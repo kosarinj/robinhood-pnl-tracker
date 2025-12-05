@@ -747,107 +747,21 @@ function App() {
           {pnlTotals && (
             <div className="summary" style={{ marginTop: '20px' }}>
               <div className="summary-card">
-                <div className="summary-label">Total Principal Deposited</div>
-                <div className="summary-value" style={{ color: '#666' }}>
-                  ${pnlTotals.totalPrincipal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <h3>Real Total P&L</h3>
+                <div className={`value ${pnlTotals.realTotal >= 0 ? 'positive' : 'negative'}`}>
+                  {formatCurrency(pnlTotals.realTotal)}
                 </div>
               </div>
-
               <div className="summary-card">
-                <div className="summary-label">Total Realized P&L</div>
-                <div className="summary-value" style={{ color: pnlTotals.totalRealizedPnL >= 0 ? '#28a745' : '#dc3545' }}>
-                  {pnlTotals.totalRealizedPnL >= 0 ? '+' : ''}${pnlTotals.totalRealizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="summary-label" style={{ fontSize: '11px', marginTop: '5px', color: '#888' }}>
-                  ROI: {((pnlTotals.totalRealizedPnL / pnlTotals.totalPrincipal) * 100).toFixed(2)}%
+                <h3>Real Realized</h3>
+                <div className={`value ${pnlTotals.realRealized >= 0 ? 'positive' : 'negative'}`}>
+                  {formatCurrency(pnlTotals.realRealized)}
                 </div>
               </div>
-
               <div className="summary-card">
-                <div className="summary-label">Total Unrealized P&L</div>
-                <div className="summary-value" style={{ color: pnlTotals.totalUnrealizedPnL >= 0 ? '#28a745' : '#dc3545' }}>
-                  {pnlTotals.totalUnrealizedPnL >= 0 ? '+' : ''}${pnlTotals.totalUnrealizedPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="summary-label" style={{ fontSize: '11px', marginTop: '5px', color: '#888' }}>
-                  Open Positions: {pnlTotals.openPositions}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">Total P&L (Realized + Unrealized)</div>
-                <div className="summary-value" style={{ color: pnlTotals.totalPnL >= 0 ? '#28a745' : '#dc3545', fontWeight: 'bold' }}>
-                  {pnlTotals.totalPnL >= 0 ? '+' : ''}${pnlTotals.totalPnL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="summary-label" style={{ fontSize: '11px', marginTop: '5px', color: '#888' }}>
-                  Overall ROI: {((pnlTotals.totalPnL / pnlTotals.totalPrincipal) * 100).toFixed(2)}%
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">Win Rate</div>
-                <div className="summary-value" style={{ color: '#666', fontSize: '20px' }}>
-                  {pnlTotals.winRate.toFixed(1)}%
-                </div>
-                <div className="summary-label" style={{ fontSize: '11px', marginTop: '5px', color: '#888' }}>
-                  Wins: {pnlTotals.wins} | Losses: {pnlTotals.losses}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">Avg Win</div>
-                <div className="summary-value" style={{ color: '#28a745', fontSize: '20px' }}>
-                  +${pnlTotals.avgWin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">Avg Loss</div>
-                <div className="summary-value" style={{ color: '#dc3545', fontSize: '20px' }}>
-                  -${Math.abs(pnlTotals.avgLoss).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">Total Dividend Income</div>
-                <div className="summary-value" style={{ color: '#28a745', fontSize: '20px' }}>
-                  +${pnlTotals.totalDividends.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">Total Fees Paid</div>
-                <div className="summary-value" style={{ color: '#dc3545', fontSize: '20px' }}>
-                  -${Math.abs(pnlTotals.totalFees).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">All-Time High P&L</div>
-                <div className="summary-value" style={{ color: '#28a745', fontSize: '20px' }}>
-                  {pnlTotals.allTimeHigh >= 0 ? '+' : ''}${pnlTotals.allTimeHigh.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="summary-label" style={{ fontSize: '11px', marginTop: '5px', color: '#888' }}>
-                  {pnlTotals.allTimeHighDate ? `on ${new Date(pnlTotals.allTimeHighDate).toLocaleDateString()}` : ''}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">All-Time Low P&L</div>
-                <div className="summary-value" style={{ color: '#dc3545', fontSize: '20px' }}>
-                  {pnlTotals.allTimeLow >= 0 ? '+' : ''}${pnlTotals.allTimeLow.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="summary-label" style={{ fontSize: '11px', marginTop: '5px', color: '#888' }}>
-                  {pnlTotals.allTimeLowDate ? `on ${new Date(pnlTotals.allTimeLowDate).toLocaleDateString()}` : ''}
-                </div>
-              </div>
-
-              <div className="summary-card">
-                <div className="summary-label">Current Account Value</div>
-                <div className="summary-value" style={{ color: '#666', fontWeight: 'bold', fontSize: '24px' }}>
-                  ${pnlTotals.currentAccountValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="summary-label" style={{ fontSize: '11px', marginTop: '5px', color: '#888' }}>
-                  Deposits + P&L
+                <h3>Real Unrealized</h3>
+                <div className={`value ${pnlTotals.realUnrealized >= 0 ? 'positive' : 'negative'}`}>
+                  {formatCurrency(pnlTotals.realUnrealized)}
                 </div>
               </div>
             </div>
