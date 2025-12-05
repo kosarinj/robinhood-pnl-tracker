@@ -81,11 +81,15 @@ function TradingSignals({ openPositions, onClose, onSignalsUpdate, fetchingEnabl
       try {
         console.log('📡 Requesting signals from server...')
         const symbols = stockPositions.map(p => p.symbol)
-        socketService.requestSignals(symbols)
 
-        // Listen for signals update from server
+        // Set up listener BEFORE requesting
+        let timeout
+
         const handleSignalsUpdate = (data) => {
           console.log('📊 Received signals from server:', data.signals.length)
+
+          // Clear timeout
+          if (timeout) clearTimeout(timeout)
 
           // Merge server signals with position data
           const mergedSignals = data.signals.map(serverSignal => {
@@ -105,11 +109,38 @@ function TradingSignals({ openPositions, onClose, onSignalsUpdate, fetchingEnabl
             onSignalsUpdate(mergedSignals)
           }
 
-          // Cleanup listener
+          // Cleanup listeners
           socketService.off('signals-update', handleSignalsUpdate)
+          socketService.off('signals-error', handleSignalsError)
         }
 
+        const handleSignalsError = (data) => {
+          console.error('❌ Error from server:', data.error)
+
+          // Clear timeout
+          if (timeout) clearTimeout(timeout)
+
+          setLoading(false)
+
+          // Cleanup listeners
+          socketService.off('signals-update', handleSignalsUpdate)
+          socketService.off('signals-error', handleSignalsError)
+        }
+
+        // Set up listeners first
         socketService.onSignalsUpdate(handleSignalsUpdate)
+        socketService.socket.on('signals-error', handleSignalsError)
+
+        // Set timeout in case server doesn't respond
+        timeout = setTimeout(() => {
+          console.error('⏱️ Timeout waiting for signals from server')
+          setLoading(false)
+          socketService.off('signals-update', handleSignalsUpdate)
+          socketService.off('signals-error', handleSignalsError)
+        }, 30000) // 30 second timeout
+
+        // Now request signals
+        socketService.requestSignals(symbols)
       } catch (error) {
         console.error('Error requesting signals from server:', error)
         setLoading(false)
