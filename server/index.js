@@ -213,6 +213,18 @@ setInterval(async () => {
 }, 60000) // Every 1 minute
 
 // REST API endpoints (optional, for HTTP access)
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Robinhood P&L Tracker Server',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      prices: '/prices?symbols=AAPL,GOOGL'
+    }
+  })
+})
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
