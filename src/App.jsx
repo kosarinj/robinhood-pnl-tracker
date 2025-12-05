@@ -746,24 +746,80 @@ function App() {
           {/* PNL Summary Cards */}
           {pnlTotals && (
             <div className="summary" style={{ marginTop: '20px' }}>
-              <div className="summary-card">
-                <h3>Real Total P&L</h3>
-                <div className={`value ${pnlTotals.realTotal >= 0 ? 'positive' : 'negative'}`}>
-                  {formatCurrency(pnlTotals.realTotal)}
+              {visiblePnlColumns.real && (
+                <>
+                  <div className="summary-card">
+                    <h3>Real Total P&L</h3>
+                    <div className={`value ${pnlTotals.realTotal >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.realTotal)}
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>Real Realized</h3>
+                    <div className={`value ${pnlTotals.realRealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.realRealized)}
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>Real Unrealized</h3>
+                    <div className={`value ${pnlTotals.realUnrealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.realUnrealized)}
+                    </div>
+                  </div>
+                </>
+              )}
+              {visiblePnlColumns.avgCost && (
+                <div className="summary-card">
+                  <h3>Avg Cost Unrealized P&L</h3>
+                  <div className={`value ${pnlTotals.avgCostUnrealized >= 0 ? 'positive' : 'negative'}`}>
+                    {formatCurrency(pnlTotals.avgCostUnrealized)}
+                  </div>
                 </div>
-              </div>
-              <div className="summary-card">
-                <h3>Real Realized</h3>
-                <div className={`value ${pnlTotals.realRealized >= 0 ? 'positive' : 'negative'}`}>
-                  {formatCurrency(pnlTotals.realRealized)}
-                </div>
-              </div>
-              <div className="summary-card">
-                <h3>Real Unrealized</h3>
-                <div className={`value ${pnlTotals.realUnrealized >= 0 ? 'positive' : 'negative'}`}>
-                  {formatCurrency(pnlTotals.realUnrealized)}
-                </div>
-              </div>
+              )}
+              {visiblePnlColumns.fifo && (
+                <>
+                  <div className="summary-card">
+                    <h3>FIFO Total P&L</h3>
+                    <div className={`value ${pnlTotals.fifoTotal >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.fifoTotal)}
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>FIFO Realized</h3>
+                    <div className={`value ${pnlTotals.fifoRealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.fifoRealized)}
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>FIFO Unrealized</h3>
+                    <div className={`value ${pnlTotals.fifoUnrealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.fifoUnrealized)}
+                    </div>
+                  </div>
+                </>
+              )}
+              {visiblePnlColumns.lifo && (
+                <>
+                  <div className="summary-card">
+                    <h3>LIFO Total P&L</h3>
+                    <div className={`value ${pnlTotals.lifoTotal >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.lifoTotal)}
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>LIFO Realized</h3>
+                    <div className={`value ${pnlTotals.lifoRealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.lifoRealized)}
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>LIFO Unrealized</h3>
+                    <div className={`value ${pnlTotals.lifoUnrealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.lifoUnrealized)}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </>
