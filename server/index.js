@@ -235,9 +235,10 @@ app.get('/prices', async (req, res) => {
 })
 
 const PORT = process.env.PORT || 3001
+const HOST = '0.0.0.0' // Listen on all interfaces for Railway
 
-httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`)
+httpServer.listen(PORT, HOST, () => {
+  console.log(`🚀 Server running on ${HOST}:${PORT}`)
   console.log(`📊 WebSocket server ready for connections`)
   console.log(`💰 Price updates every 1 minute`)
   console.log(`📈 Signal updates on-demand`)
