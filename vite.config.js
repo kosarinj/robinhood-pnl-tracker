@@ -9,6 +9,10 @@ export default defineConfig({
   preview: {
     host: '0.0.0.0',
     port: 4173,
-    strictPort: false
+    strictPort: false,
+    allowedHosts: [
+      'robinhood-pnl-tracker-production.up.railway.app',
+      '.railway.app'
+    ]
   }
 })
