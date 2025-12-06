@@ -765,6 +765,14 @@ function App() {
           {/* PNL Summary Cards */}
           {pnlTotals && (
             <div className="summary" style={{ marginTop: '20px' }}>
+              {/* Total Principal Card */}
+              <div className="summary-card">
+                <h3>Total Principal</h3>
+                <div className="value" style={{ color: '#667eea' }}>
+                  {formatCurrency(totalPrincipal)}
+                </div>
+              </div>
+
               {visiblePnlColumns.real && (
                 <>
                   <div className="summary-card">
@@ -772,17 +780,26 @@ function App() {
                     <div className={`value ${pnlTotals.realTotal >= 0 ? 'positive' : 'negative'}`}>
                       {formatCurrency(pnlTotals.realTotal)}
                     </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                      {pnlPercentages.totalPercent >= 0 ? '+' : ''}{pnlPercentages.totalPercent.toFixed(2)}%
+                    </div>
                   </div>
                   <div className="summary-card">
                     <h3>Real Realized</h3>
                     <div className={`value ${pnlTotals.realRealized >= 0 ? 'positive' : 'negative'}`}>
                       {formatCurrency(pnlTotals.realRealized)}
                     </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                      {pnlPercentages.realizedPercent >= 0 ? '+' : ''}{pnlPercentages.realizedPercent.toFixed(2)}%
+                    </div>
                   </div>
                   <div className="summary-card">
                     <h3>Real Unrealized</h3>
                     <div className={`value ${pnlTotals.realUnrealized >= 0 ? 'positive' : 'negative'}`}>
                       {formatCurrency(pnlTotals.realUnrealized)}
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                      {pnlPercentages.unrealizedPercent >= 0 ? '+' : ''}{pnlPercentages.unrealizedPercent.toFixed(2)}%
                     </div>
                   </div>
                 </>

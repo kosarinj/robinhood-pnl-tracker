@@ -183,7 +183,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   }
 
   useEffect(() => {
-    if (expandedSymbol && !expandedSymbol.includes('Put') && !expandedSymbol.includes('Call')) {
+    if (expandedSymbol && showChartsInHistory && !expandedSymbol.includes('Put') && !expandedSymbol.includes('Call')) {
       // Load TradingView widget for stocks only (not options)
       const containerId = `tradingview_${expandedSymbol.replace(/[^a-zA-Z0-9]/g, '_')}`
 
@@ -205,7 +205,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
       chartContainerRef.current[expandedSymbol] = true
     }
-  }, [expandedSymbol])
+  }, [expandedSymbol, showChartsInHistory])
 
   const createWidget = (containerId, symbol) => {
     const container = document.getElementById(containerId)
