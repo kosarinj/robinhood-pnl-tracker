@@ -9,13 +9,17 @@ function MarketAnalysis({ trades, onClose }) {
   const [error, setError] = useState(null)
   const [spData, setSpData] = useState([])
   const [nasdaqData, setNasdaqData] = useState([])
+  const [dowData, setDowData] = useState([])
   const [spDownturns, setSpDownturns] = useState([])
   const [nasdaqDownturns, setNasdaqDownturns] = useState([])
+  const [dowDownturns, setDowDownturns] = useState([])
   const [spAnalyzed, setSpAnalyzed] = useState([])
   const [nasdaqAnalyzed, setNasdaqAnalyzed] = useState([])
+  const [dowAnalyzed, setDowAnalyzed] = useState([])
   const [spScore, setSpScore] = useState(null)
   const [nasdaqScore, setNasdaqScore] = useState(null)
-  const [selectedIndex, setSelectedIndex] = useState('sp500') // 'sp500' or 'nasdaq'
+  const [dowScore, setDowScore] = useState(null)
+  const [selectedIndex, setSelectedIndex] = useState('sp500') // 'sp500', 'nasdaq', or 'dow'
   const [expandedDownturns, setExpandedDownturns] = useState({})
 
   useEffect(() => {
@@ -38,14 +42,16 @@ function MarketAnalysis({ trades, onClose }) {
 
       console.log(`Analyzing market from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`)
 
-      // Fetch both S&P 500 and NASDAQ data in parallel
-      const [spDataResult, nasdaqDataResult] = await Promise.all([
+      // Fetch S&P 500, NASDAQ, and Dow Jones data in parallel
+      const [spDataResult, nasdaqDataResult, dowDataResult] = await Promise.all([
         marketDataService.fetchHistoricalData('^GSPC', startDate, endDate),
-        marketDataService.fetchHistoricalData('^IXIC', startDate, endDate)
+        marketDataService.fetchHistoricalData('^IXIC', startDate, endDate),
+        marketDataService.fetchHistoricalData('^DJI', startDate, endDate)
       ])
 
       setSpData(spDataResult)
       setNasdaqData(nasdaqDataResult)
+      setDowData(dowDataResult)
 
       // Analyze S&P 500
       const spDetectedDownturns = identifyDownturns(spDataResult)
@@ -62,6 +68,14 @@ function MarketAnalysis({ trades, onClose }) {
       setNasdaqAnalyzed(nasdaqAnalyzedResult)
       const nasdaqScoreResult = calculateOverallScore(nasdaqAnalyzedResult)
       setNasdaqScore(nasdaqScoreResult)
+
+      // Analyze Dow Jones
+      const dowDetectedDownturns = identifyDownturns(dowDataResult)
+      setDowDownturns(dowDetectedDownturns)
+      const dowAnalyzedResult = analyzeTradeOpportunities(trades, dowDetectedDownturns)
+      setDowAnalyzed(dowAnalyzedResult)
+      const dowScoreResult = calculateOverallScore(dowAnalyzedResult)
+      setDowScore(dowScoreResult)
 
       setLoading(false)
 
@@ -98,11 +112,11 @@ function MarketAnalysis({ trades, onClose }) {
   }
 
   // Get data for selected index
-  const currentMarketData = selectedIndex === 'sp500' ? spData : nasdaqData
-  const currentDownturns = selectedIndex === 'sp500' ? spDownturns : nasdaqDownturns
-  const currentAnalyzed = selectedIndex === 'sp500' ? spAnalyzed : nasdaqAnalyzed
-  const currentScore = selectedIndex === 'sp500' ? spScore : nasdaqScore
-  const currentIndexName = selectedIndex === 'sp500' ? 'S&P 500' : 'NASDAQ'
+  const currentMarketData = selectedIndex === 'sp500' ? spData : selectedIndex === 'nasdaq' ? nasdaqData : dowData
+  const currentDownturns = selectedIndex === 'sp500' ? spDownturns : selectedIndex === 'nasdaq' ? nasdaqDownturns : dowDownturns
+  const currentAnalyzed = selectedIndex === 'sp500' ? spAnalyzed : selectedIndex === 'nasdaq' ? nasdaqAnalyzed : dowAnalyzed
+  const currentScore = selectedIndex === 'sp500' ? spScore : selectedIndex === 'nasdaq' ? nasdaqScore : dowScore
+  const currentIndexName = selectedIndex === 'sp500' ? 'S&P 500' : selectedIndex === 'nasdaq' ? 'NASDAQ' : 'Dow Jones'
 
   if (loading) {
     return (
@@ -193,7 +207,7 @@ function MarketAnalysis({ trades, onClose }) {
         </div>
 
         {/* Index Selector */}
-        <div style={{ padding: '15px 20px', background: '#f8f9fa', borderBottom: '1px solid #dee2e6', display: 'flex', gap: '10px', justifyContent: 'center' }}>
+        <div style={{ padding: '15px 20px', background: '#f8f9fa', borderBottom: '1px solid #dee2e6', display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
           <button
             onClick={() => setSelectedIndex('sp500')}
             style={{
@@ -225,6 +239,22 @@ function MarketAnalysis({ trades, onClose }) {
             }}
           >
             💻 NASDAQ
+          </button>
+          <button
+            onClick={() => setSelectedIndex('dow')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              border: 'none',
+              background: selectedIndex === 'dow' ? '#667eea' : 'white',
+              color: selectedIndex === 'dow' ? 'white' : '#333',
+              fontWeight: '600',
+              cursor: 'pointer',
+              boxShadow: selectedIndex === 'dow' ? '0 2px 8px rgba(102, 126, 234, 0.3)' : '0 2px 4px rgba(0,0,0,0.1)',
+              transition: 'all 0.2s'
+            }}
+          >
+            🏭 Dow Jones
           </button>
         </div>
 
@@ -464,7 +494,7 @@ function MarketAnalysis({ trades, onClose }) {
 
         {/* Info Footer */}
         <div style={{ padding: '15px', background: '#f8f9fa', borderTop: '1px solid #dee2e6', fontSize: '12px', color: '#666' }}>
-          <strong>ℹ️ How this works:</strong> This analysis compares major market indices (S&P 500 and NASDAQ) with your trading activity.
+          <strong>ℹ️ How this works:</strong> This analysis compares major market indices (S&P 500, NASDAQ, and Dow Jones) with your trading activity.
           Buying during downturns (when prices are lower) and holding through recovery typically leads to better returns.
           The suggestions are based on your average position sizes and the severity of each downturn. Switch between indices to see different market perspectives.
         </div>
