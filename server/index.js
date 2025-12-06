@@ -292,10 +292,14 @@ app.get('/', (req, res) => {
   res.json({
     name: 'Robinhood P&L Tracker Server',
     status: 'running',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: {
       health: '/health',
-      prices: '/prices?symbols=AAPL,GOOGL'
+      prices: '/prices?symbols=AAPL,GOOGL',
+      trackedSymbols: '/api/tracked-symbols',
+      signalAccuracy: '/api/signal-accuracy?symbol=AAPL&hours=168',
+      signals: '/api/signals/:symbol?limit=50',
+      priceHistory: '/api/prices/:symbol?limit=288'
     }
   })
 })
@@ -308,6 +312,21 @@ app.get('/health', (req, res) => {
     recordingSymbols: trackedSymbols.size,
     uptime: process.uptime()
   })
+})
+
+// Get list of tracked symbols
+app.get('/api/tracked-symbols', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        symbols: Array.from(trackedSymbols).sort(),
+        count: trackedSymbols.size
+      }
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
 })
 
 // Signal accuracy endpoints
