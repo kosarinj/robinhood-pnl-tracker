@@ -606,13 +606,13 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             {/* Expanded row showing individual trades */}
             {expandedSymbol === row.symbol && (
               <tr className="expanded-row">
-                <td colSpan={3 + (visiblePnlColumns.real ? 6 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)}>
-                  <div className="trades-detail">
-                    <h4>{row.symbol} - Trade History{showChartsInHistory && !row.isOption ? ' & Chart' : ''}</h4>
+                <td colSpan={3 + (visiblePnlColumns.real ? 6 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
+                  <div className="trades-detail" style={{ background: 'white', padding: '20px' }}>
+                    <h4 style={{ color: '#667eea', marginBottom: '15px' }}>{row.symbol} - Trade History{showChartsInHistory && !row.isOption ? ' & Chart' : ''}</h4>
 
                     {/* TradingView Chart for stocks only */}
                     {showChartsInHistory && !row.isOption && (
-                      <div className="chart-container">
+                      <div className="chart-container" style={{ marginBottom: '20px' }}>
                         <div className="alert-instructions">
                           <strong>📊 Chart with EMA 9 (Blue) & EMA 21 (Yellow)</strong>
                           <span style={{ marginLeft: '20px', fontSize: '13px', color: '#666' }}>
@@ -622,14 +622,14 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                         </div>
                         <div
                           id={`tradingview_${row.symbol.replace(/[^a-zA-Z0-9]/g, '_')}`}
-                          style={{ height: '500px', width: '100%' }}
+                          style={{ height: '500px', width: '100%', background: 'white' }}
                         />
                       </div>
                     )}
 
-                    <h4>Trade History</h4>
-                    <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'auto', width: '100%' }}>
-                    <table className="detail-table" style={{ minWidth: '600px' }}>
+                    <h4 style={{ color: '#667eea', marginBottom: '15px' }}>Trade History</h4>
+                    <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'white' }}>
+                    <table className="detail-table" style={{ minWidth: '600px', background: 'white' }}>
                       <thead>
                         <tr>
                           <th style={{ width: '90px', position: 'sticky', left: 0, background: '#667eea', zIndex: 10 }}>Date</th>
@@ -641,9 +641,20 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           <th style={{ width: '110px' }}>Running Total</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody style={{ background: 'white' }}>
                         {(() => {
+                          try {
                           const symbolTrades = getTradesForSymbol(row.symbol)
+
+                          if (!symbolTrades || symbolTrades.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan="7" style={{ padding: '20px', textAlign: 'center', background: 'white' }}>
+                                  No trades found for {row.symbol}
+                                </td>
+                              </tr>
+                            )
+                          }
 
                           // Calculate overall average buy price (Real P&L method)
                           let totalBuyCost = 0
@@ -669,23 +680,33 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                             }
 
                             return (
-                              <tr key={idx}>
+                              <tr key={idx} style={{ background: 'white' }}>
                                 <td style={{ position: 'sticky', left: 0, background: 'white', zIndex: 5 }}>{trade.date.toLocaleDateString()}</td>
-                                <td className={trade.isBuy ? 'positive' : 'negative'}>
+                                <td className={trade.isBuy ? 'positive' : 'negative'} style={{ background: 'white' }}>
                                   {trade.isBuy ? 'BUY' : 'SELL'}
                                 </td>
-                                <td>{trade.quantity}</td>
-                                <td>{formatCurrency(trade.price)}</td>
-                                <td>{formatCurrency(trade.amount)}</td>
-                                <td className={realizedPnL ? getClassName(realizedPnL) : ''}>
+                                <td style={{ background: 'white' }}>{trade.quantity}</td>
+                                <td style={{ background: 'white' }}>{formatCurrency(trade.price)}</td>
+                                <td style={{ background: 'white' }}>{formatCurrency(trade.amount)}</td>
+                                <td className={realizedPnL ? getClassName(realizedPnL) : ''} style={{ background: 'white' }}>
                                   {realizedPnL !== null ? formatCurrency(realizedPnL) : '-'}
                                 </td>
-                                <td className={!trade.isBuy ? getClassName(runningTotal) : ''}>
+                                <td className={!trade.isBuy ? getClassName(runningTotal) : ''} style={{ background: 'white' }}>
                                   {!trade.isBuy ? formatCurrency(runningTotal) : '-'}
                                 </td>
                               </tr>
                             )
                           })
+                        } catch (error) {
+                          console.error('Error rendering trade history:', error)
+                          return (
+                            <tr>
+                              <td colSpan="7" style={{ padding: '20px', textAlign: 'center', background: '#f8d7da', color: '#721c24' }}>
+                                Error loading trade history. Please try again.
+                              </td>
+                            </tr>
+                          )
+                        }
                         })()}
                       </tbody>
                     </table>
