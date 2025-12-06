@@ -408,6 +408,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       </span>
                       <span>{row.symbol}</span>
                       {row.isOption && <span style={{ fontSize: '0.8em', color: '#6c757d' }}>(Option)</span>}
+                      {row.isRollup && <span style={{ fontSize: '0.8em', color: '#667eea', fontWeight: 'bold' }}>(Options Rollup)</span>}
                       {!row.isOption && getSignalForSymbol(row.symbol) && (
                         <span
                           className="grid-signal-badge"
@@ -607,12 +608,108 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 )}
               </tr>
 
-            {/* Expanded row showing individual trades */}
+            {/* Expanded row showing individual trades or options */}
             {expandedSymbol === row.symbol && (
               <tr className="expanded-row">
                 <td colSpan={3 + (visiblePnlColumns.real ? 6 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
                   <div className="trades-detail" style={{ background: 'white', padding: '20px' }}>
-                    <h4 style={{ color: '#667eea', marginBottom: '15px' }}>{row.symbol} - Trade History{showChartsInHistory && !row.isOption ? ' & Chart' : ''}</h4>
+                    {row.isRollup ? (
+                      // Display individual options for rolled-up parent instruments
+                      <>
+                        <h4 style={{ color: '#667eea', marginBottom: '15px' }}>{row.symbol} - Options Breakdown</h4>
+                        <div style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'white' }}>
+                          <table className="detail-table" style={{ minWidth: '800px', background: 'white', width: '100%' }}>
+                            <thead>
+                              <tr>
+                                <th>Option</th>
+                                {visiblePnlColumns.real && (
+                                  <>
+                                    <th>Real Realized</th>
+                                    <th>Real Unrealized</th>
+                                    <th>Real Total</th>
+                                  </>
+                                )}
+                                {visiblePnlColumns.avgCost && (
+                                  <>
+                                    <th>Avg Cost Unrealized</th>
+                                  </>
+                                )}
+                                {visiblePnlColumns.fifo && (
+                                  <>
+                                    <th>FIFO Realized</th>
+                                    <th>FIFO Unrealized</th>
+                                    <th>FIFO Total</th>
+                                  </>
+                                )}
+                                {visiblePnlColumns.lifo && (
+                                  <>
+                                    <th>LIFO Realized</th>
+                                    <th>LIFO Unrealized</th>
+                                    <th>LIFO Total</th>
+                                  </>
+                                )}
+                              </tr>
+                            </thead>
+                            <tbody style={{ background: 'white' }}>
+                              {row.options && row.options.map((option, idx) => (
+                                <tr key={idx} style={{ background: 'white' }}>
+                                  <td style={{ background: 'white', fontSize: '0.9em' }}>{option.symbol}</td>
+                                  {visiblePnlColumns.real && (
+                                    <>
+                                      <td className={getClassName(option.real.realizedPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.real.realizedPnL)}
+                                      </td>
+                                      <td className={getClassName(option.real.unrealizedPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.real.unrealizedPnL)}
+                                      </td>
+                                      <td className={getClassName(option.real.totalPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.real.totalPnL)}
+                                      </td>
+                                    </>
+                                  )}
+                                  {visiblePnlColumns.avgCost && (
+                                    <>
+                                      <td className={getClassName(option.avgCost.unrealizedPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.avgCost.unrealizedPnL)}
+                                      </td>
+                                    </>
+                                  )}
+                                  {visiblePnlColumns.fifo && (
+                                    <>
+                                      <td className={getClassName(option.fifo.realizedPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.fifo.realizedPnL)}
+                                      </td>
+                                      <td className={getClassName(option.fifo.unrealizedPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.fifo.unrealizedPnL)}
+                                      </td>
+                                      <td className={getClassName(option.fifo.totalPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.fifo.totalPnL)}
+                                      </td>
+                                    </>
+                                  )}
+                                  {visiblePnlColumns.lifo && (
+                                    <>
+                                      <td className={getClassName(option.lifo.realizedPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.lifo.realizedPnL)}
+                                      </td>
+                                      <td className={getClassName(option.lifo.unrealizedPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.lifo.unrealizedPnL)}
+                                      </td>
+                                      <td className={getClassName(option.lifo.totalPnL)} style={{ background: 'white' }}>
+                                        {formatCurrency(option.lifo.totalPnL)}
+                                      </td>
+                                    </>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : (
+                      // Display trade history for regular stocks and options
+                      <>
+                        <h4 style={{ color: '#667eea', marginBottom: '15px' }}>{row.symbol} - Trade History{showChartsInHistory && !row.isOption ? ' & Chart' : ''}</h4>
 
                     {/* TradingView Chart for stocks only */}
                     {showChartsInHistory && !row.isOption && (
@@ -719,6 +816,8 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       </tbody>
                     </table>
                     </div>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
