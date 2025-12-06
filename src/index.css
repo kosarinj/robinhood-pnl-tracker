@@ -1007,3 +1007,313 @@ button:disabled {
   color: #333;
   font-weight: 700;
 }
+
+/* ========================================
+   MOBILE RESPONSIVE STYLES
+   ======================================== */
+
+/* Tablets and smaller (landscape iPad, portrait iPad) */
+@media (max-width: 1024px) {
+  body {
+    padding: 15px;
+  }
+
+  .app-container {
+    padding: 25px;
+  }
+
+  .sticky-header {
+    margin: -25px -25px 0 -25px;
+    padding: 25px 25px 15px 25px;
+  }
+
+  h1 {
+    font-size: 28px;
+    margin-bottom: 20px;
+  }
+
+  table {
+    min-width: 1000px;
+  }
+
+  .summary {
+    gap: 15px;
+  }
+
+  .summary-card {
+    min-width: 200px;
+  }
+}
+
+/* Mobile devices (iPhone, Android phones) */
+@media (max-width: 768px) {
+  body {
+    padding: 10px;
+  }
+
+  #root {
+    max-width: 100%;
+  }
+
+  h1 {
+    font-size: 24px;
+    margin-bottom: 15px;
+    text-align: center;
+  }
+
+  .app-container {
+    padding: 15px;
+    border-radius: 12px;
+  }
+
+  .sticky-header {
+    margin: -15px -15px 0 -15px;
+    padding: 15px 15px 10px 15px;
+    max-height: 50vh;
+  }
+
+  .upload-section {
+    padding: 20px 15px;
+    margin-bottom: 20px;
+  }
+
+  .upload-section h2 {
+    font-size: 18px;
+  }
+
+  .upload-section p {
+    font-size: 14px;
+  }
+
+  .upload-button {
+    width: 100%;
+    justify-content: center;
+    padding: 14px 20px;
+    font-size: 14px;
+  }
+
+  /* Controls - stack vertically on mobile */
+  .controls {
+    flex-direction: column;
+    gap: 15px;
+    padding: 15px;
+  }
+
+  .search-box {
+    width: 100%;
+    min-width: unset;
+  }
+
+  .pnl-toggles {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .controls label {
+    font-size: 14px;
+  }
+
+  /* Table - scroll horizontally on mobile */
+  .table-container {
+    max-height: 500px;
+    border-radius: 6px;
+  }
+
+  table {
+    min-width: 900px;
+    font-size: 13px;
+  }
+
+  th, td {
+    padding: 10px 8px !important;
+  }
+
+  th {
+    font-size: 12px !important;
+  }
+
+  /* Summary cards - stack vertically on mobile */
+  .summary {
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+
+  .summary-card {
+    min-width: unset;
+    width: 100%;
+  }
+
+  .summary-card h3 {
+    font-size: 14px;
+  }
+
+  .summary-card .value {
+    font-size: 24px !important;
+  }
+
+  /* Buttons - full width on mobile */
+  .btn-small, .btn-signals, .btn-cancel {
+    font-size: 13px !important;
+    padding: 10px 16px !important;
+  }
+
+  /* Signal popup - full screen on mobile */
+  .signal-popup {
+    width: 95% !important;
+    max-width: 95% !important;
+    max-height: 85vh !important;
+    margin: 0 !important;
+  }
+
+  .signal-popup-header h4 {
+    font-size: 16px;
+  }
+
+  /* What-if calculator - adjust for mobile */
+  .what-if-container {
+    padding: 15px !important;
+  }
+
+  .what-if-container input {
+    width: 100% !important;
+    margin-bottom: 10px;
+  }
+
+  /* Expanded row details */
+  .trades-detail {
+    padding: 15px !important;
+  }
+
+  .trades-detail h4 {
+    font-size: 16px;
+  }
+
+  .detail-table {
+    font-size: 12px;
+  }
+
+  .detail-table th,
+  .detail-table td {
+    padding: 8px 6px !important;
+  }
+
+  /* Chart container for TradingView */
+  .chart-container {
+    margin-bottom: 15px;
+  }
+
+  .alert-instructions {
+    font-size: 12px !important;
+    padding: 10px !important;
+    flex-direction: column !important;
+    text-align: center;
+  }
+
+  .alert-instructions span {
+    margin-left: 0 !important;
+    margin-top: 8px;
+  }
+}
+
+/* Extra small devices (iPhone SE, small Android phones) */
+@media (max-width: 480px) {
+  body {
+    padding: 5px;
+  }
+
+  h1 {
+    font-size: 20px;
+    margin-bottom: 10px;
+  }
+
+  .app-container {
+    padding: 10px;
+    border-radius: 8px;
+  }
+
+  .sticky-header {
+    margin: -10px -10px 0 -10px;
+    padding: 10px;
+  }
+
+  .upload-section {
+    padding: 15px 10px;
+  }
+
+  .upload-section h2 {
+    font-size: 16px;
+  }
+
+  .controls {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  table {
+    min-width: 800px;
+    font-size: 11px;
+  }
+
+  th, td {
+    padding: 8px 6px !important;
+  }
+
+  th {
+    font-size: 11px !important;
+  }
+
+  .summary-card .value {
+    font-size: 20px !important;
+  }
+
+  .signal-popup {
+    width: 98% !important;
+    max-width: 98% !important;
+    padding: 10px !important;
+  }
+
+  .signal-popup-header h4 {
+    font-size: 14px;
+  }
+
+  .btn-small, .btn-signals, .btn-cancel {
+    font-size: 12px !important;
+    padding: 8px 12px !important;
+  }
+}
+
+/* Landscape mode on phones */
+@media (max-height: 600px) and (orientation: landscape) {
+  .sticky-header {
+    max-height: 40vh;
+  }
+
+  .signal-popup {
+    max-height: 90vh !important;
+  }
+
+  .table-container {
+    max-height: 300px;
+  }
+}
+
+/* Touch-friendly adjustments for mobile */
+@media (hover: none) and (pointer: coarse) {
+  /* Increase touch targets */
+  button, a, input[type="checkbox"], label {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .controls input[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Prevent text selection on interactive elements */
+  button, .summary-card, th {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: rgba(102, 126, 234, 0.2);
+  }
+}
