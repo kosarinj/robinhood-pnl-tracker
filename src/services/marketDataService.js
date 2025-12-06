@@ -36,38 +36,72 @@ export class MarketDataService {
       const period1 = Math.floor(startDate.getTime() / 1000)
       const period2 = Math.floor(endDate.getTime() / 1000)
 
-      // Use CORS proxy to avoid browser CORS restrictions
-      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
-      const url = `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`
+      // Try multiple methods to fetch data
+      let response
+      let marketData
 
-      const response = await axios.get(url, {
-        timeout: 30000, // Increased timeout for proxy
-        headers: {
-          'User-Agent': 'Mozilla/5.0'
+      try {
+        // Method 1: Try direct Yahoo Finance with CORS proxy
+        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`
+
+        response = await axios.get(proxyUrl, {
+          timeout: 30000
+        })
+
+        if (response.data?.chart?.result?.[0]) {
+          const result = response.data.chart.result[0]
+          const timestamps = result.timestamp
+          const quotes = result.indicators.quote[0]
+
+          if (timestamps && quotes) {
+            marketData = timestamps.map((timestamp, index) => ({
+              date: new Date(timestamp * 1000),
+              open: quotes.open[index],
+              high: quotes.high[index],
+              low: quotes.low[index],
+              close: quotes.close[index],
+              volume: quotes.volume[index]
+            })).filter(day => day.close !== null)
+          }
         }
-      })
+      } catch (proxyError) {
+        console.warn('CORS proxy failed, trying alternative method:', proxyError.message)
 
-      if (!response.data?.chart?.result?.[0]) {
-        throw new Error('Invalid response from Yahoo Finance')
+        // Method 2: Use Alpha Vantage as fallback (free tier, no CORS)
+        // Note: This requires converting symbol format (^GSPC -> SPY for S&P 500)
+        const alphaSymbol = symbol === '^GSPC' ? 'SPY' : symbol.replace('^', '')
+        const alphaUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${alphaSymbol}&outputsize=full&apikey=demo`
+
+        try {
+          response = await axios.get(alphaUrl, { timeout: 30000 })
+
+          if (response.data['Time Series (Daily)']) {
+            const timeSeries = response.data['Time Series (Daily)']
+            marketData = Object.entries(timeSeries)
+              .map(([dateStr, values]) => ({
+                date: new Date(dateStr),
+                open: parseFloat(values['1. open']),
+                high: parseFloat(values['2. high']),
+                low: parseFloat(values['3. low']),
+                close: parseFloat(values['4. close']),
+                volume: parseInt(values['5. volume'])
+              }))
+              .filter(day => {
+                const time = day.date.getTime()
+                return time >= startDate.getTime() && time <= endDate.getTime()
+              })
+              .sort((a, b) => a.date - b.date)
+          }
+        } catch (alphaError) {
+          console.error('Alpha Vantage also failed:', alphaError.message)
+          throw new Error('Unable to fetch market data from any source. Please try again later.')
+        }
       }
 
-      const result = response.data.chart.result[0]
-      const timestamps = result.timestamp
-      const quotes = result.indicators.quote[0]
-
-      if (!timestamps || !quotes) {
+      if (!marketData || marketData.length === 0) {
         throw new Error('No data available for this period')
       }
-
-      // Transform to array of daily data
-      const marketData = timestamps.map((timestamp, index) => ({
-        date: new Date(timestamp * 1000),
-        open: quotes.open[index],
-        high: quotes.high[index],
-        low: quotes.low[index],
-        close: quotes.close[index],
-        volume: quotes.volume[index]
-      })).filter(day => day.close !== null) // Remove null values
 
       // Cache the result
       this.saveToCache(cacheKey, marketData)
