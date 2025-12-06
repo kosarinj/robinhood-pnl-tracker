@@ -730,16 +730,19 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
                     <h4 style={{ color: '#667eea', marginBottom: '15px' }}>Trade History</h4>
                     <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'white' }}>
-                    <table className="detail-table" style={{ minWidth: '600px', background: 'white' }}>
+                    <table className="detail-table" style={{ minWidth: '800px', background: 'white' }}>
                       <thead>
                         <tr>
                           <th style={{ width: '90px', position: 'sticky', left: 0, background: '#667eea', zIndex: 10 }}>Date</th>
+                          <th style={{ width: '200px' }}>Description</th>
                           <th style={{ width: '60px' }}>Type</th>
                           <th style={{ width: '70px' }}>Quantity</th>
                           <th style={{ width: '100px' }}>Price</th>
                           <th style={{ width: '100px' }}>Amount</th>
+                          <th style={{ width: '110px' }}>Cost Basis Used</th>
                           <th style={{ width: '110px' }}>Realized P&L</th>
                           <th style={{ width: '110px' }}>Running Total</th>
+                          <th style={{ width: '150px' }}>Matched Buys</th>
                         </tr>
                       </thead>
                       <tbody style={{ background: 'white' }}>
@@ -750,54 +753,136 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           if (!symbolTrades || symbolTrades.length === 0) {
                             return (
                               <tr>
-                                <td colSpan="7" style={{ padding: '20px', textAlign: 'center', background: 'white' }}>
+                                <td colSpan="10" style={{ padding: '20px', textAlign: 'center', background: 'white' }}>
                                   No trades found for {row.symbol}
                                 </td>
                               </tr>
                             )
                           }
 
-                          // Calculate overall average buy price (Real P&L method)
-                          let totalBuyCost = 0
+                          // Implement the hybrid cost basis calculation (matching Real P&L logic)
+                          const buyQueue = []
                           let totalBought = 0
-
-                          symbolTrades.forEach((trade) => {
-                            if (trade && trade.isBuy && trade.quantity && trade.price) {
-                              totalBuyCost += (trade.quantity || 0) * (trade.price || 0)
-                              totalBought += (trade.quantity || 0)
-                            }
-                          })
-
-                          const avgBuyPrice = totalBought > 0 ? totalBuyCost / totalBought : 0
+                          let totalBuyCost = 0
                           let runningTotal = 0
 
                           return symbolTrades.map((trade, idx) => {
                             if (!trade) return null
 
+                            const tradeDate = trade.date instanceof Date ? trade.date : new Date(trade.date)
                             let realizedPnL = null
+                            let costBasisUsed = null
+                            let matchedBuys = []
 
-                            if (!trade.isBuy) {
-                              // Calculate realized P&L for this sell using overall average buy price
-                              realizedPnL = ((trade.price || 0) - avgBuyPrice) * (trade.quantity || 0)
+                            if (trade.isBuy) {
+                              // Add to buy queue
+                              totalBought += trade.quantity
+                              totalBuyCost += trade.quantity * trade.price
+                              buyQueue.push({
+                                quantity: trade.quantity,
+                                price: trade.price,
+                                date: tradeDate,
+                                index: idx
+                              })
+                              // Keep sorted by price (lowest first)
+                              buyQueue.sort((a, b) => a.price - b.price)
+                            } else {
+                              // Selling - apply hybrid logic
+                              const sellPrice = trade.price
+                              const sellQuantity = trade.quantity
+                              const avgBuyPrice = totalBought > 0 ? totalBuyCost / totalBought : 0
+
+                              // Determine cost basis
+                              if (sellPrice < avgBuyPrice && buyQueue.length > 0) {
+                                // Selling below average - use lowest price
+                                costBasisUsed = buyQueue[0].price
+                              } else {
+                                // Selling at or above average - use average
+                                costBasisUsed = avgBuyPrice
+                              }
+
+                              realizedPnL = (sellPrice - costBasisUsed) * sellQuantity
                               runningTotal += realizedPnL
+
+                              // Track which buys were matched
+                              let remainingSellQty = sellQuantity
+                              if (sellPrice < avgBuyPrice) {
+                                // Match with lowest priced lots
+                                for (let i = 0; i < buyQueue.length && remainingSellQty > 0; i++) {
+                                  const buy = buyQueue[i]
+                                  const qtyMatched = Math.min(buy.quantity, remainingSellQty)
+                                  matchedBuys.push({
+                                    date: buy.date,
+                                    price: buy.price,
+                                    quantity: qtyMatched
+                                  })
+                                  remainingSellQty -= qtyMatched
+                                }
+                              } else {
+                                // Match with FIFO
+                                for (let i = 0; i < buyQueue.length && remainingSellQty > 0; i++) {
+                                  const buy = buyQueue[i]
+                                  const qtyMatched = Math.min(buy.quantity, remainingSellQty)
+                                  matchedBuys.push({
+                                    date: buy.date,
+                                    price: buy.price,
+                                    quantity: qtyMatched
+                                  })
+                                  remainingSellQty -= qtyMatched
+                                }
+                              }
+
+                              // Remove sold shares from queue
+                              remainingSellQty = sellQuantity
+                              while (remainingSellQty > 0 && buyQueue.length > 0) {
+                                const targetBuy = sellPrice < avgBuyPrice ? buyQueue[0] : buyQueue[0]
+
+                                if (targetBuy.quantity <= remainingSellQty) {
+                                  totalBought -= targetBuy.quantity
+                                  totalBuyCost -= targetBuy.quantity * targetBuy.price
+                                  remainingSellQty -= targetBuy.quantity
+                                  buyQueue.shift()
+                                } else {
+                                  targetBuy.quantity -= remainingSellQty
+                                  totalBought -= remainingSellQty
+                                  totalBuyCost -= remainingSellQty * targetBuy.price
+                                  remainingSellQty = 0
+                                }
+                              }
                             }
 
-                            const tradeDate = trade.date instanceof Date ? trade.date : new Date(trade.date)
+                            // Determine description to display
+                            const displayDescription = trade.isOption ? trade.description : trade.instrument
 
                             return (
                               <tr key={idx} style={{ background: 'white' }}>
                                 <td style={{ position: 'sticky', left: 0, background: 'white', zIndex: 5 }}>{tradeDate.toLocaleDateString()}</td>
+                                <td style={{ background: 'white', fontSize: '0.85em' }}>{displayDescription}</td>
                                 <td className={trade.isBuy ? 'positive' : 'negative'} style={{ background: 'white' }}>
                                   {trade.isBuy ? 'BUY' : 'SELL'}
                                 </td>
                                 <td style={{ background: 'white' }}>{trade.quantity}</td>
                                 <td style={{ background: 'white' }}>{formatCurrency(trade.price)}</td>
                                 <td style={{ background: 'white' }}>{formatCurrency(trade.amount)}</td>
+                                <td style={{ background: 'white', fontSize: '0.85em' }}>
+                                  {costBasisUsed !== null ? formatCurrency(costBasisUsed) : '-'}
+                                </td>
                                 <td className={realizedPnL ? getClassName(realizedPnL) : ''} style={{ background: 'white' }}>
                                   {realizedPnL !== null ? formatCurrency(realizedPnL) : '-'}
                                 </td>
                                 <td className={!trade.isBuy ? getClassName(runningTotal) : ''} style={{ background: 'white' }}>
                                   {!trade.isBuy ? formatCurrency(runningTotal) : '-'}
+                                </td>
+                                <td style={{ background: 'white', fontSize: '0.75em' }}>
+                                  {matchedBuys.length > 0 ? (
+                                    <div>
+                                      {matchedBuys.map((mb, mbIdx) => (
+                                        <div key={mbIdx} style={{ whiteSpace: 'nowrap' }}>
+                                          {mb.date.toLocaleDateString()}: {mb.quantity} @ {formatCurrency(mb.price)}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : '-'}
                                 </td>
                               </tr>
                             )
@@ -806,7 +891,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           console.error('Error rendering trade history:', error)
                           return (
                             <tr>
-                              <td colSpan="7" style={{ padding: '20px', textAlign: 'center', background: '#f8d7da', color: '#721c24' }}>
+                              <td colSpan="10" style={{ padding: '20px', textAlign: 'center', background: '#f8d7da', color: '#721c24' }}>
                                 Error loading trade history. Please try again.
                               </td>
                             </tr>
