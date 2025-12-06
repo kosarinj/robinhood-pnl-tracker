@@ -7,11 +7,15 @@ import { identifyDownturns, analyzeTradeOpportunities, calculateOverallScore, fo
 function MarketAnalysis({ trades, onClose }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [marketData, setMarketData] = useState([])
-  const [downturns, setDownturns] = useState([])
-  const [analyzedDownturns, setAnalyzedDownturns] = useState([])
-  const [overallScore, setOverallScore] = useState(null)
-  const [selectedDownturn, setSelectedDownturn] = useState(null)
+  const [spData, setSpData] = useState([])
+  const [nasdaqData, setNasdaqData] = useState([])
+  const [spDownturns, setSpDownturns] = useState([])
+  const [nasdaqDownturns, setNasdaqDownturns] = useState([])
+  const [spAnalyzed, setSpAnalyzed] = useState([])
+  const [nasdaqAnalyzed, setNasdaqAnalyzed] = useState([])
+  const [spScore, setSpScore] = useState(null)
+  const [nasdaqScore, setNasdaqScore] = useState(null)
+  const [selectedIndex, setSelectedIndex] = useState('sp500') // 'sp500' or 'nasdaq'
   const [expandedDownturns, setExpandedDownturns] = useState({})
 
   useEffect(() => {
@@ -34,21 +38,30 @@ function MarketAnalysis({ trades, onClose }) {
 
       console.log(`Analyzing market from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`)
 
-      // Fetch S&P 500 data
-      const data = await marketDataService.fetchHistoricalData('^GSPC', startDate, endDate)
-      setMarketData(data)
+      // Fetch both S&P 500 and NASDAQ data in parallel
+      const [spDataResult, nasdaqDataResult] = await Promise.all([
+        marketDataService.fetchHistoricalData('^GSPC', startDate, endDate),
+        marketDataService.fetchHistoricalData('^IXIC', startDate, endDate)
+      ])
 
-      // Identify downturns
-      const detectedDownturns = identifyDownturns(data)
-      setDownturns(detectedDownturns)
+      setSpData(spDataResult)
+      setNasdaqData(nasdaqDataResult)
 
-      // Analyze trade opportunities
-      const analyzed = analyzeTradeOpportunities(trades, detectedDownturns)
-      setAnalyzedDownturns(analyzed)
+      // Analyze S&P 500
+      const spDetectedDownturns = identifyDownturns(spDataResult)
+      setSpDownturns(spDetectedDownturns)
+      const spAnalyzedResult = analyzeTradeOpportunities(trades, spDetectedDownturns)
+      setSpAnalyzed(spAnalyzedResult)
+      const spScoreResult = calculateOverallScore(spAnalyzedResult)
+      setSpScore(spScoreResult)
 
-      // Calculate overall score
-      const score = calculateOverallScore(analyzed)
-      setOverallScore(score)
+      // Analyze NASDAQ
+      const nasdaqDetectedDownturns = identifyDownturns(nasdaqDataResult)
+      setNasdaqDownturns(nasdaqDetectedDownturns)
+      const nasdaqAnalyzedResult = analyzeTradeOpportunities(trades, nasdaqDetectedDownturns)
+      setNasdaqAnalyzed(nasdaqAnalyzedResult)
+      const nasdaqScoreResult = calculateOverallScore(nasdaqAnalyzedResult)
+      setNasdaqScore(nasdaqScoreResult)
 
       setLoading(false)
 
@@ -83,6 +96,13 @@ function MarketAnalysis({ trades, onClose }) {
       [index]: !prev[index]
     }))
   }
+
+  // Get data for selected index
+  const currentMarketData = selectedIndex === 'sp500' ? spData : nasdaqData
+  const currentDownturns = selectedIndex === 'sp500' ? spDownturns : nasdaqDownturns
+  const currentAnalyzed = selectedIndex === 'sp500' ? spAnalyzed : nasdaqAnalyzed
+  const currentScore = selectedIndex === 'sp500' ? spScore : nasdaqScore
+  const currentIndexName = selectedIndex === 'sp500' ? 'S&P 500' : 'NASDAQ'
 
   if (loading) {
     return (
@@ -172,21 +192,57 @@ function MarketAnalysis({ trades, onClose }) {
           <button onClick={onClose} className="btn-small btn-cancel">✗</button>
         </div>
 
+        {/* Index Selector */}
+        <div style={{ padding: '15px 20px', background: '#f8f9fa', borderBottom: '1px solid #dee2e6', display: 'flex', gap: '10px', justifyContent: 'center' }}>
+          <button
+            onClick={() => setSelectedIndex('sp500')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              border: 'none',
+              background: selectedIndex === 'sp500' ? '#667eea' : 'white',
+              color: selectedIndex === 'sp500' ? 'white' : '#333',
+              fontWeight: '600',
+              cursor: 'pointer',
+              boxShadow: selectedIndex === 'sp500' ? '0 2px 8px rgba(102, 126, 234, 0.3)' : '0 2px 4px rgba(0,0,0,0.1)',
+              transition: 'all 0.2s'
+            }}
+          >
+            📊 S&P 500
+          </button>
+          <button
+            onClick={() => setSelectedIndex('nasdaq')}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '6px',
+              border: 'none',
+              background: selectedIndex === 'nasdaq' ? '#667eea' : 'white',
+              color: selectedIndex === 'nasdaq' ? 'white' : '#333',
+              fontWeight: '600',
+              cursor: 'pointer',
+              boxShadow: selectedIndex === 'nasdaq' ? '0 2px 8px rgba(102, 126, 234, 0.3)' : '0 2px 4px rgba(0,0,0,0.1)',
+              transition: 'all 0.2s'
+            }}
+          >
+            💻 NASDAQ
+          </button>
+        </div>
+
         {/* Overall Score */}
-        {overallScore && (
+        {currentScore && (
           <div style={{ padding: '20px', background: '#f8f9fa', borderBottom: '1px solid #dee2e6' }}>
             <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: '20px' }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>Overall Timing Score</div>
                 <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#667eea' }}>
-                  {overallScore.score}/10
+                  {currentScore.score}/10
                 </div>
-                <div style={{ fontSize: '16px', color: '#333', marginTop: '5px' }}>{overallScore.label}</div>
+                <div style={{ fontSize: '16px', color: '#333', marginTop: '5px' }}>{currentScore.label}</div>
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>Downturns Detected</div>
                 <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#333' }}>
-                  {overallScore.totalOpportunities}
+                  {currentScore.totalOpportunities}
                 </div>
                 <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
                   opportunities
@@ -195,7 +251,7 @@ function MarketAnalysis({ trades, onClose }) {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>Capitalized On</div>
                 <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#28a745' }}>
-                  {overallScore.capitalizedOpportunities}
+                  {currentScore.capitalizedOpportunities}
                 </div>
                 <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
                   bought during dip
@@ -204,7 +260,7 @@ function MarketAnalysis({ trades, onClose }) {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>Missed</div>
                 <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#dc3545' }}>
-                  {overallScore.missedOpportunities}
+                  {currentScore.missedOpportunities}
                 </div>
                 <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
                   no activity
@@ -216,9 +272,9 @@ function MarketAnalysis({ trades, onClose }) {
 
         {/* Market Timeline Chart */}
         <div style={{ padding: '20px' }}>
-          <h5 style={{ marginBottom: '15px' }}>S&P 500 Timeline</h5>
+          <h5 style={{ marginBottom: '15px' }}>{currentIndexName} Timeline</h5>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={marketData.slice(-180)} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+            <LineChart data={currentMarketData.slice(-180)} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis
                 dataKey="date"
@@ -231,7 +287,7 @@ function MarketAnalysis({ trades, onClose }) {
               />
               <Tooltip
                 labelFormatter={(date) => format(new Date(date), 'MMM dd, yyyy')}
-                formatter={(value) => [`$${value.toFixed(2)}`, 'S&P 500']}
+                formatter={(value) => [`$${value.toFixed(2)}`, currentIndexName]}
               />
               <Legend />
               <Line
@@ -240,7 +296,7 @@ function MarketAnalysis({ trades, onClose }) {
                 stroke="#667eea"
                 strokeWidth={2}
                 dot={false}
-                name="S&P 500"
+                name={currentIndexName}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -253,7 +309,7 @@ function MarketAnalysis({ trades, onClose }) {
         <div style={{ padding: '20px', borderTop: '1px solid #dee2e6' }}>
           <h5 style={{ marginBottom: '15px' }}>Downturn Opportunities</h5>
 
-          {analyzedDownturns.length === 0 ? (
+          {currentAnalyzed.length === 0 ? (
             <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
               <div style={{ fontSize: '48px', marginBottom: '10px' }}>🎉</div>
               <div style={{ fontSize: '18px', marginBottom: '5px' }}>No significant downturns detected</div>
@@ -261,7 +317,7 @@ function MarketAnalysis({ trades, onClose }) {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              {analyzedDownturns.map((downturn, index) => (
+              {currentAnalyzed.map((downturn, index) => (
                 <div
                   key={index}
                   style={{
@@ -408,9 +464,9 @@ function MarketAnalysis({ trades, onClose }) {
 
         {/* Info Footer */}
         <div style={{ padding: '15px', background: '#f8f9fa', borderTop: '1px solid #dee2e6', fontSize: '12px', color: '#666' }}>
-          <strong>ℹ️ How this works:</strong> This analysis compares the S&P 500 market index with your trading activity.
+          <strong>ℹ️ How this works:</strong> This analysis compares major market indices (S&P 500 and NASDAQ) with your trading activity.
           Buying during downturns (when prices are lower) and holding through recovery typically leads to better returns.
-          The suggestions are based on your average position sizes and the severity of each downturn.
+          The suggestions are based on your average position sizes and the severity of each downturn. Switch between indices to see different market perspectives.
         </div>
       </div>
     </>
