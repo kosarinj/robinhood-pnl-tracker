@@ -7,6 +7,7 @@ import { parseTrades, parseDeposits } from './services/csvParser.js'
 import { calculatePnL } from './services/pnlCalculator.js'
 import { PriceService } from './services/priceService.js'
 import { SignalService } from './services/signalService.js'
+import { databaseService } from './services/database.js'
 
 const app = express()
 const httpServer = createServer(app)
@@ -27,6 +28,9 @@ const upload = multer({ storage: multer.memoryStorage() })
 // Services
 const priceService = new PriceService()
 const signalService = new SignalService()
+
+// Track all symbols for automatic recording
+const trackedSymbols = new Set()
 
 // Store client sessions (in-memory, stateless)
 const clientSessions = new Map()
@@ -82,6 +86,10 @@ io.on('connection', (socket) => {
 
       // Register symbols for price tracking
       priceService.addSymbols(stockSymbols)
+
+      // Add symbols to tracked set for database recording
+      stockSymbols.forEach(symbol => trackedSymbols.add(symbol))
+      console.log(`Now tracking ${trackedSymbols.size} symbols for database recording`)
 
       // Get initial prices
       const prices = await priceService.getPrices(stockSymbols)
@@ -196,9 +204,41 @@ function applysplits(trades, splits) {
 }
 
 // Background job: Update prices every minute and broadcast to clients
+let recordingCounter = 0
 setInterval(async () => {
   try {
     const updatedPrices = await priceService.refreshPrices()
+    recordingCounter++
+
+    // Every 5 minutes, record prices and signals to database
+    const shouldRecord = recordingCounter % 5 === 0
+    if (shouldRecord && trackedSymbols.size > 0) {
+      console.log(`📊 Recording prices and signals for ${trackedSymbols.size} symbols...`)
+
+      // Record prices
+      databaseService.recordPrices(updatedPrices)
+
+      // Fetch and record signals for all tracked symbols
+      const signalsToRecord = []
+      for (const symbol of trackedSymbols) {
+        try {
+          const signal = await signalService.getSignal(symbol)
+          if (signal) {
+            signalsToRecord.push(signal)
+          }
+        } catch (err) {
+          console.error(`Error fetching signal for ${symbol}:`, err)
+        }
+      }
+
+      if (signalsToRecord.length > 0) {
+        databaseService.recordSignals(signalsToRecord)
+        console.log(`✅ Recorded ${signalsToRecord.length} signals`)
+      }
+
+      // Analyze signal performance (every 5 minutes)
+      databaseService.analyzeSignalPerformance()
+    }
 
     // Broadcast price updates to all clients
     for (const [socketId, session] of clientSessions.entries()) {
@@ -225,6 +265,28 @@ setInterval(async () => {
   }
 }, 60000) // Every 1 minute
 
+// Daily database cleanup (runs at 3 AM)
+const scheduleCleanup = () => {
+  const now = new Date()
+  const next3AM = new Date(now)
+  next3AM.setHours(3, 0, 0, 0)
+
+  if (next3AM <= now) {
+    next3AM.setDate(next3AM.getDate() + 1)
+  }
+
+  const timeUntilCleanup = next3AM.getTime() - now.getTime()
+
+  setTimeout(() => {
+    console.log('🧹 Running daily database cleanup...')
+    databaseService.cleanup()
+    scheduleCleanup() // Schedule next cleanup
+  }, timeUntilCleanup)
+
+  console.log(`Next database cleanup scheduled for ${next3AM.toLocaleString()}`)
+}
+scheduleCleanup()
+
 // REST API endpoints (optional, for HTTP access)
 app.get('/', (req, res) => {
   res.json({
@@ -243,8 +305,43 @@ app.get('/health', (req, res) => {
     status: 'healthy',
     clients: clientSessions.size,
     trackedSymbols: priceService.getTrackedSymbols().length,
+    recordingSymbols: trackedSymbols.size,
     uptime: process.uptime()
   })
+})
+
+// Signal accuracy endpoints
+app.get('/api/signal-accuracy', (req, res) => {
+  try {
+    const { symbol, hours } = req.query
+    const timeRange = hours ? parseInt(hours) : 168 // Default 7 days
+    const accuracy = databaseService.getSignalAccuracy(symbol, timeRange)
+    res.json({ success: true, data: accuracy })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+app.get('/api/signals/:symbol', (req, res) => {
+  try {
+    const { symbol } = req.params
+    const { limit } = req.query
+    const signals = databaseService.getRecentSignals(symbol, limit ? parseInt(limit) : 50)
+    res.json({ success: true, data: signals })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+app.get('/api/prices/:symbol', (req, res) => {
+  try {
+    const { symbol } = req.params
+    const { limit } = req.query
+    const prices = databaseService.getRecentPrices(symbol, limit ? parseInt(limit) : 288)
+    res.json({ success: true, data: prices })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
 })
 
 app.get('/prices', async (req, res) => {
