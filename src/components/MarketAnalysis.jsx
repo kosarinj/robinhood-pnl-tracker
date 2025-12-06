@@ -12,6 +12,7 @@ function MarketAnalysis({ trades, onClose }) {
   const [analyzedDownturns, setAnalyzedDownturns] = useState([])
   const [overallScore, setOverallScore] = useState(null)
   const [selectedDownturn, setSelectedDownturn] = useState(null)
+  const [expandedDownturns, setExpandedDownturns] = useState({})
 
   useEffect(() => {
     analyzeMarket()
@@ -74,6 +75,13 @@ function MarketAnalysis({ trades, onClose }) {
       case 'mild': return '🟡'
       default: return '⚪'
     }
+  }
+
+  const toggleDownturnExpanded = (index) => {
+    setExpandedDownturns(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }))
   }
 
   if (loading) {
@@ -328,6 +336,70 @@ function MarketAnalysis({ trades, onClose }) {
                       </div>
                     )}
                   </div>
+
+                  {/* Symbol Breakdown - Drill Down */}
+                  {downturn.analysis.symbolBreakdown && downturn.analysis.symbolBreakdown.length > 0 && (
+                    <div style={{ marginTop: '15px' }}>
+                      <button
+                        onClick={() => toggleDownturnExpanded(index)}
+                        style={{
+                          background: '#667eea',
+                          color: 'white',
+                          border: 'none',
+                          padding: '8px 16px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        {expandedDownturns[index] ? '▼' : '▶'} View by Instrument ({downturn.analysis.symbolBreakdown.length} symbols)
+                      </button>
+
+                      {expandedDownturns[index] && (
+                        <div style={{ marginTop: '10px', background: '#f8f9fa', padding: '15px', borderRadius: '6px' }}>
+                          <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #dee2e6' }}>
+                                <th style={{ textAlign: 'left', padding: '8px' }}>Symbol</th>
+                                <th style={{ textAlign: 'center', padding: '8px' }}>Buys</th>
+                                <th style={{ textAlign: 'center', padding: '8px' }}>Sells</th>
+                                <th style={{ textAlign: 'right', padding: '8px' }}>Shares Bought</th>
+                                <th style={{ textAlign: 'right', padding: '8px' }}>Avg Buy Price</th>
+                                <th style={{ textAlign: 'center', padding: '8px' }}>Timing</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {downturn.analysis.symbolBreakdown.map((symbolData, symbolIndex) => (
+                                <tr key={symbolIndex} style={{ borderBottom: '1px solid #e9ecef' }}>
+                                  <td style={{ padding: '8px', fontWeight: 'bold' }}>{symbolData.symbol}</td>
+                                  <td style={{ textAlign: 'center', padding: '8px', color: '#28a745' }}>{symbolData.buyCount}</td>
+                                  <td style={{ textAlign: 'center', padding: '8px', color: '#dc3545' }}>{symbolData.sellCount}</td>
+                                  <td style={{ textAlign: 'right', padding: '8px' }}>{symbolData.sharesBought}</td>
+                                  <td style={{ textAlign: 'right', padding: '8px' }}>{formatCurrency(symbolData.avgBuyPrice)}</td>
+                                  <td style={{ textAlign: 'center', padding: '8px' }}>
+                                    <span style={{
+                                      padding: '4px 8px',
+                                      borderRadius: '4px',
+                                      background: symbolData.timing.color,
+                                      color: 'white',
+                                      fontSize: '11px',
+                                      fontWeight: 'bold'
+                                    }}>
+                                      {symbolData.timing.label}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -139,6 +139,9 @@ export function analyzeTradeOpportunities(trades, downturns) {
     // Determine if user timed it well
     const timing = evaluateTiming(buyTrades, sellTrades, downturn)
 
+    // Break down by symbol
+    const symbolBreakdown = analyzeBySymbol(tradesInPeriod, downturn)
+
     return {
       ...downturn,
       userTrades: tradesInPeriod,
@@ -154,10 +157,60 @@ export function analyzeTradeOpportunities(trades, downturns) {
         additionalShares,
         missedOpportunity: potentialGain,
         timing,
-        avgPurchasePrice: avgPrice
+        avgPurchasePrice: avgPrice,
+        symbolBreakdown
       }
     }
   })
+}
+
+/**
+ * Analyze trades by symbol during a downturn
+ */
+function analyzeBySymbol(trades, downturn) {
+  const symbolMap = {}
+
+  trades.forEach(trade => {
+    if (!symbolMap[trade.symbol]) {
+      symbolMap[trade.symbol] = {
+        symbol: trade.symbol,
+        buyTrades: [],
+        sellTrades: [],
+        totalBought: 0,
+        totalSold: 0,
+        sharesBought: 0,
+        sharesSold: 0
+      }
+    }
+
+    const isBuy = trade.isBuy || trade.type === 'BUY'
+    if (isBuy) {
+      symbolMap[trade.symbol].buyTrades.push(trade)
+      symbolMap[trade.symbol].totalBought += trade.quantity * trade.price
+      symbolMap[trade.symbol].sharesBought += trade.quantity
+    } else {
+      symbolMap[trade.symbol].sellTrades.push(trade)
+      symbolMap[trade.symbol].totalSold += trade.quantity * trade.price
+      symbolMap[trade.symbol].sharesSold += trade.quantity
+    }
+  })
+
+  // Convert to array and add metrics
+  return Object.values(symbolMap).map(symbolData => {
+    const buyCount = symbolData.buyTrades.length
+    const sellCount = symbolData.sellTrades.length
+    const avgBuyPrice = buyCount > 0 ? symbolData.totalBought / symbolData.sharesBought : 0
+    const timing = evaluateTiming(symbolData.buyTrades, symbolData.sellTrades, downturn)
+
+    return {
+      ...symbolData,
+      buyCount,
+      sellCount,
+      avgBuyPrice,
+      netShares: symbolData.sharesBought - symbolData.sharesSold,
+      timing
+    }
+  }).sort((a, b) => b.sharesBought - a.sharesBought) // Sort by most shares bought
 }
 
 /**
