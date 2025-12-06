@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import CSVUpload from './components/CSVUpload'
 import TradesTable from './components/TradesTable'
 import TradingSignals from './components/TradingSignals'
+import MarketAnalysis from './components/MarketAnalysis'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -53,6 +54,7 @@ function App() {
   const [showChartsInHistory, setShowChartsInHistory] = useState(false)
   const [connected, setConnected] = useState(false)
   const [useServer, setUseServer] = useState(true) // Toggle between server and standalone mode
+  const [showMarketAnalysis, setShowMarketAnalysis] = useState(false)
 
   // Connect to server on mount
   useEffect(() => {
@@ -553,17 +555,34 @@ function App() {
         </div>
       )}
 
-      {/* Lookup Symbol Signal - Always visible */}
+      {/* Lookup Symbol Signal & Market Analysis - Always visible */}
       <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-        <button
-          onClick={() => setShowSymbolLookup(true)}
-          className="btn-signals"
-          style={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', padding: '12px 24px', fontSize: '16px' }}
-        >
-          🔍 Lookup Symbol Signal
-        </button>
+        <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setShowSymbolLookup(true)}
+            className="btn-signals"
+            style={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', padding: '12px 24px', fontSize: '16px' }}
+          >
+            🔍 Lookup Symbol Signal
+          </button>
+          <button
+            onClick={() => setShowMarketAnalysis(true)}
+            className="btn-signals"
+            disabled={trades.length === 0}
+            style={{
+              background: trades.length > 0
+                ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                : '#ccc',
+              padding: '12px 24px',
+              fontSize: '16px',
+              cursor: trades.length > 0 ? 'pointer' : 'not-allowed'
+            }}
+          >
+            📉 Market Downturn Analysis
+          </button>
+        </div>
         <p style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
-          Search for technical analysis signals for any stock symbol
+          Analyze trading signals or identify market opportunities from downturns
         </p>
       </div>
 
@@ -967,6 +986,14 @@ function App() {
             onClick={closeLookup}
           />
         </>
+      )}
+
+      {/* Market Downturn Analysis Popup */}
+      {showMarketAnalysis && (
+        <MarketAnalysis
+          trades={trades}
+          onClose={() => setShowMarketAnalysis(false)}
+        />
       )}
     </div>
   )
