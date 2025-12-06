@@ -111,7 +111,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   const getTradesForSymbol = (symbol) => {
     if (!trades) return []
-    return trades.filter(t => t.symbol === symbol).sort((a, b) => a.date - b.date)
+    return trades.filter(t => t.symbol === symbol).sort((a, b) => {
+      const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
+      const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
+      return dateA - dateB
+    })
   }
 
   const startEditingSplit = (symbol, currentRatio) => {
@@ -661,9 +665,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           let totalBought = 0
 
                           symbolTrades.forEach((trade) => {
-                            if (trade.isBuy) {
-                              totalBuyCost += trade.quantity * trade.price
-                              totalBought += trade.quantity
+                            if (trade && trade.isBuy && trade.quantity && trade.price) {
+                              totalBuyCost += (trade.quantity || 0) * (trade.price || 0)
+                              totalBought += (trade.quantity || 0)
                             }
                           })
 
@@ -671,17 +675,21 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           let runningTotal = 0
 
                           return symbolTrades.map((trade, idx) => {
+                            if (!trade) return null
+
                             let realizedPnL = null
 
                             if (!trade.isBuy) {
                               // Calculate realized P&L for this sell using overall average buy price
-                              realizedPnL = (trade.price - avgBuyPrice) * trade.quantity
+                              realizedPnL = ((trade.price || 0) - avgBuyPrice) * (trade.quantity || 0)
                               runningTotal += realizedPnL
                             }
 
+                            const tradeDate = trade.date instanceof Date ? trade.date : new Date(trade.date)
+
                             return (
                               <tr key={idx} style={{ background: 'white' }}>
-                                <td style={{ position: 'sticky', left: 0, background: 'white', zIndex: 5 }}>{trade.date.toLocaleDateString()}</td>
+                                <td style={{ position: 'sticky', left: 0, background: 'white', zIndex: 5 }}>{tradeDate.toLocaleDateString()}</td>
                                 <td className={trade.isBuy ? 'positive' : 'negative'} style={{ background: 'white' }}>
                                   {trade.isBuy ? 'BUY' : 'SELL'}
                                 </td>
