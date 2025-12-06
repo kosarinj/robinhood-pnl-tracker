@@ -31,6 +31,18 @@ const signalService = new SignalService()
 // Store client sessions (in-memory, stateless)
 const clientSessions = new Map()
 
+// Session cleanup - remove sessions older than 1 hour
+const SESSION_TIMEOUT = 60 * 60 * 1000 // 1 hour
+setInterval(() => {
+  const now = Date.now()
+  for (const [sessionId, session] of clientSessions.entries()) {
+    if (now - session.lastActivity > SESSION_TIMEOUT) {
+      console.log(`Cleaning up inactive session: ${sessionId}`)
+      clientSessions.delete(sessionId)
+    }
+  }
+}, 5 * 60 * 1000) // Check every 5 minutes
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`)
@@ -64,7 +76,8 @@ io.on('connection', (socket) => {
         totalPrincipal,
         stockSymbols,
         splitAdjustments: {},
-        manualPrices: {}
+        manualPrices: {},
+        lastActivity: Date.now()
       })
 
       // Register symbols for price tracking
