@@ -25,7 +25,7 @@ function App() {
   const [showSignals, setShowSignals] = useState(false)
   const [visiblePnlColumns, setVisiblePnlColumns] = useState({
     real: true,
-    avgCost: true,
+    avgCost: false,
     fifo: true,
     lifo: true
   })
