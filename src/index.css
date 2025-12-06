@@ -523,16 +523,19 @@ button:disabled {
 }
 
 .expanded-row {
-  background: #f8f9fa;
+  background: white !important;
 }
 
 .expanded-row td {
   padding: 0 !important;
+  background: white !important;
 }
 
 .trades-detail {
   padding: 20px;
   animation: slideDown 0.3s ease;
+  background: white;
+  min-height: 200px;
 }
 
 .chart-container {

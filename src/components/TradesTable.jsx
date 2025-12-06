@@ -208,35 +208,40 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   }, [expandedSymbol, showChartsInHistory])
 
   const createWidget = (containerId, symbol) => {
-    const container = document.getElementById(containerId)
-    if (container && window.TradingView) {
-      new window.TradingView.widget({
-        width: '100%',
-        height: 500,
-        symbol: symbol,
-        interval: '10',
-        timezone: 'Etc/UTC',
-        theme: 'light',
-        style: '1',
-        locale: 'en',
-        toolbar_bg: '#f1f3f6',
-        enable_publishing: false,
-        hide_top_toolbar: false,
-        hide_side_toolbar: false,
-        allow_symbol_change: true,
-        save_image: false,
-        container_id: containerId,
-        studies: [
-          {
-            id: 'MAExp@tv-basicstudies',
-            inputs: { length: 9 }
-          },
-          {
-            id: 'MAExp@tv-basicstudies',
-            inputs: { length: 21 }
-          }
-        ]
-      })
+    try {
+      const container = document.getElementById(containerId)
+      if (container && window.TradingView) {
+        new window.TradingView.widget({
+          width: '100%',
+          height: 500,
+          symbol: symbol,
+          interval: '10',
+          timezone: 'Etc/UTC',
+          theme: 'light',
+          style: '1',
+          locale: 'en',
+          toolbar_bg: '#f1f3f6',
+          enable_publishing: false,
+          hide_top_toolbar: false,
+          hide_side_toolbar: false,
+          allow_symbol_change: true,
+          save_image: false,
+          container_id: containerId,
+          studies: [
+            {
+              id: 'MAExp@tv-basicstudies',
+              inputs: { length: 9 }
+            },
+            {
+              id: 'MAExp@tv-basicstudies',
+              inputs: { length: 21 }
+            }
+          ]
+        })
+      }
+    } catch (error) {
+      console.error('Error creating TradingView widget:', error)
+      // Widget creation failed, but don't break the page
     }
   }
 
