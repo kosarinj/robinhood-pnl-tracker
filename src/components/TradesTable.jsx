@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 
-function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, visiblePnlColumns, tradingSignals, showChartsInHistory, onManualPriceUpdate, onClearManualPrice, onSplitAdjustment, onClearSplitAdjustment, onTotalsUpdate }) {
+function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, visiblePnlColumns, tradingSignals, showChartsInHistory, showRiskManagement, riskAllocations, onManualPriceUpdate, onClearManualPrice, onSplitAdjustment, onClearSplitAdjustment, onTotalsUpdate, onRiskAllocationUpdate }) {
   const [sortConfig, setSortConfig] = useState({ key: 'symbol', direction: 'asc' })
   const [expandedSymbol, setExpandedSymbol] = useState(null)
   const [editingPrice, setEditingPrice] = useState(null)
@@ -15,6 +15,8 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const [whatIfShares, setWhatIfShares] = useState('')
   const [whatIfPrice, setWhatIfPrice] = useState('')
   const [whatIfMethod, setWhatIfMethod] = useState('real')
+  const [editingRisk, setEditingRisk] = useState(null)
+  const [riskInput, setRiskInput] = useState('')
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -109,8 +111,20 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     setPriceInput('')
   }
 
-  const getTradesForSymbol = (symbol) => {
+  const getTradesForSymbol = (symbol, isRollup = false, options = []) => {
     if (!trades) return []
+
+    // For rolled-up parent instruments, get trades for all underlying options
+    if (isRollup && options && options.length > 0) {
+      const optionSymbols = options.map(opt => opt.symbol)
+      return trades.filter(t => optionSymbols.includes(t.symbol)).sort((a, b) => {
+        const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
+        const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
+        return dateA - dateB
+      })
+    }
+
+    // For regular symbols, filter by exact symbol match
     return trades.filter(t => t.symbol === symbol).sort((a, b) => {
       const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
       const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
@@ -148,6 +162,24 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     setWhatIfShares('')
     setWhatIfPrice('')
     setWhatIfMethod('real')
+  }
+
+  const startEditingRisk = (symbol, currentAllocation) => {
+    setEditingRisk(symbol)
+    setRiskInput(currentAllocation ? currentAllocation.toString() : '')
+  }
+
+  const saveRiskAllocation = (symbol) => {
+    if (riskInput && !isNaN(riskInput) && parseFloat(riskInput) >= 0) {
+      onRiskAllocationUpdate(symbol, parseFloat(riskInput))
+    }
+    setEditingRisk(null)
+    setRiskInput('')
+  }
+
+  const cancelEditingRisk = () => {
+    setEditingRisk(null)
+    setRiskInput('')
   }
 
   const calculateWhatIfAvgCost = (row) => {
@@ -314,6 +346,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             <th rowSpan="2" onClick={() => handleSort('avgCost.position')} className="sortable">
               Position{getSortIcon('avgCost.position')}
             </th>
+            {showRiskManagement && (
+              <th colSpan="3" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6', background: '#fff4e6' }}>Risk Management</th>
+            )}
             {visiblePnlColumns.real && (
               <th colSpan="6" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Real P&L</th>
             )}
@@ -328,6 +363,13 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             )}
           </tr>
           <tr>
+            {showRiskManagement && (
+              <>
+                <th style={{ background: '#fff4e6' }}>Risk Allocated</th>
+                <th style={{ background: '#fff4e6' }}>Risk Used</th>
+                <th style={{ background: '#fff4e6' }}>Used %</th>
+              </>
+            )}
             {visiblePnlColumns.real && (
               <>
                 <th onClick={() => handleSort('real.avgCostBasis')} className="sortable" style={{ minWidth: '90px', maxWidth: '90px' }}>
@@ -527,6 +569,55 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 </td>
                 <td>{row.avgCost.position}</td>
 
+                {/* Risk Management columns */}
+                {showRiskManagement && (() => {
+                  const allocation = (riskAllocations && riskAllocations[row.symbol]) || 0
+                  const costBasis = row.real.avgCostBasis * row.real.position
+                  const riskUsed = costBasis
+                  const usedPercent = allocation > 0 ? (riskUsed / allocation) * 100 : 0
+                  const isOverAllocated = usedPercent > 100
+
+                  return (
+                    <>
+                      <td onClick={(e) => e.stopPropagation()} style={{ background: '#fffbf0' }}>
+                        {editingRisk === row.symbol ? (
+                          <div className="price-edit">
+                            <input
+                              type="number"
+                              step="100"
+                              min="0"
+                              value={riskInput}
+                              onChange={(e) => setRiskInput(e.target.value)}
+                              onKeyPress={(e) => e.key === 'Enter' && saveRiskAllocation(row.symbol)}
+                              className="price-input"
+                              autoFocus
+                            />
+                            <button onClick={() => saveRiskAllocation(row.symbol)} className="btn-small btn-save">✓</button>
+                            <button onClick={cancelEditingRisk} className="btn-small btn-cancel">✗</button>
+                          </div>
+                        ) : (
+                          <div className="price-display">
+                            {allocation > 0 ? formatCurrency(allocation) : '-'}
+                            <button
+                              onClick={() => startEditingRisk(row.symbol, allocation)}
+                              className="btn-small btn-edit"
+                            >
+                              {allocation > 0 ? 'Edit' : 'Set'}
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ background: '#fffbf0' }}>
+                        {formatCurrency(riskUsed)}
+                      </td>
+                      <td style={{ background: isOverAllocated ? '#ffe6e6' : '#fffbf0', fontWeight: isOverAllocated ? 'bold' : 'normal' }}>
+                        {allocation > 0 ? `${usedPercent.toFixed(1)}%` : '-'}
+                        {isOverAllocated && <span style={{ color: '#dc3545', marginLeft: '5px' }}>⚠</span>}
+                      </td>
+                    </>
+                  )
+                })()}
+
                 {/* Real P&L columns */}
                 {visiblePnlColumns.real && (
                   <>
@@ -611,7 +702,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             {/* Expanded row showing individual trades or options */}
             {expandedSymbol === row.symbol && (
               <tr className="expanded-row">
-                <td colSpan={3 + (visiblePnlColumns.real ? 6 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
+                <td colSpan={3 + (showRiskManagement ? 3 : 0) + (visiblePnlColumns.real ? 6 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
                   <div className="trades-detail" style={{ background: 'white', padding: '20px' }}>
                     {row.isRollup ? (
                       // Display individual options for rolled-up parent instruments
@@ -748,7 +839,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       <tbody style={{ background: 'white' }}>
                         {(() => {
                           try {
-                          const symbolTrades = getTradesForSymbol(row.symbol)
+                          const symbolTrades = getTradesForSymbol(row.symbol, row.isRollup, row.options)
 
                           if (!symbolTrades || symbolTrades.length === 0) {
                             return (
@@ -766,7 +857,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           let totalBuyCost = 0
                           let runningTotal = 0
 
-                          return symbolTrades.map((trade, idx) => {
+                          const tradeRows = symbolTrades.map((trade, idx) => {
                             if (!trade) return null
 
                             const tradeDate = trade.date instanceof Date ? trade.date : new Date(trade.date)
@@ -887,6 +978,47 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                               </tr>
                             )
                           })
+
+                          // Calculate expected realized P&L from main grid
+                          const expectedRealizedPnL = row.real.realizedPnL
+                          const difference = Math.abs(runningTotal - expectedRealizedPnL)
+                          const isMatch = difference < 0.01 // Allow for tiny rounding differences
+
+                          // Log verification for debugging
+                          if (!isMatch) {
+                            console.warn(`[${row.symbol}] Realized P&L Mismatch:`, {
+                              tradeHistoryTotal: runningTotal,
+                              mainGridRealized: expectedRealizedPnL,
+                              difference: difference,
+                              numberOfTrades: symbolTrades.length
+                            })
+                          }
+
+                          // Add verification row after all trades
+                          return [
+                            ...tradeRows,
+                            <tr key="verification" style={{
+                              background: isMatch ? '#d4edda' : '#fff3cd',
+                              borderTop: '2px solid #667eea',
+                              fontWeight: 'bold'
+                            }}>
+                              <td colSpan="7" style={{ textAlign: 'right', padding: '12px' }}>
+                                {isMatch ? '✓ Verified:' : '⚠ Mismatch:'}
+                              </td>
+                              <td style={{ padding: '12px' }}>
+                                {formatCurrency(runningTotal)}
+                              </td>
+                              <td colSpan="2" style={{ padding: '12px', fontSize: '0.85em' }}>
+                                {isMatch ? (
+                                  <span style={{ color: '#155724' }}>Matches main grid Realized P&L</span>
+                                ) : (
+                                  <span style={{ color: '#856404' }}>
+                                    Expected: {formatCurrency(expectedRealizedPnL)} (Diff: {formatCurrency(difference)})
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ]
                         } catch (error) {
                           console.error('Error rendering trade history:', error)
                           return (
@@ -913,6 +1045,27 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         <tfoot>
           <tr className="totals-row">
             <td colSpan="3"><strong>TOTALS</strong></td>
+
+            {/* Risk Management totals */}
+            {showRiskManagement && (() => {
+              const totalAllocated = data.reduce((sum, row) => sum + ((riskAllocations && riskAllocations[row.symbol]) || 0), 0)
+              const totalUsed = data.reduce((sum, row) => sum + (row.real.avgCostBasis * row.real.position), 0)
+              const avgUsedPercent = totalAllocated > 0 ? (totalUsed / totalAllocated) * 100 : 0
+
+              return (
+                <>
+                  <td style={{ background: '#fff4e6' }}>
+                    <strong>{formatCurrency(totalAllocated)}</strong>
+                  </td>
+                  <td style={{ background: '#fff4e6' }}>
+                    <strong>{formatCurrency(totalUsed)}</strong>
+                  </td>
+                  <td style={{ background: '#fff4e6' }}>
+                    <strong>{totalAllocated > 0 ? `${avgUsedPercent.toFixed(1)}%` : '-'}</strong>
+                  </td>
+                </>
+              )
+            })()}
 
             {/* Real P&L totals */}
             {visiblePnlColumns.real && (

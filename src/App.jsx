@@ -55,6 +55,9 @@ function App() {
   const [connected, setConnected] = useState(false)
   const [useServer, setUseServer] = useState(true) // Toggle between server and standalone mode
   const [showMarketAnalysis, setShowMarketAnalysis] = useState(false)
+  const [showRiskManagement, setShowRiskManagement] = useState(false)
+  const [riskAllocations, setRiskAllocations] = useState({})
+  const [totalRiskBudget, setTotalRiskBudget] = useState(10000) // Default $10k risk budget
 
   // Connect to server on mount
   useEffect(() => {
@@ -156,6 +159,12 @@ function App() {
       const pnl = calculatePnL(adjustedTrades, mergedPrices)
       setPnlData(pnl)
     }
+  }
+
+  const handleRiskAllocationUpdate = (symbol, amount) => {
+    const updatedAllocations = { ...riskAllocations, [symbol]: parseFloat(amount) }
+    setRiskAllocations(updatedAllocations)
+    console.log(`Risk allocation for ${symbol} set to ${amount}`)
   }
 
   const applySplitAdjustments = (trades, splits) => {
@@ -640,6 +649,14 @@ function App() {
               />
               Include Chart in History
             </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={showRiskManagement}
+                onChange={(e) => setShowRiskManagement(e.target.checked)}
+              />
+              Show Risk Management
+            </label>
             <div className="pnl-toggles">
               <strong>P&L Columns:</strong>
               <label>
@@ -755,11 +772,14 @@ function App() {
             visiblePnlColumns={visiblePnlColumns}
             tradingSignals={tradingSignals}
             showChartsInHistory={showChartsInHistory}
+            showRiskManagement={showRiskManagement}
+            riskAllocations={riskAllocations}
             onManualPriceUpdate={handleManualPriceUpdate}
             onClearManualPrice={handleClearManualPrice}
             onSplitAdjustment={handleSplitAdjustment}
             onClearSplitAdjustment={handleClearSplitAdjustment}
             onTotalsUpdate={setPnlTotals}
+            onRiskAllocationUpdate={handleRiskAllocationUpdate}
           />
 
           {/* PNL Summary Cards */}
