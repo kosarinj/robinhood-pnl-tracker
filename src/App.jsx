@@ -473,11 +473,19 @@ function App() {
   let filteredData = pnlData
 
   // Filter by options/rollups
-  // Since options are always rolled up into parent instruments,
-  // we filter out the rolled-up parent rows when "Include Other Instruments" is unchecked
+  // When "Include Other Instruments" is unchecked:
+  // - Hide rolled-up parent rows (isRollup = true)
+  // - Individual options should already be rolled up and not appear
+  // When "Include Other Instruments" is checked:
+  // - Show rolled-up parent rows
+  // - Individual options still don't show (they're in the options array of the parent)
   if (!includeOptions) {
-    filteredData = filteredData.filter(item => !item.isOption && !item.isRollup)
+    // Hide only the rollup parents, not individual options (which shouldn't exist after rollup)
+    filteredData = filteredData.filter(item => !item.isRollup)
   }
+
+  // Always filter out any individual options that somehow didn't get rolled up
+  filteredData = filteredData.filter(item => !item.isOption || item.isRollup)
 
   // Filter by open positions only
   if (showOpenOnly) {
