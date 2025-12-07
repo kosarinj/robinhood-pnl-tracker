@@ -37,7 +37,9 @@ export const parseTrades = (csvContent) => {
 
             // Determine if buy or sell
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
-            const isBuy = transCode.includes('BUY') || transCode === 'BTO'
+            // Buy transactions: BUY, BTO (Buy to Open), BTC (Buy to Close)
+            // Sell transactions: SELL, STO (Sell to Open), STC (Sell to Close)
+            const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
 
             // Parse date
             const dateStr = row['Activity Date'] || row['Date'] || row['Trade Date']

@@ -484,8 +484,9 @@ function App() {
     filteredData = filteredData.filter(item => !item.isRollup)
   }
 
-  // Always filter out any individual options that somehow didn't get rolled up
-  filteredData = filteredData.filter(item => !item.isOption || item.isRollup)
+  // Always filter out individual options that aren't part of a rollup parent
+  // Keep rollup parents (isRollup=true) regardless of isOption flag
+  filteredData = filteredData.filter(item => item.isRollup || !item.isOption)
 
   // Filter by open positions only
   if (showOpenOnly) {
