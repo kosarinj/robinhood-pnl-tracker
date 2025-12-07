@@ -26,8 +26,8 @@ function App() {
   const [visiblePnlColumns, setVisiblePnlColumns] = useState({
     real: true,
     avgCost: false,
-    fifo: true,
-    lifo: true
+    fifo: false,
+    lifo: false
   })
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null)
   const [tradingSignals, setTradingSignals] = useState([])
