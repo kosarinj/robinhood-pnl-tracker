@@ -173,7 +173,8 @@ function App() {
         const ratio = splits[trade.symbol]
         return {
           ...trade,
-          price: trade.price / ratio
+          price: trade.price / ratio,
+          quantity: trade.quantity * ratio  // Adjust quantity for split
         }
       }
       return trade
