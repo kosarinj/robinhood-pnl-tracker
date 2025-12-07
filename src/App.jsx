@@ -109,7 +109,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...updatedManualPrices }
         const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices)
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
         setPnlData(pnl)
       }
     }
@@ -124,7 +124,7 @@ function App() {
     if (trades.length > 0) {
       const mergedPrices = { ...currentPrices, ...updatedManualPrices }
       const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-      const pnl = calculatePnL(adjustedTrades, mergedPrices)
+      const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
       setPnlData(pnl)
     }
   }
@@ -141,7 +141,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...manualPrices }
         const adjustedTrades = applySplitAdjustments(trades, updatedSplits)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices)
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
         setPnlData(pnl)
       }
     }
@@ -156,7 +156,7 @@ function App() {
     if (trades.length > 0) {
       const mergedPrices = { ...currentPrices, ...manualPrices }
       const adjustedTrades = applySplitAdjustments(trades, updatedSplits)
-      const pnl = calculatePnL(adjustedTrades, mergedPrices)
+      const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
       setPnlData(pnl)
     }
   }
@@ -211,7 +211,7 @@ function App() {
 
     // Recalculate P&L
     const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-    const pnl = calculatePnL(adjustedTrades, mergedPrices)
+    const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
     setPnlData(pnl)
 
     setLastPriceUpdate(new Date())
@@ -349,6 +349,17 @@ function App() {
     }
   }
 
+  // Recalculate P&L when includeOptions toggle changes
+  useEffect(() => {
+    if (trades.length > 0) {
+      const mergedPrices = { ...currentPrices, ...manualPrices }
+      const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
+      const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
+      setPnlData(pnl)
+      console.log(`P&L recalculated with rollup=${!includeOptions}`)
+    }
+  }, [includeOptions])
+
   // Calculate P&L percentages when data changes
   useEffect(() => {
     if (trades.length > 0 && deposits.length > 0 && pnlTotals) {
@@ -447,7 +458,8 @@ function App() {
         const adjustedTrades = applySplitAdjustments(parsedTrades, splitAdjustments)
 
         // Calculate P&L with both FIFO and LIFO
-        const pnl = calculatePnL(adjustedTrades, mergedPrices)
+        // When includeOptions is true, disable rollup to show individual options
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
         setPnlData(pnl)
 
         // Set initial price update timestamp
