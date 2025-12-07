@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "npx serve dist -l $PORT"
+    "start:production": "node production-server.js",
+    "start": "node production-server.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
