@@ -109,7 +109,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...updatedManualPrices }
         const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
         setPnlData(pnl)
       }
     }
@@ -124,7 +124,7 @@ function App() {
     if (trades.length > 0) {
       const mergedPrices = { ...currentPrices, ...updatedManualPrices }
       const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-      const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
+      const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
       setPnlData(pnl)
     }
   }
@@ -141,7 +141,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...manualPrices }
         const adjustedTrades = applySplitAdjustments(trades, updatedSplits)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
         setPnlData(pnl)
       }
     }
@@ -156,7 +156,7 @@ function App() {
     if (trades.length > 0) {
       const mergedPrices = { ...currentPrices, ...manualPrices }
       const adjustedTrades = applySplitAdjustments(trades, updatedSplits)
-      const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
+      const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
       setPnlData(pnl)
     }
   }
@@ -211,7 +211,7 @@ function App() {
 
     // Recalculate P&L
     const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-    const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
+    const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
     setPnlData(pnl)
 
     setLastPriceUpdate(new Date())
@@ -349,16 +349,8 @@ function App() {
     }
   }
 
-  // Recalculate P&L when includeOptions toggle changes
-  useEffect(() => {
-    if (trades.length > 0) {
-      const mergedPrices = { ...currentPrices, ...manualPrices }
-      const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-      const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
-      setPnlData(pnl)
-      console.log(`P&L recalculated with rollup=${!includeOptions}`)
-    }
-  }, [includeOptions])
+  // Note: Options are always rolled up into their underlying instruments
+  // The "Include Other Instruments" toggle only affects filtering, not rollup behavior
 
   // Calculate P&L percentages when data changes
   useEffect(() => {
@@ -458,8 +450,8 @@ function App() {
         const adjustedTrades = applySplitAdjustments(parsedTrades, splitAdjustments)
 
         // Calculate P&L with both FIFO and LIFO
-        // When includeOptions is true, disable rollup to show individual options
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, !includeOptions)
+        // Options are always rolled up into their underlying instruments
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true)
         setPnlData(pnl)
 
         // Set initial price update timestamp
@@ -479,9 +471,11 @@ function App() {
 
   let filteredData = pnlData
 
-  // Filter by options
+  // Filter by options/rollups
+  // Since options are always rolled up into parent instruments,
+  // we filter out the rolled-up parent rows when "Include Other Instruments" is unchecked
   if (!includeOptions) {
-    filteredData = filteredData.filter(item => !item.isOption)
+    filteredData = filteredData.filter(item => !item.isOption && !item.isRollup)
   }
 
   // Filter by open positions only
@@ -669,6 +663,25 @@ function App() {
               />
               Show Risk Management
             </label>
+            {showRiskManagement && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '20px' }}>
+                <label style={{ fontWeight: 'bold' }}>Total Risk Budget:</label>
+                <input
+                  type="number"
+                  step="1000"
+                  min="0"
+                  value={totalRiskBudget}
+                  onChange={(e) => setTotalRiskBudget(parseFloat(e.target.value) || 0)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '4px',
+                    border: '1px solid #ddd',
+                    width: '150px',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+            )}
             <div className="pnl-toggles">
               <strong>P&L Columns:</strong>
               <label>
@@ -804,6 +817,53 @@ function App() {
                   {formatCurrency(totalPrincipal)}
                 </div>
               </div>
+
+              {/* Risk Management Summary */}
+              {showRiskManagement && (() => {
+                const totalAllocated = filteredData.reduce((sum, row) => sum + ((riskAllocations && riskAllocations[row.symbol]) || 0), 0)
+                const totalUsed = filteredData.reduce((sum, row) => sum + (row.real.avgCostBasis * row.real.position), 0)
+                const availableRisk = totalRiskBudget - totalAllocated
+                const utilizationPercent = totalRiskBudget > 0 ? (totalUsed / totalRiskBudget) * 100 : 0
+
+                return (
+                  <>
+                    <div className="summary-card" style={{ background: '#fff4e6', borderLeft: '4px solid #f59e0b' }}>
+                      <h3>Risk Budget</h3>
+                      <div className="value" style={{ color: '#f59e0b' }}>
+                        {formatCurrency(totalRiskBudget)}
+                      </div>
+                    </div>
+                    <div className="summary-card" style={{ background: '#fff4e6', borderLeft: '4px solid #f59e0b' }}>
+                      <h3>Risk Allocated</h3>
+                      <div className="value" style={{ color: '#f59e0b' }}>
+                        {formatCurrency(totalAllocated)}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                        {totalRiskBudget > 0 ? ((totalAllocated / totalRiskBudget) * 100).toFixed(1) : 0}% of budget
+                      </div>
+                    </div>
+                    <div className="summary-card" style={{ background: '#fff4e6', borderLeft: '4px solid #f59e0b' }}>
+                      <h3>Risk Used</h3>
+                      <div className="value" style={{ color: utilizationPercent > 100 ? '#dc3545' : '#f59e0b' }}>
+                        {formatCurrency(totalUsed)}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                        {utilizationPercent.toFixed(1)}% utilized
+                        {utilizationPercent > 100 && <span style={{ color: '#dc3545', marginLeft: '5px' }}>⚠ Over Budget!</span>}
+                      </div>
+                    </div>
+                    <div className="summary-card" style={{ background: availableRisk < 0 ? '#ffe6e6' : '#e6f7e6', borderLeft: `4px solid ${availableRisk < 0 ? '#dc3545' : '#28a745'}` }}>
+                      <h3>Available Risk</h3>
+                      <div className={`value ${availableRisk >= 0 ? 'positive' : 'negative'}`}>
+                        {formatCurrency(Math.abs(availableRisk))}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                        {availableRisk < 0 ? 'Over-allocated' : 'Remaining capacity'}
+                      </div>
+                    </div>
+                  </>
+                )
+              })()}
 
               {visiblePnlColumns.real && (
                 <>
