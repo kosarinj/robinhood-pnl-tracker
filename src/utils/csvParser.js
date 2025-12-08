@@ -32,10 +32,6 @@ export const parseTrades = (file) => {
             // For stocks, use the instrument (ticker symbol)
             let symbol = isOption ? description : instrument.trim()
 
-            // Debug logging for options
-            if (isOption) {
-              console.log(`Option detected: ${description}, instrument: ${instrument}`)
-            }
 
             // Parse quantity, price, and amount with currency cleaning
             const quantity = parseCurrency(row['Quantity'] || row['Qty'] || 0)

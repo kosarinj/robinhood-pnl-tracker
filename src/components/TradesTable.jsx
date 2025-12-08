@@ -111,17 +111,13 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     setPriceInput('')
   }
 
-  const getTradesForSymbol = (symbol, isRollup = false, options = []) => {
+  const getTradesForSymbol = (symbol, isRollup = true, options = []) => {
     if (!trades) return []
-
-    console.log(`getTradesForSymbol called:`, { symbol, isRollup, optionsCount: options?.length })
 
     // For rolled-up parent instruments, get trades for all underlying options
     if (isRollup && options && options.length > 0) {
       const optionSymbols = options.map(opt => opt.symbol)
-      console.log(`Getting trades for ${optionSymbols.length} options:`, optionSymbols)
       const matchedTrades = trades.filter(t => optionSymbols.includes(t.symbol))
-      console.log(`Found ${matchedTrades.length} trades for options`)
       return matchedTrades.sort((a, b) => {
         const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
         const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
@@ -303,9 +299,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const rowCurrentValues = {}
 
   sortedData.forEach(row => {
-    // Always include options trades in the trade history if they exist
-    const hasOptions = row.options && row.options.length > 0
-    let symbolTrades = getTradesForSymbol(row.symbol, hasOptions, row.options)
+    let symbolTrades = getTradesForSymbol(row.symbol, true, row.options)
 
     // Apply split adjustments (matching App.jsx logic)
     symbolTrades = symbolTrades.map(trade => {
@@ -940,9 +934,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       <tbody style={{ background: 'white' }}>
                         {(() => {
                           try {
-                          // Always include options trades in the trade history if they exist
-    const hasOptions = row.options && row.options.length > 0
-    let symbolTrades = getTradesForSymbol(row.symbol, hasOptions, row.options)
+                          let symbolTrades = getTradesForSymbol(row.symbol, true, row.options)
 
                           // Apply split adjustments (matching App.jsx logic)
                           symbolTrades = symbolTrades.map(trade => {
