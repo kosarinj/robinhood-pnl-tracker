@@ -293,8 +293,10 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   const sortedData = getSortedData(data)
 
-  // Calculate running totals for each row (matching Trade History logic)
-  const rowRunningTotals = {}
+  // Calculate buy/sell totals and current values for each row
+  const rowBuySellTotals = {}
+  const rowCurrentValues = {}
+
   sortedData.forEach(row => {
     let symbolTrades = getTradesForSymbol(row.symbol, row.isRollup, row.options)
 
@@ -311,79 +313,26 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       return trade
     })
 
+    // Simple calculation: sum all buy and sell amounts
+    let totalBuyAmount = 0
+    let totalSellAmount = 0
+    let position = 0
 
-    // Replicate the EXACT Real P&L calculation logic from pnlCalculator.js
-    const buyQueue = []
-    let totalBought = 0
-    let totalBuyCost = 0
-    let runningTotal = 0
-
-    symbolTrades.forEach((trade, tradeIdx) => {
+    symbolTrades.forEach((trade) => {
       if (trade.isBuy) {
-        totalBought += trade.quantity
-        totalBuyCost += trade.quantity * trade.price
-        buyQueue.push({
-          quantity: trade.quantity,
-          price: trade.price
-        })
-        buyQueue.sort((a, b) => a.price - b.price)
+        totalBuyAmount += trade.quantity * trade.price
+        position += trade.quantity
       } else {
-        const sellPrice = trade.price
-        const sellQuantity = trade.quantity
-        const avgBuyPrice = totalBought > 0 ? totalBuyCost / totalBought : 0
-
-        let costBasisUsed
-        if (sellPrice < avgBuyPrice) {
-          if (buyQueue.length > 0) {
-            costBasisUsed = buyQueue[0].price
-          } else {
-            costBasisUsed = avgBuyPrice
-          }
-        } else {
-          costBasisUsed = avgBuyPrice
-        }
-
-        const realizedPnL = (sellPrice - costBasisUsed) * sellQuantity
-        runningTotal += realizedPnL
-
-
-        // Remove sold shares from queue (matching pnlCalculator.js logic)
-        let remainingSellQty = sellQuantity
-        while (remainingSellQty > 0 && buyQueue.length > 0) {
-          if (sellPrice < avgBuyPrice) {
-            // When selling below average, remove from lowest priced lots first
-            const lowestBuy = buyQueue[0]
-            if (lowestBuy.quantity <= remainingSellQty) {
-              totalBought -= lowestBuy.quantity
-              totalBuyCost -= lowestBuy.quantity * lowestBuy.price
-              remainingSellQty -= lowestBuy.quantity
-              buyQueue.shift()
-            } else {
-              lowestBuy.quantity -= remainingSellQty
-              totalBought -= remainingSellQty
-              totalBuyCost -= remainingSellQty * lowestBuy.price
-              remainingSellQty = 0
-            }
-          } else {
-            // When selling at or above average, remove from FIFO (oldest first)
-            const oldestBuy = buyQueue[0]
-            if (oldestBuy.quantity <= remainingSellQty) {
-              totalBought -= oldestBuy.quantity
-              totalBuyCost -= oldestBuy.quantity * oldestBuy.price
-              remainingSellQty -= oldestBuy.quantity
-              buyQueue.shift()
-            } else {
-              oldestBuy.quantity -= remainingSellQty
-              totalBought -= remainingSellQty
-              totalBuyCost -= remainingSellQty * oldestBuy.price
-              remainingSellQty = 0
-            }
-          }
-        }
+        totalSellAmount += trade.quantity * trade.price
+        position -= trade.quantity
       }
     })
 
-    rowRunningTotals[row.symbol] = runningTotal
+    // Buy/Sell Total = Sell amounts - Buy amounts (realized P&L)
+    rowBuySellTotals[row.symbol] = totalSellAmount - totalBuyAmount
+
+    // Current Value = Outstanding shares * current price
+    rowCurrentValues[row.symbol] = position * row.currentPrice
 
   })
 
@@ -485,8 +434,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <th onClick={() => handleSort('real.realizedPnL')} className="sortable">
                   Realized P&L{getSortIcon('real.realizedPnL')}
                 </th>
-                <th style={{ minWidth: '100px' }}>
-                  Running Total
+                <th style={{ minWidth: '120px' }}>
+                  Buy/Sell Total
+                </th>
+                <th style={{ minWidth: '120px' }}>
+                  Current Value
                 </th>
                 <th onClick={() => handleSort('real.unrealizedPnL')} className="sortable">
                   Unrealized P&L{getSortIcon('real.unrealizedPnL')}
@@ -749,22 +701,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     <td className={getClassName(row.real.realizedPnL)}>
                       {formatCurrency(row.real.realizedPnL)}
                     </td>
-                    <td className={getClassName(rowRunningTotals[row.symbol])} style={{
-                      background: Math.abs(rowRunningTotals[row.symbol] - row.real.realizedPnL) < 0.01 ? '#d4edda' : '#fff3cd'
-                    }}>
-                      {formatCurrency(rowRunningTotals[row.symbol] || 0)}
-                      {row.symbol === 'DDOG' && (() => {
-                        const ddogItems = allData.filter(d => d.symbol?.includes('DDOG'))
-                        return (
-                          <div style={{ fontSize: '0.65em', marginTop: '4px', color: '#000', background: '#fff', padding: '4px', border: '1px solid #ccc' }}>
-                            <strong>RT:</strong> {formatCurrency(rowRunningTotals[row.symbol])}<br/>
-                            <strong>Grid:</strong> {formatCurrency(row.real.realizedPnL)}<br/>
-                            <strong>Rollup:</strong> {row.isRollup ? 'YES' : 'NO'}<br/>
-                            <strong>Opts:</strong> {row.options ? row.options.length : 0}<br/>
-                            <strong>AllData DDOG:</strong> {ddogItems.length}
-                          </div>
-                        )
-                      })()}
+                    <td className={getClassName(rowBuySellTotals[row.symbol])}>
+                      {formatCurrency(rowBuySellTotals[row.symbol] || 0)}
+                    </td>
+                    <td>
+                      {formatCurrency(rowCurrentValues[row.symbol] || 0)}
                     </td>
                     <td className={getClassName(row.real.unrealizedPnL)}>
                       {formatCurrency(row.real.unrealizedPnL)}
