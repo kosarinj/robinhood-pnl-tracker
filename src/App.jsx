@@ -627,6 +627,17 @@ function App() {
                 className="symbol-search"
               />
             </div>
+            <button
+              onClick={refreshPrices}
+              disabled={loading || trades.length === 0}
+              style={{
+                padding: '8px 16px',
+                cursor: trades.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: trades.length === 0 ? 0.5 : 1
+              }}
+            >
+              🔄 Refresh Prices
+            </button>
             <label>
               <input
                 type="checkbox"

@@ -9,7 +9,10 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 const fetchPriceForSymbol = async (symbol, retryCount = 0) => {
   try {
-    const url = `${CORS_PROXY}${encodeURIComponent(YAHOO_FINANCE_API + '/' + symbol)}`
+    // Add cache-busting timestamp to force fresh data
+    const timestamp = Date.now()
+    const yahooUrl = `${YAHOO_FINANCE_API}/${symbol}?timestamp=${timestamp}`
+    const url = `${CORS_PROXY}${encodeURIComponent(yahooUrl)}`
     const response = await axios.get(url, { timeout: 10000 })
 
     if (response.data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
@@ -52,7 +55,10 @@ export const fetchCurrentPrices = async (symbols) => {
 
 export const fetchQuote = async (symbol) => {
   try {
-    const url = `${CORS_PROXY}${encodeURIComponent(YAHOO_FINANCE_API + '/' + symbol)}`
+    // Add cache-busting timestamp to force fresh data
+    const timestamp = Date.now()
+    const yahooUrl = `${YAHOO_FINANCE_API}/${symbol}?timestamp=${timestamp}`
+    const url = `${CORS_PROXY}${encodeURIComponent(yahooUrl)}`
     const response = await axios.get(url)
 
     const result = response.data.chart.result[0]
