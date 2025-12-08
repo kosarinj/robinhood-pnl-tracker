@@ -18,14 +18,10 @@ class SocketService {
     }
 
     console.log(`Connecting to server at ${this.serverUrl}...`)
-    console.log(`Browser location: ${window.location.hostname}`)
     this.socket = io(this.serverUrl, {
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 10,
-      transports: ['polling'],  // Use only polling, disable websocket
-      withCredentials: false,
-      path: '/socket.io/'
+      reconnectionAttempts: 5
     })
 
     this.socket.on('connect', () => {

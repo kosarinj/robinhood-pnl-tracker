@@ -14,11 +14,8 @@ const httpServer = createServer(app)
 const io = new Server(httpServer, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST'],
-    credentials: false
-  },
-  transports: ['polling'],  // Use only polling for Railway compatibility
-  allowEIO3: true
+    methods: ['GET', 'POST']
+  }
 })
 
 // Middleware
