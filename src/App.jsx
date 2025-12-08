@@ -647,7 +647,7 @@ function App() {
                 checked={includeOptions}
                 onChange={(e) => setIncludeOptions(e.target.checked)}
               />
-              Include Other Instruments
+              Include Options
             </label>
             <label>
               <input
