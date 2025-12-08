@@ -120,7 +120,12 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       return trades.filter(t => optionSymbols.includes(t.symbol)).sort((a, b) => {
         const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
         const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
-        return dateA - dateB
+        // First sort by date
+        if (dateA !== dateB) return dateA - dateB
+        // If same date, process buys before sells
+        if (a.isBuy && !b.isBuy) return -1
+        if (!a.isBuy && b.isBuy) return 1
+        return 0
       })
     }
 
@@ -128,7 +133,12 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     return trades.filter(t => t.symbol === symbol).sort((a, b) => {
       const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
       const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
-      return dateA - dateB
+      // First sort by date
+      if (dateA !== dateB) return dateA - dateB
+      // If same date, process buys before sells
+      if (a.isBuy && !b.isBuy) return -1
+      if (!a.isBuy && b.isBuy) return 1
+      return 0
     })
   }
 
@@ -283,6 +293,100 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   const sortedData = getSortedData(data)
 
+  // Calculate running totals for each row (matching Trade History logic)
+  const rowRunningTotals = {}
+  sortedData.forEach(row => {
+    let symbolTrades = getTradesForSymbol(row.symbol, row.isRollup, row.options)
+
+    // Apply split adjustments (matching App.jsx logic)
+    symbolTrades = symbolTrades.map(trade => {
+      if (splitAdjustments[trade.symbol]) {
+        const ratio = splitAdjustments[trade.symbol]
+        return {
+          ...trade,
+          price: trade.price / ratio,
+          quantity: trade.quantity * ratio
+        }
+      }
+      return trade
+    })
+
+
+    // Replicate the EXACT Real P&L calculation logic from pnlCalculator.js
+    const buyQueue = []
+    let totalBought = 0
+    let totalBuyCost = 0
+    let runningTotal = 0
+
+    symbolTrades.forEach((trade, tradeIdx) => {
+      if (trade.isBuy) {
+        totalBought += trade.quantity
+        totalBuyCost += trade.quantity * trade.price
+        buyQueue.push({
+          quantity: trade.quantity,
+          price: trade.price
+        })
+        buyQueue.sort((a, b) => a.price - b.price)
+      } else {
+        const sellPrice = trade.price
+        const sellQuantity = trade.quantity
+        const avgBuyPrice = totalBought > 0 ? totalBuyCost / totalBought : 0
+
+        let costBasisUsed
+        if (sellPrice < avgBuyPrice) {
+          if (buyQueue.length > 0) {
+            costBasisUsed = buyQueue[0].price
+          } else {
+            costBasisUsed = avgBuyPrice
+          }
+        } else {
+          costBasisUsed = avgBuyPrice
+        }
+
+        const realizedPnL = (sellPrice - costBasisUsed) * sellQuantity
+        runningTotal += realizedPnL
+
+
+        // Remove sold shares from queue (matching pnlCalculator.js logic)
+        let remainingSellQty = sellQuantity
+        while (remainingSellQty > 0 && buyQueue.length > 0) {
+          if (sellPrice < avgBuyPrice) {
+            // When selling below average, remove from lowest priced lots first
+            const lowestBuy = buyQueue[0]
+            if (lowestBuy.quantity <= remainingSellQty) {
+              totalBought -= lowestBuy.quantity
+              totalBuyCost -= lowestBuy.quantity * lowestBuy.price
+              remainingSellQty -= lowestBuy.quantity
+              buyQueue.shift()
+            } else {
+              lowestBuy.quantity -= remainingSellQty
+              totalBought -= remainingSellQty
+              totalBuyCost -= remainingSellQty * lowestBuy.price
+              remainingSellQty = 0
+            }
+          } else {
+            // When selling at or above average, remove from FIFO (oldest first)
+            const oldestBuy = buyQueue[0]
+            if (oldestBuy.quantity <= remainingSellQty) {
+              totalBought -= oldestBuy.quantity
+              totalBuyCost -= oldestBuy.quantity * oldestBuy.price
+              remainingSellQty -= oldestBuy.quantity
+              buyQueue.shift()
+            } else {
+              oldestBuy.quantity -= remainingSellQty
+              totalBought -= remainingSellQty
+              totalBuyCost -= remainingSellQty * oldestBuy.price
+              remainingSellQty = 0
+            }
+          }
+        }
+      }
+    })
+
+    rowRunningTotals[row.symbol] = runningTotal
+
+  })
+
   // Calculate totals from filtered data
   const totals = data.reduce(
     (acc, row) => ({
@@ -380,6 +484,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 </th>
                 <th onClick={() => handleSort('real.realizedPnL')} className="sortable">
                   Realized P&L{getSortIcon('real.realizedPnL')}
+                </th>
+                <th style={{ minWidth: '100px' }}>
+                  Running Total
                 </th>
                 <th onClick={() => handleSort('real.unrealizedPnL')} className="sortable">
                   Unrealized P&L{getSortIcon('real.unrealizedPnL')}
@@ -642,6 +749,19 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     <td className={getClassName(row.real.realizedPnL)}>
                       {formatCurrency(row.real.realizedPnL)}
                     </td>
+                    <td className={getClassName(rowRunningTotals[row.symbol])} style={{
+                      background: Math.abs(rowRunningTotals[row.symbol] - row.real.realizedPnL) < 0.01 ? '#d4edda' : '#fff3cd'
+                    }}>
+                      {formatCurrency(rowRunningTotals[row.symbol] || 0)}
+                      {row.symbol === 'DDOG' && (
+                        <div style={{ fontSize: '0.65em', marginTop: '4px', color: '#000', background: '#fff', padding: '4px', border: '1px solid #ccc' }}>
+                          <strong>Running Total:</strong> {formatCurrency(rowRunningTotals[row.symbol])}<br/>
+                          <strong>Grid P&L:</strong> {formatCurrency(row.real.realizedPnL)}<br/>
+                          <strong>Diff:</strong> {formatCurrency(Math.abs(rowRunningTotals[row.symbol] - row.real.realizedPnL))}<br/>
+                          <strong>Issue:</strong> Main grid is WRONG
+                        </div>
+                      )}
+                    </td>
                     <td className={getClassName(row.real.unrealizedPnL)}>
                       {formatCurrency(row.real.unrealizedPnL)}
                     </td>
@@ -839,7 +959,20 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       <tbody style={{ background: 'white' }}>
                         {(() => {
                           try {
-                          const symbolTrades = getTradesForSymbol(row.symbol, row.isRollup, row.options)
+                          let symbolTrades = getTradesForSymbol(row.symbol, row.isRollup, row.options)
+
+                          // Apply split adjustments (matching App.jsx logic)
+                          symbolTrades = symbolTrades.map(trade => {
+                            if (splitAdjustments[trade.symbol]) {
+                              const ratio = splitAdjustments[trade.symbol]
+                              return {
+                                ...trade,
+                                price: trade.price / ratio,
+                                quantity: trade.quantity * ratio
+                              }
+                            }
+                            return trade
+                          })
 
                           if (!symbolTrades || symbolTrades.length === 0) {
                             return (
@@ -878,17 +1011,19 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                               // Keep sorted by price (lowest first)
                               buyQueue.sort((a, b) => a.price - b.price)
                             } else {
-                              // Selling - apply hybrid logic
+                              // Selling - apply EXACT Real P&L hybrid logic from pnlCalculator.js
                               const sellPrice = trade.price
                               const sellQuantity = trade.quantity
                               const avgBuyPrice = totalBought > 0 ? totalBuyCost / totalBought : 0
 
-                              // Determine cost basis
-                              if (sellPrice < avgBuyPrice && buyQueue.length > 0) {
-                                // Selling below average - use lowest price
-                                costBasisUsed = buyQueue[0].price
+                              // Determine cost basis (matching pnlCalculator.js exactly)
+                              if (sellPrice < avgBuyPrice) {
+                                if (buyQueue.length > 0) {
+                                  costBasisUsed = buyQueue[0].price
+                                } else {
+                                  costBasisUsed = avgBuyPrice
+                                }
                               } else {
-                                // Selling at or above average - use average
                                 costBasisUsed = avgBuyPrice
                               }
 
@@ -923,21 +1058,37 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                                 }
                               }
 
-                              // Remove sold shares from queue
+                              // Remove sold shares from queue (matching pnlCalculator.js)
                               remainingSellQty = sellQuantity
                               while (remainingSellQty > 0 && buyQueue.length > 0) {
-                                const targetBuy = sellPrice < avgBuyPrice ? buyQueue[0] : buyQueue[0]
-
-                                if (targetBuy.quantity <= remainingSellQty) {
-                                  totalBought -= targetBuy.quantity
-                                  totalBuyCost -= targetBuy.quantity * targetBuy.price
-                                  remainingSellQty -= targetBuy.quantity
-                                  buyQueue.shift()
+                                if (sellPrice < avgBuyPrice) {
+                                  // When selling below average, remove from lowest priced lots first
+                                  const lowestBuy = buyQueue[0]
+                                  if (lowestBuy.quantity <= remainingSellQty) {
+                                    totalBought -= lowestBuy.quantity
+                                    totalBuyCost -= lowestBuy.quantity * lowestBuy.price
+                                    remainingSellQty -= lowestBuy.quantity
+                                    buyQueue.shift()
+                                  } else {
+                                    lowestBuy.quantity -= remainingSellQty
+                                    totalBought -= remainingSellQty
+                                    totalBuyCost -= remainingSellQty * lowestBuy.price
+                                    remainingSellQty = 0
+                                  }
                                 } else {
-                                  targetBuy.quantity -= remainingSellQty
-                                  totalBought -= remainingSellQty
-                                  totalBuyCost -= remainingSellQty * targetBuy.price
-                                  remainingSellQty = 0
+                                  // When selling at or above average, remove FIFO (oldest first)
+                                  const oldestBuy = buyQueue[0]
+                                  if (oldestBuy.quantity <= remainingSellQty) {
+                                    totalBought -= oldestBuy.quantity
+                                    totalBuyCost -= oldestBuy.quantity * oldestBuy.price
+                                    remainingSellQty -= oldestBuy.quantity
+                                    buyQueue.shift()
+                                  } else {
+                                    oldestBuy.quantity -= remainingSellQty
+                                    totalBought -= remainingSellQty
+                                    totalBuyCost -= remainingSellQty * oldestBuy.price
+                                    remainingSellQty = 0
+                                  }
                                 }
                               }
                             }
@@ -1074,6 +1225,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <td></td>
                 <td className={getClassName(totals.realRealized)}>
                   <strong>{formatCurrency(totals.realRealized)}</strong>
+                </td>
+                <td className={getClassName(Object.values(rowRunningTotals).reduce((sum, val) => sum + val, 0))}>
+                  <strong>{formatCurrency(Object.values(rowRunningTotals).reduce((sum, val) => sum + val, 0))}</strong>
                 </td>
                 <td className={getClassName(totals.realUnrealized)}>
                   <strong>{formatCurrency(totals.realUnrealized)}</strong>

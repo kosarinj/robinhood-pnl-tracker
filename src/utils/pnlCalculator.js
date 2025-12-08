@@ -31,7 +31,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
     const isOption = symbolTrades.some(t => t.isOption)
 
     // Calculate Real P&L (simple buy/sell matching)
-    const real = calculateReal(symbolTrades, currentPrice)
+    const real = calculateReal(symbolTrades, currentPrice, symbol)
 
     // Calculate Average Cost P&L
     const avgCost = calculateAverageCost(symbolTrades, currentPrice)
@@ -121,14 +121,14 @@ const rollupOptionsByParent = (pnlData) => {
 }
 
 // Real P&L calculation - hybrid approach: use lowest cost when selling below average, otherwise use average
-const calculateReal = (trades, currentPrice) => {
+const calculateReal = (trades, currentPrice, symbol) => {
   const buyQueue = [] // Track individual buy lots sorted by price (for finding lowest)
   let totalBought = 0
   let totalBuyCost = 0
   let position = 0
   let realizedPnL = 0
 
-  trades.forEach((trade) => {
+  trades.forEach((trade, tradeIdx) => {
     if (trade.isBuy) {
       totalBought += trade.quantity
       totalBuyCost += trade.quantity * trade.price
@@ -165,7 +165,9 @@ const calculateReal = (trades, currentPrice) => {
       }
 
       // Calculate realized P&L for this sale
-      realizedPnL += (sellPrice - costBasisForSale) * sellQuantity
+      const tradePnL = (sellPrice - costBasisForSale) * sellQuantity
+      realizedPnL += tradePnL
+
 
       // Remove sold shares from buy queue
       let remainingSellQty = sellQuantity
