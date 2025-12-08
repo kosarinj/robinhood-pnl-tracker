@@ -75,9 +75,18 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
     if (!item.isOption && optionsByParent[item.symbol]) {
       // This stock has options - calculate total options P&L
       const options = optionsByParent[item.symbol]
+
+      // Debug: Log each option's P&L
+      console.log(`\n=== Options for ${item.symbol} ===`)
+      options.forEach(opt => {
+        console.log(`  ${opt.symbol}: Total P&L = ${opt.real.totalPnL}, Realized = ${opt.real.realizedPnL}, Unrealized = ${opt.real.unrealizedPnL}`)
+      })
+
       item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
       item.optionsCount = options.length
       item.options = options // Store options array for trade history
+
+      console.log(`  TOTAL Options P&L: ${item.optionsPnL} (${item.optionsCount} options)`)
     } else {
       item.optionsPnL = 0
       item.optionsCount = 0

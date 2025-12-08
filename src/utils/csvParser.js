@@ -34,9 +34,15 @@ export const parseTrades = (file) => {
 
 
             // Parse quantity, price, and amount with currency cleaning
-            const quantity = parseCurrency(row['Quantity'] || row['Qty'] || 0)
-            const price = parseCurrency(row['Price'] || row['Trade Price'] || 0)
+            let quantity = parseCurrency(row['Quantity'] || row['Qty'] || 0)
+            let price = parseCurrency(row['Price'] || row['Trade Price'] || 0)
             const amount = parseCurrency(row['Amount'] || 0)
+
+            // For options: multiply quantity by 100 (1 contract = 100 shares)
+            // This ensures P&L calculations reflect actual contract values
+            if (isOption) {
+              quantity = quantity * 100
+            }
 
             // Determine if buy or sell
             // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
