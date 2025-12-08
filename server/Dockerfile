@@ -7,14 +7,14 @@ RUN apk add --no-cache python3 make g++
 # Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Copy package files from server directory
+COPY server/package*.json ./
 
 # Install dependencies
 RUN npm install --production
 
-# Copy application code
-COPY . .
+# Copy application code from server directory
+COPY server/ .
 
 # Expose port (Railway will inject PORT env var)
 EXPOSE 8080
