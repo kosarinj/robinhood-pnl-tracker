@@ -4,7 +4,10 @@ class SocketService {
   constructor() {
     this.socket = null
     this.connected = false
-    this.serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
+    // Use environment variable if set, otherwise use production URL if not localhost, otherwise localhost
+    const envUrl = import.meta.env.VITE_SERVER_URL
+    const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+    this.serverUrl = envUrl || (isProduction ? 'https://robinhood-pnl-tracker-production-805d.up.railway.app' : 'http://localhost:3001')
   }
 
   // Connect to server
