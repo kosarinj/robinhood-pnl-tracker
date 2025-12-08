@@ -154,15 +154,35 @@ const calculateReal = (trades, currentPrice, symbol) => {
   let totalSellShares = 0
   let position = 0
 
+  // Track buy queue to calculate lowest open buy price (using FIFO)
+  const buyQueue = []
+
   trades.forEach((trade) => {
     if (trade.isBuy) {
       totalBuyAmount += trade.quantity * trade.price
       totalBuyShares += trade.quantity
       position += trade.quantity
+      buyQueue.push({
+        quantity: trade.quantity,
+        price: trade.price
+      })
     } else {
       totalSellAmount += trade.quantity * trade.price
       totalSellShares += trade.quantity
       position -= trade.quantity
+
+      // Remove sold shares from buy queue (FIFO)
+      let remainingSellQty = trade.quantity
+      while (remainingSellQty > 0 && buyQueue.length > 0) {
+        const oldestBuy = buyQueue[0]
+        if (oldestBuy.quantity <= remainingSellQty) {
+          remainingSellQty -= oldestBuy.quantity
+          buyQueue.shift()
+        } else {
+          oldestBuy.quantity -= remainingSellQty
+          remainingSellQty = 0
+        }
+      }
     }
   })
 
@@ -172,10 +192,16 @@ const calculateReal = (trades, currentPrice, symbol) => {
   // Unrealized P&L = Current value of remaining position
   let unrealizedPnL = 0
   let avgCostBasis = 0
+  let lowestOpenBuyPrice = 0
 
   if (position > 0) {
     unrealizedPnL = position * currentPrice
     avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+
+    // Find the lowest price among remaining open buys
+    if (buyQueue.length > 0) {
+      lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
+    }
   }
 
   // Total P&L = Realized + Unrealized
@@ -191,7 +217,7 @@ const calculateReal = (trades, currentPrice, symbol) => {
     position: roundToTwo(position),
     avgCostBasis: roundToTwo(avgCostBasis),
     percentageReturn: roundToTwo(percentageReturn),
-    lowestOpenBuyPrice: 0 // Not used in simple calculation
+    lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice)
   }
 }
 
