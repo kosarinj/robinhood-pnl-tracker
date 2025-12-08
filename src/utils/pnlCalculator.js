@@ -85,9 +85,11 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
       console.log(`Found options for ${item.symbol}:`, options.length)
       item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
       item.optionsCount = options.length
+      item.options = options // Store options array for trade history
     } else {
       item.optionsPnL = 0
       item.optionsCount = 0
+      item.options = []
     }
   })
 

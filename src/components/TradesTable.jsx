@@ -303,7 +303,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const rowCurrentValues = {}
 
   sortedData.forEach(row => {
-    let symbolTrades = getTradesForSymbol(row.symbol, row.isRollup, row.options)
+    // Always include options trades in the trade history if they exist
+    const hasOptions = row.options && row.options.length > 0
+    let symbolTrades = getTradesForSymbol(row.symbol, hasOptions, row.options)
 
     // Apply split adjustments (matching App.jsx logic)
     symbolTrades = symbolTrades.map(trade => {
@@ -938,7 +940,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       <tbody style={{ background: 'white' }}>
                         {(() => {
                           try {
-                          let symbolTrades = getTradesForSymbol(row.symbol, row.isRollup, row.options)
+                          // Always include options trades in the trade history if they exist
+    const hasOptions = row.options && row.options.length > 0
+    let symbolTrades = getTradesForSymbol(row.symbol, hasOptions, row.options)
 
                           // Apply split adjustments (matching App.jsx logic)
                           symbolTrades = symbolTrades.map(trade => {
