@@ -409,7 +409,6 @@ function App() {
         const stockCount = response.trades.filter(t => !t.isOption).length
         const stats = { total: response.trades.length, options: optionCount, stocks: stockCount }
         setCsvStats(stats)
-        alert(`CSV LOADED (SERVER MODE)!\n\nTotal: ${stats.total} trades\nStocks: ${stats.stocks}\nOptions: ${stats.options}`)
 
         console.log(`Server response: ${response.pnlData.length} symbols, principal: ${response.totalPrincipal}`)
 
@@ -426,7 +425,6 @@ function App() {
         const stockCount = parsedTrades.filter(t => !t.isOption).length
         const stats = { total: parsedTrades.length, options: optionCount, stocks: stockCount }
         setCsvStats(stats)
-        alert(`CSV LOADED!\n\nTotal: ${stats.total} trades\nStocks: ${stats.stocks}\nOptions: ${stats.options}`)
 
         // Parse CSV file for deposits to calculate principal
         const { deposits: parsedDeposits, totalPrincipal: principal } = await parseDeposits(file)
@@ -475,13 +473,6 @@ function App() {
         setPnlData(pnl)
         console.log('Debug messages collected:', debugMessages.length)
         setDebugInfo(debugMessages)
-
-        // Show debug in alert
-        if (debugMessages.length > 0) {
-          alert('DEBUG INFO:\n\n' + debugMessages.join('\n'))
-        } else {
-          alert('NO DEBUG MESSAGES! debugMessages.length = ' + debugMessages.length)
-        }
 
         // Set initial price update timestamp
         setLastPriceUpdate(new Date())
