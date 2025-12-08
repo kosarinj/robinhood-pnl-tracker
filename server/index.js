@@ -17,7 +17,8 @@ const io = new Server(httpServer, {
     methods: ['GET', 'POST'],
     credentials: false
   },
-  transports: ['websocket', 'polling']
+  transports: ['polling'],  // Use only polling for Railway compatibility
+  allowEIO3: true
 })
 
 // Middleware

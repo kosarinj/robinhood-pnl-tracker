@@ -23,10 +23,9 @@ class SocketService {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 10,
-      transports: ['polling', 'websocket'],
+      transports: ['polling'],  // Use only polling, disable websocket
       withCredentials: false,
-      upgrade: true,
-      rememberUpgrade: true
+      path: '/socket.io/'
     })
 
     this.socket.on('connect', () => {
