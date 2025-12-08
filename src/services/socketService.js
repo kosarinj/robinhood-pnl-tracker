@@ -18,12 +18,15 @@ class SocketService {
     }
 
     console.log(`Connecting to server at ${this.serverUrl}...`)
+    console.log(`Browser location: ${window.location.hostname}`)
     this.socket = io(this.serverUrl, {
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 5,
-      transports: ['websocket', 'polling'],
-      withCredentials: false
+      reconnectionAttempts: 10,
+      transports: ['polling', 'websocket'],
+      withCredentials: false,
+      upgrade: true,
+      rememberUpgrade: true
     })
 
     this.socket.on('connect', () => {
@@ -37,7 +40,16 @@ class SocketService {
     })
 
     this.socket.on('connect_error', (error) => {
-      console.error('Connection error:', error.message)
+      console.error('❌ Connection error:', error.message)
+      console.error('Error details:', error)
+    })
+
+    this.socket.on('reconnect_attempt', (attemptNumber) => {
+      console.log(`🔄 Reconnection attempt ${attemptNumber}...`)
+    })
+
+    this.socket.on('reconnect_failed', () => {
+      console.error('❌ Reconnection failed after all attempts')
     })
 
     return this.socket
