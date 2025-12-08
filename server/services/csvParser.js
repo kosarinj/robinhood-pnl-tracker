@@ -38,11 +38,11 @@ export const parseTrades = (file) => {
             let price = parseCurrency(row['Price'] || row['Trade Price'] || 0)
             const amount = parseCurrency(row['Amount'] || 0)
 
-            // For options: 1 contract = 100 shares
-            // Just multiply both by 100 to get actual contract values
+            // For options: use the Amount field directly (already correct contract value)
+            // Set quantity=1 and price=amount so that quantity*price=amount in calculations
             if (isOption) {
-              quantity = quantity * 100
-              price = price * 100
+              quantity = 1
+              price = amount
             }
 
             // Determine if buy or sell
