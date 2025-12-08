@@ -341,18 +341,24 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   // Calculate totals from filtered data
   const totals = data.reduce(
-    (acc, row) => ({
-      realRealized: acc.realRealized + row.real.realizedPnL,
-      realUnrealized: acc.realUnrealized + row.real.unrealizedPnL,
-      realTotal: acc.realTotal + row.real.totalPnL + (row.optionsPnL || 0),
-      avgCostUnrealized: acc.avgCostUnrealized + row.avgCost.unrealizedPnL,
-      fifoRealized: acc.fifoRealized + row.fifo.realizedPnL,
-      fifoUnrealized: acc.fifoUnrealized + row.fifo.unrealizedPnL,
-      fifoTotal: acc.fifoTotal + row.fifo.totalPnL,
-      lifoRealized: acc.lifoRealized + row.lifo.realizedPnL,
-      lifoUnrealized: acc.lifoUnrealized + row.lifo.unrealizedPnL,
-      lifoTotal: acc.lifoTotal + row.lifo.totalPnL
-    }),
+    (acc, row) => {
+      // Calculate options realized and unrealized P&L separately
+      const optionsRealized = (row.options || []).reduce((sum, opt) => sum + (opt.real.realizedPnL || 0), 0)
+      const optionsUnrealized = (row.options || []).reduce((sum, opt) => sum + (opt.real.unrealizedPnL || 0), 0)
+
+      return {
+        realRealized: acc.realRealized + row.real.realizedPnL + optionsRealized,
+        realUnrealized: acc.realUnrealized + row.real.unrealizedPnL + optionsUnrealized,
+        realTotal: acc.realTotal + row.real.totalPnL + (row.optionsPnL || 0),
+        avgCostUnrealized: acc.avgCostUnrealized + row.avgCost.unrealizedPnL,
+        fifoRealized: acc.fifoRealized + row.fifo.realizedPnL,
+        fifoUnrealized: acc.fifoUnrealized + row.fifo.unrealizedPnL,
+        fifoTotal: acc.fifoTotal + row.fifo.totalPnL,
+        lifoRealized: acc.lifoRealized + row.lifo.realizedPnL,
+        lifoUnrealized: acc.lifoUnrealized + row.lifo.unrealizedPnL,
+        lifoTotal: acc.lifoTotal + row.lifo.totalPnL
+      }
+    },
     {
       realRealized: 0,
       realUnrealized: 0,
