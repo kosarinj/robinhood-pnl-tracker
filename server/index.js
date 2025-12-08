@@ -11,15 +11,21 @@ import { databaseService } from './services/database.js'
 
 const app = express()
 const httpServer = createServer(app)
+
+// Configure CORS for both Express and Socket.IO
+const corsOptions = {
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false
+}
+
 const io = new Server(httpServer, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
+  cors: corsOptions
 })
 
 // Middleware
-app.use(cors())
+app.use(cors(corsOptions))
 app.use(express.json())
 
 // Configure multer for file uploads
