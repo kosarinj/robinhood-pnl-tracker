@@ -124,124 +124,52 @@ const rollupOptionsByParent = (pnlData) => {
   })
 }
 
-// Real P&L calculation - hybrid approach: use lowest cost when selling below average, otherwise use average
+// Real P&L calculation - Simple approach: sum all buy/sell amounts
 const calculateReal = (trades, currentPrice, symbol) => {
-  const buyQueue = [] // Track individual buy lots sorted by price (for finding lowest)
-  let totalBought = 0
-  let totalBuyCost = 0
+  let totalBuyAmount = 0
+  let totalSellAmount = 0
+  let totalBuyShares = 0
+  let totalSellShares = 0
   let position = 0
-  let realizedPnL = 0
 
-  trades.forEach((trade, tradeIdx) => {
+  trades.forEach((trade) => {
     if (trade.isBuy) {
-      totalBought += trade.quantity
-      totalBuyCost += trade.quantity * trade.price
+      totalBuyAmount += trade.quantity * trade.price
+      totalBuyShares += trade.quantity
       position += trade.quantity
-      // Track individual buy lots
-      buyQueue.push({
-        quantity: trade.quantity,
-        price: trade.price
-      })
-      // Keep buy queue sorted by price (lowest first)
-      buyQueue.sort((a, b) => a.price - b.price)
     } else {
-      // Selling
-      const sellPrice = trade.price
-      const sellQuantity = trade.quantity
-      position -= sellQuantity
-
-      // Calculate average buy price of all remaining shares
-      const avgBuyPrice = totalBought > 0 ? totalBuyCost / totalBought : 0
-
-      // Determine which cost basis to use for this sale
-      let costBasisForSale
-      if (sellPrice < avgBuyPrice) {
-        // Selling below average - use lowest outstanding share price to minimize loss
-        if (buyQueue.length > 0) {
-          const lowestPrice = buyQueue[0].price
-          costBasisForSale = lowestPrice
-        } else {
-          costBasisForSale = avgBuyPrice
-        }
-      } else {
-        // Selling at or above average - use average price
-        costBasisForSale = avgBuyPrice
-      }
-
-      // Calculate realized P&L for this sale
-      const tradePnL = (sellPrice - costBasisForSale) * sellQuantity
-      realizedPnL += tradePnL
-
-
-      // Remove sold shares from buy queue
-      let remainingSellQty = sellQuantity
-      while (remainingSellQty > 0 && buyQueue.length > 0) {
-        if (sellPrice < avgBuyPrice) {
-          // When selling below average, remove from lowest priced lots first
-          const lowestBuy = buyQueue[0]
-
-          if (lowestBuy.quantity <= remainingSellQty) {
-            // Fully consume this buy lot
-            totalBought -= lowestBuy.quantity
-            totalBuyCost -= lowestBuy.quantity * lowestBuy.price
-            remainingSellQty -= lowestBuy.quantity
-            buyQueue.shift()
-          } else {
-            // Partially consume this buy lot
-            lowestBuy.quantity -= remainingSellQty
-            totalBought -= remainingSellQty
-            totalBuyCost -= remainingSellQty * lowestBuy.price
-            remainingSellQty = 0
-          }
-        } else {
-          // When selling at or above average, remove proportionally from all lots (use FIFO for simplicity)
-          const oldestBuy = buyQueue[0]
-
-          if (oldestBuy.quantity <= remainingSellQty) {
-            // Fully consume this buy lot
-            totalBought -= oldestBuy.quantity
-            totalBuyCost -= oldestBuy.quantity * oldestBuy.price
-            remainingSellQty -= oldestBuy.quantity
-            buyQueue.shift()
-          } else {
-            // Partially consume this buy lot
-            oldestBuy.quantity -= remainingSellQty
-            totalBought -= remainingSellQty
-            totalBuyCost -= remainingSellQty * oldestBuy.price
-            remainingSellQty = 0
-          }
-        }
-      }
+      totalSellAmount += trade.quantity * trade.price
+      totalSellShares += trade.quantity
+      position -= trade.quantity
     }
   })
 
-  // Unrealized P&L: current value vs cost basis of remaining position
+  // Realized P&L = Total sell amount - Total buy amount
+  const realizedPnL = totalSellAmount - totalBuyAmount
+
+  // Unrealized P&L = Current value of remaining position
   let unrealizedPnL = 0
   let avgCostBasis = 0
 
-  if (position > 0 && totalBought > 0) {
-    avgCostBasis = totalBuyCost / totalBought
-    unrealizedPnL = (currentPrice - avgCostBasis) * position
+  if (position > 0) {
+    unrealizedPnL = position * currentPrice
+    avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
   }
 
-  // Calculate percentage return: Total P&L / cost basis
-  const costBasis = totalBought > 0 ? totalBuyCost : 0
-  const percentageReturn = costBasis > 0 ? ((realizedPnL + unrealizedPnL) / costBasis) * 100 : 0
+  // Total P&L = Realized + Unrealized
+  const totalPnL = realizedPnL + unrealizedPnL
 
-  // Find lowest buy price among remaining open lots
-  let lowestOpenBuyPrice = 0
-  if (buyQueue.length > 0) {
-    lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
-  }
+  // Calculate percentage return: Total P&L / total invested
+  const percentageReturn = totalBuyAmount > 0 ? (totalPnL / totalBuyAmount) * 100 : 0
 
   return {
     realizedPnL: roundToTwo(realizedPnL),
     unrealizedPnL: roundToTwo(unrealizedPnL),
-    totalPnL: roundToTwo(realizedPnL + unrealizedPnL),
+    totalPnL: roundToTwo(totalPnL),
     position: roundToTwo(position),
     avgCostBasis: roundToTwo(avgCostBasis),
     percentageReturn: roundToTwo(percentageReturn),
-    lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice)
+    lowestOpenBuyPrice: 0 // Not used in simple calculation
   }
 }
 
