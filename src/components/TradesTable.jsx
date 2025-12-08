@@ -344,7 +344,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     (acc, row) => ({
       realRealized: acc.realRealized + row.real.realizedPnL,
       realUnrealized: acc.realUnrealized + row.real.unrealizedPnL,
-      realTotal: acc.realTotal + row.real.totalPnL,
+      realTotal: acc.realTotal + row.real.totalPnL + (row.optionsPnL || 0),
       avgCostUnrealized: acc.avgCostUnrealized + row.avgCost.unrealizedPnL,
       fifoRealized: acc.fifoRealized + row.fifo.realizedPnL,
       fifoUnrealized: acc.fifoUnrealized + row.fifo.unrealizedPnL,
