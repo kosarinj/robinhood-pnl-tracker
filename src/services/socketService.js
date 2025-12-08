@@ -8,6 +8,12 @@ class SocketService {
     const envUrl = import.meta.env.VITE_SERVER_URL
     const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
     this.serverUrl = envUrl || (isProduction ? 'https://robinhood-pnl-tracker-production-805d.up.railway.app' : 'http://localhost:3001')
+    console.log('🔧 Socket Service Config:', {
+      envUrl,
+      hostname: window.location.hostname,
+      isProduction,
+      serverUrl: this.serverUrl
+    })
   }
 
   // Connect to server
