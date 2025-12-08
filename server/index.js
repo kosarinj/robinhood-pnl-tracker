@@ -15,16 +15,32 @@ const httpServer = createServer(app)
 // Configure CORS for both Express and Socket.IO
 const corsOptions = {
   origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  credentials: false
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['*'],
+  credentials: false,
+  optionsSuccessStatus: 200
 }
 
 const io = new Server(httpServer, {
-  cors: corsOptions
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: false,
+    allowedHeaders: ['*']
+  },
+  allowEIO3: true
 })
 
-// Middleware
+// Middleware - add CORS before other middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+  res.header('Access-Control-Allow-Headers', '*')
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200)
+  }
+  next()
+})
 app.use(cors(corsOptions))
 app.use(express.json())
 
