@@ -10,19 +10,21 @@ const parseCurrency = (value) => {
   return isNegative ? -number : number
 }
 
-// Parse trades from CSV string (server version)
-export const parseTrades = (csvContent) => {
+export const parseTrades = (file) => {
   return new Promise((resolve, reject) => {
-    Papa.parse(csvContent, {
+    Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
         try {
           const trades = results.data.map((row, index) => {
+            // Robinhood CSV format:
+            // Activity Date, Process Date, Settle Date, Instrument, Description, Trans Code, Quantity, Price, Amount
+
             const instrument = row['Instrument'] || row['Symbol'] || ''
             const description = row['Description'] || ''
 
-            // Determine if it's an option
+            // Determine if it's an option - check description for "Put" or "Call"
             const descLower = description.toLowerCase()
             const isOption = descLower.includes('put') || descLower.includes('call')
 
@@ -30,15 +32,22 @@ export const parseTrades = (csvContent) => {
             // For stocks, use the instrument (ticker symbol)
             let symbol = isOption ? description : instrument.trim()
 
+
             // Parse quantity, price, and amount with currency cleaning
-            const quantity = parseCurrency(row['Quantity'] || row['Qty'] || 0)
-            const price = parseCurrency(row['Price'] || row['Trade Price'] || 0)
+            let quantity = parseCurrency(row['Quantity'] || row['Qty'] || 0)
+            let price = parseCurrency(row['Price'] || row['Trade Price'] || 0)
             const amount = parseCurrency(row['Amount'] || 0)
 
+            // For options: 1 contract = 100 shares
+            // Just multiply both by 100 to get actual contract values
+            if (isOption) {
+              quantity = quantity * 100
+              price = price * 100
+            }
+
             // Determine if buy or sell
+            // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
-            // Buy transactions: BUY, BTO (Buy to Open), BTC (Buy to Close)
-            // Sell transactions: SELL, STO (Sell to Open), STC (Sell to Close)
             const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
 
             // Parse date
@@ -56,7 +65,8 @@ export const parseTrades = (csvContent) => {
               quantity: Math.abs(quantity),
               price: Math.abs(price),
               amount: Math.abs(amount),
-              transCode
+              transCode,
+              rawRow: row
             }
           })
 
@@ -64,6 +74,11 @@ export const parseTrades = (csvContent) => {
           const validTrades = trades
             .filter(t => t.symbol && t.quantity > 0 && t.price > 0)
             .sort((a, b) => a.date - b.date)
+
+          // Count options for debugging
+          const optionCount = validTrades.filter(t => t.isOption).length
+          const stockCount = validTrades.filter(t => !t.isOption).length
+          console.log(`📊 CSV Parsed: ${stockCount} stock trades, ${optionCount} option trades`)
 
           if (validTrades.length === 0) {
             reject(new Error('No valid trades found in CSV. Please check the file format.'))
@@ -81,10 +96,10 @@ export const parseTrades = (csvContent) => {
   })
 }
 
-// Parse ACH deposits from CSV string (server version)
-export const parseDeposits = (csvContent) => {
+// Parse ACH deposits from CSV to calculate total principal
+export const parseDeposits = (file) => {
   return new Promise((resolve, reject) => {
-    Papa.parse(csvContent, {
+    Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {

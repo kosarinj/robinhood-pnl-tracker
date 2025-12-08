@@ -17,6 +17,8 @@ function App() {
   const [symbolFilter, setSymbolFilter] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [debugInfo, setDebugInfo] = useState([])
+  const [csvStats, setCsvStats] = useState(null)
   const [manualPrices, setManualPrices] = useState({})
   const [currentPrices, setCurrentPrices] = useState({})
   const [splitAdjustments, setSplitAdjustments] = useState({})
@@ -402,6 +404,13 @@ function App() {
         setFailedSymbols(response.failedSymbols || [])
         setLastPriceUpdate(new Date(response.timestamp))
 
+        // Count options vs stocks for debugging
+        const optionCount = response.trades.filter(t => t.isOption).length
+        const stockCount = response.trades.filter(t => !t.isOption).length
+        const stats = { total: response.trades.length, options: optionCount, stocks: stockCount }
+        setCsvStats(stats)
+        alert(`CSV LOADED (SERVER MODE)!\n\nTotal: ${stats.total} trades\nStocks: ${stats.stocks}\nOptions: ${stats.options}`)
+
         console.log(`Server response: ${response.pnlData.length} symbols, principal: ${response.totalPrincipal}`)
 
       } else {
@@ -411,6 +420,13 @@ function App() {
         // Parse CSV file for trades
         const parsedTrades = await parseTrades(file)
         setTrades(parsedTrades)
+
+        // Count options vs stocks for debugging
+        const optionCount = parsedTrades.filter(t => t.isOption).length
+        const stockCount = parsedTrades.filter(t => !t.isOption).length
+        const stats = { total: parsedTrades.length, options: optionCount, stocks: stockCount }
+        setCsvStats(stats)
+        alert(`CSV LOADED!\n\nTotal: ${stats.total} trades\nStocks: ${stats.stocks}\nOptions: ${stats.options}`)
 
         // Parse CSV file for deposits to calculate principal
         const { deposits: parsedDeposits, totalPrincipal: principal } = await parseDeposits(file)
@@ -451,8 +467,21 @@ function App() {
 
         // Calculate P&L with both FIFO and LIFO
         // Options are always rolled up into their underlying instruments
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, true)
+        const debugMessages = []
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true, (msg) => {
+          console.log('DEBUG CALLBACK:', msg)
+          debugMessages.push(msg)
+        })
         setPnlData(pnl)
+        console.log('Debug messages collected:', debugMessages.length)
+        setDebugInfo(debugMessages)
+
+        // Show debug in alert
+        if (debugMessages.length > 0) {
+          alert('DEBUG INFO:\n\n' + debugMessages.join('\n'))
+        } else {
+          alert('NO DEBUG MESSAGES! debugMessages.length = ' + debugMessages.length)
+        }
 
         // Set initial price update timestamp
         setLastPriceUpdate(new Date())
@@ -596,6 +625,53 @@ function App() {
           Analyze trading signals or identify market opportunities from downturns
         </p>
       </div>
+
+      {csvStats && (
+        <div style={{
+          padding: '20px',
+          background: '#fff3cd',
+          border: '2px solid #ffc107',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          fontSize: '16px',
+          fontWeight: 'bold'
+        }}>
+          📊 CSV LOADED: {csvStats.total} total trades | {csvStats.stocks} stock trades | {csvStats.options} option trades
+        </div>
+      )}
+
+      {debugInfo.length > 0 && (
+        <div style={{
+          padding: '20px',
+          background: '#d1ecf1',
+          border: '3px solid #0c5460',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          fontFamily: 'monospace',
+          fontSize: '14px',
+          maxHeight: '400px',
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap'
+        }}>
+          <strong style={{ fontSize: '18px', marginBottom: '15px', display: 'block', color: '#0c5460' }}>🔍 OPTIONS DEBUG INFO:</strong>
+          {debugInfo.map((msg, i) => <div key={i} style={{ marginBottom: '5px' }}>{msg}</div>)}
+        </div>
+      )}
+
+      {debugInfo.length === 0 && csvStats && csvStats.options > 0 && (
+        <div style={{
+          padding: '20px',
+          background: '#f8d7da',
+          border: '3px solid #721c24',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          fontSize: '16px',
+          fontWeight: 'bold',
+          color: '#721c24'
+        }}>
+          ⚠️ WARNING: {csvStats.options} options detected but NO debug info generated!
+        </div>
+      )}
 
       {pnlData.length > 0 && !loading && (
           <>

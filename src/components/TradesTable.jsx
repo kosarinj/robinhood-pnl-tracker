@@ -894,7 +894,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                               Option Symbols: {row.options.map(o => o.symbol).join(', ')}<br/>
                             </>
                           )}
-                          Trades for this symbol: {getTradesForSymbol(row.symbol, row.isRollup, row.options).length}
+                          Trades for this symbol: {getTradesForSymbol(row.symbol, true, row.options).length}
                         </div>
 
                     {/* TradingView Chart for stocks only */}

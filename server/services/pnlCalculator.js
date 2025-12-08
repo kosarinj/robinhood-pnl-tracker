@@ -1,5 +1,31 @@
+// Helper to extract parent instrument from option description
+// e.g., "AAPL 01/15/2024 $150 Call" -> "AAPL"
+const extractParentInstrument = (description) => {
+  if (!description) return null
+
+  // Options typically start with the ticker symbol
+  // Match word characters at the beginning before a space or date
+  const match = description.match(/^([A-Z]+)/)
+  const result = match ? match[1] : null
+
+  // Debug first 5 options
+  if (!result) {
+    console.log(`⚠️ No parent found for: "${description}"`)
+  }
+
+  return result
+}
+
 // Calculate P&L using Average Cost, FIFO, and LIFO methods
-export const calculatePnL = (trades, currentPrices) => {
+export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null) => {
+  const debugLog = (msg) => {
+    if (debugCallback) debugCallback(msg)
+  }
+
+  // Debug: Count input options
+  const inputOptions = trades.filter(t => t.isOption).length
+  debugLog(`Input: ${trades.length} trades, ${inputOptions} are options`)
+
   // Group trades by symbol
   const tradesBySymbol = trades.reduce((acc, trade) => {
     if (!acc[trade.symbol]) {
@@ -10,6 +36,7 @@ export const calculatePnL = (trades, currentPrices) => {
   }, {})
 
   const results = []
+  const optionsByParent = {} // Track options by their parent instrument
 
   // Calculate P&L for each symbol
   Object.keys(tradesBySymbol).forEach((symbol) => {
@@ -20,7 +47,7 @@ export const calculatePnL = (trades, currentPrices) => {
     const isOption = symbolTrades.some(t => t.isOption)
 
     // Calculate Real P&L (simple buy/sell matching)
-    const real = calculateReal(symbolTrades, currentPrice)
+    const real = calculateReal(symbolTrades, currentPrice, symbol)
 
     // Calculate Average Cost P&L
     const avgCost = calculateAverageCost(symbolTrades, currentPrice)
@@ -31,7 +58,11 @@ export const calculatePnL = (trades, currentPrices) => {
     // Calculate LIFO P&L
     const lifo = calculateLIFO(symbolTrades, currentPrice)
 
-    results.push({
+    // Extract parent instrument from description for options
+    const description = symbolTrades[0].description || symbolTrades[0].instrument || symbol
+    const parentInstrument = isOption ? extractParentInstrument(description) : null
+
+    const item = {
       symbol,
       instrument: symbolTrades[0].instrument,
       isOption,
@@ -39,48 +70,148 @@ export const calculatePnL = (trades, currentPrices) => {
       real,
       avgCost,
       fifo,
-      lifo
-    })
+      lifo,
+      parentInstrument
+    }
+
+    results.push(item)
+
+    // Track options by parent for aggregation
+    if (isOption && parentInstrument) {
+      debugLog(`✓ Option: ${symbol} -> Parent: ${parentInstrument}`)
+      if (!optionsByParent[parentInstrument]) {
+        optionsByParent[parentInstrument] = []
+      }
+      optionsByParent[parentInstrument].push(item)
+    } else if (isOption && !parentInstrument) {
+      debugLog(`✗ Option without parent: ${symbol}`)
+    }
   })
 
-  return results
+  // Debug: Show what we found
+  const totalOptionsTracked = Object.values(optionsByParent).reduce((sum, opts) => sum + opts.length, 0)
+  debugLog(`Tracked ${totalOptionsTracked} options across ${Object.keys(optionsByParent).length} parent stocks`)
+  if (Object.keys(optionsByParent).length > 0) {
+    debugLog(`Parents: ${Object.keys(optionsByParent).join(', ')}`)
+  }
+
+  // Add options P&L to stocks
+  results.forEach(item => {
+    if (!item.isOption && optionsByParent[item.symbol]) {
+      // This stock has options - calculate total options P&L
+      const options = optionsByParent[item.symbol]
+
+      debugLog(`\n📊 ${item.symbol} has ${options.length} options:`)
+      options.forEach(opt => {
+        debugLog(`   ${opt.symbol}: P&L=$${opt.real.totalPnL}`)
+      })
+
+      item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
+      item.optionsCount = options.length
+      item.options = options // Store options array for trade history
+
+      debugLog(`   TOTAL: $${item.optionsPnL}`)
+    } else {
+      item.optionsPnL = 0
+      item.optionsCount = 0
+      item.options = []
+    }
+  })
+
+  // Filter out individual options, keep only stocks
+  return results.filter(item => !item.isOption).sort((a, b) => a.symbol.localeCompare(b.symbol))
 }
 
-// Real P&L calculation - simple buy/sell matching
-const calculateReal = (trades, currentPrice) => {
-  const buyQueue = []
-  let totalBought = 0
-  let totalBuyCost = 0
-  let totalSold = 0
-  let totalSellRevenue = 0
+// Rollup options under their parent instrument
+const rollupOptionsByParent = (pnlData) => {
+  const grouped = {}
+  const stocksAndOthers = []
+
+  pnlData.forEach(item => {
+    if (item.isOption && item.parentInstrument) {
+      // Group option under parent instrument
+      if (!grouped[item.parentInstrument]) {
+        grouped[item.parentInstrument] = {
+          symbol: item.parentInstrument,
+          instrument: item.parentInstrument,
+          isOption: false,
+          isRollup: true,
+          currentPrice: 0, // Parent stock price would need to be fetched separately
+          options: [],
+          // Initialize aggregated P&L values
+          real: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0, percentageReturn: 0, lowestOpenBuyPrice: 0 },
+          avgCost: { unrealizedPnL: 0, position: 0, avgCostBasis: 0 },
+          fifo: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0 },
+          lifo: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0 }
+        }
+      }
+
+      // Add this option to the parent's options array
+      grouped[item.parentInstrument].options.push(item)
+
+      // Aggregate P&L values
+      const parent = grouped[item.parentInstrument]
+      parent.real.realizedPnL += item.real.realizedPnL || 0
+      parent.real.unrealizedPnL += item.real.unrealizedPnL || 0
+      parent.real.totalPnL += item.real.totalPnL || 0
+
+      parent.avgCost.unrealizedPnL += item.avgCost.unrealizedPnL || 0
+
+      parent.fifo.realizedPnL += item.fifo.realizedPnL || 0
+      parent.fifo.unrealizedPnL += item.fifo.unrealizedPnL || 0
+      parent.fifo.totalPnL += item.fifo.totalPnL || 0
+
+      parent.lifo.realizedPnL += item.lifo.realizedPnL || 0
+      parent.lifo.unrealizedPnL += item.lifo.unrealizedPnL || 0
+      parent.lifo.totalPnL += item.lifo.totalPnL || 0
+    } else {
+      // Not an option or no parent found - keep as is
+      stocksAndOthers.push(item)
+    }
+  })
+
+  // Combine stocks with rolled-up option groups
+  const rolledUpParents = Object.values(grouped)
+
+  return [...stocksAndOthers, ...rolledUpParents].sort((a, b) => {
+    // Sort by symbol alphabetically
+    return a.symbol.localeCompare(b.symbol)
+  })
+}
+
+// Real P&L calculation - Simple approach: sum all buy/sell amounts
+const calculateReal = (trades, currentPrice, symbol) => {
+  let totalBuyAmount = 0
+  let totalSellAmount = 0
+  let totalBuyShares = 0
+  let totalSellShares = 0
   let position = 0
+
+  // Track buy queue to calculate lowest open buy price (using FIFO)
+  const buyQueue = []
 
   trades.forEach((trade) => {
     if (trade.isBuy) {
-      totalBought += trade.quantity
-      totalBuyCost += trade.quantity * trade.price
+      totalBuyAmount += trade.quantity * trade.price
+      totalBuyShares += trade.quantity
       position += trade.quantity
-      // Track individual buy lots for lowest price calculation
       buyQueue.push({
         quantity: trade.quantity,
         price: trade.price
       })
     } else {
-      totalSold += trade.quantity
-      totalSellRevenue += trade.quantity * trade.price
+      totalSellAmount += trade.quantity * trade.price
+      totalSellShares += trade.quantity
       position -= trade.quantity
 
-      // Match sells against buys (FIFO) to track remaining lots
+      // Remove sold shares from buy queue (FIFO)
       let remainingSellQty = trade.quantity
       while (remainingSellQty > 0 && buyQueue.length > 0) {
         const oldestBuy = buyQueue[0]
-
         if (oldestBuy.quantity <= remainingSellQty) {
-          // Fully consume this buy lot
           remainingSellQty -= oldestBuy.quantity
           buyQueue.shift()
         } else {
-          // Partially consume this buy lot
           oldestBuy.quantity -= remainingSellQty
           remainingSellQty = 0
         }
@@ -88,32 +219,34 @@ const calculateReal = (trades, currentPrice) => {
     }
   })
 
-  // Realized P&L: actual profit/loss from completed sells
-  const realizedPnL = totalSellRevenue - (totalSold * (totalBuyCost / totalBought))
+  // Realized P&L = Total sell amount - Total buy amount
+  const realizedPnL = totalSellAmount - totalBuyAmount
 
-  // Unrealized P&L: current value vs cost basis of remaining position
+  // Unrealized P&L = Current value of remaining position
   let unrealizedPnL = 0
   let avgCostBasis = 0
-
-  if (position > 0 && totalBought > 0) {
-    avgCostBasis = totalBuyCost / totalBought
-    unrealizedPnL = (currentPrice - avgCostBasis) * position
-  }
-
-  // Calculate percentage return: Total P&L / (shares × avg cost basis)
-  const costBasis = position > 0 ? position * avgCostBasis : totalBuyCost
-  const percentageReturn = costBasis > 0 ? ((realizedPnL + unrealizedPnL) / costBasis) * 100 : 0
-
-  // Find lowest buy price among remaining open lots
   let lowestOpenBuyPrice = 0
-  if (buyQueue.length > 0) {
-    lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
+
+  if (position > 0) {
+    unrealizedPnL = position * currentPrice
+    avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+
+    // Find the lowest price among remaining open buys
+    if (buyQueue.length > 0) {
+      lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
+    }
   }
+
+  // Total P&L = Realized + Unrealized
+  const totalPnL = realizedPnL + unrealizedPnL
+
+  // Calculate percentage return: Total P&L / total invested
+  const percentageReturn = totalBuyAmount > 0 ? (totalPnL / totalBuyAmount) * 100 : 0
 
   return {
     realizedPnL: roundToTwo(realizedPnL),
     unrealizedPnL: roundToTwo(unrealizedPnL),
-    totalPnL: roundToTwo(realizedPnL + unrealizedPnL),
+    totalPnL: roundToTwo(totalPnL),
     position: roundToTwo(position),
     avgCostBasis: roundToTwo(avgCostBasis),
     percentageReturn: roundToTwo(percentageReturn),
@@ -196,19 +329,20 @@ const calculateFIFO = (trades, currentPrice) => {
   // Calculate unrealized P&L on remaining position
   let unrealizedPnL = 0
   let avgCostBasis = 0
+  const position = buyQueue.reduce((sum, buy) => sum + buy.quantity, 0)
 
-  if (buyQueue.length > 0) {
+  // Only calculate unrealized if position is meaningfully greater than zero (not just rounding errors)
+  if (buyQueue.length > 0 && position > 0.0001) {
     const totalCost = buyQueue.reduce((sum, buy) => sum + (buy.price * buy.quantity), 0)
-    const totalQty = buyQueue.reduce((sum, buy) => sum + buy.quantity, 0)
-    avgCostBasis = totalCost / totalQty
-    unrealizedPnL = (currentPrice - avgCostBasis) * totalQty
+    avgCostBasis = totalCost / position
+    unrealizedPnL = (currentPrice - avgCostBasis) * position
   }
 
   return {
     realizedPnL: roundToTwo(realizedPnL),
-    unrealizedPnL: roundToTwo(unrealizedPnL),
-    totalPnL: roundToTwo(realizedPnL + unrealizedPnL),
-    position: roundToTwo(buyQueue.reduce((sum, buy) => sum + buy.quantity, 0)),
+    unrealizedPnL: position > 0.0001 ? roundToTwo(unrealizedPnL) : 0,
+    totalPnL: roundToTwo(realizedPnL + (position > 0.0001 ? unrealizedPnL : 0)),
+    position: position > 0.0001 ? roundToTwo(position) : 0,
     avgCostBasis: roundToTwo(avgCostBasis)
   }
 }
@@ -256,19 +390,20 @@ const calculateLIFO = (trades, currentPrice) => {
   // Calculate unrealized P&L on remaining position
   let unrealizedPnL = 0
   let avgCostBasis = 0
+  const position = buyStack.reduce((sum, buy) => sum + buy.quantity, 0)
 
-  if (buyStack.length > 0) {
+  // Only calculate unrealized if position is meaningfully greater than zero (not just rounding errors)
+  if (buyStack.length > 0 && position > 0.0001) {
     const totalCost = buyStack.reduce((sum, buy) => sum + (buy.price * buy.quantity), 0)
-    const totalQty = buyStack.reduce((sum, buy) => sum + buy.quantity, 0)
-    avgCostBasis = totalCost / totalQty
-    unrealizedPnL = (currentPrice - avgCostBasis) * totalQty
+    avgCostBasis = totalCost / position
+    unrealizedPnL = (currentPrice - avgCostBasis) * position
   }
 
   return {
     realizedPnL: roundToTwo(realizedPnL),
-    unrealizedPnL: roundToTwo(unrealizedPnL),
-    totalPnL: roundToTwo(realizedPnL + unrealizedPnL),
-    position: roundToTwo(buyStack.reduce((sum, buy) => sum + buy.quantity, 0)),
+    unrealizedPnL: position > 0.0001 ? roundToTwo(unrealizedPnL) : 0,
+    totalPnL: roundToTwo(realizedPnL + (position > 0.0001 ? unrealizedPnL : 0)),
+    position: position > 0.0001 ? roundToTwo(position) : 0,
     avgCostBasis: roundToTwo(avgCostBasis)
   }
 }

@@ -39,10 +39,9 @@ export const parseTrades = (file) => {
             const amount = parseCurrency(row['Amount'] || 0)
 
             // For options: 1 contract = 100 shares
-            // Use the amount directly and adjust price to be the total contract price
+            // Just multiply both by 100 to get actual contract values
             if (isOption) {
               quantity = quantity * 100
-              // Price in CSV is per-share, multiply by 100 to get per-contract price
               price = price * 100
             }
 
@@ -75,6 +74,11 @@ export const parseTrades = (file) => {
           const validTrades = trades
             .filter(t => t.symbol && t.quantity > 0 && t.price > 0)
             .sort((a, b) => a.date - b.date)
+
+          // Count options for debugging
+          const optionCount = validTrades.filter(t => t.isOption).length
+          const stockCount = validTrades.filter(t => !t.isOption).length
+          console.log(`📊 CSV Parsed: ${stockCount} stock trades, ${optionCount} option trades`)
 
           if (validTrades.length === 0) {
             reject(new Error('No valid trades found in CSV. Please check the file format.'))

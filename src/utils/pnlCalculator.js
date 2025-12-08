@@ -6,11 +6,26 @@ const extractParentInstrument = (description) => {
   // Options typically start with the ticker symbol
   // Match word characters at the beginning before a space or date
   const match = description.match(/^([A-Z]+)/)
-  return match ? match[1] : null
+  const result = match ? match[1] : null
+
+  // Debug first 5 options
+  if (!result) {
+    console.log(`⚠️ No parent found for: "${description}"`)
+  }
+
+  return result
 }
 
 // Calculate P&L using Average Cost, FIFO, and LIFO methods
-export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
+export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null) => {
+  const debugLog = (msg) => {
+    if (debugCallback) debugCallback(msg)
+  }
+
+  // Debug: Count input options
+  const inputOptions = trades.filter(t => t.isOption).length
+  debugLog(`Input: ${trades.length} trades, ${inputOptions} are options`)
+
   // Group trades by symbol
   const tradesBySymbol = trades.reduce((acc, trade) => {
     if (!acc[trade.symbol]) {
@@ -63,12 +78,22 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
 
     // Track options by parent for aggregation
     if (isOption && parentInstrument) {
+      debugLog(`✓ Option: ${symbol} -> Parent: ${parentInstrument}`)
       if (!optionsByParent[parentInstrument]) {
         optionsByParent[parentInstrument] = []
       }
       optionsByParent[parentInstrument].push(item)
+    } else if (isOption && !parentInstrument) {
+      debugLog(`✗ Option without parent: ${symbol}`)
     }
   })
+
+  // Debug: Show what we found
+  const totalOptionsTracked = Object.values(optionsByParent).reduce((sum, opts) => sum + opts.length, 0)
+  debugLog(`Tracked ${totalOptionsTracked} options across ${Object.keys(optionsByParent).length} parent stocks`)
+  if (Object.keys(optionsByParent).length > 0) {
+    debugLog(`Parents: ${Object.keys(optionsByParent).join(', ')}`)
+  }
 
   // Add options P&L to stocks
   results.forEach(item => {
@@ -76,17 +101,16 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
       // This stock has options - calculate total options P&L
       const options = optionsByParent[item.symbol]
 
-      // Debug: Log each option's P&L
-      console.log(`\n=== Options for ${item.symbol} ===`)
+      debugLog(`\n📊 ${item.symbol} has ${options.length} options:`)
       options.forEach(opt => {
-        console.log(`  ${opt.symbol}: Total P&L = ${opt.real.totalPnL}, Realized = ${opt.real.realizedPnL}, Unrealized = ${opt.real.unrealizedPnL}`)
+        debugLog(`   ${opt.symbol}: P&L=$${opt.real.totalPnL}`)
       })
 
       item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
       item.optionsCount = options.length
       item.options = options // Store options array for trade history
 
-      console.log(`  TOTAL Options P&L: ${item.optionsPnL} (${item.optionsCount} options)`)
+      debugLog(`   TOTAL: $${item.optionsPnL}`)
     } else {
       item.optionsPnL = 0
       item.optionsCount = 0
