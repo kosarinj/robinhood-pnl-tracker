@@ -42,6 +42,10 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
     // Calculate LIFO P&L
     const lifo = calculateLIFO(symbolTrades, currentPrice)
 
+    // Extract parent instrument from description for options
+    const description = symbolTrades[0].description || symbolTrades[0].instrument || symbol
+    const parentInstrument = isOption ? extractParentInstrument(description) : null
+
     results.push({
       symbol,
       instrument: symbolTrades[0].instrument,
@@ -51,7 +55,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
       avgCost,
       fifo,
       lifo,
-      parentInstrument: isOption ? extractParentInstrument(symbol) : null
+      parentInstrument
     })
   })
 

@@ -753,14 +753,18 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       background: Math.abs(rowRunningTotals[row.symbol] - row.real.realizedPnL) < 0.01 ? '#d4edda' : '#fff3cd'
                     }}>
                       {formatCurrency(rowRunningTotals[row.symbol] || 0)}
-                      {row.symbol === 'DDOG' && (
-                        <div style={{ fontSize: '0.65em', marginTop: '4px', color: '#000', background: '#fff', padding: '4px', border: '1px solid #ccc' }}>
-                          <strong>Running Total:</strong> {formatCurrency(rowRunningTotals[row.symbol])}<br/>
-                          <strong>Grid P&L:</strong> {formatCurrency(row.real.realizedPnL)}<br/>
-                          <strong>Diff:</strong> {formatCurrency(Math.abs(rowRunningTotals[row.symbol] - row.real.realizedPnL))}<br/>
-                          <strong>Issue:</strong> Main grid is WRONG
-                        </div>
-                      )}
+                      {row.symbol === 'DDOG' && (() => {
+                        const ddogItems = allData.filter(d => d.symbol?.includes('DDOG'))
+                        return (
+                          <div style={{ fontSize: '0.65em', marginTop: '4px', color: '#000', background: '#fff', padding: '4px', border: '1px solid #ccc' }}>
+                            <strong>RT:</strong> {formatCurrency(rowRunningTotals[row.symbol])}<br/>
+                            <strong>Grid:</strong> {formatCurrency(row.real.realizedPnL)}<br/>
+                            <strong>Rollup:</strong> {row.isRollup ? 'YES' : 'NO'}<br/>
+                            <strong>Opts:</strong> {row.options ? row.options.length : 0}<br/>
+                            <strong>AllData DDOG:</strong> {ddogItems.length}
+                          </div>
+                        )
+                      })()}
                     </td>
                     <td className={getClassName(row.real.unrealizedPnL)}>
                       {formatCurrency(row.real.unrealizedPnL)}
