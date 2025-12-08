@@ -18,7 +18,9 @@ class SocketService {
     this.socket = io(this.serverUrl, {
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 5
+      reconnectionAttempts: 5,
+      transports: ['websocket', 'polling'],
+      withCredentials: false
     })
 
     this.socket.on('connect', () => {
