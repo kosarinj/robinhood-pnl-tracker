@@ -38,10 +38,12 @@ export const parseTrades = (file) => {
             let price = parseCurrency(row['Price'] || row['Trade Price'] || 0)
             const amount = parseCurrency(row['Amount'] || 0)
 
-            // For options: multiply quantity by 100 (1 contract = 100 shares)
-            // This ensures P&L calculations reflect actual contract values
+            // For options: 1 contract = 100 shares
+            // Use the amount directly and adjust price to be the total contract price
             if (isOption) {
               quantity = quantity * 100
+              // Price in CSV is per-share, multiply by 100 to get per-contract price
+              price = price * 100
             }
 
             // Determine if buy or sell
