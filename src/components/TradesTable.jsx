@@ -299,7 +299,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const rowCurrentValues = {}
 
   sortedData.forEach(row => {
-    let symbolTrades = getTradesForSymbol(row.symbol, true, row.options)
+    // For Buy/Sell Total, only get stock trades (not options)
+    // Options P&L is shown separately in its own column
+    let symbolTrades = getTradesForSymbol(row.symbol, false, []) // Don't include options
 
     // Apply split adjustments (matching App.jsx logic)
     symbolTrades = symbolTrades.map(trade => {
@@ -314,7 +316,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       return trade
     })
 
-    // Simple calculation: sum all buy and sell amounts
+    // Simple calculation: sum all buy and sell amounts (stock trades only)
     let totalBuyAmount = 0
     let totalSellAmount = 0
     let position = 0
