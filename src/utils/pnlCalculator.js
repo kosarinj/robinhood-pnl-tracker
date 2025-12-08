@@ -21,6 +21,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
   }, {})
 
   const results = []
+  const optionsByParent = {} // Track options by their parent instrument
 
   // Calculate P&L for each symbol
   Object.keys(tradesBySymbol).forEach((symbol) => {
@@ -46,7 +47,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
     const description = symbolTrades[0].description || symbolTrades[0].instrument || symbol
     const parentInstrument = isOption ? extractParentInstrument(description) : null
 
-    results.push({
+    const item = {
       symbol,
       instrument: symbolTrades[0].instrument,
       isOption,
@@ -56,15 +57,34 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
       fifo,
       lifo,
       parentInstrument
-    })
+    }
+
+    results.push(item)
+
+    // Track options by parent for aggregation
+    if (isOption && parentInstrument) {
+      if (!optionsByParent[parentInstrument]) {
+        optionsByParent[parentInstrument] = []
+      }
+      optionsByParent[parentInstrument].push(item)
+    }
   })
 
-  // If rollupOptions is true, group options under their parent instruments
-  if (rollupOptions) {
-    return rollupOptionsByParent(results)
-  }
+  // Add options P&L to stocks
+  results.forEach(item => {
+    if (!item.isOption && optionsByParent[item.symbol]) {
+      // This stock has options - calculate total options P&L
+      const options = optionsByParent[item.symbol]
+      item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
+      item.optionsCount = options.length
+    } else {
+      item.optionsPnL = 0
+      item.optionsCount = 0
+    }
+  })
 
-  return results
+  // Filter out individual options, keep only stocks
+  return results.filter(item => !item.isOption).sort((a, b) => a.symbol.localeCompare(b.symbol))
 }
 
 // Rollup options under their parent instrument

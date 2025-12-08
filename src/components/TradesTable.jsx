@@ -114,10 +114,15 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const getTradesForSymbol = (symbol, isRollup = false, options = []) => {
     if (!trades) return []
 
+    console.log(`getTradesForSymbol called:`, { symbol, isRollup, optionsCount: options?.length })
+
     // For rolled-up parent instruments, get trades for all underlying options
     if (isRollup && options && options.length > 0) {
       const optionSymbols = options.map(opt => opt.symbol)
-      return trades.filter(t => optionSymbols.includes(t.symbol)).sort((a, b) => {
+      console.log(`Getting trades for ${optionSymbols.length} options:`, optionSymbols)
+      const matchedTrades = trades.filter(t => optionSymbols.includes(t.symbol))
+      console.log(`Found ${matchedTrades.length} trades for options`)
+      return matchedTrades.sort((a, b) => {
         const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
         const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
         // First sort by date
@@ -440,6 +445,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <th style={{ minWidth: '120px' }}>
                   Current Value
                 </th>
+                <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
+                  Options P&L{getSortIcon('optionsPnL')}
+                </th>
                 <th onClick={() => handleSort('real.unrealizedPnL')} className="sortable">
                   Unrealized P&L{getSortIcon('real.unrealizedPnL')}
                 </th>
@@ -509,7 +517,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       </span>
                       <span>{row.symbol}</span>
                       {row.isOption && <span style={{ fontSize: '0.8em', color: '#6c757d' }}>(Option)</span>}
-                      {row.isRollup && <span style={{ fontSize: '0.8em', color: '#667eea', fontWeight: 'bold' }}>(Options Rollup)</span>}
+                      {row.isRollup && <span style={{ fontSize: '0.8em', color: '#667eea', fontWeight: 'bold' }}>(Options Rollup: {row.options?.length || 0} options)</span>}
                       {!row.isOption && getSignalForSymbol(row.symbol) && (
                         <span
                           className="grid-signal-badge"
@@ -707,6 +715,10 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     <td>
                       {formatCurrency(rowCurrentValues[row.symbol] || 0)}
                     </td>
+                    <td className={getClassName(row.optionsPnL || 0)} style={{ fontWeight: (row.optionsCount || 0) > 0 ? 'bold' : 'normal' }}>
+                      {formatCurrency(row.optionsPnL || 0)}
+                      {(row.optionsCount || 0) > 0 && <span style={{ fontSize: '0.7em', marginLeft: '4px' }}>({row.optionsCount})</span>}
+                    </td>
                     <td className={getClassName(row.real.unrealizedPnL)}>
                       {formatCurrency(row.real.unrealizedPnL)}
                     </td>
@@ -866,6 +878,28 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       // Display trade history for regular stocks and options
                       <>
                         <h4 style={{ color: '#667eea', marginBottom: '15px' }}>{row.symbol} - Trade History{showChartsInHistory && !row.isOption ? ' & Chart' : ''}</h4>
+
+                        {/* Debug Info */}
+                        <div style={{
+                          background: '#e3f2fd',
+                          padding: '10px',
+                          marginBottom: '15px',
+                          border: '2px solid #2196f3',
+                          borderRadius: '4px',
+                          fontFamily: 'monospace',
+                          fontSize: '12px'
+                        }}>
+                          <strong>DEBUG INFO:</strong><br/>
+                          Symbol: {row.symbol}<br/>
+                          Is Rollup: {row.isRollup ? 'YES' : 'NO'}<br/>
+                          Options Array Length: {row.options ? row.options.length : 0}<br/>
+                          {row.options && row.options.length > 0 && (
+                            <>
+                              Option Symbols: {row.options.map(o => o.symbol).join(', ')}<br/>
+                            </>
+                          )}
+                          Trades for this symbol: {getTradesForSymbol(row.symbol, row.isRollup, row.options).length}
+                        </div>
 
                     {/* TradingView Chart for stocks only */}
                     {showChartsInHistory && !row.isOption && (
@@ -1176,6 +1210,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 </td>
                 <td>
                   <strong>{formatCurrency(Object.values(rowCurrentValues).reduce((sum, val) => sum + val, 0))}</strong>
+                </td>
+                <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
+                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
                 </td>
                 <td className={getClassName(totals.realUnrealized)}>
                   <strong>{formatCurrency(totals.realUnrealized)}</strong>

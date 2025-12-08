@@ -43,9 +43,9 @@ export const parseTrades = (file) => {
             const amount = parseCurrency(row['Amount'] || 0)
 
             // Determine if buy or sell
-            // Trans codes: Buy, Sell, BTO (Buy to Open), STC (Sell to Close)
+            // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
-            const isBuy = transCode.includes('BUY') || transCode === 'BTO'
+            const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
 
             // Parse date
             const dateStr = row['Activity Date'] || row['Date'] || row['Trade Date']
