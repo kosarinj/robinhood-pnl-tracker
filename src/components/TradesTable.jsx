@@ -1171,8 +1171,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <td className={getClassName(totals.realRealized)}>
                   <strong>{formatCurrency(totals.realRealized)}</strong>
                 </td>
-                <td className={getClassName(Object.values(rowRunningTotals).reduce((sum, val) => sum + val, 0))}>
-                  <strong>{formatCurrency(Object.values(rowRunningTotals).reduce((sum, val) => sum + val, 0))}</strong>
+                <td className={getClassName(Object.values(rowBuySellTotals).reduce((sum, val) => sum + val, 0))}>
+                  <strong>{formatCurrency(Object.values(rowBuySellTotals).reduce((sum, val) => sum + val, 0))}</strong>
+                </td>
+                <td>
+                  <strong>{formatCurrency(Object.values(rowCurrentValues).reduce((sum, val) => sum + val, 0))}</strong>
                 </td>
                 <td className={getClassName(totals.realUnrealized)}>
                   <strong>{formatCurrency(totals.realUnrealized)}</strong>
