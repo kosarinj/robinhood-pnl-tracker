@@ -13,7 +13,6 @@ import { socketService } from './services/socketService'
 function App() {
   const [trades, setTrades] = useState([])
   const [pnlData, setPnlData] = useState([])
-  const [includeOptions, setIncludeOptions] = useState(false)
   const [showOpenOnly, setShowOpenOnly] = useState(true)
   const [symbolFilter, setSymbolFilter] = useState('')
   const [loading, setLoading] = useState(false)
@@ -472,21 +471,8 @@ function App() {
 
   let filteredData = pnlData
 
-  // Filter by options/rollups
-  // When "Include Other Instruments" is unchecked:
-  // - Hide rolled-up parent rows (isRollup = true)
-  // - Individual options should already be rolled up and not appear
-  // When "Include Other Instruments" is checked:
-  // - Show rolled-up parent rows
-  // - Individual options still don't show (they're in the options array of the parent)
-  if (!includeOptions) {
-    // Hide only the rollup parents, not individual options (which shouldn't exist after rollup)
-    filteredData = filteredData.filter(item => !item.isRollup)
-  }
-
-  // Always filter out individual options that aren't part of a rollup parent
-  // Keep rollup parents (isRollup=true) regardless of isOption flag
-  filteredData = filteredData.filter(item => item.isRollup || !item.isOption)
+  // Filter out individual options - they're shown as aggregated P&L in the Options P&L column
+  filteredData = filteredData.filter(item => !item.isOption)
 
   // Filter by open positions only
   if (showOpenOnly) {
@@ -641,14 +627,6 @@ function App() {
                 className="symbol-search"
               />
             </div>
-            <label>
-              <input
-                type="checkbox"
-                checked={includeOptions}
-                onChange={(e) => setIncludeOptions(e.target.checked)}
-              />
-              Include Options
-            </label>
             <label>
               <input
                 type="checkbox"

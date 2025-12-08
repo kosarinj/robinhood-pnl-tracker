@@ -63,18 +63,26 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true) => {
 
     // Track options by parent for aggregation
     if (isOption && parentInstrument) {
+      console.log(`Tracking option: ${symbol} -> parent: ${parentInstrument}, P&L: ${item.real.totalPnL}`)
       if (!optionsByParent[parentInstrument]) {
         optionsByParent[parentInstrument] = []
       }
       optionsByParent[parentInstrument].push(item)
+    } else if (isOption && !parentInstrument) {
+      console.log(`Option without parent: ${symbol}, description: ${description}`)
     }
   })
+
+  // Debug: Log what we found
+  console.log('Options by parent:', Object.keys(optionsByParent))
+  console.log('All symbols:', results.map(r => ({ symbol: r.symbol, isOption: r.isOption })))
 
   // Add options P&L to stocks
   results.forEach(item => {
     if (!item.isOption && optionsByParent[item.symbol]) {
       // This stock has options - calculate total options P&L
       const options = optionsByParent[item.symbol]
+      console.log(`Found options for ${item.symbol}:`, options.length)
       item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
       item.optionsCount = options.length
     } else {

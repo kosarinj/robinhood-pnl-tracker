@@ -34,7 +34,7 @@ export const parseTrades = (file) => {
 
             // Debug logging for options
             if (isOption) {
-              console.log(`Option detected: ${description}`)
+              console.log(`Option detected: ${description}, instrument: ${instrument}`)
             }
 
             // Parse quantity, price, and amount with currency cleaning
