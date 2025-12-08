@@ -15,9 +15,14 @@ const fetchPriceForSymbol = async (symbol, retryCount = 0) => {
     const url = `${CORS_PROXY}${encodeURIComponent(yahooUrl)}`
     const response = await axios.get(url, { timeout: 10000 })
 
-    if (response.data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
-      const quote = response.data.chart.result[0].meta.regularMarketPrice
-      console.log(`✓ Fetched price for ${symbol}: $${quote}`)
+    if (response.data?.chart?.result?.[0]?.meta) {
+      const meta = response.data.chart.result[0].meta
+      // Try to get the most recent price - prefer regularMarketPrice, fallback to previousClose
+      const quote = meta.regularMarketPrice || meta.previousClose || 0
+
+      // Log the timestamp to see how fresh the data is
+      const marketTime = meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toLocaleTimeString() : 'unknown'
+      console.log(`✓ Fetched price for ${symbol}: $${quote} (market time: ${marketTime})`)
       return quote
     } else {
       console.warn(`⚠ No price data in response for ${symbol}`)
