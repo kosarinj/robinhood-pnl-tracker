@@ -443,14 +443,14 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <th style={{ minWidth: '120px' }}>
                   Current Value
                 </th>
-                <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
-                  Options P&L{getSortIcon('optionsPnL')}
-                </th>
                 <th onClick={() => handleSort('real.unrealizedPnL')} className="sortable">
                   Unrealized P&L{getSortIcon('real.unrealizedPnL')}
                 </th>
                 <th onClick={() => handleSort('real.totalPnL')} className="sortable">
                   Total P&L{getSortIcon('real.totalPnL')}
+                </th>
+                <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
+                  Options P&L{getSortIcon('optionsPnL')}
                 </th>
                 <th onClick={() => handleSort('real.percentageReturn')} className="sortable">
                   %{getSortIcon('real.percentageReturn')}
@@ -713,15 +713,15 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     <td>
                       {formatCurrency(rowCurrentValues[row.symbol] || 0)}
                     </td>
-                    <td className={getClassName(row.optionsPnL || 0)} style={{ fontWeight: (row.optionsCount || 0) > 0 ? 'bold' : 'normal' }}>
-                      {formatCurrency(row.optionsPnL || 0)}
-                      {(row.optionsCount || 0) > 0 && <span style={{ fontSize: '0.7em', marginLeft: '4px' }}>({row.optionsCount})</span>}
-                    </td>
                     <td className={getClassName(row.real.unrealizedPnL)}>
                       {formatCurrency(row.real.unrealizedPnL)}
                     </td>
-                    <td className={getClassName(row.real.totalPnL)}>
-                      {formatCurrency(row.real.totalPnL)}
+                    <td className={getClassName(row.real.totalPnL + (row.optionsPnL || 0))}>
+                      {formatCurrency(row.real.totalPnL + (row.optionsPnL || 0))}
+                    </td>
+                    <td className={getClassName(row.optionsPnL || 0)} style={{ fontWeight: (row.optionsCount || 0) > 0 ? 'bold' : 'normal' }}>
+                      {formatCurrency(row.optionsPnL || 0)}
+                      {(row.optionsCount || 0) > 0 && <span style={{ fontSize: '0.7em', marginLeft: '4px' }}>({row.optionsCount})</span>}
                     </td>
                     <td className={getClassName(row.real.percentageReturn)}>
                       {row.real.percentageReturn.toFixed(2)}%
@@ -1209,14 +1209,14 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <td>
                   <strong>{formatCurrency(Object.values(rowCurrentValues).reduce((sum, val) => sum + val, 0))}</strong>
                 </td>
-                <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
-                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
-                </td>
                 <td className={getClassName(totals.realUnrealized)}>
                   <strong>{formatCurrency(totals.realUnrealized)}</strong>
                 </td>
-                <td className={getClassName(totals.realTotal)}>
-                  <strong>{formatCurrency(totals.realTotal)}</strong>
+                <td className={getClassName(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
+                  <strong>{formatCurrency(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
+                </td>
+                <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
+                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
                 </td>
                 <td></td>
               </>
