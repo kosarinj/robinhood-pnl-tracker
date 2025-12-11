@@ -7,6 +7,7 @@ import { parseTrades, parseDeposits } from './services/csvParser.js'
 import { calculatePnL } from './services/pnlCalculator.js'
 import { PriceService } from './services/priceService.js'
 import { SignalService } from './services/signalService.js'
+import { PolygonService } from './services/polygonService.js'
 import { databaseService } from './services/database.js'
 
 const app = express()
@@ -49,7 +50,17 @@ const upload = multer({ storage: multer.memoryStorage() })
 
 // Services
 const priceService = new PriceService()
-const signalService = new SignalService()
+
+// Signal service configuration - Use Polygon by default, fallback to Alpha Vantage
+const USE_POLYGON = process.env.USE_POLYGON !== 'false' // Default to true
+const signalService = USE_POLYGON ? new PolygonService() : new SignalService()
+const dataSource = USE_POLYGON ? 'Polygon.io' : 'Alpha Vantage'
+
+console.log(`📊 Signal Data Source: ${dataSource}`)
+if (USE_POLYGON) {
+  console.log('💡 Get your free Polygon API key at https://polygon.io/')
+  console.log('   Set POLYGON_API_KEY in environment or .env file')
+}
 
 // Track all symbols for automatic recording
 const trackedSymbols = new Set()
