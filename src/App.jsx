@@ -3,6 +3,7 @@ import CSVUpload from './components/CSVUpload'
 import TradesTable from './components/TradesTable'
 import TradingSignals from './components/TradingSignals'
 import MarketAnalysis from './components/MarketAnalysis'
+import SignalPerformance from './components/SignalPerformance'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -56,6 +57,7 @@ function App() {
   const [connected, setConnected] = useState(false)
   const [useServer, setUseServer] = useState(true) // Toggle between server and standalone mode
   const [showMarketAnalysis, setShowMarketAnalysis] = useState(false)
+  const [showSignalPerformance, setShowSignalPerformance] = useState(false)
   const [showRiskManagement, setShowRiskManagement] = useState(false)
   const [riskAllocations, setRiskAllocations] = useState({})
   const [totalRiskBudget, setTotalRiskBudget] = useState(10000) // Default $10k risk budget
@@ -563,6 +565,21 @@ function App() {
             }}
           >
             📉 Market Downturn Analysis
+          </button>
+          <button
+            onClick={() => setShowSignalPerformance(true)}
+            className="btn-signals"
+            disabled={!useServer || !connected}
+            style={{
+              background: (useServer && connected)
+                ? 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)'
+                : '#ccc',
+              padding: '12px 24px',
+              fontSize: '16px',
+              cursor: (useServer && connected) ? 'pointer' : 'not-allowed'
+            }}
+          >
+            📊 Signal Performance
           </button>
         </div>
         <p style={{ marginTop: '10px', fontSize: '14px', color: '#666' }}>
@@ -1123,6 +1140,16 @@ function App() {
         <MarketAnalysis
           trades={trades}
           onClose={() => setShowMarketAnalysis(false)}
+        />
+      )}
+
+      {/* Signal Performance Analysis Popup */}
+      {showSignalPerformance && (
+        <SignalPerformance
+          symbols={stockSymbols}
+          onClose={() => setShowSignalPerformance(false)}
+          useServer={useServer}
+          connected={connected}
         />
       )}
     </div>
