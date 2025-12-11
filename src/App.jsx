@@ -884,6 +884,39 @@ function App() {
                 </div>
               </div>
 
+              {/* Real PNL Cards - Moved to top */}
+              {visiblePnlColumns.real && (
+                <>
+                  <div className="summary-card">
+                    <h3>Real Total P&L</h3>
+                    <div className={`value ${pnlTotals.realTotal >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.realTotal)}
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                      {pnlPercentages.totalPercent >= 0 ? '+' : ''}{pnlPercentages.totalPercent.toFixed(2)}%
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>Real Realized</h3>
+                    <div className={`value ${pnlTotals.realRealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.realRealized)}
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                      {pnlPercentages.realizedPercent >= 0 ? '+' : ''}{pnlPercentages.realizedPercent.toFixed(2)}%
+                    </div>
+                  </div>
+                  <div className="summary-card">
+                    <h3>Real Unrealized</h3>
+                    <div className={`value ${pnlTotals.realUnrealized >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.realUnrealized)}
+                    </div>
+                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
+                      {pnlPercentages.unrealizedPercent >= 0 ? '+' : ''}{pnlPercentages.unrealizedPercent.toFixed(2)}%
+                    </div>
+                  </div>
+                </>
+              )}
+
               {/* Risk Management Summary */}
               {showRiskManagement && (() => {
                 const totalAllocated = filteredData.reduce((sum, row) => sum + ((riskAllocations && riskAllocations[row.symbol]) || 0), 0)
@@ -931,37 +964,6 @@ function App() {
                 )
               })()}
 
-              {visiblePnlColumns.real && (
-                <>
-                  <div className="summary-card">
-                    <h3>Real Total P&L</h3>
-                    <div className={`value ${pnlTotals.realTotal >= 0 ? 'positive' : 'negative'}`}>
-                      {formatCurrency(pnlTotals.realTotal)}
-                    </div>
-                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-                      {pnlPercentages.totalPercent >= 0 ? '+' : ''}{pnlPercentages.totalPercent.toFixed(2)}%
-                    </div>
-                  </div>
-                  <div className="summary-card">
-                    <h3>Real Realized</h3>
-                    <div className={`value ${pnlTotals.realRealized >= 0 ? 'positive' : 'negative'}`}>
-                      {formatCurrency(pnlTotals.realRealized)}
-                    </div>
-                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-                      {pnlPercentages.realizedPercent >= 0 ? '+' : ''}{pnlPercentages.realizedPercent.toFixed(2)}%
-                    </div>
-                  </div>
-                  <div className="summary-card">
-                    <h3>Real Unrealized</h3>
-                    <div className={`value ${pnlTotals.realUnrealized >= 0 ? 'positive' : 'negative'}`}>
-                      {formatCurrency(pnlTotals.realUnrealized)}
-                    </div>
-                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-                      {pnlPercentages.unrealizedPercent >= 0 ? '+' : ''}{pnlPercentages.unrealizedPercent.toFixed(2)}%
-                    </div>
-                  </div>
-                </>
-              )}
               {visiblePnlColumns.avgCost && (
                 <div className="summary-card">
                   <h3>Avg Cost Unrealized P&L</h3>
