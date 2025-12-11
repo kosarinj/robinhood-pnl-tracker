@@ -288,67 +288,20 @@ function App() {
       return { realizedPercent: 0, unrealizedPercent: 0, totalPercent: 0 }
     }
 
-    // Build cumulative principal timeline
-    let cumulativePrincipal = 0
-    const principalTimeline = deposits.map(deposit => {
-      cumulativePrincipal += deposit.amount
-      return {
-        date: deposit.date,
-        cumulativePrincipal
-      }
-    })
+    // Calculate total principal from all deposits
+    const cumulativePrincipal = deposits.reduce((sum, deposit) => sum + deposit.amount, 0)
 
-    // Function to get principal at a specific date
-    const getPrincipalAtDate = (date) => {
-      // Find the cumulative principal up to this date
-      let principal = 0
-      for (const entry of principalTimeline) {
-        if (entry.date <= date) {
-          principal = entry.cumulativePrincipal
-        } else {
-          break
-        }
-      }
-      return principal > 0 ? principal : principalTimeline[0]?.cumulativePrincipal || 0
+    if (cumulativePrincipal === 0) {
+      return { realizedPercent: 0, unrealizedPercent: 0, totalPercent: 0 }
     }
 
-    // For realized P&L: calculate weighted average based on when trades occurred
-    const sellTrades = trades.filter(t => !t.isBuy)
+    // Calculate percentages using total principal as denominator
+    // This works correctly with options (including expired options and short positions)
+    const realizedPercent = (pnlTotals.realRealized / cumulativePrincipal) * 100
+    const unrealizedPercent = (pnlTotals.realUnrealized / cumulativePrincipal) * 100
+    const totalPercent = (pnlTotals.realTotal / cumulativePrincipal) * 100
 
-    if (sellTrades.length > 0) {
-      // Calculate average principal during the trading period
-      const tradeDates = sellTrades.map(t => t.date)
-      const avgPrincipal = tradeDates.reduce((sum, date) => {
-        return sum + getPrincipalAtDate(date)
-      }, 0) / tradeDates.length
-
-      const realizedPercent = avgPrincipal > 0
-        ? (pnlTotals.realRealized / avgPrincipal) * 100
-        : 0
-
-      // For unrealized P&L: use current total principal
-      const unrealizedPercent = cumulativePrincipal > 0
-        ? (pnlTotals.realUnrealized / cumulativePrincipal) * 100
-        : 0
-
-      // For total P&L: weighted combination
-      const totalPercent = (realizedPercent * Math.abs(pnlTotals.realRealized) +
-                           unrealizedPercent * Math.abs(pnlTotals.realUnrealized)) /
-                           (Math.abs(pnlTotals.realRealized) + Math.abs(pnlTotals.realUnrealized) || 1)
-
-      return { realizedPercent, unrealizedPercent, totalPercent }
-    } else {
-      // No sells yet, only unrealized
-      const unrealizedPercent = cumulativePrincipal > 0
-        ? (pnlTotals.realUnrealized / cumulativePrincipal) * 100
-        : 0
-
-      return {
-        realizedPercent: 0,
-        unrealizedPercent,
-        totalPercent: unrealizedPercent
-      }
-    }
+    return { realizedPercent, unrealizedPercent, totalPercent }
   }
 
   // Note: Options are always rolled up into their underlying instruments
