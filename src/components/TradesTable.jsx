@@ -114,10 +114,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const getTradesForSymbol = (symbol, isRollup = true, options = []) => {
     if (!trades) return []
 
-    // For rolled-up parent instruments, get trades for all underlying options
+    // For rolled-up parent instruments, get trades for both the stock AND all underlying options
     if (isRollup && options && options.length > 0) {
       const optionSymbols = options.map(opt => opt.symbol)
-      const matchedTrades = trades.filter(t => optionSymbols.includes(t.symbol))
+      // Include trades for the parent symbol AND all option symbols
+      const matchedTrades = trades.filter(t => t.symbol === symbol || optionSymbols.includes(t.symbol))
       return matchedTrades.sort((a, b) => {
         const dateA = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime()
         const dateB = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime()
