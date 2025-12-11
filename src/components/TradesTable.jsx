@@ -412,7 +412,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
               <th colSpan="3" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6', background: '#fff4e6' }}>Risk Management</th>
             )}
             {visiblePnlColumns.real && (
-              <th colSpan="6" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Real P&L</th>
+              <th colSpan="9" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Real P&L</th>
             )}
             {visiblePnlColumns.avgCost && (
               <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Average Cost</th>
@@ -444,9 +444,6 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                   Realized P&L{getSortIcon('real.realizedPnL')}
                 </th>
                 <th style={{ minWidth: '120px' }}>
-                  Buy/Sell Total
-                </th>
-                <th style={{ minWidth: '120px' }}>
                   Current Value
                 </th>
                 <th onClick={() => handleSort('real.unrealizedPnL')} className="sortable">
@@ -454,6 +451,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 </th>
                 <th onClick={() => handleSort('real.totalPnL')} className="sortable">
                   Total P&L{getSortIcon('real.totalPnL')}
+                </th>
+                <th style={{ minWidth: '120px' }}>
+                  Buy/Sell Total
                 </th>
                 <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
                   Options P&L{getSortIcon('optionsPnL')}
@@ -713,9 +713,6 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     <td className={getClassName(row.real.realizedPnL)}>
                       {formatCurrency(row.real.realizedPnL)}
                     </td>
-                    <td className={getClassName(rowBuySellTotals[row.symbol])}>
-                      {formatCurrency(rowBuySellTotals[row.symbol] || 0)}
-                    </td>
                     <td>
                       {formatCurrency(rowCurrentValues[row.symbol] || 0)}
                     </td>
@@ -724,6 +721,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     </td>
                     <td className={getClassName(row.real.totalPnL + (row.optionsPnL || 0))}>
                       {formatCurrency(row.real.totalPnL + (row.optionsPnL || 0))}
+                    </td>
+                    <td className={getClassName(rowBuySellTotals[row.symbol])}>
+                      {formatCurrency(rowBuySellTotals[row.symbol] || 0)}
                     </td>
                     <td className={getClassName(row.optionsPnL || 0)} style={{ fontWeight: (row.optionsCount || 0) > 0 ? 'bold' : 'normal' }}>
                       {formatCurrency(row.optionsPnL || 0)}
@@ -783,7 +783,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             {/* Expanded row showing individual trades or options */}
             {expandedSymbol === row.symbol && (
               <tr className="expanded-row">
-                <td colSpan={3 + (showRiskManagement ? 3 : 0) + (visiblePnlColumns.real ? 6 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
+                <td colSpan={3 + (showRiskManagement ? 3 : 0) + (visiblePnlColumns.real ? 9 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
                   <div className="trades-detail" style={{ background: 'white', padding: '20px' }}>
                     {row.isRollup ? (
                       // Display individual options for rolled-up parent instruments
