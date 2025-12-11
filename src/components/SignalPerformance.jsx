@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import './TradingSignals.css'
+import { socketService } from '../services/socketService'
 
 function SignalPerformance({ symbols, onClose, useServer, connected }) {
   const [loading, setLoading] = useState(true)
@@ -21,7 +21,7 @@ function SignalPerformance({ symbols, onClose, useServer, connected }) {
       setError(null)
 
       const symbol = selectedSymbol === 'ALL' ? '' : selectedSymbol
-      const url = `http://localhost:5000/api/signal-accuracy?symbol=${symbol}&hours=${timeRange}`
+      const url = `${socketService.serverUrl}/api/signal-accuracy?symbol=${symbol}&hours=${timeRange}`
 
       const response = await fetch(url)
       const data = await response.json()
