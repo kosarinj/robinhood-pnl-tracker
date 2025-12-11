@@ -61,6 +61,7 @@ function App() {
   const [showRiskManagement, setShowRiskManagement] = useState(false)
   const [riskAllocations, setRiskAllocations] = useState({})
   const [totalRiskBudget, setTotalRiskBudget] = useState(10000) // Default $10k risk budget
+  const [stockSymbols, setStockSymbols] = useState([]) // Stock symbols (excluding options)
 
   // Connect to server on mount
   useEffect(() => {
@@ -194,6 +195,9 @@ function App() {
     const stockSymbols = allSymbols.filter(s => {
       return !s.includes(' ') && !s.includes('Put') && !s.includes('Call')
     })
+
+    // Save stock symbols to state
+    setStockSymbols(stockSymbols)
 
     // Fetch current prices
     const fetchedPrices = await fetchCurrentPrices(stockSymbols)
@@ -396,6 +400,9 @@ function App() {
         })
 
         console.log(`Total symbols: ${allSymbols.length}, Stock symbols to fetch: ${stockSymbols.length}`)
+
+        // Save stock symbols to state
+        setStockSymbols(stockSymbols)
 
         // Fetch current prices from Yahoo Finance (only for stocks, not options)
         const fetchedPrices = await fetchCurrentPrices(stockSymbols)
