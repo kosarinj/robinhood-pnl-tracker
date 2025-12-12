@@ -75,7 +75,7 @@ function App() {
   })
   const [showChartsInHistory, setShowChartsInHistory] = useState(false)
   const [connected, setConnected] = useState(false)
-  const [useServer, setUseServer] = useState(true) // Toggle between server and standalone mode
+  const [useServer, setUseServer] = useState(false) // Toggle between server and standalone mode - STANDALONE by default
   const [showMarketAnalysis, setShowMarketAnalysis] = useState(false)
   const [showSignalPerformance, setShowSignalPerformance] = useState(false)
   const [showRiskManagement, setShowRiskManagement] = useState(false)
