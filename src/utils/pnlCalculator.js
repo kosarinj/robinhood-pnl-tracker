@@ -78,9 +78,12 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     const dailyPnL = position > 0 ? (currentPrice - previousClose) * position : 0
 
     // Calculate "Made Up Ground": profit made when stock is down
-    // If price is down from previous close but daily PNL is positive,
-    // it means you made money through trading despite the price drop
-    const madeUpGround = (currentPrice < previousClose && dailyPnL > 0) ? dailyPnL : 0
+    // If price is down from previous close, include:
+    // 1. Daily PNL from price movement on open positions
+    // 2. Realized profit from sells that happened today
+    const todaysRealizedProfit = real.todaysRealizedProfit || 0
+    const totalDailyProfit = dailyPnL + todaysRealizedProfit
+    const madeUpGround = (currentPrice < previousClose && totalDailyProfit > 0) ? totalDailyProfit : 0
 
     // Debug log for daily PNL - show ALL calculations for stocks with positions
     if (position > 0 && !isOption) {
@@ -180,7 +183,7 @@ const rollupOptionsByParent = (pnlData) => {
           currentPrice: 0, // Parent stock price would need to be fetched separately
           options: [],
           // Initialize aggregated P&L values
-          real: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0, percentageReturn: 0, lowestOpenBuyPrice: 0 },
+          real: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0, percentageReturn: 0, lowestOpenBuyPrice: 0, todaysRealizedProfit: 0 },
           avgCost: { unrealizedPnL: 0, position: 0, avgCostBasis: 0 },
           fifo: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0 },
           lifo: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0 }
@@ -231,6 +234,11 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   // Track buy queue to calculate lowest open buy price (using FIFO)
   const buyQueue = []
 
+  // Track realized profit from today's sells (for Made Up Ground)
+  let todaysRealizedProfit = 0
+  const today = new Date()
+  today.setHours(0, 0, 0, 0) // Start of today
+
   trades.forEach((trade) => {
     if (trade.isBuy) {
       totalBuyAmount += trade.quantity * trade.price
@@ -245,10 +253,25 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
       totalSellShares += trade.quantity
       position -= trade.quantity
 
-      // Remove sold shares from buy queue (FIFO)
+      // Check if this sell happened today
+      const tradeDate = new Date(trade.date || trade.transDate)
+      tradeDate.setHours(0, 0, 0, 0)
+      const isTodaysSell = tradeDate.getTime() === today.getTime()
+
+      // Remove sold shares from buy queue (FIFO) and track today's profit
       let remainingSellQty = trade.quantity
+      const sellPrice = trade.price
+
       while (remainingSellQty > 0 && buyQueue.length > 0) {
         const oldestBuy = buyQueue[0]
+        const qtyToMatch = Math.min(oldestBuy.quantity, remainingSellQty)
+
+        // If this is today's sell, track the profit
+        if (isTodaysSell) {
+          const profit = (sellPrice - oldestBuy.price) * qtyToMatch
+          todaysRealizedProfit += profit
+        }
+
         if (oldestBuy.quantity <= remainingSellQty) {
           remainingSellQty -= oldestBuy.quantity
           buyQueue.shift()
@@ -306,7 +329,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     position: roundToTwo(position),
     avgCostBasis: roundToTwo(avgCostBasis),
     percentageReturn: roundToTwo(percentageReturn),
-    lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice)
+    lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice),
+    todaysRealizedProfit: roundToTwo(todaysRealizedProfit)
   }
 }
 
