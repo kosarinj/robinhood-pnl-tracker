@@ -721,14 +721,11 @@ function App() {
           <button
             onClick={() => setShowSignalPerformance(true)}
             className="btn-signals"
-            disabled={!useServer || !connected}
             style={{
-              background: (useServer && connected)
-                ? 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)'
-                : '#ccc',
+              background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
               padding: '12px 24px',
               fontSize: '16px',
-              cursor: (useServer && connected) ? 'pointer' : 'not-allowed'
+              cursor: 'pointer'
             }}
           >
             📊 Signal Performance
