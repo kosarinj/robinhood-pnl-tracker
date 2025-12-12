@@ -40,7 +40,12 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
 
   // Calculate P&L for each symbol
   Object.keys(tradesBySymbol).forEach((symbol) => {
-    const symbolTrades = tradesBySymbol[symbol]
+    // IMPORTANT: Sort trades by date for correct FIFO/LIFO calculations
+    const symbolTrades = tradesBySymbol[symbol].sort((a, b) => {
+      const dateA = new Date(a.date || a.transDate)
+      const dateB = new Date(b.date || b.transDate)
+      return dateA - dateB
+    })
     const currentPrice = currentPrices[symbol] || 0
     const previousClose = previousClosePrices[symbol] || 0
 
