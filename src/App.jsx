@@ -972,7 +972,7 @@ function App() {
                       {pnlPercentages.unrealizedPercent >= 0 ? '+' : ''}{pnlPercentages.unrealizedPercent.toFixed(2)}%
                     </div>
                   </div>
-                  <div className="summary-card" style={{ background: '#e7f3ff', borderLeft: '4px solid #2196f3' }}>
+                  <div className="summary-card" style={{ background: '#d4edda', borderLeft: '4px solid #28a745' }}>
                     <h3>Daily P&L</h3>
                     <div className={`value ${pnlTotals.dailyPnL >= 0 ? 'positive' : 'negative'}`}>
                       {formatCurrency(pnlTotals.dailyPnL)}
