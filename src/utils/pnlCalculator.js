@@ -231,19 +231,22 @@ const calculateReal = (trades, currentPrice, symbol) => {
   // Realized P&L = Total sell amount - Total buy amount
   const realizedPnL = totalSellAmount - totalBuyAmount
 
-  // Unrealized P&L = Current value of remaining position
+  // Calculate average cost basis and unrealized P&L for remaining position
   let unrealizedPnL = 0
   let avgCostBasis = 0
   let lowestOpenBuyPrice = 0
 
-  if (position > 0) {
-    unrealizedPnL = position * currentPrice
-    avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+  if (position > 0 && buyQueue.length > 0) {
+    // Calculate average cost of REMAINING shares (not all shares ever bought)
+    const totalCostOfRemaining = buyQueue.reduce((sum, buy) => sum + (buy.price * buy.quantity), 0)
+    const totalRemainingShares = buyQueue.reduce((sum, buy) => sum + buy.quantity, 0)
+    avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
+
+    // Unrealized P&L = (Current Price - Avg Cost) * Position
+    unrealizedPnL = (currentPrice - avgCostBasis) * position
 
     // Find the lowest price among remaining open buys
-    if (buyQueue.length > 0) {
-      lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
-    }
+    lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
   }
 
   // Total P&L = Realized + Unrealized
