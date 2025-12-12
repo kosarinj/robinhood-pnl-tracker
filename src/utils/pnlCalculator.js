@@ -261,52 +261,27 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   let lowestOpenBuyPrice = 0
 
   if (position > 0) {
+    // Unrealized P&L = Current value of remaining position
+    // (Cost is already accounted for in realizedPnL via totalBuyAmount)
+    unrealizedPnL = currentPrice * position
+
+    // Calculate avgCostBasis for display purposes only (not used in P&L calc)
     if (buyQueue.length > 0) {
-      // Calculate average cost of REMAINING shares (not all shares ever bought)
       const totalCostOfRemaining = buyQueue.reduce((sum, buy) => sum + (buy.price * buy.quantity), 0)
       const totalRemainingShares = buyQueue.reduce((sum, buy) => sum + buy.quantity, 0)
 
-      // Debug: Check if buyQueue shares match position
       if (Math.abs(totalRemainingShares - position) > 0.01) {
-        const msg = `⚠️ [${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares} - Using fallback calculation`
-        console.warn(msg)
-        if (debugCallback) debugCallback(msg)
-
-        // If mismatch, buyQueue is unreliable - use fallback calculation
-        // Calculate average cost of ALL shares ever bought (not just buyQueue)
+        // Position mismatch - use fallback
         avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
-
-        const fallbackMsg = `[${symbol}] Fallback avgCost: $${avgCostBasis.toFixed(2)} (totalBuy=$${totalBuyAmount}, totalShares=${totalBuyShares})`
-        console.log(fallbackMsg)
-        if (debugCallback) debugCallback(fallbackMsg)
       } else {
-        // Normal case: buyQueue matches position
+        // Normal case
         avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
       }
 
       lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
     } else {
-      // Fallback: If buyQueue is empty but position > 0, use old calculation
-      const msg = `[${symbol}] BuyQueue empty but position=${position}, using fallback calculation`
-      console.warn(msg)
-      if (debugCallback) debugCallback(msg)
+      // Fallback
       avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
-    }
-
-    // Unrealized P&L = (Current Price - Avg Cost) * Position
-    unrealizedPnL = (currentPrice - avgCostBasis) * position
-
-    // Debug log for suspicious values (lowered threshold to 5000 to catch more issues)
-    if (Math.abs(unrealizedPnL) > 5000) {
-      const msg = `⚠️ [${symbol}] Large unrealized P&L: $${unrealizedPnL.toFixed(2)} | currentPrice=$${currentPrice} | avgCost=$${avgCostBasis.toFixed(2)} | position=${position}`
-      console.warn(msg)
-      if (debugCallback) debugCallback(msg)
-    }
-
-    // Log ALL positions for debugging
-    if (position > 0) {
-      const msg = `[${symbol}] position=${position}, unrealizedPnL=$${unrealizedPnL.toFixed(2)}, avgCost=$${avgCostBasis.toFixed(2)}`
-      if (debugCallback) debugCallback(msg)
     }
   }
 
