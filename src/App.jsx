@@ -289,6 +289,11 @@ function App() {
     // Fetch current prices and previous close prices
     const { currentPrices: fetchedPrices, previousClosePrices: fetchedPrevClosePrices } = await fetchCurrentPrices(stockSymbols)
 
+    console.log('✓ Fetched prices:', {
+      sampleCurrent: Object.entries(fetchedPrices).slice(0, 3),
+      samplePrevClose: Object.entries(fetchedPrevClosePrices).slice(0, 3)
+    })
+
     // Track failed symbols
     const failed = stockSymbols.filter(s => fetchedPrices[s] === 0)
     setFailedSymbols(failed)
@@ -309,6 +314,11 @@ function App() {
     // Recalculate P&L with warnings collection
     const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
     const warnings = []
+
+    // Add previousClose info to debug output
+    const prevCloseSample = Object.entries(fetchedPrevClosePrices).slice(0, 5)
+    warnings.push(`📊 PreviousClose samples: ${prevCloseSample.map(([s, p]) => `${s}=$${p}`).join(', ')}`)
+
     const pnl = calculatePnL(adjustedTrades, mergedPrices, true, (msg) => {
       console.log('DEBUG:', msg)
       warnings.push(msg)
