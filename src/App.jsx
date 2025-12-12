@@ -977,7 +977,7 @@ function App() {
                     <div className={`value ${pnlTotals.dailyPnL >= 0 ? 'positive' : 'negative'}`}>
                       {formatCurrency(pnlTotals.dailyPnL)}
                     </div>
-                    <div style={{ fontSize: '12px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                    <div style={{ fontSize: '12px', color: '#333', marginTop: '5px', fontStyle: 'italic', fontWeight: '500' }}>
                       Today's change
                     </div>
                   </div>
