@@ -394,8 +394,8 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         </td>
       ),
       footer: () => (
-        <td className={getClassName(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
-          <strong>{formatCurrency(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
+        <td className={getClassName(totals.realTotal)}>
+          <strong>{formatCurrency(totals.realTotal)}</strong>
         </td>
       )
     },
