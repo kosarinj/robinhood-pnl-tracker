@@ -959,21 +959,21 @@ function App() {
                     </div>
                   </div>
                   <div className="summary-card">
-                    <h3>Real Realized</h3>
+                    <h3>Buy/Sell Total</h3>
                     <div className={`value ${pnlTotals.realRealized >= 0 ? 'positive' : 'negative'}`}>
                       {formatCurrency(pnlTotals.realRealized)}
                     </div>
-                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-                      {pnlPercentages.realizedPercent >= 0 ? '+' : ''}{pnlPercentages.realizedPercent.toFixed(2)}%
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                      Net cash flow
                     </div>
                   </div>
                   <div className="summary-card">
-                    <h3>Real Unrealized</h3>
+                    <h3>Current Value</h3>
                     <div className={`value ${pnlTotals.realUnrealized >= 0 ? 'positive' : 'negative'}`}>
                       {formatCurrency(pnlTotals.realUnrealized)}
                     </div>
-                    <div style={{ fontSize: '14px', color: '#666', marginTop: '5px' }}>
-                      {pnlPercentages.unrealizedPercent >= 0 ? '+' : ''}{pnlPercentages.unrealizedPercent.toFixed(2)}%
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                      Holdings value
                     </div>
                   </div>
                   <div className="summary-card" style={{
