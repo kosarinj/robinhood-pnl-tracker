@@ -32,6 +32,22 @@ function App() {
     fifo: false,
     lifo: false
   })
+  const [showColumnCustomizer, setShowColumnCustomizer] = useState(false)
+  const [realPnlColumnOrder, setRealPnlColumnOrder] = useState(() => {
+    const saved = localStorage.getItem('realPnlColumnOrder')
+    return saved ? JSON.parse(saved) : [
+      'avgCost',
+      'lowestBuy',
+      'realized',
+      'currentValue',
+      'unrealized',
+      'total',
+      'buySellTotal',
+      'dailyPnL',
+      'optionsPnL',
+      'percentage'
+    ]
+  })
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null)
   const [tradingSignals, setTradingSignals] = useState([])
   const [signalFilter, setSignalFilter] = useState({
@@ -170,6 +186,36 @@ function App() {
     const updatedAllocations = { ...riskAllocations, [symbol]: parseFloat(amount) }
     setRiskAllocations(updatedAllocations)
     console.log(`Risk allocation for ${symbol} set to ${amount}`)
+  }
+
+  const handleColumnOrderChange = (newOrder) => {
+    setRealPnlColumnOrder(newOrder)
+    localStorage.setItem('realPnlColumnOrder', JSON.stringify(newOrder))
+  }
+
+  const moveColumn = (index, direction) => {
+    const newOrder = [...realPnlColumnOrder]
+    const newIndex = direction === 'up' ? index - 1 : index + 1
+    if (newIndex >= 0 && newIndex < newOrder.length) {
+      [newOrder[index], newOrder[newIndex]] = [newOrder[newIndex], newOrder[index]]
+      handleColumnOrderChange(newOrder)
+    }
+  }
+
+  const resetColumnOrder = () => {
+    const defaultOrder = [
+      'avgCost',
+      'lowestBuy',
+      'realized',
+      'currentValue',
+      'unrealized',
+      'total',
+      'buySellTotal',
+      'dailyPnL',
+      'optionsPnL',
+      'percentage'
+    ]
+    handleColumnOrderChange(defaultOrder)
   }
 
   const applySplitAdjustments = (trades, splits) => {
@@ -740,6 +786,15 @@ function App() {
                 />
                 Real
               </label>
+              {visiblePnlColumns.real && (
+                <button
+                  onClick={() => setShowColumnCustomizer(true)}
+                  className="btn-small"
+                  style={{ marginLeft: '10px', padding: '4px 8px', fontSize: '12px' }}
+                >
+                  ⚙️ Customize
+                </button>
+              )}
               <label>
                 <input
                   type="checkbox"
@@ -898,6 +953,7 @@ function App() {
             manualPrices={manualPrices}
             splitAdjustments={splitAdjustments}
             visiblePnlColumns={visiblePnlColumns}
+            realPnlColumnOrder={realPnlColumnOrder}
             tradingSignals={tradingSignals}
             showChartsInHistory={showChartsInHistory}
             showRiskManagement={showRiskManagement}
@@ -1177,6 +1233,131 @@ function App() {
           useServer={useServer}
           connected={connected}
         />
+      )}
+
+      {/* Column Customizer Popup */}
+      {showColumnCustomizer && (
+        <>
+          <div
+            className="signal-popup"
+            style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 999999,
+              borderLeftColor: '#667eea',
+              maxWidth: '500px',
+              width: '90%',
+              maxHeight: '80vh',
+              overflowY: 'auto'
+            }}
+          >
+            <div className="signal-popup-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h4>⚙️ Customize Real P&L Columns</h4>
+              <button onClick={() => setShowColumnCustomizer(false)} className="btn-small btn-cancel" style={{ fontSize: '16px', padding: '4px 8px' }}>✗</button>
+            </div>
+
+            <div style={{ marginBottom: '15px', fontSize: '14px', color: '#666' }}>
+              Reorder columns using the arrow buttons. Changes are saved automatically.
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              {realPnlColumnOrder.map((columnId, index) => {
+                const columnNames = {
+                  avgCost: 'Avg Cost',
+                  lowestBuy: 'Lowest Buy',
+                  realized: 'Realized P&L',
+                  currentValue: 'Current Value',
+                  unrealized: 'Unrealized P&L',
+                  total: 'Total P&L',
+                  buySellTotal: 'Buy/Sell Total',
+                  dailyPnL: 'Daily P&L',
+                  optionsPnL: 'Options P&L',
+                  percentage: 'Percentage %'
+                }
+
+                return (
+                  <div
+                    key={columnId}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '10px',
+                      marginBottom: '8px',
+                      background: '#f8f9fa',
+                      borderRadius: '6px',
+                      border: '1px solid #dee2e6'
+                    }}
+                  >
+                    <span style={{ flex: 1, fontWeight: '500' }}>
+                      {index + 1}. {columnNames[columnId]}
+                    </span>
+                    <div style={{ display: 'flex', gap: '5px' }}>
+                      <button
+                        onClick={() => moveColumn(index, 'up')}
+                        disabled={index === 0}
+                        className="btn-small"
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '12px',
+                          cursor: index === 0 ? 'not-allowed' : 'pointer',
+                          opacity: index === 0 ? 0.5 : 1
+                        }}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        onClick={() => moveColumn(index, 'down')}
+                        disabled={index === realPnlColumnOrder.length - 1}
+                        className="btn-small"
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '12px',
+                          cursor: index === realPnlColumnOrder.length - 1 ? 'not-allowed' : 'pointer',
+                          opacity: index === realPnlColumnOrder.length - 1 ? 0.5 : 1
+                        }}
+                      >
+                        ▼
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={resetColumnOrder}
+                className="btn-small"
+                style={{ padding: '8px 16px' }}
+              >
+                Reset to Default
+              </button>
+              <button
+                onClick={() => setShowColumnCustomizer(false)}
+                className="btn-small"
+                style={{ padding: '8px 16px', background: '#667eea', color: 'white' }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+
+          {/* Backdrop */}
+          <div
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 999998
+            }}
+            onClick={() => setShowColumnCustomizer(false)}
+          />
+        </>
       )}
     </div>
   )

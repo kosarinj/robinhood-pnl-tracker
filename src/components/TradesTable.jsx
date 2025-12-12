@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 
-function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, visiblePnlColumns, tradingSignals, showChartsInHistory, showRiskManagement, riskAllocations, onManualPriceUpdate, onClearManualPrice, onSplitAdjustment, onClearSplitAdjustment, onTotalsUpdate, onRiskAllocationUpdate }) {
+function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, visiblePnlColumns, realPnlColumnOrder, tradingSignals, showChartsInHistory, showRiskManagement, riskAllocations, onManualPriceUpdate, onClearManualPrice, onSplitAdjustment, onClearSplitAdjustment, onTotalsUpdate, onRiskAllocationUpdate }) {
   const [sortConfig, setSortConfig] = useState({ key: 'symbol', direction: 'asc' })
   const [expandedSymbol, setExpandedSymbol] = useState(null)
   const [editingPrice, setEditingPrice] = useState(null)
@@ -295,6 +295,173 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   const sortedData = getSortedData(data)
 
+  // Column definitions for Real P&L
+  const realPnlColumns = {
+    avgCost: {
+      header: () => (
+        <th onClick={() => handleSort('real.avgCostBasis')} className="sortable" style={{ minWidth: '90px', maxWidth: '90px' }}>
+          Avg Cost{getSortIcon('real.avgCostBasis')}
+        </th>
+      ),
+      cell: (row) => (
+        <td style={{ minWidth: '90px', maxWidth: '90px' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+            <span>{formatCurrency(row.real.avgCostBasis)}</span>
+            {row.real.position > 0 && (
+              <button
+                onClick={() => openWhatIf(row.symbol, row.currentPrice)}
+                className="btn-small btn-edit"
+                style={{ fontSize: '10px', padding: '2px 6px' }}
+                title="What-if calculator"
+              >
+                📊
+              </button>
+            )}
+          </div>
+        </td>
+      ),
+      footer: () => <td></td>
+    },
+    lowestBuy: {
+      header: () => (
+        <th onClick={() => handleSort('real.lowestOpenBuyPrice')} className="sortable" style={{ minWidth: '100px', maxWidth: '100px' }}>
+          Lowest Buy{getSortIcon('real.lowestOpenBuyPrice')}
+        </th>
+      ),
+      cell: (row) => (
+        <td style={{ minWidth: '100px', maxWidth: '100px' }}>
+          {row.real.lowestOpenBuyPrice > 0 ? formatCurrency(row.real.lowestOpenBuyPrice) : '-'}
+        </td>
+      ),
+      footer: () => <td></td>
+    },
+    realized: {
+      header: () => (
+        <th onClick={() => handleSort('real.realizedPnL')} className="sortable">
+          Realized P&L{getSortIcon('real.realizedPnL')}
+        </th>
+      ),
+      cell: (row) => (
+        <td className={getClassName(row.real.realizedPnL)}>
+          {formatCurrency(row.real.realizedPnL)}
+        </td>
+      ),
+      footer: () => (
+        <td className={getClassName(totals.realRealized)}>
+          <strong>{formatCurrency(totals.realRealized)}</strong>
+        </td>
+      )
+    },
+    currentValue: {
+      header: () => <th style={{ minWidth: '120px' }}>Current Value</th>,
+      cell: (row) => (
+        <td>
+          {formatCurrency(rowCurrentValues[row.symbol] || 0)}
+        </td>
+      ),
+      footer: () => (
+        <td>
+          <strong>{formatCurrency(Object.values(rowCurrentValues).reduce((sum, val) => sum + val, 0))}</strong>
+        </td>
+      )
+    },
+    unrealized: {
+      header: () => (
+        <th onClick={() => handleSort('real.unrealizedPnL')} className="sortable">
+          Unrealized P&L{getSortIcon('real.unrealizedPnL')}
+        </th>
+      ),
+      cell: (row) => (
+        <td className={getClassName(row.real.unrealizedPnL)}>
+          {formatCurrency(row.real.unrealizedPnL)}
+        </td>
+      ),
+      footer: () => (
+        <td className={getClassName(totals.realUnrealized)}>
+          <strong>{formatCurrency(totals.realUnrealized)}</strong>
+        </td>
+      )
+    },
+    total: {
+      header: () => (
+        <th onClick={() => handleSort('real.totalPnL')} className="sortable">
+          Total P&L{getSortIcon('real.totalPnL')}
+        </th>
+      ),
+      cell: (row) => (
+        <td className={getClassName(row.real.totalPnL + (row.optionsPnL || 0))}>
+          {formatCurrency(row.real.totalPnL + (row.optionsPnL || 0))}
+        </td>
+      ),
+      footer: () => (
+        <td className={getClassName(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
+          <strong>{formatCurrency(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
+        </td>
+      )
+    },
+    buySellTotal: {
+      header: () => <th style={{ minWidth: '120px' }}>Buy/Sell Total</th>,
+      cell: (row) => (
+        <td className={getClassName(rowBuySellTotals[row.symbol])}>
+          {formatCurrency(rowBuySellTotals[row.symbol] || 0)}
+        </td>
+      ),
+      footer: () => (
+        <td className={getClassName(Object.values(rowBuySellTotals).reduce((sum, val) => sum + val, 0))}>
+          <strong>{formatCurrency(Object.values(rowBuySellTotals).reduce((sum, val) => sum + val, 0))}</strong>
+        </td>
+      )
+    },
+    dailyPnL: {
+      header: () => (
+        <th onClick={() => handleSort('dailyPnL')} className="sortable" style={{ minWidth: '110px' }}>
+          Daily P&L{getSortIcon('dailyPnL')}
+        </th>
+      ),
+      cell: (row) => (
+        <td className={getClassName((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}>
+          {formatCurrency((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}
+        </td>
+      ),
+      footer: () => (
+        <td className={getClassName(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}>
+          <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}</strong>
+        </td>
+      )
+    },
+    optionsPnL: {
+      header: () => (
+        <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
+          Options P&L{getSortIcon('optionsPnL')}
+        </th>
+      ),
+      cell: (row) => (
+        <td className={getClassName(row.optionsPnL || 0)} style={{ fontWeight: (row.optionsCount || 0) > 0 ? 'bold' : 'normal' }}>
+          {formatCurrency(row.optionsPnL || 0)}
+          {(row.optionsCount || 0) > 0 && <span style={{ fontSize: '0.7em', marginLeft: '4px' }}>({row.optionsCount})</span>}
+        </td>
+      ),
+      footer: () => (
+        <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
+          <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
+        </td>
+      )
+    },
+    percentage: {
+      header: () => (
+        <th onClick={() => handleSort('real.percentageReturn')} className="sortable">
+          %{getSortIcon('real.percentageReturn')}
+        </th>
+      ),
+      cell: (row) => (
+        <td className={getClassName(row.real.percentageReturn)}>
+          {row.real.percentageReturn.toFixed(2)}%
+        </td>
+      ),
+      footer: () => <td></td>
+    }
+  }
+
   // Calculate buy/sell totals and current values for each row
   const rowBuySellTotals = {}
   const rowCurrentValues = {}
@@ -435,40 +602,10 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <th style={{ background: '#fff4e6' }}>Used %</th>
               </>
             )}
-            {visiblePnlColumns.real && (
-              <>
-                <th onClick={() => handleSort('real.avgCostBasis')} className="sortable" style={{ minWidth: '90px', maxWidth: '90px' }}>
-                  Avg Cost{getSortIcon('real.avgCostBasis')}
-                </th>
-                <th onClick={() => handleSort('real.lowestOpenBuyPrice')} className="sortable" style={{ minWidth: '100px', maxWidth: '100px' }}>
-                  Lowest Buy{getSortIcon('real.lowestOpenBuyPrice')}
-                </th>
-                <th onClick={() => handleSort('real.realizedPnL')} className="sortable">
-                  Realized P&L{getSortIcon('real.realizedPnL')}
-                </th>
-                <th style={{ minWidth: '120px' }}>
-                  Current Value
-                </th>
-                <th onClick={() => handleSort('real.unrealizedPnL')} className="sortable">
-                  Unrealized P&L{getSortIcon('real.unrealizedPnL')}
-                </th>
-                <th onClick={() => handleSort('real.totalPnL')} className="sortable">
-                  Total P&L{getSortIcon('real.totalPnL')}
-                </th>
-                <th style={{ minWidth: '120px' }}>
-                  Buy/Sell Total
-                </th>
-                <th onClick={() => handleSort('dailyPnL')} className="sortable" style={{ minWidth: '110px' }}>
-                  Daily P&L{getSortIcon('dailyPnL')}
-                </th>
-                <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
-                  Options P&L{getSortIcon('optionsPnL')}
-                </th>
-                <th onClick={() => handleSort('real.percentageReturn')} className="sortable">
-                  %{getSortIcon('real.percentageReturn')}
-                </th>
-              </>
-            )}
+            {visiblePnlColumns.real && realPnlColumnOrder && realPnlColumnOrder.map(columnId => {
+              const column = realPnlColumns[columnId]
+              return column ? <React.Fragment key={columnId}>{column.header()}</React.Fragment> : null
+            })}
             {visiblePnlColumns.avgCost && (
               <>
                 <th onClick={() => handleSort('avgCost.avgCostBasis')} className="sortable">
@@ -696,53 +833,10 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 })()}
 
                 {/* Real P&L columns */}
-                {visiblePnlColumns.real && (
-                  <>
-                    <td style={{ minWidth: '90px', maxWidth: '90px' }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-                        <span>{formatCurrency(row.real.avgCostBasis)}</span>
-                        {row.real.position > 0 && (
-                          <button
-                            onClick={() => openWhatIf(row.symbol, row.currentPrice)}
-                            className="btn-small btn-edit"
-                            style={{ fontSize: '10px', padding: '2px 6px' }}
-                            title="What-if calculator"
-                          >
-                            📊
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: '100px', maxWidth: '100px' }}>
-                      {row.real.lowestOpenBuyPrice > 0 ? formatCurrency(row.real.lowestOpenBuyPrice) : '-'}
-                    </td>
-                    <td className={getClassName(row.real.realizedPnL)}>
-                      {formatCurrency(row.real.realizedPnL)}
-                    </td>
-                    <td>
-                      {formatCurrency(rowCurrentValues[row.symbol] || 0)}
-                    </td>
-                    <td className={getClassName(row.real.unrealizedPnL)}>
-                      {formatCurrency(row.real.unrealizedPnL)}
-                    </td>
-                    <td className={getClassName(row.real.totalPnL + (row.optionsPnL || 0))}>
-                      {formatCurrency(row.real.totalPnL + (row.optionsPnL || 0))}
-                    </td>
-                    <td className={getClassName(rowBuySellTotals[row.symbol])}>
-                      {formatCurrency(rowBuySellTotals[row.symbol] || 0)}
-                    </td>
-                    <td className={getClassName((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}>
-                      {formatCurrency((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}
-                    </td>
-                    <td className={getClassName(row.optionsPnL || 0)} style={{ fontWeight: (row.optionsCount || 0) > 0 ? 'bold' : 'normal' }}>
-                      {formatCurrency(row.optionsPnL || 0)}
-                      {(row.optionsCount || 0) > 0 && <span style={{ fontSize: '0.7em', marginLeft: '4px' }}>({row.optionsCount})</span>}
-                    </td>
-                    <td className={getClassName(row.real.percentageReturn)}>
-                      {row.real.percentageReturn.toFixed(2)}%
-                    </td>
-                  </>
-                )}
+                {visiblePnlColumns.real && realPnlColumnOrder && realPnlColumnOrder.map(columnId => {
+                  const column = realPnlColumns[columnId]
+                  return column ? <React.Fragment key={columnId}>{column.cell(row)}</React.Fragment> : null
+                })}
 
                 {/* Average Cost columns */}
                 {visiblePnlColumns.avgCost && (
@@ -1211,34 +1305,10 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             })()}
 
             {/* Real P&L totals */}
-            {visiblePnlColumns.real && (
-              <>
-                <td></td>
-                <td></td>
-                <td className={getClassName(totals.realRealized)}>
-                  <strong>{formatCurrency(totals.realRealized)}</strong>
-                </td>
-                <td className={getClassName(Object.values(rowBuySellTotals).reduce((sum, val) => sum + val, 0))}>
-                  <strong>{formatCurrency(Object.values(rowBuySellTotals).reduce((sum, val) => sum + val, 0))}</strong>
-                </td>
-                <td>
-                  <strong>{formatCurrency(Object.values(rowCurrentValues).reduce((sum, val) => sum + val, 0))}</strong>
-                </td>
-                <td className={getClassName(totals.realUnrealized)}>
-                  <strong>{formatCurrency(totals.realUnrealized)}</strong>
-                </td>
-                <td className={getClassName(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
-                  <strong>{formatCurrency(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
-                </td>
-                <td className={getClassName(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}>
-                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}</strong>
-                </td>
-                <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
-                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
-                </td>
-                <td></td>
-              </>
-            )}
+            {visiblePnlColumns.real && realPnlColumnOrder && realPnlColumnOrder.map(columnId => {
+              const column = realPnlColumns[columnId]
+              return column ? <React.Fragment key={columnId}>{column.footer()}</React.Fragment> : null
+            })}
 
             {/* Average Cost totals */}
             {visiblePnlColumns.avgCost && (
