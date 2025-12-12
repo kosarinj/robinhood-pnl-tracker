@@ -51,6 +51,7 @@ function App() {
     ]
   })
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null)
+  const [prevCloseDebug, setPrevCloseDebug] = useState(null)
   const [tradingSignals, setTradingSignals] = useState([])
   const [signalFilter, setSignalFilter] = useState({
     BUY: true,
@@ -289,9 +290,18 @@ function App() {
     // Fetch current prices and previous close prices
     const { currentPrices: fetchedPrices, previousClosePrices: fetchedPrevClosePrices } = await fetchCurrentPrices(stockSymbols)
 
+    // Debug previousClose for display
+    const prevCloseSamples = Object.entries(fetchedPrevClosePrices).slice(0, 5)
+    const allZero = prevCloseSamples.every(([s, p]) => p === 0)
+    setPrevCloseDebug({
+      samples: prevCloseSamples,
+      allZero,
+      total: Object.keys(fetchedPrevClosePrices).length
+    })
+
     console.log('✓ Fetched prices:', {
       sampleCurrent: Object.entries(fetchedPrices).slice(0, 3),
-      samplePrevClose: Object.entries(fetchedPrevClosePrices).slice(0, 3)
+      samplePrevClose: prevCloseSamples
     })
 
     // Track failed symbols
@@ -617,6 +627,35 @@ function App() {
           />
         </label>
       </div>
+
+      {/* PreviousClose Debug Banner */}
+      {prevCloseDebug && (
+        <div style={{
+          padding: '15px',
+          background: prevCloseDebug.allZero ? '#f8d7da' : '#d1ecf1',
+          border: `3px solid ${prevCloseDebug.allZero ? '#721c24' : '#0c5460'}`,
+          borderRadius: '8px',
+          marginBottom: '20px',
+          fontSize: '16px',
+          fontWeight: 'bold'
+        }}>
+          {prevCloseDebug.allZero ? (
+            <div style={{ color: '#721c24' }}>
+              ⚠️ WARNING: All previousClose prices are $0! Daily P&L will be $0 for all stocks.
+              <div style={{ fontSize: '14px', marginTop: '5px', fontWeight: 'normal' }}>
+                Fetched {prevCloseDebug.total} symbols but all have previousClose = 0
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: '#0c5460' }}>
+              ✓ PreviousClose prices fetched successfully for {prevCloseDebug.total} symbols
+              <div style={{ fontSize: '14px', marginTop: '5px', fontWeight: 'normal' }}>
+                Samples: {prevCloseDebug.samples.map(([s, p]) => `${s}=$${p.toFixed(2)}`).join(', ')}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="error">
