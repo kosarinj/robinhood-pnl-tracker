@@ -33,6 +33,8 @@ function App() {
     lifo: false
   })
   const [showColumnCustomizer, setShowColumnCustomizer] = useState(false)
+  const [draggedColumn, setDraggedColumn] = useState(null)
+  const [dragOverIndex, setDragOverIndex] = useState(null)
   const [realPnlColumnOrder, setRealPnlColumnOrder] = useState(() => {
     const saved = localStorage.getItem('realPnlColumnOrder')
     return saved ? JSON.parse(saved) : [
@@ -216,6 +218,44 @@ function App() {
       'percentage'
     ]
     handleColumnOrderChange(defaultOrder)
+  }
+
+  const handleDragStart = (e, index) => {
+    setDraggedColumn(index)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/html', e.currentTarget)
+  }
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDragOverIndex(index)
+  }
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null)
+  }
+
+  const handleDrop = (e, dropIndex) => {
+    e.preventDefault()
+    if (draggedColumn === null || draggedColumn === dropIndex) {
+      setDraggedColumn(null)
+      setDragOverIndex(null)
+      return
+    }
+
+    const newOrder = [...realPnlColumnOrder]
+    const [draggedItem] = newOrder.splice(draggedColumn, 1)
+    newOrder.splice(dropIndex, 0, draggedItem)
+
+    handleColumnOrderChange(newOrder)
+    setDraggedColumn(null)
+    setDragOverIndex(null)
+  }
+
+  const handleDragEnd = () => {
+    setDraggedColumn(null)
+    setDragOverIndex(null)
   }
 
   const applySplitAdjustments = (trades, splits) => {
@@ -1259,7 +1299,7 @@ function App() {
             </div>
 
             <div style={{ marginBottom: '15px', fontSize: '14px', color: '#666' }}>
-              Reorder columns using the arrow buttons. Changes are saved automatically.
+              Drag and drop to reorder columns, or use arrow buttons. Changes are saved automatically.
             </div>
 
             <div style={{ marginBottom: '20px' }}>
@@ -1277,19 +1317,32 @@ function App() {
                   percentage: 'Percentage %'
                 }
 
+                const isDragging = draggedColumn === index
+                const isDragOver = dragOverIndex === index
+
                 return (
                   <div
                     key={columnId}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, index)}
+                    onDragOver={(e) => handleDragOver(e, index)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, index)}
+                    onDragEnd={handleDragEnd}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       padding: '10px',
                       marginBottom: '8px',
-                      background: '#f8f9fa',
+                      background: isDragging ? '#e9ecef' : isDragOver ? '#d4edda' : '#f8f9fa',
                       borderRadius: '6px',
-                      border: '1px solid #dee2e6'
+                      border: isDragOver ? '2px dashed #28a745' : '1px solid #dee2e6',
+                      cursor: 'grab',
+                      opacity: isDragging ? 0.5 : 1,
+                      transition: 'all 0.2s ease'
                     }}
                   >
+                    <span style={{ marginRight: '10px', color: '#999', fontSize: '18px' }}>⋮⋮</span>
                     <span style={{ flex: 1, fontWeight: '500' }}>
                       {index + 1}. {columnNames[columnId]}
                     </span>
