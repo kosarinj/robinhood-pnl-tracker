@@ -72,9 +72,18 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     const position = avgCost.position
     const dailyPnL = position > 0 ? (currentPrice - previousClose) * position : 0
 
+    // Debug log for daily PNL - show ALL calculations for stocks with positions
+    if (position > 0 && !isOption) {
+      const msg = `💰 [${symbol}] Daily PNL calc: position=${position} × (current=$${currentPrice} - prevClose=$${previousClose}) = $${dailyPnL.toFixed(2)}`
+      console.log(msg)
+      if (debugCallback) debugCallback(msg)
+    }
+
     // Debug log for daily PNL issues
     if (position > 0 && dailyPnL === 0 && previousClose === 0) {
-      console.warn(`[${symbol}] Daily PNL is 0: previousClose not set (${previousClose}), currentPrice=${currentPrice}, position=${position}`)
+      const msg = `⚠️ [${symbol}] Daily PNL is 0: previousClose not set (${previousClose}), currentPrice=${currentPrice}, position=${position}`
+      console.warn(msg)
+      if (debugCallback) debugCallback(msg)
     }
 
     const item = {
