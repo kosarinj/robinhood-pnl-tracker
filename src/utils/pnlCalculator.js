@@ -53,7 +53,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     const isOption = symbolTrades.some(t => t.isOption)
 
     // Calculate Real P&L (simple buy/sell matching)
-    const real = calculateReal(symbolTrades, currentPrice, symbol)
+    const real = calculateReal(symbolTrades, currentPrice, symbol, debugCallback)
 
     // Calculate Average Cost P&L
     const avgCost = calculateAverageCost(symbolTrades, currentPrice)
@@ -199,7 +199,7 @@ const rollupOptionsByParent = (pnlData) => {
 }
 
 // Real P&L calculation - Simple approach: sum all buy/sell amounts
-const calculateReal = (trades, currentPrice, symbol) => {
+const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   let totalBuyAmount = 0
   let totalSellAmount = 0
   let totalBuyShares = 0
