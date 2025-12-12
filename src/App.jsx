@@ -83,6 +83,35 @@ function App() {
   const [totalRiskBudget, setTotalRiskBudget] = useState(10000) // Default $10k risk budget
   const [stockSymbols, setStockSymbols] = useState([]) // Stock symbols (excluding options)
 
+  // Helper function to get dynamic color for Daily PNL
+  const getDailyPnLColor = (value) => {
+    if (value === 0) {
+      return { background: '#f8f9fa', border: '#6c757d', textColor: '#333' }
+    }
+
+    // For positive values: scale from light green to deep green
+    if (value > 0) {
+      const intensity = Math.min(value / 1000, 1) // Cap at $1000 for max green
+      const lightness = 85 - (intensity * 45) // 85% to 40% lightness
+      const saturation = 40 + (intensity * 30) // 40% to 70% saturation
+      return {
+        background: `hsl(120, ${saturation}%, ${lightness}%)`,
+        border: `hsl(120, ${saturation + 10}%, ${lightness - 20}%)`,
+        textColor: lightness < 60 ? '#fff' : '#155724'
+      }
+    }
+
+    // For negative values: scale from light red to deep red
+    const intensity = Math.min(Math.abs(value) / 1000, 1) // Cap at -$1000 for max red
+    const lightness = 85 - (intensity * 45) // 85% to 40% lightness
+    const saturation = 40 + (intensity * 30) // 40% to 70% saturation
+    return {
+      background: `hsl(0, ${saturation}%, ${lightness}%)`,
+      border: `hsl(0, ${saturation + 10}%, ${lightness - 20}%)`,
+      textColor: lightness < 60 ? '#fff' : '#721c24'
+    }
+  }
+
   // Connect to server on mount
   useEffect(() => {
     if (!useServer) return
@@ -950,12 +979,15 @@ function App() {
                       {pnlPercentages.unrealizedPercent >= 0 ? '+' : ''}{pnlPercentages.unrealizedPercent.toFixed(2)}%
                     </div>
                   </div>
-                  <div className="summary-card" style={{ background: '#d4edda', borderLeft: '4px solid #28a745' }}>
-                    <h3>Daily P&L</h3>
-                    <div className={`value ${pnlTotals.dailyPnL >= 0 ? 'positive' : 'negative'}`}>
+                  <div className="summary-card" style={{
+                    background: getDailyPnLColor(pnlTotals.dailyPnL).background,
+                    borderLeft: `4px solid ${getDailyPnLColor(pnlTotals.dailyPnL).border}`
+                  }}>
+                    <h3 style={{ color: getDailyPnLColor(pnlTotals.dailyPnL).textColor }}>Daily P&L</h3>
+                    <div className="value" style={{ color: getDailyPnLColor(pnlTotals.dailyPnL).textColor }}>
                       {formatCurrency(pnlTotals.dailyPnL)}
                     </div>
-                    <div style={{ fontSize: '12px', color: '#333', marginTop: '5px', fontStyle: 'italic', fontWeight: '500' }}>
+                    <div style={{ fontSize: '12px', color: getDailyPnLColor(pnlTotals.dailyPnL).textColor, marginTop: '5px', fontStyle: 'italic', fontWeight: '500', opacity: 0.8 }}>
                       Today's change
                     </div>
                   </div>

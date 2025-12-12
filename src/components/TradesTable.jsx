@@ -31,6 +31,37 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     return ''
   }
 
+  // Helper function to get dynamic gradient color for Daily PNL cells
+  const getDailyPnLStyle = (value) => {
+    if (value === 0) {
+      return { backgroundColor: '#f8f9fa', color: '#333' }
+    }
+
+    // For positive values: scale from light green to deep green
+    if (value > 0) {
+      const intensity = Math.min(value / 1000, 1) // Cap at $1000 for max green
+      const lightness = 90 - (intensity * 50) // 90% to 40% lightness
+      const saturation = 35 + (intensity * 35) // 35% to 70% saturation
+      const textColor = lightness < 65 ? '#fff' : '#155724'
+      return {
+        backgroundColor: `hsl(120, ${saturation}%, ${lightness}%)`,
+        color: textColor,
+        fontWeight: intensity > 0.5 ? 'bold' : 'normal'
+      }
+    }
+
+    // For negative values: scale from light red to deep red
+    const intensity = Math.min(Math.abs(value) / 1000, 1) // Cap at -$1000 for max red
+    const lightness = 90 - (intensity * 50) // 90% to 40% lightness
+    const saturation = 35 + (intensity * 35) // 35% to 70% saturation
+    const textColor = lightness < 65 ? '#fff' : '#721c24'
+    return {
+      backgroundColor: `hsl(0, ${saturation}%, ${lightness}%)`,
+      color: textColor,
+      fontWeight: intensity > 0.5 ? 'bold' : 'normal'
+    }
+  }
+
   const getSignalForSymbol = (symbol) => {
     if (!tradingSignals || tradingSignals.length === 0) return null
     return tradingSignals.find(s => s.symbol === symbol)
@@ -418,16 +449,22 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
           Daily P&L{getSortIcon('dailyPnL')}
         </th>
       ),
-      cell: (row) => (
-        <td className={getClassName((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}>
-          {formatCurrency((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}
-        </td>
-      ),
-      footer: () => (
-        <td className={getClassName(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}>
-          <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}</strong>
-        </td>
-      )
+      cell: (row) => {
+        const dailyValue = (row.dailyPnL || 0) + (row.optionsDailyPnL || 0)
+        return (
+          <td style={getDailyPnLStyle(dailyValue)}>
+            {formatCurrency(dailyValue)}
+          </td>
+        )
+      },
+      footer: () => {
+        const totalDaily = data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0)
+        return (
+          <td style={getDailyPnLStyle(totalDaily)}>
+            <strong>{formatCurrency(totalDaily)}</strong>
+          </td>
+        )
+      }
     },
     optionsPnL: {
       header: () => (
