@@ -22,6 +22,7 @@ function App() {
   const [csvStats, setCsvStats] = useState(null)
   const [manualPrices, setManualPrices] = useState({})
   const [currentPrices, setCurrentPrices] = useState({})
+  const [previousClosePrices, setPreviousClosePrices] = useState({})
   const [splitAdjustments, setSplitAdjustments] = useState({})
   const [failedSymbols, setFailedSymbols] = useState([])
   const [showSignals, setShowSignals] = useState(false)
@@ -113,7 +114,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...updatedManualPrices }
         const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices) // Always rollup options
         setPnlData(pnl)
       }
     }
@@ -128,7 +129,7 @@ function App() {
     if (trades.length > 0) {
       const mergedPrices = { ...currentPrices, ...updatedManualPrices }
       const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-      const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
+      const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices) // Always rollup options
       setPnlData(pnl)
     }
   }
@@ -145,7 +146,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...manualPrices }
         const adjustedTrades = applySplitAdjustments(trades, updatedSplits)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices) // Always rollup options
         setPnlData(pnl)
       }
     }
@@ -160,7 +161,7 @@ function App() {
     if (trades.length > 0) {
       const mergedPrices = { ...currentPrices, ...manualPrices }
       const adjustedTrades = applySplitAdjustments(trades, updatedSplits)
-      const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
+      const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices) // Always rollup options
       setPnlData(pnl)
     }
   }
@@ -199,8 +200,8 @@ function App() {
     // Save stock symbols to state
     setStockSymbols(stockSymbols)
 
-    // Fetch current prices
-    const fetchedPrices = await fetchCurrentPrices(stockSymbols)
+    // Fetch current prices and previous close prices
+    const { currentPrices: fetchedPrices, previousClosePrices: fetchedPrevClosePrices } = await fetchCurrentPrices(stockSymbols)
 
     // Track failed symbols
     const failed = stockSymbols.filter(s => fetchedPrices[s] === 0)
@@ -210,16 +211,18 @@ function App() {
     allSymbols.forEach(symbol => {
       if (!fetchedPrices[symbol]) {
         fetchedPrices[symbol] = 0
+        fetchedPrevClosePrices[symbol] = 0
       }
     })
 
     // Merge with manual overrides
     const mergedPrices = { ...fetchedPrices, ...manualPrices }
     setCurrentPrices(fetchedPrices)
+    setPreviousClosePrices(fetchedPrevClosePrices)
 
     // Recalculate P&L
     const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-    const pnl = calculatePnL(adjustedTrades, mergedPrices, true) // Always rollup options
+    const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, fetchedPrevClosePrices) // Always rollup options
     setPnlData(pnl)
 
     setLastPriceUpdate(new Date())
@@ -405,7 +408,7 @@ function App() {
         setStockSymbols(stockSymbols)
 
         // Fetch current prices from Yahoo Finance (only for stocks, not options)
-        const fetchedPrices = await fetchCurrentPrices(stockSymbols)
+        const { currentPrices: fetchedPrices, previousClosePrices: fetchedPrevClosePrices } = await fetchCurrentPrices(stockSymbols)
 
         // Track failed symbols (stocks that got $0 price)
         const failed = stockSymbols.filter(s => fetchedPrices[s] === 0)
@@ -415,12 +418,14 @@ function App() {
         allSymbols.forEach(symbol => {
           if (!fetchedPrices[symbol]) {
             fetchedPrices[symbol] = 0
+            fetchedPrevClosePrices[symbol] = 0
           }
         })
 
         // Merge fetched prices with manual overrides
         const mergedPrices = { ...fetchedPrices, ...manualPrices }
         setCurrentPrices(fetchedPrices)
+        setPreviousClosePrices(fetchedPrevClosePrices)
 
         // Apply split adjustments to trades
         const adjustedTrades = applySplitAdjustments(parsedTrades, splitAdjustments)
@@ -431,7 +436,7 @@ function App() {
         const pnl = calculatePnL(adjustedTrades, mergedPrices, true, (msg) => {
           console.log('DEBUG CALLBACK:', msg)
           debugMessages.push(msg)
-        })
+        }, fetchedPrevClosePrices)
         setPnlData(pnl)
         console.log('Debug messages collected:', debugMessages.length)
         setDebugInfo(debugMessages)
@@ -831,28 +836,9 @@ function App() {
             </div>
           )}
 
-          <TradesTable
-            data={filteredData}
-            allData={pnlData}
-            trades={trades}
-            manualPrices={manualPrices}
-            splitAdjustments={splitAdjustments}
-            visiblePnlColumns={visiblePnlColumns}
-            tradingSignals={tradingSignals}
-            showChartsInHistory={showChartsInHistory}
-            showRiskManagement={showRiskManagement}
-            riskAllocations={riskAllocations}
-            onManualPriceUpdate={handleManualPriceUpdate}
-            onClearManualPrice={handleClearManualPrice}
-            onSplitAdjustment={handleSplitAdjustment}
-            onClearSplitAdjustment={handleClearSplitAdjustment}
-            onTotalsUpdate={setPnlTotals}
-            onRiskAllocationUpdate={handleRiskAllocationUpdate}
-          />
-
-          {/* PNL Summary Cards */}
+          {/* PNL Summary Cards - Real PNL and Daily PNL Above Grid */}
           {pnlTotals && (
-            <div className="summary" style={{ marginTop: '20px' }}>
+            <div className="summary" style={{ marginTop: '20px', marginBottom: '20px' }}>
               {/* Total Principal Card */}
               <div className="summary-card">
                 <h3>Total Principal</h3>
@@ -861,7 +847,7 @@ function App() {
                 </div>
               </div>
 
-              {/* Real PNL Cards - Moved to top */}
+              {/* Real PNL Cards */}
               {visiblePnlColumns.real && (
                 <>
                   <div className="summary-card">
@@ -891,9 +877,42 @@ function App() {
                       {pnlPercentages.unrealizedPercent >= 0 ? '+' : ''}{pnlPercentages.unrealizedPercent.toFixed(2)}%
                     </div>
                   </div>
+                  <div className="summary-card" style={{ background: '#e7f3ff', borderLeft: '4px solid #2196f3' }}>
+                    <h3>Daily P&L</h3>
+                    <div className={`value ${pnlTotals.dailyPnL >= 0 ? 'positive' : 'negative'}`}>
+                      {formatCurrency(pnlTotals.dailyPnL)}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '5px', fontStyle: 'italic' }}>
+                      Today's change
+                    </div>
+                  </div>
                 </>
               )}
+            </div>
+          )}
 
+          <TradesTable
+            data={filteredData}
+            allData={pnlData}
+            trades={trades}
+            manualPrices={manualPrices}
+            splitAdjustments={splitAdjustments}
+            visiblePnlColumns={visiblePnlColumns}
+            tradingSignals={tradingSignals}
+            showChartsInHistory={showChartsInHistory}
+            showRiskManagement={showRiskManagement}
+            riskAllocations={riskAllocations}
+            onManualPriceUpdate={handleManualPriceUpdate}
+            onClearManualPrice={handleClearManualPrice}
+            onSplitAdjustment={handleSplitAdjustment}
+            onClearSplitAdjustment={handleClearSplitAdjustment}
+            onTotalsUpdate={setPnlTotals}
+            onRiskAllocationUpdate={handleRiskAllocationUpdate}
+          />
+
+          {/* PNL Summary Cards - LIFO/FIFO Below Grid */}
+          {pnlTotals && (
+            <div className="summary" style={{ marginTop: '20px' }}>
               {/* Risk Management Summary */}
               {showRiskManagement && (() => {
                 const totalAllocated = filteredData.reduce((sum, row) => sum + ((riskAllocations && riskAllocations[row.symbol]) || 0), 0)

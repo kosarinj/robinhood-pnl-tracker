@@ -17,7 +17,7 @@ const extractParentInstrument = (description) => {
 }
 
 // Calculate P&L using Average Cost, FIFO, and LIFO methods
-export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null) => {
+export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null, previousClosePrices = {}) => {
   const debugLog = (msg) => {
     if (debugCallback) debugCallback(msg)
   }
@@ -42,6 +42,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
   Object.keys(tradesBySymbol).forEach((symbol) => {
     const symbolTrades = tradesBySymbol[symbol]
     const currentPrice = currentPrices[symbol] || 0
+    const previousClose = previousClosePrices[symbol] || 0
 
     // Determine if this symbol represents options
     const isOption = symbolTrades.some(t => t.isOption)
@@ -62,11 +63,17 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     const description = symbolTrades[0].description || symbolTrades[0].instrument || symbol
     const parentInstrument = isOption ? extractParentInstrument(description) : null
 
+    // Calculate daily PNL: (Current Price - Previous Close) * Position
+    const position = avgCost.position
+    const dailyPnL = position > 0 ? (currentPrice - previousClose) * position : 0
+
     const item = {
       symbol,
       instrument: symbolTrades[0].instrument,
       isOption,
       currentPrice,
+      previousClose,
+      dailyPnL,
       real,
       avgCost,
       fifo,
@@ -98,21 +105,23 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
   // Add options P&L to stocks
   results.forEach(item => {
     if (!item.isOption && optionsByParent[item.symbol]) {
-      // This stock has options - calculate total options P&L
+      // This stock has options - calculate total options P&L and daily PNL
       const options = optionsByParent[item.symbol]
 
       debugLog(`\n📊 ${item.symbol} has ${options.length} options:`)
       options.forEach(opt => {
-        debugLog(`   ${opt.symbol}: P&L=$${opt.real.totalPnL}`)
+        debugLog(`   ${opt.symbol}: P&L=$${opt.real.totalPnL}, Daily=$${opt.dailyPnL}`)
       })
 
       item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
+      item.optionsDailyPnL = options.reduce((sum, opt) => sum + (opt.dailyPnL || 0), 0)
       item.optionsCount = options.length
       item.options = options // Store options array for trade history
 
-      debugLog(`   TOTAL: $${item.optionsPnL}`)
+      debugLog(`   TOTAL P&L: $${item.optionsPnL}, TOTAL DAILY: $${item.optionsDailyPnL}`)
     } else {
       item.optionsPnL = 0
+      item.optionsDailyPnL = 0
       item.optionsCount = 0
       item.options = []
     }

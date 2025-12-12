@@ -19,14 +19,15 @@ const fetchPriceForSymbol = async (symbol, retryCount = 0) => {
       const meta = response.data.chart.result[0].meta
       // Try to get the most recent price - prefer regularMarketPrice, fallback to previousClose
       const quote = meta.regularMarketPrice || meta.previousClose || 0
+      const prevClose = meta.previousClose || 0
 
       // Log the timestamp to see how fresh the data is
       const marketTime = meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toLocaleTimeString() : 'unknown'
-      console.log(`✓ Fetched price for ${symbol}: $${quote} (market time: ${marketTime})`)
-      return quote
+      console.log(`✓ Fetched price for ${symbol}: $${quote} (prev close: $${prevClose}, market time: ${marketTime})`)
+      return { current: quote, previousClose: prevClose }
     } else {
       console.warn(`⚠ No price data in response for ${symbol}`)
-      return 0
+      return { current: 0, previousClose: 0 }
     }
   } catch (error) {
     if (retryCount < 1) {
@@ -35,19 +36,21 @@ const fetchPriceForSymbol = async (symbol, retryCount = 0) => {
       return fetchPriceForSymbol(symbol, retryCount + 1)
     }
     console.error(`✗ Failed to fetch price for ${symbol}:`, error.response?.status, error.message)
-    return 0
+    return { current: 0, previousClose: 0 }
   }
 }
 
 export const fetchCurrentPrices = async (symbols) => {
   const prices = {}
+  const previousClosePrices = {}
 
   console.log(`Fetching prices for ${symbols.length} symbols...`)
 
   // Fetch all prices in parallel for speed
   const promises = symbols.map(async (symbol) => {
-    const price = await fetchPriceForSymbol(symbol)
-    prices[symbol] = price
+    const priceData = await fetchPriceForSymbol(symbol)
+    prices[symbol] = priceData.current
+    previousClosePrices[symbol] = priceData.previousClose
   })
 
   await Promise.all(promises)
@@ -55,7 +58,7 @@ export const fetchCurrentPrices = async (symbols) => {
   const successCount = Object.values(prices).filter(p => p > 0).length
   console.log(`Successfully fetched ${successCount}/${symbols.length} prices`)
 
-  return prices
+  return { currentPrices: prices, previousClosePrices }
 }
 
 export const fetchQuote = async (symbol) => {

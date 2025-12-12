@@ -351,6 +351,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         realRealized: acc.realRealized + row.real.realizedPnL + optionsRealized,
         realUnrealized: acc.realUnrealized + row.real.unrealizedPnL + optionsUnrealized,
         realTotal: acc.realTotal + row.real.totalPnL + (row.optionsPnL || 0),
+        dailyPnL: acc.dailyPnL + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0),
         avgCostUnrealized: acc.avgCostUnrealized + row.avgCost.unrealizedPnL,
         fifoRealized: acc.fifoRealized + row.fifo.realizedPnL,
         fifoUnrealized: acc.fifoUnrealized + row.fifo.unrealizedPnL,
@@ -364,6 +365,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       realRealized: 0,
       realUnrealized: 0,
       realTotal: 0,
+      dailyPnL: 0,
       avgCostUnrealized: 0,
       fifoRealized: 0,
       fifoUnrealized: 0,
@@ -413,7 +415,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
               <th colSpan="3" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6', background: '#fff4e6' }}>Risk Management</th>
             )}
             {visiblePnlColumns.real && (
-              <th colSpan="9" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Real P&L</th>
+              <th colSpan="10" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Real P&L</th>
             )}
             {visiblePnlColumns.avgCost && (
               <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Average Cost</th>
@@ -458,6 +460,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 </th>
                 <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
                   Options P&L{getSortIcon('optionsPnL')}
+                </th>
+                <th onClick={() => handleSort('dailyPnL')} className="sortable" style={{ minWidth: '110px' }}>
+                  Daily P&L{getSortIcon('dailyPnL')}
                 </th>
                 <th onClick={() => handleSort('real.percentageReturn')} className="sortable">
                   %{getSortIcon('real.percentageReturn')}
@@ -730,6 +735,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                       {formatCurrency(row.optionsPnL || 0)}
                       {(row.optionsCount || 0) > 0 && <span style={{ fontSize: '0.7em', marginLeft: '4px' }}>({row.optionsCount})</span>}
                     </td>
+                    <td className={getClassName((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}>
+                      {formatCurrency((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}
+                    </td>
                     <td className={getClassName(row.real.percentageReturn)}>
                       {row.real.percentageReturn.toFixed(2)}%
                     </td>
@@ -784,7 +792,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             {/* Expanded row showing individual trades or options */}
             {expandedSymbol === row.symbol && (
               <tr className="expanded-row">
-                <td colSpan={3 + (showRiskManagement ? 3 : 0) + (visiblePnlColumns.real ? 9 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
+                <td colSpan={3 + (showRiskManagement ? 3 : 0) + (visiblePnlColumns.real ? 10 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
                   <div className="trades-detail" style={{ background: 'white', padding: '20px' }}>
                     {row.isRollup ? (
                       // Display individual options for rolled-up parent instruments
@@ -1224,6 +1232,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 </td>
                 <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
                   <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
+                </td>
+                <td className={getClassName(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}>
+                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}</strong>
                 </td>
                 <td></td>
               </>
