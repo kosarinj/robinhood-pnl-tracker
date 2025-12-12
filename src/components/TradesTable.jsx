@@ -458,11 +458,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <th style={{ minWidth: '120px' }}>
                   Buy/Sell Total
                 </th>
-                <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
-                  Options P&L{getSortIcon('optionsPnL')}
-                </th>
                 <th onClick={() => handleSort('dailyPnL')} className="sortable" style={{ minWidth: '110px' }}>
                   Daily P&L{getSortIcon('dailyPnL')}
+                </th>
+                <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
+                  Options P&L{getSortIcon('optionsPnL')}
                 </th>
                 <th onClick={() => handleSort('real.percentageReturn')} className="sortable">
                   %{getSortIcon('real.percentageReturn')}
@@ -731,12 +731,12 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     <td className={getClassName(rowBuySellTotals[row.symbol])}>
                       {formatCurrency(rowBuySellTotals[row.symbol] || 0)}
                     </td>
+                    <td className={getClassName((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}>
+                      {formatCurrency((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}
+                    </td>
                     <td className={getClassName(row.optionsPnL || 0)} style={{ fontWeight: (row.optionsCount || 0) > 0 ? 'bold' : 'normal' }}>
                       {formatCurrency(row.optionsPnL || 0)}
                       {(row.optionsCount || 0) > 0 && <span style={{ fontSize: '0.7em', marginLeft: '4px' }}>({row.optionsCount})</span>}
-                    </td>
-                    <td className={getClassName((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}>
-                      {formatCurrency((row.dailyPnL || 0) + (row.optionsDailyPnL || 0))}
                     </td>
                     <td className={getClassName(row.real.percentageReturn)}>
                       {row.real.percentageReturn.toFixed(2)}%
@@ -1230,11 +1230,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 <td className={getClassName(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
                   <strong>{formatCurrency(totals.realTotal + data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
                 </td>
-                <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
-                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
-                </td>
                 <td className={getClassName(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}>
                   <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0), 0))}</strong>
+                </td>
+                <td className={getClassName(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}>
+                  <strong>{formatCurrency(data.reduce((sum, row) => sum + (row.optionsPnL || 0), 0))}</strong>
                 </td>
                 <td></td>
               </>
