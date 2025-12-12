@@ -67,6 +67,11 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     const position = avgCost.position
     const dailyPnL = position > 0 ? (currentPrice - previousClose) * position : 0
 
+    // Debug log for daily PNL issues
+    if (position > 0 && dailyPnL === 0 && previousClose === 0) {
+      console.warn(`[${symbol}] Daily PNL is 0: previousClose not set (${previousClose}), currentPrice=${currentPrice}, position=${position}`)
+    }
+
     const item = {
       symbol,
       instrument: symbolTrades[0].instrument,
@@ -236,17 +241,32 @@ const calculateReal = (trades, currentPrice, symbol) => {
   let avgCostBasis = 0
   let lowestOpenBuyPrice = 0
 
-  if (position > 0 && buyQueue.length > 0) {
-    // Calculate average cost of REMAINING shares (not all shares ever bought)
-    const totalCostOfRemaining = buyQueue.reduce((sum, buy) => sum + (buy.price * buy.quantity), 0)
-    const totalRemainingShares = buyQueue.reduce((sum, buy) => sum + buy.quantity, 0)
-    avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
+  if (position > 0) {
+    if (buyQueue.length > 0) {
+      // Calculate average cost of REMAINING shares (not all shares ever bought)
+      const totalCostOfRemaining = buyQueue.reduce((sum, buy) => sum + (buy.price * buy.quantity), 0)
+      const totalRemainingShares = buyQueue.reduce((sum, buy) => sum + buy.quantity, 0)
+
+      // Debug: Check if buyQueue shares match position
+      if (Math.abs(totalRemainingShares - position) > 0.01) {
+        console.warn(`[${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares}`)
+      }
+
+      avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
+      lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
+    } else {
+      // Fallback: If buyQueue is empty but position > 0, use old calculation
+      console.warn(`[${symbol}] BuyQueue empty but position=${position}, using fallback calculation`)
+      avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+    }
 
     // Unrealized P&L = (Current Price - Avg Cost) * Position
     unrealizedPnL = (currentPrice - avgCostBasis) * position
 
-    // Find the lowest price among remaining open buys
-    lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
+    // Debug log for suspicious values
+    if (Math.abs(unrealizedPnL) > 10000) {
+      console.warn(`[${symbol}] Large unrealized P&L: ${unrealizedPnL}, currentPrice=${currentPrice}, avgCost=${avgCostBasis}, position=${position}`)
+    }
   }
 
   // Total P&L = Realized + Unrealized
