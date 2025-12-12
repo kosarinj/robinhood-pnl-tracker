@@ -254,14 +254,18 @@ const calculateReal = (trades, currentPrice, symbol) => {
 
       // Debug: Check if buyQueue shares match position
       if (Math.abs(totalRemainingShares - position) > 0.01) {
-        console.warn(`[${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares}`)
+        const msg = `[${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares}`
+        console.warn(msg)
+        if (debugCallback) debugCallback(msg)
       }
 
       avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
       lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
     } else {
       // Fallback: If buyQueue is empty but position > 0, use old calculation
-      console.warn(`[${symbol}] BuyQueue empty but position=${position}, using fallback calculation`)
+      const msg = `[${symbol}] BuyQueue empty but position=${position}, using fallback calculation`
+      console.warn(msg)
+      if (debugCallback) debugCallback(msg)
       avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
     }
 
@@ -270,7 +274,9 @@ const calculateReal = (trades, currentPrice, symbol) => {
 
     // Debug log for suspicious values
     if (Math.abs(unrealizedPnL) > 10000) {
-      console.warn(`[${symbol}] Large unrealized P&L: ${unrealizedPnL}, currentPrice=${currentPrice}, avgCost=${avgCostBasis}, position=${position}`)
+      const msg = `⚠️ [${symbol}] Large unrealized P&L: ${unrealizedPnL.toFixed(2)}, currentPrice=${currentPrice}, avgCost=${avgCostBasis.toFixed(2)}, position=${position}`
+      console.warn(msg)
+      if (debugCallback) debugCallback(msg)
     }
   }
 

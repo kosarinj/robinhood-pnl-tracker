@@ -306,13 +306,18 @@ function App() {
     setCurrentPrices(fetchedPrices)
     setPreviousClosePrices(fetchedPrevClosePrices)
 
-    // Recalculate P&L
+    // Recalculate P&L with warnings collection
     const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-    const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, fetchedPrevClosePrices) // Always rollup options
+    const warnings = []
+    const pnl = calculatePnL(adjustedTrades, mergedPrices, true, (msg) => {
+      console.log('DEBUG:', msg)
+      warnings.push(msg)
+    }, fetchedPrevClosePrices) // Always rollup options
     setPnlData(pnl)
+    setDebugInfo(warnings) // Show warnings on screen
 
     setLastPriceUpdate(new Date())
-    console.log('Prices refreshed')
+    console.log('Prices refreshed', { warningsCount: warnings.length })
   }
 
   const handleSymbolLookup = async () => {
