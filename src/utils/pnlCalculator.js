@@ -268,18 +268,17 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
 
       // Debug: Check if buyQueue shares match position
       if (Math.abs(totalRemainingShares - position) > 0.01) {
-        const msg = `⚠️ [${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares} - Using position as source of truth`
+        const msg = `⚠️ [${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares} - Using fallback calculation`
         console.warn(msg)
         if (debugCallback) debugCallback(msg)
 
-        // If mismatch, scale the cost basis to actual position
-        // This handles short positions that were later covered
-        if (position > 0 && totalRemainingShares > 0) {
-          avgCostBasis = totalCostOfRemaining / totalRemainingShares
-        } else {
-          // Fallback for edge cases
-          avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
-        }
+        // If mismatch, buyQueue is unreliable - use fallback calculation
+        // Calculate average cost of ALL shares ever bought (not just buyQueue)
+        avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+
+        const fallbackMsg = `[${symbol}] Fallback avgCost: $${avgCostBasis.toFixed(2)} (totalBuy=$${totalBuyAmount}, totalShares=${totalBuyShares})`
+        console.log(fallbackMsg)
+        if (debugCallback) debugCallback(fallbackMsg)
       } else {
         // Normal case: buyQueue matches position
         avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
