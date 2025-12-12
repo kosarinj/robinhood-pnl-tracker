@@ -254,12 +254,23 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
 
       // Debug: Check if buyQueue shares match position
       if (Math.abs(totalRemainingShares - position) > 0.01) {
-        const msg = `[${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares}`
+        const msg = `⚠️ [${symbol}] Position mismatch: position=${position}, buyQueue total=${totalRemainingShares} - Using position as source of truth`
         console.warn(msg)
         if (debugCallback) debugCallback(msg)
+
+        // If mismatch, scale the cost basis to actual position
+        // This handles short positions that were later covered
+        if (position > 0 && totalRemainingShares > 0) {
+          avgCostBasis = totalCostOfRemaining / totalRemainingShares
+        } else {
+          // Fallback for edge cases
+          avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+        }
+      } else {
+        // Normal case: buyQueue matches position
+        avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
       }
 
-      avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
       lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
     } else {
       // Fallback: If buyQueue is empty but position > 0, use old calculation
