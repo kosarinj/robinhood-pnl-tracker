@@ -18,6 +18,11 @@ const extractParentInstrument = (description) => {
 
 // Calculate P&L using Average Cost, FIFO, and LIFO methods
 export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null, previousClosePrices = {}) => {
+  // Log when calculatePnL is called to catch duplicate calls
+  const prevCloseCount = Object.keys(previousClosePrices).length
+  const hasPrevClose = Object.values(previousClosePrices).some(v => v > 0)
+  console.log(`🔄 calculatePnL called: ${prevCloseCount} symbols, hasPreviousClose=${hasPrevClose}`, new Error().stack.split('\n')[2])
+
   const debugLog = (msg) => {
     if (debugCallback) debugCallback(msg)
   }
