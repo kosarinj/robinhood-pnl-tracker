@@ -717,7 +717,7 @@ function App() {
           overflow: 'auto',
           whiteSpace: 'pre-wrap'
         }}>
-          <strong style={{ fontSize: '18px', marginBottom: '15px', display: 'block', color: '#0c5460' }}>🔍 OPTIONS DEBUG INFO:</strong>
+          <strong style={{ fontSize: '18px', marginBottom: '15px', display: 'block', color: '#0c5460' }}>🔍 P&L CALCULATION DEBUG INFO:</strong>
           {debugInfo.map((msg, i) => <div key={i} style={{ marginBottom: '5px' }}>{msg}</div>)}
         </div>
       )}

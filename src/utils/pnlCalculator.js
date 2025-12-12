@@ -272,10 +272,16 @@ const calculateReal = (trades, currentPrice, symbol) => {
     // Unrealized P&L = (Current Price - Avg Cost) * Position
     unrealizedPnL = (currentPrice - avgCostBasis) * position
 
-    // Debug log for suspicious values
-    if (Math.abs(unrealizedPnL) > 10000) {
-      const msg = `⚠️ [${symbol}] Large unrealized P&L: ${unrealizedPnL.toFixed(2)}, currentPrice=${currentPrice}, avgCost=${avgCostBasis.toFixed(2)}, position=${position}`
+    // Debug log for suspicious values (lowered threshold to 5000 to catch more issues)
+    if (Math.abs(unrealizedPnL) > 5000) {
+      const msg = `⚠️ [${symbol}] Large unrealized P&L: $${unrealizedPnL.toFixed(2)} | currentPrice=$${currentPrice} | avgCost=$${avgCostBasis.toFixed(2)} | position=${position}`
       console.warn(msg)
+      if (debugCallback) debugCallback(msg)
+    }
+
+    // Log ALL positions for debugging
+    if (position > 0) {
+      const msg = `[${symbol}] position=${position}, unrealizedPnL=$${unrealizedPnL.toFixed(2)}, avgCost=$${avgCostBasis.toFixed(2)}`
       if (debugCallback) debugCallback(msg)
     }
   }
