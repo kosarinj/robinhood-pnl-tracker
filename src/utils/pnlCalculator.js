@@ -77,6 +77,11 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     const position = avgCost.position
     const dailyPnL = position > 0 ? (currentPrice - previousClose) * position : 0
 
+    // Calculate "Made Up Ground": profit made when stock is down
+    // If price is down from previous close but daily PNL is positive,
+    // it means you made money through trading despite the price drop
+    const madeUpGround = (currentPrice < previousClose && dailyPnL > 0) ? dailyPnL : 0
+
     // Debug log for daily PNL - show ALL calculations for stocks with positions
     if (position > 0 && !isOption) {
       const msg = `💰 [${symbol}] Daily PNL calc: position=${position} × (current=$${currentPrice} - prevClose=$${previousClose}) = $${dailyPnL.toFixed(2)}`
@@ -98,6 +103,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
       currentPrice,
       previousClose,
       dailyPnL,
+      madeUpGround,
       real,
       avgCost,
       fifo,
@@ -139,6 +145,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
 
       item.optionsPnL = options.reduce((sum, opt) => sum + (opt.real.totalPnL || 0), 0)
       item.optionsDailyPnL = options.reduce((sum, opt) => sum + (opt.dailyPnL || 0), 0)
+      item.optionsMadeUpGround = options.reduce((sum, opt) => sum + (opt.madeUpGround || 0), 0)
       item.optionsCount = options.length
       item.options = options // Store options array for trade history
 
@@ -146,6 +153,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     } else {
       item.optionsPnL = 0
       item.optionsDailyPnL = 0
+      item.optionsMadeUpGround = 0
       item.optionsCount = 0
       item.options = []
     }

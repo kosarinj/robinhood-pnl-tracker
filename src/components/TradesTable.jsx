@@ -466,6 +466,37 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         )
       }
     },
+    madeUpGround: {
+      header: () => (
+        <th onClick={() => handleSort('madeUpGround')} className="sortable" style={{ minWidth: '130px' }}>
+          Made Up Ground{getSortIcon('madeUpGround')}
+        </th>
+      ),
+      cell: (row) => {
+        const madeUpValue = (row.madeUpGround || 0) + (row.optionsMadeUpGround || 0)
+        return (
+          <td style={{
+            backgroundColor: madeUpValue > 0 ? '#d4edda' : 'transparent',
+            color: madeUpValue > 0 ? '#155724' : '#666',
+            fontWeight: madeUpValue > 0 ? 'bold' : 'normal'
+          }}>
+            {formatCurrency(madeUpValue)}
+          </td>
+        )
+      },
+      footer: () => {
+        const total = data.reduce((sum, row) => sum + (row.madeUpGround || 0) + (row.optionsMadeUpGround || 0), 0)
+        return (
+          <td style={{
+            backgroundColor: total > 0 ? '#d4edda' : 'transparent',
+            color: total > 0 ? '#155724' : '#666',
+            fontWeight: 'bold'
+          }}>
+            <strong>{formatCurrency(total)}</strong>
+          </td>
+        )
+      }
+    },
     optionsPnL: {
       header: () => (
         <th onClick={() => handleSort('optionsPnL')} className="sortable" style={{ minWidth: '110px' }}>
@@ -556,6 +587,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         realUnrealized: acc.realUnrealized + row.real.unrealizedPnL + optionsUnrealized,
         realTotal: acc.realTotal + row.real.totalPnL + (row.optionsPnL || 0),
         dailyPnL: acc.dailyPnL + (row.dailyPnL || 0) + (row.optionsDailyPnL || 0),
+        madeUpGround: acc.madeUpGround + (row.madeUpGround || 0) + (row.optionsMadeUpGround || 0),
         avgCostUnrealized: acc.avgCostUnrealized + row.avgCost.unrealizedPnL,
         fifoRealized: acc.fifoRealized + row.fifo.realizedPnL,
         fifoUnrealized: acc.fifoUnrealized + row.fifo.unrealizedPnL,
@@ -570,6 +602,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       realUnrealized: 0,
       realTotal: 0,
       dailyPnL: 0,
+      madeUpGround: 0,
       avgCostUnrealized: 0,
       fifoRealized: 0,
       fifoUnrealized: 0,

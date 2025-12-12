@@ -46,6 +46,7 @@ function App() {
       'total',
       'buySellTotal',
       'dailyPnL',
+      'madeUpGround',
       'optionsPnL',
       'percentage'
     ]
@@ -988,6 +989,18 @@ function App() {
                       Today's change
                     </div>
                   </div>
+                  <div className="summary-card" style={{
+                    background: pnlTotals.madeUpGround > 0 ? '#d4edda' : '#f8f9fa',
+                    borderLeft: `4px solid ${pnlTotals.madeUpGround > 0 ? '#28a745' : '#6c757d'}`
+                  }}>
+                    <h3 style={{ color: pnlTotals.madeUpGround > 0 ? '#155724' : '#666' }}>Made Up Ground</h3>
+                    <div className="value" style={{ color: pnlTotals.madeUpGround > 0 ? '#155724' : '#666' }}>
+                      {formatCurrency(pnlTotals.madeUpGround || 0)}
+                    </div>
+                    <div style={{ fontSize: '12px', color: pnlTotals.madeUpGround > 0 ? '#155724' : '#666', marginTop: '5px', fontStyle: 'italic', fontWeight: '500', opacity: 0.8 }}>
+                      Profit when down
+                    </div>
+                  </div>
                 </>
               )}
             </div>
@@ -1320,6 +1333,7 @@ function App() {
                   total: 'Total P&L',
                   buySellTotal: 'Buy/Sell Total',
                   dailyPnL: 'Daily P&L',
+                  madeUpGround: 'Made Up Ground',
                   optionsPnL: 'Options P&L',
                   percentage: 'Percentage %'
                 }
