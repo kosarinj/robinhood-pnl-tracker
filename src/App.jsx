@@ -628,35 +628,6 @@ function App() {
         </label>
       </div>
 
-      {/* PreviousClose Debug Banner */}
-      {prevCloseDebug && (
-        <div style={{
-          padding: '15px',
-          background: prevCloseDebug.allZero ? '#f8d7da' : '#d1ecf1',
-          border: `3px solid ${prevCloseDebug.allZero ? '#721c24' : '#0c5460'}`,
-          borderRadius: '8px',
-          marginBottom: '20px',
-          fontSize: '16px',
-          fontWeight: 'bold'
-        }}>
-          {prevCloseDebug.allZero ? (
-            <div style={{ color: '#721c24' }}>
-              ⚠️ WARNING: All previousClose prices are $0! Daily P&L will be $0 for all stocks.
-              <div style={{ fontSize: '14px', marginTop: '5px', fontWeight: 'normal' }}>
-                Fetched {prevCloseDebug.total} symbols but all have previousClose = 0
-              </div>
-            </div>
-          ) : (
-            <div style={{ color: '#0c5460' }}>
-              ✓ PreviousClose prices fetched successfully for {prevCloseDebug.total} symbols
-              <div style={{ fontSize: '14px', marginTop: '5px', fontWeight: 'normal' }}>
-                Samples: {prevCloseDebug.samples.map(([s, p]) => `${s}=$${p.toFixed(2)}`).join(', ')}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {error && (
         <div className="error">
           <strong>Error:</strong> {error}
@@ -738,53 +709,6 @@ function App() {
           Analyze trading signals or identify market opportunities from downturns
         </p>
       </div>
-
-      {csvStats && (
-        <div style={{
-          padding: '20px',
-          background: '#fff3cd',
-          border: '2px solid #ffc107',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          fontSize: '16px',
-          fontWeight: 'bold'
-        }}>
-          📊 CSV LOADED: {csvStats.total} total trades | {csvStats.stocks} stock trades | {csvStats.options} option trades
-        </div>
-      )}
-
-      {debugInfo.length > 0 && (
-        <div style={{
-          padding: '20px',
-          background: '#d1ecf1',
-          border: '3px solid #0c5460',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          fontFamily: 'monospace',
-          fontSize: '14px',
-          maxHeight: '400px',
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap'
-        }}>
-          <strong style={{ fontSize: '18px', marginBottom: '15px', display: 'block', color: '#0c5460' }}>🔍 P&L CALCULATION DEBUG INFO:</strong>
-          {debugInfo.map((msg, i) => <div key={i} style={{ marginBottom: '5px' }}>{msg}</div>)}
-        </div>
-      )}
-
-      {debugInfo.length === 0 && csvStats && csvStats.options > 0 && (
-        <div style={{
-          padding: '20px',
-          background: '#f8d7da',
-          border: '3px solid #721c24',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          fontSize: '16px',
-          fontWeight: 'bold',
-          color: '#721c24'
-        }}>
-          ⚠️ WARNING: {csvStats.options} options detected but NO debug info generated!
-        </div>
-      )}
 
       {pnlData.length > 0 && !loading && (
           <>
