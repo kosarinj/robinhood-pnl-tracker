@@ -153,25 +153,46 @@ class SocketService {
       }
 
       console.log(`Requesting historical data from server for ${symbol}...`)
-      this.socket.emit('fetch-historical-data', { symbol, range, interval })
 
-      this.socket.once('historical-data-result', (response) => {
-        if (response.symbol === symbol) {
-          console.log(`Received ${response.data.length} data points from server`)
+      let resolved = false
+
+      const resultHandler = (response) => {
+        if (response.symbol === symbol && !resolved) {
+          resolved = true
+          console.log(`✅ Received ${response.data.length} data points from server for ${symbol}`)
+          this.socket.off('historical-data-result', resultHandler)
+          this.socket.off('historical-data-error', errorHandler)
+          clearTimeout(timeoutId)
           resolve(response.data)
         }
-      })
+      }
 
-      this.socket.once('historical-data-error', (response) => {
-        if (response.symbol === symbol) {
+      const errorHandler = (response) => {
+        if (response.symbol === symbol && !resolved) {
+          resolved = true
+          console.error(`❌ Error from server for ${symbol}:`, response.error)
+          this.socket.off('historical-data-result', resultHandler)
+          this.socket.off('historical-data-error', errorHandler)
+          clearTimeout(timeoutId)
           reject(new Error(response.error))
         }
-      })
+      }
 
-      // Timeout after 20 seconds
-      setTimeout(() => {
-        reject(new Error('Historical data fetch timeout'))
-      }, 20000)
+      this.socket.on('historical-data-result', resultHandler)
+      this.socket.on('historical-data-error', errorHandler)
+
+      this.socket.emit('fetch-historical-data', { symbol, range, interval })
+
+      // Timeout after 15 seconds
+      const timeoutId = setTimeout(() => {
+        if (!resolved) {
+          resolved = true
+          console.error(`⏱️ Historical data fetch timeout for ${symbol}`)
+          this.socket.off('historical-data-result', resultHandler)
+          this.socket.off('historical-data-error', errorHandler)
+          reject(new Error('Historical data fetch timeout - server may be slow or unavailable'))
+        }
+      }, 15000)
     })
   }
 
