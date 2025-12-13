@@ -52,6 +52,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         }
 
         console.log(`Received ${historical.length} data points for ${symbol}`)
+        console.log('First data point:', historical[0])
+        console.log('Last data point:', historical[historical.length - 1])
 
         if (historical.length === 0) {
           throw new Error('No historical data available. The data provider may be unavailable or the symbol may be invalid.')
@@ -59,6 +61,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
 
         // Add technical indicators
         const dataWithIndicators = addIndicators(historical, indicators)
+        console.log('After adding indicators:', dataWithIndicators.length, 'points')
+        console.log('First point with indicators:', dataWithIndicators[0])
 
         // Add buy/sell markers from trades
         const enrichedData = dataWithIndicators.map(candle => {
@@ -82,6 +86,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           }
         })
 
+        console.log('Final enriched data:', enrichedData.length, 'points')
+        console.log('Sample enriched point:', enrichedData[Math.floor(enrichedData.length / 2)])
         setPriceData(enrichedData)
       } catch (err) {
         console.error('Error loading price chart:', err)
