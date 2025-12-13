@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react'
+import PriceChart from './PriceChart'
 
 function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, visiblePnlColumns, realPnlColumnOrder, tradingSignals, showChartsInHistory, showRiskManagement, riskAllocations, onManualPriceUpdate, onClearManualPrice, onSplitAdjustment, onClearSplitAdjustment, onTotalsUpdate, onRiskAllocationUpdate }) {
   const [sortConfig, setSortConfig] = useState({ key: 'symbol', direction: 'asc' })
   const [expandedSymbol, setExpandedSymbol] = useState(null)
+  const [chartSymbol, setChartSymbol] = useState(null)
   const [editingPrice, setEditingPrice] = useState(null)
   const [priceInput, setPriceInput] = useState('')
   const [editingSplit, setEditingSplit] = useState(null)
@@ -733,6 +735,27 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                         {expandedSymbol === row.symbol ? '▼' : '▶'}
                       </span>
                       <span>{row.symbol}</span>
+                      {!row.isOption && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setChartSymbol(row.symbol)
+                          }}
+                          style={{
+                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            padding: '4px 8px',
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            fontWeight: '500'
+                          }}
+                          title="View price chart with trades"
+                        >
+                          📈 Chart
+                        </button>
+                      )}
                       {row.isOption && <span style={{ fontSize: '0.8em', color: '#6c757d' }}>(Option)</span>}
                       {row.isRollup && <span style={{ fontSize: '0.8em', color: '#667eea', fontWeight: 'bold' }}>(Options Rollup: {row.options?.length || 0} options)</span>}
                       {!row.isOption && getSignalForSymbol(row.symbol) && (
@@ -1656,6 +1679,15 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             zIndex: 999998
           }}
           onClick={closeWhatIf}
+        />
+      )}
+
+      {/* Price Chart Modal */}
+      {chartSymbol && (
+        <PriceChart
+          symbol={chartSymbol}
+          trades={trades.filter(t => t.symbol === chartSymbol)}
+          onClose={() => setChartSymbol(null)}
         />
       )}
     </>
