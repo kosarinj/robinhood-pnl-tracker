@@ -1,14 +1,13 @@
 [build]
-builder = "NIXPACKS"
-buildCommand = "cd server && npm install"
+builder = "DOCKERFILE"
+dockerfilePath = "server/Dockerfile"
 
 [deploy]
-startCommand = "cd server && npm start"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 [[deploy.volumes]]
-mountPath = "/app/server/data"
+mountPath = "/app/data"
 
 [deploy.environmentVariables]
-DATABASE_PATH = "/app/server/data/trading_data.db"
+DATABASE_PATH = "/app/data/trading_data.db"
