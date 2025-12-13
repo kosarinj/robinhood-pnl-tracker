@@ -89,6 +89,11 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         console.log('Final enriched data:', enrichedData.length, 'points')
         console.log('Sample enriched point:', enrichedData[Math.floor(enrichedData.length / 2)])
         setPriceData(enrichedData)
+
+        // Force a resize event to trigger ResponsiveContainer to render
+        setTimeout(() => {
+          window.dispatchEvent(new Event('resize'))
+        }, 100)
       } catch (err) {
         console.error('Error loading price chart:', err)
         setError(err.message || 'Failed to load chart data. Please try again later.')
@@ -209,7 +214,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         {/* Price Chart */}
         {!loading && !error && priceData.length > 0 && (
           <>
-            <ResponsiveContainer width="100%" height={400}>
+            <ResponsiveContainer width="100%" height={400} key={`chart-${priceData.length}`}>
               <ComposedChart data={priceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis
