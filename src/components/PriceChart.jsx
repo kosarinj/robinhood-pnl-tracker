@@ -64,7 +64,7 @@ function PriceChart({ symbol, trades, onClose }) {
           }
         })
 
-        setPrice Data(enrichedData)
+        setPriceData(enrichedData)
       } catch (err) {
         setError(err.message)
       } finally {

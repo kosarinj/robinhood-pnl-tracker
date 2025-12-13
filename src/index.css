@@ -1,3 +1,38 @@
+:root {
+  /* Default theme variables - will be overridden by ThemeContext */
+  --background: #f8f9fa;
+  --surface: #ffffff;
+  --surfaceHover: #f8f9fa;
+  --text: #212529;
+  --textSecondary: #6c757d;
+  --border: #dee2e6;
+  --shadow: rgba(0, 0, 0, 0.1);
+
+  --positive: #28a745;
+  --negative: #dc3545;
+  --neutral: #6c757d;
+  --warning: #ffc107;
+
+  --cardPositive: #d4edda;
+  --cardNegative: #f8d7da;
+  --cardNeutral: #e9ecef;
+
+  --chartLine: #2196F3;
+  --chartGrid: #e0e0e0;
+  --chartText: #666;
+
+  --tableHeader: #f8f9fa;
+  --tableRowHover: #f8f9fa;
+  --tableRowExpanded: #e9ecef;
+
+  --buttonPrimary: #007bff;
+  --buttonPrimaryHover: #0056b3;
+  --buttonSecondary: #6c757d;
+  --buttonSecondaryHover: #545b62;
+  --buttonDanger: #dc3545;
+  --buttonDangerHover: #c82333;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -10,10 +45,12 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--background);
   min-height: 100vh;
   padding: 20px;
   overflow-y: auto;
+  color: var(--text);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 #root {
@@ -50,24 +87,26 @@ h1 {
 }
 
 .app-container {
-  background: white;
+  background: var(--surface);
   border-radius: 16px;
   padding: 40px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 40px var(--shadow);
   position: relative;
+  transition: background-color 0.3s ease;
 }
 
 .sticky-header {
   position: sticky;
   top: 0;
   z-index: 1000;
-  background: white;
+  background: var(--surface);
   margin: -40px -40px 0 -40px;
   padding: 40px 40px 20px 40px;
   border-radius: 16px 16px 0 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 12px var(--shadow);
   max-height: 60vh;
   overflow-y: auto;
+  transition: background-color 0.3s ease;
 }
 
 .upload-section {

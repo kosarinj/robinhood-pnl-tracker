@@ -4,6 +4,7 @@ import TradesTable from './components/TradesTable'
 import TradingSignals from './components/TradingSignals'
 import MarketAnalysis from './components/MarketAnalysis'
 import SignalPerformance from './components/SignalPerformance'
+import ThemeToggle from './components/ThemeToggle'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -76,7 +77,7 @@ function App() {
   })
   const [showChartsInHistory, setShowChartsInHistory] = useState(false)
   const [connected, setConnected] = useState(false)
-  const [useServer, setUseServer] = useState(false) // Toggle between server and standalone mode - STANDALONE by default
+  const [useServer, setUseServer] = useState(true) // Toggle between server and standalone mode - SERVER mode by default
   const [showMarketAnalysis, setShowMarketAnalysis] = useState(false)
   const [showSignalPerformance, setShowSignalPerformance] = useState(false)
   const [showRiskManagement, setShowRiskManagement] = useState(false)
@@ -642,6 +643,7 @@ function App() {
 
   return (
     <div className="app-container">
+      <ThemeToggle />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
         <label className="upload-button">
