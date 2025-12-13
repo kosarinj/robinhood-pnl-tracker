@@ -1026,6 +1026,8 @@ function App() {
             onClearSplitAdjustment={handleClearSplitAdjustment}
             onTotalsUpdate={setPnlTotals}
             onRiskAllocationUpdate={handleRiskAllocationUpdate}
+            useServer={useServer}
+            connected={connected}
           />
 
           {/* PNL Summary Cards - LIFO/FIFO Below Grid */}

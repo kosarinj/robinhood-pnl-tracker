@@ -123,4 +123,43 @@ export class PriceService {
 
     return prices
   }
+
+  // Fetch historical price data for charting
+  async fetchHistoricalPrices(symbol, range = '6mo', interval = '1d') {
+    try {
+      console.log(`Fetching historical data for ${symbol} (${range}, ${interval})`)
+
+      // Yahoo Finance API URL - no CORS issues on server
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`
+      const response = await axios.get(url, { timeout: 15000 })
+
+      const result = response.data?.chart?.result?.[0]
+      if (!result) {
+        throw new Error('No data returned from Yahoo Finance')
+      }
+
+      const timestamps = result.timestamp || []
+      const quotes = result.indicators?.quote?.[0]
+
+      if (!quotes) {
+        throw new Error('No quote data in response')
+      }
+
+      const historicalData = timestamps.map((ts, i) => ({
+        timestamp: ts * 1000, // Convert to milliseconds
+        date: new Date(ts * 1000).toISOString(),
+        open: quotes.open[i],
+        high: quotes.high[i],
+        low: quotes.low[i],
+        close: quotes.close[i],
+        volume: quotes.volume[i]
+      })).filter(item => item.close !== null) // Filter out null values
+
+      console.log(`✓ Fetched ${historicalData.length} historical data points for ${symbol}`)
+      return historicalData
+    } catch (error) {
+      console.error(`✗ Failed to fetch historical data for ${symbol}:`, error.message)
+      throw error
+    }
+  }
 }

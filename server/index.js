@@ -220,6 +220,20 @@ io.on('connection', (socket) => {
       socket.emit('lookup-signal-error', { error: error.message })
     }
   })
+
+  // Fetch historical price data for charts
+  socket.on('fetch-historical-data', async ({ symbol, range, interval }) => {
+    console.log(`📊 Received fetch-historical-data request for: ${symbol} (${range}, ${interval})`)
+    try {
+      const historicalData = await priceService.fetchHistoricalPrices(symbol, range, interval)
+      console.log(`✅ Sending ${historicalData.length} data points for ${symbol}`)
+
+      socket.emit('historical-data-result', { symbol, data: historicalData })
+    } catch (error) {
+      console.error(`❌ Error fetching historical data for ${symbol}:`, error)
+      socket.emit('historical-data-error', { symbol, error: error.message })
+    }
+  })
 })
 
 // Helper function to apply split adjustments

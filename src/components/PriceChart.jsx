@@ -14,8 +14,9 @@ import {
 } from 'recharts'
 import { fetchHistoricalPrices } from '../utils/yahooFinance'
 import { addIndicators } from '../utils/technicalIndicators'
+import { socketService } from '../services/socketService'
 
-function PriceChart({ symbol, trades, onClose }) {
+function PriceChart({ symbol, trades, onClose, useServer = false, connected = false }) {
   const [priceData, setPriceData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -33,8 +34,23 @@ function PriceChart({ symbol, trades, onClose }) {
 
       try {
         console.log(`Loading historical data for ${symbol}...`)
-        // Fetch 6 months of daily data (Yahoo Finance doesn't support 4-hour directly)
-        const historical = await fetchHistoricalPrices(symbol, '6mo', '1d')
+        let historical
+
+        // Use server if connected, otherwise use CORS proxies
+        if (useServer && connected) {
+          console.log('Using server to fetch historical data (no CORS issues)')
+          historical = await socketService.fetchHistoricalData(symbol, '6mo', '1d')
+          // Convert date strings back to Date objects
+          historical = historical.map(item => ({
+            ...item,
+            date: new Date(item.date)
+          }))
+        } else {
+          console.log('Using CORS proxies to fetch historical data')
+          // Fetch 6 months of daily data (Yahoo Finance doesn't support 4-hour directly)
+          historical = await fetchHistoricalPrices(symbol, '6mo', '1d')
+        }
+
         console.log(`Received ${historical.length} data points for ${symbol}`)
 
         if (historical.length === 0) {
@@ -76,7 +92,7 @@ function PriceChart({ symbol, trades, onClose }) {
     }
 
     loadData()
-  }, [symbol, trades, indicators])
+  }, [symbol, trades, indicators, useServer, connected])
 
   const toggleIndicator = (indicator) => {
     setIndicators(prev => ({

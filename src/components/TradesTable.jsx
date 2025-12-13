@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import PriceChart from './PriceChart'
 
-function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, visiblePnlColumns, realPnlColumnOrder, tradingSignals, showChartsInHistory, showRiskManagement, riskAllocations, onManualPriceUpdate, onClearManualPrice, onSplitAdjustment, onClearSplitAdjustment, onTotalsUpdate, onRiskAllocationUpdate }) {
+function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, visiblePnlColumns, realPnlColumnOrder, tradingSignals, showChartsInHistory, showRiskManagement, riskAllocations, onManualPriceUpdate, onClearManualPrice, onSplitAdjustment, onClearSplitAdjustment, onTotalsUpdate, onRiskAllocationUpdate, useServer, connected }) {
   const [sortConfig, setSortConfig] = useState({ key: 'symbol', direction: 'asc' })
   const [expandedSymbol, setExpandedSymbol] = useState(null)
   const [chartSymbol, setChartSymbol] = useState(null)
@@ -1688,6 +1688,8 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
           symbol={chartSymbol}
           trades={trades.filter(t => t.symbol === chartSymbol)}
           onClose={() => setChartSymbol(null)}
+          useServer={useServer}
+          connected={connected}
         />
       )}
     </>

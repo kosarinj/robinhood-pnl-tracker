@@ -144,6 +144,37 @@ class SocketService {
     })
   }
 
+  // Fetch historical price data
+  fetchHistoricalData(symbol, range = '6mo', interval = '1d') {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      console.log(`Requesting historical data from server for ${symbol}...`)
+      this.socket.emit('fetch-historical-data', { symbol, range, interval })
+
+      this.socket.once('historical-data-result', (response) => {
+        if (response.symbol === symbol) {
+          console.log(`Received ${response.data.length} data points from server`)
+          resolve(response.data)
+        }
+      })
+
+      this.socket.once('historical-data-error', (response) => {
+        if (response.symbol === symbol) {
+          reject(new Error(response.error))
+        }
+      })
+
+      // Timeout after 20 seconds
+      setTimeout(() => {
+        reject(new Error('Historical data fetch timeout'))
+      }, 20000)
+    })
+  }
+
   // Listen for price updates
   onPriceUpdate(callback) {
     if (this.socket) {
