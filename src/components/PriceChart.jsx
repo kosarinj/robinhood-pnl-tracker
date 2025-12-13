@@ -32,11 +32,13 @@ function PriceChart({ symbol, trades, onClose }) {
       setError(null)
 
       try {
+        console.log(`Loading historical data for ${symbol}...`)
         // Fetch 6 months of daily data (Yahoo Finance doesn't support 4-hour directly)
         const historical = await fetchHistoricalPrices(symbol, '6mo', '1d')
+        console.log(`Received ${historical.length} data points for ${symbol}`)
 
         if (historical.length === 0) {
-          throw new Error('No historical data available')
+          throw new Error('No historical data available. The data provider may be unavailable or the symbol may be invalid.')
         }
 
         // Add technical indicators
@@ -66,7 +68,8 @@ function PriceChart({ symbol, trades, onClose }) {
 
         setPriceData(enrichedData)
       } catch (err) {
-        setError(err.message)
+        console.error('Error loading price chart:', err)
+        setError(err.message || 'Failed to load chart data. Please try again later.')
       } finally {
         setLoading(false)
       }
