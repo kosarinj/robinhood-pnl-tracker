@@ -1,3 +1,14 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "cd server && npm install"
+
 [deploy]
-restartPolicyType = "on_failure"
+startCommand = "cd server && npm start"
+restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+
+[[deploy.volumes]]
+mountPath = "/app/server/data"
+
+[deploy.environmentVariables]
+DATABASE_PATH = "/app/server/data/trading_data.db"
