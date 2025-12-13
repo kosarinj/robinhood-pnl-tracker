@@ -211,6 +211,24 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           </div>
         )}
 
+        {/* Debug Info */}
+        {!loading && !error && priceData.length > 0 && (
+          <div style={{
+            background: '#f0f0f0',
+            padding: '10px',
+            marginBottom: '10px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontFamily: 'monospace'
+          }}>
+            <strong>Debug Info:</strong><br/>
+            Data Points: {priceData.length}<br/>
+            First Point: timestamp={priceData[0]?.timestamp}, close={priceData[0]?.close}<br/>
+            Sample Point: timestamp={priceData[Math.floor(priceData.length/2)]?.timestamp}, close={priceData[Math.floor(priceData.length/2)]?.close}<br/>
+            Last Point: timestamp={priceData[priceData.length-1]?.timestamp}, close={priceData[priceData.length-1]?.close}
+          </div>
+        )}
+
         {/* Price Chart */}
         {!loading && !error && priceData.length > 0 && (
           <>
