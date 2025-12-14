@@ -57,6 +57,25 @@ db.exec(`
     created_at INTEGER DEFAULT (strftime('%s', 'now'))
   );
 
+  -- Table to store P&L snapshots
+  CREATE TABLE IF NOT EXISTS pnl_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asof_date TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    position REAL NOT NULL,
+    avg_cost REAL,
+    current_price REAL,
+    current_value REAL,
+    realized_pnl REAL,
+    unrealized_pnl REAL,
+    total_pnl REAL,
+    daily_pnl REAL,
+    options_pnl REAL,
+    percentage REAL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    UNIQUE(asof_date, symbol)
+  );
+
   -- Indexes for faster queries
   CREATE INDEX IF NOT EXISTS idx_signal_snapshots_symbol_timestamp
     ON signal_snapshots(symbol, timestamp DESC);
@@ -66,6 +85,9 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_signal_performance_symbol
     ON signal_performance(symbol, signal_timestamp DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_pnl_snapshots_asof_date
+    ON pnl_snapshots(asof_date DESC, symbol);
 `)
 
 console.log(`Database initialized at: ${dbPath}`)
@@ -84,6 +106,23 @@ const insertPriceSnapshot = db.prepare(`
 const insertSignalPerformance = db.prepare(`
   INSERT INTO signal_performance (symbol, signal_timestamp, signal_type, signal_price, check_timestamp, check_price, time_elapsed_minutes, price_change_percent, was_correct)
   VALUES (@symbol, @signalTimestamp, @signalType, @signalPrice, @checkTimestamp, @checkPrice, @timeElapsedMinutes, @priceChangePercent, @wasCorrect)
+`)
+
+const upsertPnLSnapshot = db.prepare(`
+  INSERT INTO pnl_snapshots (asof_date, symbol, position, avg_cost, current_price, current_value, realized_pnl, unrealized_pnl, total_pnl, daily_pnl, options_pnl, percentage)
+  VALUES (@asofDate, @symbol, @position, @avgCost, @currentPrice, @currentValue, @realizedPnl, @unrealizedPnl, @totalPnl, @dailyPnl, @optionsPnl, @percentage)
+  ON CONFLICT(asof_date, symbol) DO UPDATE SET
+    position = excluded.position,
+    avg_cost = excluded.avg_cost,
+    current_price = excluded.current_price,
+    current_value = excluded.current_value,
+    realized_pnl = excluded.realized_pnl,
+    unrealized_pnl = excluded.unrealized_pnl,
+    total_pnl = excluded.total_pnl,
+    daily_pnl = excluded.daily_pnl,
+    options_pnl = excluded.options_pnl,
+    percentage = excluded.percentage,
+    created_at = strftime('%s', 'now')
 `)
 
 export class DatabaseService {
@@ -313,6 +352,65 @@ export class DatabaseService {
       console.log('Database cleanup completed')
     } catch (error) {
       console.error('Error during cleanup:', error)
+    }
+  }
+
+  // Save P&L snapshot for a specific date
+  savePnLSnapshot(asofDate, pnlData) {
+    try {
+      const saveSnapshot = db.transaction((asofDate, pnlData) => {
+        for (const item of pnlData) {
+          upsertPnLSnapshot.run({
+            asofDate,
+            symbol: item.symbol,
+            position: item.real?.position || 0,
+            avgCost: item.real?.avgCostBasis || null,
+            currentPrice: item.currentPrice || null,
+            currentValue: item.real?.currentValue || null,
+            realizedPnl: item.real?.realized || null,
+            unrealizedPnl: item.real?.unrealized || null,
+            totalPnl: item.real?.total || null,
+            dailyPnl: item.real?.dailyPnL || null,
+            optionsPnl: item.real?.optionsPnL || null,
+            percentage: item.real?.percentage || null
+          })
+        }
+      })
+      saveSnapshot(asofDate, pnlData)
+      console.log(`✅ Saved P&L snapshot for ${asofDate}: ${pnlData.length} symbols`)
+    } catch (error) {
+      console.error('Error saving P&L snapshot:', error)
+      throw error
+    }
+  }
+
+  // Get P&L snapshot for a specific date
+  getPnLSnapshot(asofDate) {
+    try {
+      const stmt = db.prepare(`
+        SELECT * FROM pnl_snapshots
+        WHERE asof_date = ?
+        ORDER BY symbol
+      `)
+      return stmt.all(asofDate)
+    } catch (error) {
+      console.error('Error getting P&L snapshot:', error)
+      return []
+    }
+  }
+
+  // Get all available snapshot dates
+  getSnapshotDates() {
+    try {
+      const stmt = db.prepare(`
+        SELECT DISTINCT asof_date
+        FROM pnl_snapshots
+        ORDER BY asof_date DESC
+      `)
+      return stmt.all().map(row => row.asof_date)
+    } catch (error) {
+      console.error('Error getting snapshot dates:', error)
+      return []
     }
   }
 

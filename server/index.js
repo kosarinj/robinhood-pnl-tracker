@@ -130,6 +130,23 @@ io.on('connection', (socket) => {
       // Calculate initial P&L
       const pnlData = calculatePnL(trades, prices)
 
+      // Find the latest trade date for asof_date
+      const latestTradeDate = trades.reduce((latest, trade) => {
+        const tradeDate = new Date(trade.date)
+        return tradeDate > latest ? tradeDate : latest
+      }, new Date(0))
+
+      // Format as YYYY-MM-DD
+      const asofDate = latestTradeDate.toISOString().split('T')[0]
+
+      // Save P&L snapshot to database
+      try {
+        databaseService.savePnLSnapshot(asofDate, pnlData)
+        console.log(`💾 Saved P&L snapshot for ${asofDate}`)
+      } catch (error) {
+        console.error('Error saving P&L snapshot:', error)
+      }
+
       // Send initial data
       socket.emit('csv-processed', {
         success: true,
@@ -138,7 +155,8 @@ io.on('connection', (socket) => {
           pnlData,
           totalPrincipal,
           deposits,
-          currentPrices: prices
+          currentPrices: prices,
+          asofDate
         }
       })
 
