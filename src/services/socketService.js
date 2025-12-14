@@ -144,6 +144,38 @@ class SocketService {
     })
   }
 
+  // Save P&L snapshot
+  savePnLSnapshot(asofDate, pnlData) {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      console.log(`Saving P&L snapshot for ${asofDate}...`)
+
+      const resultHandler = (response) => {
+        this.socket.off('pnl-snapshot-saved', resultHandler)
+        if (response.success) {
+          console.log(`✅ P&L snapshot saved for ${asofDate}`)
+          resolve(response)
+        } else {
+          console.error(`❌ Error saving snapshot:`, response.error)
+          reject(new Error(response.error))
+        }
+      }
+
+      this.socket.on('pnl-snapshot-saved', resultHandler)
+      this.socket.emit('save-pnl-snapshot', { asofDate, pnlData })
+
+      // Timeout after 10 seconds
+      setTimeout(() => {
+        this.socket.off('pnl-snapshot-saved', resultHandler)
+        reject(new Error('Save snapshot timeout'))
+      }, 10000)
+    })
+  }
+
   // Fetch historical price data
   fetchHistoricalData(symbol, range = '6mo', interval = '1d') {
     return new Promise((resolve, reject) => {

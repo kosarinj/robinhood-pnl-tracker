@@ -641,23 +641,61 @@ function App() {
     return ''
   }
 
+  const handleSaveSnapshot = async () => {
+    if (!useServer || !connected) {
+      alert('Must be connected to server to save snapshots')
+      return
+    }
+    if (pnlData.length === 0) {
+      alert('No data to save. Please upload a CSV first.')
+      return
+    }
+
+    const today = new Date().toISOString().split('T')[0]
+    try {
+      await socketService.savePnLSnapshot(today, pnlData)
+      alert(`✅ P&L snapshot saved for ${today}`)
+    } catch (error) {
+      alert(`❌ Error saving snapshot: ${error.message}`)
+    }
+  }
+
   return (
     <div className="app-container">
       <ThemeToggle />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
-        <label className="upload-button">
-          📁 Upload CSV
-          <input
-            type="file"
-            accept=".csv"
-            onChange={(e) => {
-              const file = e.target.files[0]
-              if (file) handleFileUpload(file)
-            }}
-            style={{ display: 'none' }}
-          />
-        </label>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {useServer && connected && pnlData.length > 0 && (
+            <button
+              onClick={handleSaveSnapshot}
+              style={{
+                background: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '10px 20px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}
+            >
+              💾 Save Snapshot
+            </button>
+          )}
+          <label className="upload-button">
+            📁 Upload CSV
+            <input
+              type="file"
+              accept=".csv"
+              onChange={(e) => {
+                const file = e.target.files[0]
+                if (file) handleFileUpload(file)
+              }}
+              style={{ display: 'none' }}
+            />
+          </label>
+        </div>
       </div>
 
       {error && (

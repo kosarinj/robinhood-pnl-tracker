@@ -252,6 +252,18 @@ io.on('connection', (socket) => {
       socket.emit('historical-data-error', { symbol, error: error.message })
     }
   })
+
+  // Manually save P&L snapshot
+  socket.on('save-pnl-snapshot', async ({ asofDate, pnlData }) => {
+    console.log(`💾 Received save-pnl-snapshot request for: ${asofDate}`)
+    try {
+      databaseService.savePnLSnapshot(asofDate, pnlData)
+      socket.emit('pnl-snapshot-saved', { success: true, asofDate })
+    } catch (error) {
+      console.error(`❌ Error saving P&L snapshot:`, error)
+      socket.emit('pnl-snapshot-saved', { success: false, error: error.message })
+    }
+  })
 })
 
 // Helper function to apply split adjustments
