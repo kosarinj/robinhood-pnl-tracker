@@ -533,6 +533,9 @@ function App() {
 
       const transformedData = snapshotData.map(row => {
         try {
+          // Helper to ensure numeric values (convert null/undefined to 0)
+          const num = (val) => (val === null || val === undefined || isNaN(val)) ? 0 : Number(val)
+
           const emptyPnl = {
             position: 0,
             avgCostBasis: 0,
@@ -547,29 +550,29 @@ function App() {
 
           return {
             symbol: row.symbol || 'UNKNOWN',
-            currentPrice: row.current_price || 0,
-            previousClose: row.current_price || 0,
+            currentPrice: num(row.current_price),
+            previousClose: num(row.current_price),
             avgCost: {
-              position: row.position || 0,
-              avgCostBasis: row.avg_cost || 0,
-              currentValue: row.current_value || 0,
-              realized: row.realized_pnl || 0,
-              unrealized: row.unrealized_pnl || 0,
-              total: row.total_pnl || 0,
-              dailyPnL: row.daily_pnl || 0,
-              optionsPnL: row.options_pnl || 0,
-              percentage: row.percentage || 0
+              position: num(row.position),
+              avgCostBasis: num(row.avg_cost),
+              currentValue: num(row.current_value),
+              realized: num(row.realized_pnl),
+              unrealized: num(row.unrealized_pnl),
+              total: num(row.total_pnl),
+              dailyPnL: num(row.daily_pnl),
+              optionsPnL: num(row.options_pnl),
+              percentage: num(row.percentage)
             },
             real: {
-              position: row.position || 0,
-              avgCostBasis: row.avg_cost || 0,
-              currentValue: row.current_value || 0,
-              realized: row.realized_pnl || 0,
-              unrealized: row.unrealized_pnl || 0,
-              total: row.total_pnl || 0,
-              dailyPnL: row.daily_pnl || 0,
-              optionsPnL: row.options_pnl || 0,
-              percentage: row.percentage || 0
+              position: num(row.position),
+              avgCostBasis: num(row.avg_cost),
+              currentValue: num(row.current_value),
+              realized: num(row.realized_pnl),
+              unrealized: num(row.unrealized_pnl),
+              total: num(row.total_pnl),
+              dailyPnL: num(row.daily_pnl),
+              optionsPnL: num(row.options_pnl),
+              percentage: num(row.percentage)
             },
             lifo: { ...emptyPnl },
             fifo: { ...emptyPnl }
