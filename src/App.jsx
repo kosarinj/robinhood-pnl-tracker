@@ -507,7 +507,17 @@ function App() {
 
     try {
       setLoading(true)
+      setError(null)
+      console.log(`Loading snapshot for ${asofDate}...`)
+
       const snapshotData = await socketService.loadPnLSnapshot(asofDate)
+      console.log(`Received snapshot data:`, snapshotData)
+
+      if (!snapshotData || snapshotData.length === 0) {
+        setError(`No data found for ${asofDate}. Upload a CSV to save data first.`)
+        setLoading(false)
+        return
+      }
 
       // Transform snapshot data to match pnlData format
       const transformedData = snapshotData.map(row => ({
@@ -526,11 +536,14 @@ function App() {
         }
       }))
 
+      console.log(`Transformed data:`, transformedData)
       setPnlData(transformedData)
       setCurrentSnapshotDate(asofDate)
       setIsViewingSnapshot(true)
       setLoading(false)
+      console.log(`✅ Snapshot loaded successfully`)
     } catch (error) {
+      console.error('Error loading snapshot:', error)
       setError('Error loading snapshot: ' + error.message)
       setLoading(false)
     }
