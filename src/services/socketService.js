@@ -144,34 +144,64 @@ class SocketService {
     })
   }
 
-  // Save P&L snapshot
-  savePnLSnapshot(asofDate, pnlData) {
+  // Get available snapshot dates
+  getSnapshotDates() {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.connected) {
         reject(new Error('Not connected to server'))
         return
       }
 
-      console.log(`Saving P&L snapshot for ${asofDate}...`)
+      const resultHandler = (response) => {
+        this.socket.off('snapshot-dates-result', resultHandler)
+        this.socket.off('snapshot-dates-error', errorHandler)
+        resolve(response.dates)
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('snapshot-dates-result', resultHandler)
+        this.socket.off('snapshot-dates-error', errorHandler)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('snapshot-dates-result', resultHandler)
+      this.socket.on('snapshot-dates-error', errorHandler)
+      this.socket.emit('get-snapshot-dates')
+
+      setTimeout(() => {
+        this.socket.off('snapshot-dates-result', resultHandler)
+        this.socket.off('snapshot-dates-error', errorHandler)
+        reject(new Error('Get snapshot dates timeout'))
+      }, 10000)
+    })
+  }
+
+  // Load P&L snapshot
+  loadPnLSnapshot(asofDate) {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      console.log(`Loading P&L snapshot for ${asofDate}...`)
 
       const resultHandler = (response) => {
-        this.socket.off('pnl-snapshot-saved', resultHandler)
+        this.socket.off('pnl-snapshot-loaded', resultHandler)
         if (response.success) {
-          console.log(`✅ P&L snapshot saved for ${asofDate}`)
-          resolve(response)
+          console.log(`✅ Loaded P&L snapshot for ${asofDate}`)
+          resolve(response.data)
         } else {
-          console.error(`❌ Error saving snapshot:`, response.error)
           reject(new Error(response.error))
         }
       }
 
-      this.socket.on('pnl-snapshot-saved', resultHandler)
-      this.socket.emit('save-pnl-snapshot', { asofDate, pnlData })
+      this.socket.on('pnl-snapshot-loaded', resultHandler)
+      this.socket.emit('load-pnl-snapshot', { asofDate })
 
-      // Timeout after 10 seconds
       setTimeout(() => {
-        this.socket.off('pnl-snapshot-saved', resultHandler)
-        reject(new Error('Save snapshot timeout'))
+        this.socket.off('pnl-snapshot-loaded', resultHandler)
+        reject(new Error('Load snapshot timeout'))
       }, 10000)
     })
   }

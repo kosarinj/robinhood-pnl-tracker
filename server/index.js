@@ -253,15 +253,27 @@ io.on('connection', (socket) => {
     }
   })
 
-  // Manually save P&L snapshot
-  socket.on('save-pnl-snapshot', async ({ asofDate, pnlData }) => {
-    console.log(`💾 Received save-pnl-snapshot request for: ${asofDate}`)
+  // Get available snapshot dates
+  socket.on('get-snapshot-dates', async () => {
+    console.log(`📅 Received get-snapshot-dates request`)
     try {
-      databaseService.savePnLSnapshot(asofDate, pnlData)
-      socket.emit('pnl-snapshot-saved', { success: true, asofDate })
+      const dates = databaseService.getSnapshotDates()
+      socket.emit('snapshot-dates-result', { dates })
     } catch (error) {
-      console.error(`❌ Error saving P&L snapshot:`, error)
-      socket.emit('pnl-snapshot-saved', { success: false, error: error.message })
+      console.error(`❌ Error getting snapshot dates:`, error)
+      socket.emit('snapshot-dates-error', { error: error.message })
+    }
+  })
+
+  // Load P&L snapshot for a specific date
+  socket.on('load-pnl-snapshot', async ({ asofDate }) => {
+    console.log(`📂 Received load-pnl-snapshot request for: ${asofDate}`)
+    try {
+      const snapshot = databaseService.getPnLSnapshot(asofDate)
+      socket.emit('pnl-snapshot-loaded', { success: true, asofDate, data: snapshot })
+    } catch (error) {
+      console.error(`❌ Error loading P&L snapshot:`, error)
+      socket.emit('pnl-snapshot-loaded', { success: false, error: error.message })
     }
   })
 })

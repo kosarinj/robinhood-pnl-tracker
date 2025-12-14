@@ -25,6 +25,9 @@ function App() {
   const [currentPrices, setCurrentPrices] = useState({})
   const [previousClosePrices, setPreviousClosePrices] = useState({})
   const [splitAdjustments, setSplitAdjustments] = useState({})
+  const [snapshotDates, setSnapshotDates] = useState([])
+  const [currentSnapshotDate, setCurrentSnapshotDate] = useState(null)
+  const [isViewingSnapshot, setIsViewingSnapshot] = useState(false)
   const [failedSymbols, setFailedSymbols] = useState([])
   const [showSignals, setShowSignals] = useState(false)
   const [visiblePnlColumns, setVisiblePnlColumns] = useState({
@@ -482,6 +485,57 @@ function App() {
     return () => clearInterval(interval)
   }, [trades, manualPrices, splitAdjustments, useServer])
 
+  // Load snapshot dates when connected to server
+  useEffect(() => {
+    if (useServer && connected) {
+      socketService.getSnapshotDates()
+        .then(dates => {
+          console.log('Available snapshot dates:', dates)
+          setSnapshotDates(dates)
+        })
+        .catch(err => console.error('Error loading snapshot dates:', err))
+    }
+  }, [useServer, connected])
+
+  const handleLoadSnapshot = async (asofDate) => {
+    if (!asofDate) {
+      // Clear snapshot view - return to live mode
+      setIsViewingSnapshot(false)
+      setCurrentSnapshotDate(null)
+      return
+    }
+
+    try {
+      setLoading(true)
+      const snapshotData = await socketService.loadPnLSnapshot(asofDate)
+
+      // Transform snapshot data to match pnlData format
+      const transformedData = snapshotData.map(row => ({
+        symbol: row.symbol,
+        currentPrice: row.current_price,
+        real: {
+          position: row.position,
+          avgCostBasis: row.avg_cost,
+          currentValue: row.current_value,
+          realized: row.realized_pnl,
+          unrealized: row.unrealized_pnl,
+          total: row.total_pnl,
+          dailyPnL: row.daily_pnl,
+          optionsPnL: row.options_pnl,
+          percentage: row.percentage
+        }
+      }))
+
+      setPnlData(transformedData)
+      setCurrentSnapshotDate(asofDate)
+      setIsViewingSnapshot(true)
+      setLoading(false)
+    } catch (error) {
+      setError('Error loading snapshot: ' + error.message)
+      setLoading(false)
+    }
+  }
+
   const handleFileUpload = async (file) => {
     try {
       setLoading(true)
@@ -641,47 +695,33 @@ function App() {
     return ''
   }
 
-  const handleSaveSnapshot = async () => {
-    if (!useServer || !connected) {
-      alert('Must be connected to server to save snapshots')
-      return
-    }
-    if (pnlData.length === 0) {
-      alert('No data to save. Please upload a CSV first.')
-      return
-    }
-
-    const today = new Date().toISOString().split('T')[0]
-    try {
-      await socketService.savePnLSnapshot(today, pnlData)
-      alert(`✅ P&L snapshot saved for ${today}`)
-    } catch (error) {
-      alert(`❌ Error saving snapshot: ${error.message}`)
-    }
-  }
-
   return (
     <div className="app-container">
       <ThemeToggle />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          {useServer && connected && pnlData.length > 0 && (
-            <button
-              onClick={handleSaveSnapshot}
-              style={{
-                background: '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                padding: '10px 20px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: '500'
-              }}
-            >
-              💾 Save Snapshot
-            </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {useServer && connected && snapshotDates.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: '14px', fontWeight: '500' }}>Load Snapshot:</label>
+              <select
+                value={currentSnapshotDate || ''}
+                onChange={(e) => handleLoadSnapshot(e.target.value || null)}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #ccc',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  background: isViewingSnapshot ? '#fff3cd' : 'white'
+                }}
+              >
+                <option value="">Live View</option>
+                {snapshotDates.map(date => (
+                  <option key={date} value={date}>{date}</option>
+                ))}
+              </select>
+            </div>
           )}
           <label className="upload-button">
             📁 Upload CSV
@@ -697,6 +737,38 @@ function App() {
           </label>
         </div>
       </div>
+
+      {isViewingSnapshot && (
+        <div style={{
+          background: '#fff3cd',
+          border: '2px solid #ffc107',
+          borderRadius: '6px',
+          padding: '12px 16px',
+          marginBottom: '15px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span style={{ fontWeight: '500', color: '#856404' }}>
+            📅 Viewing snapshot from: {currentSnapshotDate}
+          </span>
+          <button
+            onClick={() => handleLoadSnapshot(null)}
+            style={{
+              background: '#ffc107',
+              color: '#000',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '500'
+            }}
+          >
+            Return to Live View
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="error">
