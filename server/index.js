@@ -124,12 +124,6 @@ io.on('connection', (socket) => {
       stockSymbols.forEach(symbol => trackedSymbols.add(symbol))
       console.log(`Now tracking ${trackedSymbols.size} symbols for database recording`)
 
-      // Get initial prices
-      const prices = await priceService.getPrices(stockSymbols)
-
-      // Calculate initial P&L
-      const pnlData = calculatePnL(trades, prices)
-
       // Find the latest trade date for asof_date
       const latestTradeDate = trades.reduce((latest, trade) => {
         const tradeDate = new Date(trade.date)
@@ -139,20 +133,34 @@ io.on('connection', (socket) => {
       // Format as YYYY-MM-DD
       const asofDate = latestTradeDate.toISOString().split('T')[0]
 
-      // Save P&L snapshot to database
+      // Get historical prices for the asof_date (closing prices from that day)
+      console.log(`📅 Fetching historical prices for ${asofDate}...`)
+      const historicalPrices = await priceService.getPricesForDate(stockSymbols, asofDate)
+      console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
+
+      // Calculate P&L using historical prices from the asof_date
+      const pnlData = calculatePnL(trades, historicalPrices)
+
+      // Save P&L snapshot to database with historical prices
       try {
         databaseService.savePnLSnapshot(asofDate, pnlData)
-        console.log(`💾 Saved P&L snapshot for ${asofDate}`)
+        console.log(`💾 Saved P&L snapshot for ${asofDate} with historical prices`)
       } catch (error) {
         console.error('Error saving P&L snapshot:', error)
       }
+
+      // Get current prices for live view
+      const prices = await priceService.getPrices(stockSymbols)
+
+      // Calculate P&L again with current prices for live view
+      const livePnlData = calculatePnL(trades, prices)
 
       // Send initial data
       socket.emit('csv-processed', {
         success: true,
         data: {
           trades,
-          pnlData,
+          pnlData: livePnlData,
           totalPrincipal,
           deposits,
           currentPrices: prices,

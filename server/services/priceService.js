@@ -162,4 +162,72 @@ export class PriceService {
       throw error
     }
   }
+
+  // Get closing price for a specific date
+  async getPriceForDate(symbol, dateString) {
+    try {
+      const targetDate = new Date(dateString)
+      targetDate.setHours(0, 0, 0, 0)
+
+      // Fetch 1 week of data around the target date to handle weekends/holidays
+      const endDate = new Date(targetDate)
+      endDate.setDate(endDate.getDate() + 3)
+      const startDate = new Date(targetDate)
+      startDate.setDate(startDate.getDate() - 3)
+
+      const period1 = Math.floor(startDate.getTime() / 1000)
+      const period2 = Math.floor(endDate.getTime() / 1000)
+
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
+      const response = await axios.get(url, { timeout: 15000 })
+
+      const result = response.data?.chart?.result?.[0]
+      if (!result) {
+        console.warn(`No historical data for ${symbol} on ${dateString}, using current price`)
+        return await this.getPrice(symbol)
+      }
+
+      const timestamps = result.timestamp || []
+      const quotes = result.indicators?.quote?.[0]
+
+      if (!quotes || timestamps.length === 0) {
+        console.warn(`No quotes for ${symbol} on ${dateString}, using current price`)
+        return await this.getPrice(symbol)
+      }
+
+      // Find the closest date to our target
+      let closestIndex = 0
+      let closestDiff = Infinity
+
+      timestamps.forEach((ts, i) => {
+        const dataDate = new Date(ts * 1000)
+        dataDate.setHours(0, 0, 0, 0)
+        const diff = Math.abs(dataDate - targetDate)
+        if (diff < closestDiff && quotes.close[i] !== null) {
+          closestDiff = diff
+          closestIndex = i
+        }
+      })
+
+      const closingPrice = quotes.close[closestIndex]
+      const actualDate = new Date(timestamps[closestIndex] * 1000).toISOString().split('T')[0]
+
+      console.log(`✓ ${symbol} closing price on ${actualDate} (target: ${dateString}): $${closingPrice}`)
+      return closingPrice || 0
+    } catch (error) {
+      console.error(`✗ Failed to fetch historical price for ${symbol} on ${dateString}:`, error.message)
+      // Fallback to current price if historical fetch fails
+      return await this.getPrice(symbol)
+    }
+  }
+
+  // Get closing prices for multiple symbols on a specific date
+  async getPricesForDate(symbols, dateString) {
+    const prices = {}
+    const fetchPromises = symbols.map(async (symbol) => {
+      prices[symbol] = await this.getPriceForDate(symbol, dateString)
+    })
+    await Promise.all(fetchPromises)
+    return prices
+  }
 }
