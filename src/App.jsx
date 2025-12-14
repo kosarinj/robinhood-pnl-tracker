@@ -487,13 +487,20 @@ function App() {
 
   // Load snapshot dates when connected to server
   useEffect(() => {
+    console.log('Snapshot dates effect - useServer:', useServer, 'connected:', connected)
     if (useServer && connected) {
+      console.log('Fetching snapshot dates...')
       socketService.getSnapshotDates()
         .then(dates => {
-          console.log('Available snapshot dates:', dates)
-          setSnapshotDates(dates)
+          console.log('✅ Received snapshot dates:', dates)
+          setSnapshotDates(dates || [])
         })
-        .catch(err => console.error('Error loading snapshot dates:', err))
+        .catch(err => {
+          console.error('❌ Error loading snapshot dates:', err)
+          setSnapshotDates([])
+        })
+    } else {
+      console.log('Not fetching dates - not connected or not in server mode')
     }
   }, [useServer, connected])
 
