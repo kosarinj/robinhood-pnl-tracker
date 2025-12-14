@@ -520,23 +520,34 @@ function App() {
       }
 
       // Transform snapshot data to match pnlData format
-      const transformedData = snapshotData.map(row => ({
-        symbol: row.symbol,
-        currentPrice: row.current_price,
-        real: {
-          position: row.position,
-          avgCostBasis: row.avg_cost,
-          currentValue: row.current_value,
-          realized: row.realized_pnl,
-          unrealized: row.unrealized_pnl,
-          total: row.total_pnl,
-          dailyPnL: row.daily_pnl,
-          optionsPnL: row.options_pnl,
-          percentage: row.percentage
-        }
-      }))
+      console.log('Sample row:', snapshotData[0])
 
-      console.log(`Transformed data:`, transformedData)
+      const transformedData = snapshotData.map(row => {
+        try {
+          return {
+            symbol: row.symbol || 'UNKNOWN',
+            currentPrice: row.current_price || 0,
+            real: {
+              position: row.position || 0,
+              avgCostBasis: row.avg_cost || 0,
+              currentValue: row.current_value || 0,
+              realized: row.realized_pnl || 0,
+              unrealized: row.unrealized_pnl || 0,
+              total: row.total_pnl || 0,
+              dailyPnL: row.daily_pnl || 0,
+              optionsPnL: row.options_pnl || 0,
+              percentage: row.percentage || 0
+            }
+          }
+        } catch (err) {
+          console.error('Error transforming row:', row, err)
+          return null
+        }
+      }).filter(item => item !== null)
+
+      console.log(`Transformed ${transformedData.length} rows`)
+      console.log('Sample transformed:', transformedData[0])
+
       setPnlData(transformedData)
       setCurrentSnapshotDate(asofDate)
       setIsViewingSnapshot(true)
