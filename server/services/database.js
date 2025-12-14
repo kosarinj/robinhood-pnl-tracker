@@ -367,9 +367,9 @@ export class DatabaseService {
             avgCost: item.real?.avgCostBasis || null,
             currentPrice: item.currentPrice || null,
             currentValue: item.real?.currentValue || null,
-            realizedPnl: item.real?.realized || null,
-            unrealizedPnl: item.real?.unrealized || null,
-            totalPnl: item.real?.total || null,
+            realizedPnl: item.real?.realizedPnL || null,
+            unrealizedPnl: item.real?.unrealizedPnL || null,
+            totalPnl: item.real?.totalPnL || null,
             dailyPnl: item.real?.dailyPnL || null,
             optionsPnl: item.real?.optionsPnL || null,
             percentage: item.real?.percentage || null
