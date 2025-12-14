@@ -371,7 +371,7 @@ export class DatabaseService {
             unrealizedPnl: item.real?.unrealizedPnL || null,
             totalPnl: item.real?.totalPnL || null,
             dailyPnl: item.real?.dailyPnL || null,
-            optionsPnl: item.real?.optionsPnL || null,
+            optionsPnl: item.optionsPnL || null,
             percentage: item.real?.percentage || null
           })
         }
