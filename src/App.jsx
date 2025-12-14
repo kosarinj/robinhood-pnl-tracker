@@ -555,6 +555,10 @@ function App() {
             currentPrice: num(row.current_price),
             previousClose: num(row.current_price),
             optionsPnL: num(row.options_pnl),
+            optionsDailyPnL: 0,
+            optionsMadeUpGround: 0,
+            optionsCount: 0,
+            options: [],
             avgCost: {
               position: num(row.position),
               avgCostBasis: num(row.avg_cost),
