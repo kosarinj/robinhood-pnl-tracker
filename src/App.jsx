@@ -502,6 +502,7 @@ function App() {
       // Clear snapshot view - return to live mode
       setIsViewingSnapshot(false)
       setCurrentSnapshotDate(null)
+      // Note: Don't clear pnlData - it will be refreshed when user uploads CSV or refreshes prices
       return
     }
 
@@ -512,6 +513,7 @@ function App() {
 
       const snapshotData = await socketService.loadPnLSnapshot(asofDate)
       console.log(`Received snapshot data:`, snapshotData)
+      alert(`Loading snapshot for ${asofDate} - received ${snapshotData?.length || 0} rows`)
 
       if (!snapshotData || snapshotData.length === 0) {
         setError(`No data found for ${asofDate}. Upload a CSV to save data first.`)
@@ -548,7 +550,9 @@ function App() {
       console.log(`Transformed ${transformedData.length} rows`)
       console.log('Sample transformed:', transformedData[0])
 
+      // Set snapshot data
       setPnlData(transformedData)
+      setTrades([]) // Clear trades when viewing snapshot (historical data only)
       setCurrentSnapshotDate(asofDate)
       setIsViewingSnapshot(true)
       setLoading(false)
