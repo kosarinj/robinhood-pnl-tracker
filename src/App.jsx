@@ -526,9 +526,33 @@ function App() {
 
       const transformedData = snapshotData.map(row => {
         try {
+          const emptyPnl = {
+            position: 0,
+            avgCostBasis: 0,
+            currentValue: 0,
+            realized: 0,
+            unrealized: 0,
+            total: 0,
+            dailyPnL: 0,
+            optionsPnL: 0,
+            percentage: 0
+          }
+
           return {
             symbol: row.symbol || 'UNKNOWN',
             currentPrice: row.current_price || 0,
+            previousClose: row.current_price || 0,
+            avgCost: {
+              position: row.position || 0,
+              avgCostBasis: row.avg_cost || 0,
+              currentValue: row.current_value || 0,
+              realized: row.realized_pnl || 0,
+              unrealized: row.unrealized_pnl || 0,
+              total: row.total_pnl || 0,
+              dailyPnL: row.daily_pnl || 0,
+              optionsPnL: row.options_pnl || 0,
+              percentage: row.percentage || 0
+            },
             real: {
               position: row.position || 0,
               avgCostBasis: row.avg_cost || 0,
@@ -539,7 +563,9 @@ function App() {
               dailyPnL: row.daily_pnl || 0,
               optionsPnL: row.options_pnl || 0,
               percentage: row.percentage || 0
-            }
+            },
+            lifo: { ...emptyPnl },
+            fifo: { ...emptyPnl }
           }
         } catch (err) {
           console.error('Error transforming row:', row, err)
