@@ -240,12 +240,15 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis
                   dataKey="timestamp"
+                  domain={['auto', 'auto']}
+                  type="number"
                   tickFormatter={formatDate}
                   stroke="#666"
                   style={{ fontSize: '12px' }}
                 />
                 <YAxis
                   yAxisId="price"
+                  domain={['auto', 'auto']}
                   tickFormatter={formatPrice}
                   stroke="#666"
                   style={{ fontSize: '12px' }}
@@ -275,6 +278,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   strokeWidth={2}
                   dot={false}
                   name="Price"
+                  connectNulls={true}
+                  isAnimationActive={false}
                 />
 
                 {/* EMA 9 */}
