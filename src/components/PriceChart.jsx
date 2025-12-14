@@ -20,6 +20,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [priceData, setPriceData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [chartReady, setChartReady] = useState(false)
   const [indicators, setIndicators] = useState({
     showEMA9: false,
     showEMA21: false,
@@ -90,9 +91,13 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         console.log('Sample enriched point:', enrichedData[Math.floor(enrichedData.length / 2)])
         setPriceData(enrichedData)
 
-        // Force a resize event to trigger ResponsiveContainer to render
+        // Delay chart rendering to ensure DOM is ready
         setTimeout(() => {
-          window.dispatchEvent(new Event('resize'))
+          setChartReady(true)
+          // Force multiple resize events
+          setTimeout(() => window.dispatchEvent(new Event('resize')), 50)
+          setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
+          setTimeout(() => window.dispatchEvent(new Event('resize')), 300)
         }, 100)
       } catch (err) {
         console.error('Error loading price chart:', err)
@@ -233,9 +238,10 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         )}
 
         {/* Price Chart */}
-        {!loading && !error && priceData.length > 0 && (
+        {!loading && !error && priceData.length > 0 && chartReady && (
           <>
-            <ResponsiveContainer width="100%" height={400} key={`chart-${priceData.length}`}>
+            <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
+              <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}`}>
               <ComposedChart data={priceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis
@@ -344,6 +350,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 />
               </ComposedChart>
             </ResponsiveContainer>
+            </div>
 
             {/* MACD Chart (separate) */}
             {indicators.showMACD && (
