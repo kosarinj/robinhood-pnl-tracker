@@ -554,6 +554,7 @@ function App() {
             symbol: row.symbol || 'UNKNOWN',
             currentPrice: num(row.current_price),
             previousClose: num(row.current_price),
+            optionsPnL: num(row.options_pnl),
             avgCost: {
               position: num(row.position),
               avgCostBasis: num(row.avg_cost),
