@@ -540,12 +540,14 @@ function App() {
             position: 0,
             avgCostBasis: 0,
             currentValue: 0,
-            realized: 0,
-            unrealized: 0,
-            total: 0,
+            realizedPnL: 0,
+            unrealizedPnL: 0,
+            totalPnL: 0,
             dailyPnL: 0,
             optionsPnL: 0,
-            percentage: 0
+            percentage: 0,
+            percentageReturn: 0,
+            lowestOpenBuyPrice: 0
           }
 
           return {
@@ -556,23 +558,27 @@ function App() {
               position: num(row.position),
               avgCostBasis: num(row.avg_cost),
               currentValue: num(row.current_value),
-              realized: num(row.realized_pnl),
-              unrealized: num(row.unrealized_pnl),
-              total: num(row.total_pnl),
+              realizedPnL: num(row.realized_pnl),
+              unrealizedPnL: num(row.unrealized_pnl),
+              totalPnL: num(row.total_pnl),
               dailyPnL: num(row.daily_pnl),
               optionsPnL: num(row.options_pnl),
-              percentage: num(row.percentage)
+              percentage: num(row.percentage),
+              percentageReturn: num(row.percentage),
+              lowestOpenBuyPrice: 0
             },
             real: {
               position: num(row.position),
               avgCostBasis: num(row.avg_cost),
               currentValue: num(row.current_value),
-              realized: num(row.realized_pnl),
-              unrealized: num(row.unrealized_pnl),
-              total: num(row.total_pnl),
+              realizedPnL: num(row.realized_pnl),
+              unrealizedPnL: num(row.unrealized_pnl),
+              totalPnL: num(row.total_pnl),
               dailyPnL: num(row.daily_pnl),
               optionsPnL: num(row.options_pnl),
-              percentage: num(row.percentage)
+              percentage: num(row.percentage),
+              percentageReturn: num(row.percentage),
+              lowestOpenBuyPrice: 0
             },
             lifo: { ...emptyPnl },
             fifo: { ...emptyPnl }
@@ -584,10 +590,12 @@ function App() {
       }).filter(item => item !== null)
 
       console.log(`Transformed ${transformedData.length} rows`)
-      console.log('Sample transformed:', transformedData[0])
+      console.log('Sample transformed:', JSON.stringify(transformedData[0], null, 2))
 
       // Set snapshot data
+      console.log('Setting pnlData to transformed data...')
       setPnlData(transformedData)
+      console.log('pnlData set - about to render')
       setTrades([]) // Clear trades when viewing snapshot (historical data only)
       setCurrentSnapshotDate(asofDate)
       setIsViewingSnapshot(true)
