@@ -149,6 +149,14 @@ io.on('connection', (socket) => {
         console.error('Error saving P&L snapshot:', error)
       }
 
+      // Save trades to database
+      try {
+        databaseService.saveTrades(trades, asofDate)
+        console.log(`💾 Saved ${trades.length} trades to database for ${asofDate}`)
+      } catch (error) {
+        console.error('Error saving trades:', error)
+      }
+
       // Get current prices for live view
       const prices = await priceService.getPrices(stockSymbols)
 
@@ -282,6 +290,70 @@ io.on('connection', (socket) => {
     } catch (error) {
       console.error(`❌ Error loading P&L snapshot:`, error)
       socket.emit('pnl-snapshot-loaded', { success: false, error: error.message })
+    }
+  })
+
+  // Get latest saved trades
+  socket.on('get-latest-trades', async () => {
+    console.log(`📥 Received get-latest-trades request`)
+    try {
+      const { trades, uploadDate } = databaseService.getLatestTrades()
+
+      if (trades.length > 0) {
+        console.log(`✓ Found ${trades.length} trades from ${uploadDate}`)
+
+        // Parse deposits from the same session if available
+        // For now, we'll just send the trades and let the client handle deposits separately
+        socket.emit('latest-trades-result', {
+          success: true,
+          trades,
+          uploadDate,
+          deposits: [],
+          totalPrincipal: 0
+        })
+      } else {
+        console.log(`ℹ️  No saved trades found`)
+        socket.emit('latest-trades-result', {
+          success: true,
+          trades: [],
+          uploadDate: null,
+          deposits: [],
+          totalPrincipal: 0
+        })
+      }
+    } catch (error) {
+      console.error(`❌ Error getting latest trades:`, error)
+      socket.emit('latest-trades-error', { error: error.message })
+    }
+  })
+
+  // Get all upload dates
+  socket.on('get-upload-dates', async () => {
+    console.log(`📅 Received get-upload-dates request`)
+    try {
+      const dates = databaseService.getUploadDates()
+      socket.emit('upload-dates-result', { dates })
+    } catch (error) {
+      console.error(`❌ Error getting upload dates:`, error)
+      socket.emit('upload-dates-error', { error: error.message })
+    }
+  })
+
+  // Load trades for a specific date
+  socket.on('load-trades', async ({ uploadDate }) => {
+    console.log(`📂 Received load-trades request for: ${uploadDate}`)
+    try {
+      const trades = databaseService.getTrades(uploadDate)
+      socket.emit('trades-loaded', {
+        success: true,
+        uploadDate,
+        trades,
+        deposits: [],
+        totalPrincipal: 0
+      })
+    } catch (error) {
+      console.error(`❌ Error loading trades:`, error)
+      socket.emit('trades-loaded', { success: false, error: error.message })
     }
   })
 })

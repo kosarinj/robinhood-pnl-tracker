@@ -125,9 +125,28 @@ function App() {
     socketService.connect()
 
     // Listen for connection status
-    socketService.socket.on('connect', () => {
+    socketService.socket.on('connect', async () => {
       setConnected(true)
       console.log('✅ Connected to server')
+
+      // Auto-load latest saved trades if no trades are currently loaded
+      if (trades.length === 0) {
+        try {
+          console.log('📥 Attempting to auto-load latest saved trades...')
+          const result = await socketService.getLatestTrades()
+          if (result.success && result.trades && result.trades.length > 0) {
+            console.log(`✅ Auto-loaded ${result.trades.length} trades from ${result.uploadDate}`)
+            setTrades(result.trades)
+            setDeposits(result.deposits || [])
+            setTotalPrincipal(result.totalPrincipal || 0)
+            setMessage(`Auto-loaded ${result.trades.length} trades from ${result.uploadDate}`)
+          } else {
+            console.log('ℹ️  No saved trades found on server')
+          }
+        } catch (error) {
+          console.log('ℹ️  Could not auto-load trades:', error.message)
+        }
+      }
     })
 
     socketService.socket.on('disconnect', () => {

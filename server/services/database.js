@@ -76,6 +76,31 @@ db.exec(`
     UNIQUE(asof_date, symbol)
   );
 
+  -- Table to store raw trades from CSV
+  CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    upload_date TEXT NOT NULL,
+    trans_date TEXT NOT NULL,
+    trans_code TEXT,
+    symbol TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    price REAL NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT,
+    is_buy INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+  );
+
+  -- Table to store CSV upload metadata
+  CREATE TABLE IF NOT EXISTS csv_uploads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    upload_date TEXT NOT NULL UNIQUE,
+    latest_trade_date TEXT NOT NULL,
+    trade_count INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+  );
+
   -- Indexes for faster queries
   CREATE INDEX IF NOT EXISTS idx_signal_snapshots_symbol_timestamp
     ON signal_snapshots(symbol, timestamp DESC);
@@ -88,6 +113,15 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_pnl_snapshots_asof_date
     ON pnl_snapshots(asof_date DESC, symbol);
+
+  CREATE INDEX IF NOT EXISTS idx_trades_upload_date
+    ON trades(upload_date DESC, trans_date DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_trades_symbol
+    ON trades(symbol, trans_date DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_csv_uploads_date
+    ON csv_uploads(upload_date DESC);
 `)
 
 console.log(`Database initialized at: ${dbPath}`)
@@ -123,6 +157,20 @@ const upsertPnLSnapshot = db.prepare(`
     options_pnl = excluded.options_pnl,
     percentage = excluded.percentage,
     created_at = strftime('%s', 'now')
+`)
+
+const insertTrade = db.prepare(`
+  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy)
+  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy)
+`)
+
+const upsertCsvUpload = db.prepare(`
+  INSERT INTO csv_uploads (upload_date, latest_trade_date, trade_count)
+  VALUES (@uploadDate, @latestTradeDate, @tradeCount)
+  ON CONFLICT(upload_date) DO UPDATE SET
+    latest_trade_date = excluded.latest_trade_date,
+    trade_count = excluded.trade_count,
+    updated_at = strftime('%s', 'now')
 `)
 
 export class DatabaseService {
@@ -410,6 +458,123 @@ export class DatabaseService {
       return stmt.all().map(row => row.asof_date)
     } catch (error) {
       console.error('Error getting snapshot dates:', error)
+      return []
+    }
+  }
+
+  // Save trades from CSV upload
+  saveTrades(trades, uploadDate = null) {
+    try {
+      // Use provided upload date or generate from latest trade date
+      if (!uploadDate && trades.length > 0) {
+        // Find the latest trade date
+        const latestTrade = trades.reduce((latest, trade) => {
+          const tradeDate = new Date(trade.date || trade.transDate)
+          const latestDate = new Date(latest.date || latest.transDate)
+          return tradeDate > latestDate ? trade : latest
+        })
+        uploadDate = new Date(latestTrade.date || latestTrade.transDate).toISOString().split('T')[0]
+      }
+
+      // Delete existing trades for this upload date
+      db.prepare('DELETE FROM trades WHERE upload_date = ?').run(uploadDate)
+
+      // Save all trades in a transaction
+      const saveTrades = db.transaction((trades, uploadDate) => {
+        for (const trade of trades) {
+          const transDate = new Date(trade.date || trade.transDate).toISOString().split('T')[0]
+          insertTrade.run({
+            uploadDate,
+            transDate,
+            transCode: trade.transCode || trade.transactionCode || null,
+            symbol: trade.symbol,
+            quantity: trade.quantity,
+            price: trade.price,
+            amount: trade.amount,
+            description: trade.description || null,
+            isBuy: trade.isBuy ? 1 : 0
+          })
+        }
+
+        // Update metadata
+        upsertCsvUpload.run({
+          uploadDate,
+          latestTradeDate: uploadDate,
+          tradeCount: trades.length
+        })
+      })
+
+      saveTrades(trades, uploadDate)
+      console.log(`✅ Saved ${trades.length} trades for ${uploadDate}`)
+      return uploadDate
+    } catch (error) {
+      console.error('Error saving trades:', error)
+      throw error
+    }
+  }
+
+  // Get trades for a specific upload date
+  getTrades(uploadDate) {
+    try {
+      const stmt = db.prepare(`
+        SELECT * FROM trades
+        WHERE upload_date = ?
+        ORDER BY trans_date DESC, symbol
+      `)
+      const rows = stmt.all(uploadDate)
+
+      // Convert back to the expected format
+      return rows.map(row => ({
+        date: row.trans_date,
+        transDate: row.trans_date,
+        transCode: row.trans_code,
+        symbol: row.symbol,
+        quantity: row.quantity,
+        price: row.price,
+        amount: row.amount,
+        description: row.description,
+        isBuy: row.is_buy === 1
+      }))
+    } catch (error) {
+      console.error('Error getting trades:', error)
+      return []
+    }
+  }
+
+  // Get the latest saved trades
+  getLatestTrades() {
+    try {
+      const latestUpload = db.prepare(`
+        SELECT upload_date FROM csv_uploads
+        ORDER BY upload_date DESC
+        LIMIT 1
+      `).get()
+
+      if (!latestUpload) {
+        return { trades: [], uploadDate: null }
+      }
+
+      return {
+        trades: this.getTrades(latestUpload.upload_date),
+        uploadDate: latestUpload.upload_date
+      }
+    } catch (error) {
+      console.error('Error getting latest trades:', error)
+      return { trades: [], uploadDate: null }
+    }
+  }
+
+  // Get all available upload dates
+  getUploadDates() {
+    try {
+      const stmt = db.prepare(`
+        SELECT upload_date, latest_trade_date, trade_count
+        FROM csv_uploads
+        ORDER BY upload_date DESC
+      `)
+      return stmt.all()
+    } catch (error) {
+      console.error('Error getting upload dates:', error)
       return []
     }
   }

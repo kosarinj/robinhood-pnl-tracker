@@ -217,6 +217,102 @@ class SocketService {
     })
   }
 
+  // Get latest saved trades
+  getLatestTrades() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('latest-trades-result', resultHandler)
+        this.socket.off('latest-trades-error', errorHandler)
+        clearTimeout(timeoutId)
+        resolve(response)
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('latest-trades-result', resultHandler)
+        this.socket.off('latest-trades-error', errorHandler)
+        clearTimeout(timeoutId)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('latest-trades-result', resultHandler)
+      this.socket.on('latest-trades-error', errorHandler)
+      this.socket.emit('get-latest-trades')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('latest-trades-result', resultHandler)
+        this.socket.off('latest-trades-error', errorHandler)
+        reject(new Error('Get latest trades timeout'))
+      }, 10000)
+    })
+  }
+
+  // Get all upload dates
+  getUploadDates() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('upload-dates-result', resultHandler)
+        this.socket.off('upload-dates-error', errorHandler)
+        clearTimeout(timeoutId)
+        resolve(response.dates)
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('upload-dates-result', resultHandler)
+        this.socket.off('upload-dates-error', errorHandler)
+        clearTimeout(timeoutId)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('upload-dates-result', resultHandler)
+      this.socket.on('upload-dates-error', errorHandler)
+      this.socket.emit('get-upload-dates')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('upload-dates-result', resultHandler)
+        this.socket.off('upload-dates-error', errorHandler)
+        reject(new Error('Get upload dates timeout'))
+      }, 10000)
+    })
+  }
+
+  // Load trades for a specific date
+  loadTrades(uploadDate) {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('trades-loaded', resultHandler)
+        clearTimeout(timeoutId)
+        if (response.success) {
+          resolve(response)
+        } else {
+          reject(new Error(response.error))
+        }
+      }
+
+      this.socket.on('trades-loaded', resultHandler)
+      this.socket.emit('load-trades', { uploadDate })
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('trades-loaded', resultHandler)
+        reject(new Error('Load trades timeout'))
+      }, 10000)
+    })
+  }
+
   // Fetch historical price data
   fetchHistoricalData(symbol, range = '6mo', interval = '1d') {
     return new Promise((resolve, reject) => {
