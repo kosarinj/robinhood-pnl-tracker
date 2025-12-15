@@ -36,7 +36,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   // Helper function to get dynamic gradient color for Daily PNL cells
   const getDailyPnLStyle = (value) => {
     if (value === 0) {
-      return { backgroundColor: '#f8f9fa', color: '#333' }
+      return { backgroundColor: 'var(--surface)', color: 'var(--text)' }
     }
 
     // For positive values: scale from light green to deep green
@@ -627,7 +627,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       {data.length !== allData?.length && (
         <div style={{
           padding: '10px 15px',
-          background: '#e7f3ff',
+          background: 'var(--surface)',
           borderRadius: '8px',
           marginBottom: '15px',
           fontSize: '14px',
@@ -651,27 +651,27 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
               Position{getSortIcon('avgCost.position')}
             </th>
             {showRiskManagement && (
-              <th colSpan="3" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6', background: '#fff4e6' }}>Risk Management</th>
+              <th colSpan="3" style={{ textAlign: 'center', borderBottom: '1px solid var(--border)', background: 'var(--tableHeader)' }}>Risk Management</th>
             )}
             {visiblePnlColumns.real && (
-              <th colSpan="10" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Real P&L</th>
+              <th colSpan="10" style={{ textAlign: 'center', borderBottom: '1px solid var(--border)' }}>Real P&L</th>
             )}
             {visiblePnlColumns.avgCost && (
-              <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>Average Cost</th>
+              <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid var(--border)' }}>Average Cost</th>
             )}
             {visiblePnlColumns.fifo && (
-              <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>FIFO</th>
+              <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid var(--border)' }}>FIFO</th>
             )}
             {visiblePnlColumns.lifo && (
-              <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid #dee2e6' }}>LIFO</th>
+              <th colSpan="4" style={{ textAlign: 'center', borderBottom: '1px solid var(--border)' }}>LIFO</th>
             )}
           </tr>
           <tr>
             {showRiskManagement && (
               <>
-                <th style={{ background: '#fff4e6' }}>Risk Allocated</th>
-                <th style={{ background: '#fff4e6' }}>Risk Used</th>
-                <th style={{ background: '#fff4e6' }}>Used %</th>
+                <th style={{ background: 'var(--tableHeader)' }}>Risk Allocated</th>
+                <th style={{ background: 'var(--tableHeader)' }}>Risk Used</th>
+                <th style={{ background: 'var(--tableHeader)' }}>Used %</th>
               </>
             )}
             {visiblePnlColumns.real && realPnlColumnOrder && realPnlColumnOrder.map(columnId => {
@@ -886,7 +886,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
                   return (
                     <>
-                      <td onClick={(e) => e.stopPropagation()} style={{ background: '#fffbf0' }}>
+                      <td onClick={(e) => e.stopPropagation()} style={{ background: 'var(--tableHeader)' }}>
                         {editingRisk === row.symbol ? (
                           <div className="price-edit">
                             <input
@@ -914,7 +914,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           </div>
                         )}
                       </td>
-                      <td style={{ background: '#fffbf0' }}>
+                      <td style={{ background: 'var(--tableHeader)' }}>
                         {formatCurrency(riskUsed)}
                       </td>
                       <td style={{ background: isOverAllocated ? '#ffe6e6' : '#fffbf0', fontWeight: isOverAllocated ? 'bold' : 'normal' }}>
@@ -979,14 +979,14 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             {/* Expanded row showing individual trades or options */}
             {expandedSymbol === row.symbol && (
               <tr className="expanded-row">
-                <td colSpan={3 + (showRiskManagement ? 3 : 0) + (visiblePnlColumns.real ? 10 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'white', padding: '0' }}>
-                  <div className="trades-detail" style={{ background: 'white', padding: '20px' }}>
+                <td colSpan={3 + (showRiskManagement ? 3 : 0) + (visiblePnlColumns.real ? 10 : 0) + (visiblePnlColumns.avgCost ? 4 : 0) + (visiblePnlColumns.fifo ? 4 : 0) + (visiblePnlColumns.lifo ? 4 : 0)} style={{ background: 'var(--surface)', padding: '0' }}>
+                  <div className="trades-detail" style={{ background: 'var(--surface)', padding: '20px' }}>
                     {row.isRollup ? (
                       // Display individual options for rolled-up parent instruments
                       <>
                         <h4 style={{ color: '#667eea', marginBottom: '15px' }}>{row.symbol} - Options Breakdown</h4>
-                        <div style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'white' }}>
-                          <table className="detail-table" style={{ minWidth: '800px', background: 'white', width: '100%' }}>
+                        <div style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'var(--surface)' }}>
+                          <table className="detail-table" style={{ minWidth: '800px', background: 'var(--surface)', width: '100%' }}>
                             <thead>
                               <tr>
                                 <th>Option</th>
@@ -1018,52 +1018,52 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                                 )}
                               </tr>
                             </thead>
-                            <tbody style={{ background: 'white' }}>
+                            <tbody style={{ background: 'var(--surface)' }}>
                               {row.options && row.options.map((option, idx) => (
-                                <tr key={idx} style={{ background: 'white' }}>
-                                  <td style={{ background: 'white', fontSize: '0.9em' }}>{option.symbol}</td>
+                                <tr key={idx} style={{ background: 'var(--surface)' }}>
+                                  <td style={{ background: 'var(--surface)', fontSize: '0.9em' }}>{option.symbol}</td>
                                   {visiblePnlColumns.real && (
                                     <>
-                                      <td className={getClassName(option.real.realizedPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.real.realizedPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.real.realizedPnL)}
                                       </td>
-                                      <td className={getClassName(option.real.unrealizedPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.real.unrealizedPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.real.unrealizedPnL)}
                                       </td>
-                                      <td className={getClassName(option.real.totalPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.real.totalPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.real.totalPnL)}
                                       </td>
                                     </>
                                   )}
                                   {visiblePnlColumns.avgCost && (
                                     <>
-                                      <td className={getClassName(option.avgCost.unrealizedPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.avgCost.unrealizedPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.avgCost.unrealizedPnL)}
                                       </td>
                                     </>
                                   )}
                                   {visiblePnlColumns.fifo && (
                                     <>
-                                      <td className={getClassName(option.fifo.realizedPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.fifo.realizedPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.fifo.realizedPnL)}
                                       </td>
-                                      <td className={getClassName(option.fifo.unrealizedPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.fifo.unrealizedPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.fifo.unrealizedPnL)}
                                       </td>
-                                      <td className={getClassName(option.fifo.totalPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.fifo.totalPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.fifo.totalPnL)}
                                       </td>
                                     </>
                                   )}
                                   {visiblePnlColumns.lifo && (
                                     <>
-                                      <td className={getClassName(option.lifo.realizedPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.lifo.realizedPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.lifo.realizedPnL)}
                                       </td>
-                                      <td className={getClassName(option.lifo.unrealizedPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.lifo.unrealizedPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.lifo.unrealizedPnL)}
                                       </td>
-                                      <td className={getClassName(option.lifo.totalPnL)} style={{ background: 'white' }}>
+                                      <td className={getClassName(option.lifo.totalPnL)} style={{ background: 'var(--surface)' }}>
                                         {formatCurrency(option.lifo.totalPnL)}
                                       </td>
                                     </>
@@ -1113,14 +1113,14 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                         </div>
                         <div
                           id={`tradingview_${row.symbol.replace(/[^a-zA-Z0-9]/g, '_')}`}
-                          style={{ height: '500px', width: '100%', background: 'white' }}
+                          style={{ height: '500px', width: '100%', background: 'var(--surface)' }}
                         />
                       </div>
                     )}
 
                     <h4 style={{ color: '#667eea', marginBottom: '15px' }}>Trade History</h4>
-                    <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'white' }}>
-                    <table className="detail-table" style={{ minWidth: '800px', background: 'white' }}>
+                    <div style={{ maxHeight: '400px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'var(--surface)' }}>
+                    <table className="detail-table" style={{ minWidth: '800px', background: 'var(--surface)' }}>
                       <thead>
                         <tr>
                           <th style={{ width: '90px', position: 'sticky', left: 0, background: '#667eea', zIndex: 10 }}>Date</th>
@@ -1135,7 +1135,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           <th style={{ width: '150px' }}>Matched Buys</th>
                         </tr>
                       </thead>
-                      <tbody style={{ background: 'white' }}>
+                      <tbody style={{ background: 'var(--surface)' }}>
                         {(() => {
                           try {
                           let symbolTrades = getTradesForSymbol(row.symbol, true, row.options)
@@ -1156,7 +1156,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           if (!symbolTrades || symbolTrades.length === 0) {
                             return (
                               <tr>
-                                <td colSpan="10" style={{ padding: '20px', textAlign: 'center', background: 'white' }}>
+                                <td colSpan="10" style={{ padding: '20px', textAlign: 'center', background: 'var(--surface)' }}>
                                   No trades found for {row.symbol}
                                 </td>
                               </tr>
@@ -1276,25 +1276,25 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                             const displayDescription = trade.isOption ? trade.description : trade.instrument
 
                             return (
-                              <tr key={idx} style={{ background: 'white' }}>
-                                <td style={{ position: 'sticky', left: 0, background: 'white', zIndex: 5 }}>{tradeDate.toLocaleDateString()}</td>
-                                <td style={{ background: 'white', fontSize: '0.85em' }}>{displayDescription}</td>
-                                <td className={trade.isBuy ? 'positive' : 'negative'} style={{ background: 'white' }}>
+                              <tr key={idx} style={{ background: 'var(--surface)' }}>
+                                <td style={{ position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 5 }}>{tradeDate.toLocaleDateString()}</td>
+                                <td style={{ background: 'var(--surface)', fontSize: '0.85em' }}>{displayDescription}</td>
+                                <td className={trade.isBuy ? 'positive' : 'negative'} style={{ background: 'var(--surface)' }}>
                                   {trade.isBuy ? 'BUY' : 'SELL'}
                                 </td>
-                                <td style={{ background: 'white' }}>{trade.quantity}</td>
-                                <td style={{ background: 'white' }}>{formatCurrency(trade.price)}</td>
-                                <td style={{ background: 'white' }}>{formatCurrency(trade.amount)}</td>
-                                <td style={{ background: 'white', fontSize: '0.85em' }}>
+                                <td style={{ background: 'var(--surface)' }}>{trade.quantity}</td>
+                                <td style={{ background: 'var(--surface)' }}>{formatCurrency(trade.price)}</td>
+                                <td style={{ background: 'var(--surface)' }}>{formatCurrency(trade.amount)}</td>
+                                <td style={{ background: 'var(--surface)', fontSize: '0.85em' }}>
                                   {costBasisUsed !== null ? formatCurrency(costBasisUsed) : '-'}
                                 </td>
-                                <td className={realizedPnL ? getClassName(realizedPnL) : ''} style={{ background: 'white' }}>
+                                <td className={realizedPnL ? getClassName(realizedPnL) : ''} style={{ background: 'var(--surface)' }}>
                                   {realizedPnL !== null ? formatCurrency(realizedPnL) : '-'}
                                 </td>
-                                <td className={!trade.isBuy ? getClassName(runningTotal) : ''} style={{ background: 'white' }}>
+                                <td className={!trade.isBuy ? getClassName(runningTotal) : ''} style={{ background: 'var(--surface)' }}>
                                   {!trade.isBuy ? formatCurrency(runningTotal) : '-'}
                                 </td>
-                                <td style={{ background: 'white', fontSize: '0.75em' }}>
+                                <td style={{ background: 'var(--surface)', fontSize: '0.75em' }}>
                                   {matchedBuys.length > 0 ? (
                                     <div>
                                       {matchedBuys.map((mb, mbIdx) => (
@@ -1384,13 +1384,13 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
               return (
                 <>
-                  <td style={{ background: '#fff4e6' }}>
+                  <td style={{ background: 'var(--tableHeader)' }}>
                     <strong>{formatCurrency(totalAllocated)}</strong>
                   </td>
-                  <td style={{ background: '#fff4e6' }}>
+                  <td style={{ background: 'var(--tableHeader)' }}>
                     <strong>{formatCurrency(totalUsed)}</strong>
                   </td>
-                  <td style={{ background: '#fff4e6' }}>
+                  <td style={{ background: 'var(--tableHeader)' }}>
                     <strong>{totalAllocated > 0 ? `${avgUsedPercent.toFixed(1)}%` : '-'}</strong>
                   </td>
                 </>
@@ -1556,7 +1556,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
             return (
               <>
-                <div style={{ marginBottom: '15px', padding: '10px', background: '#f0f0f0', borderRadius: '6px' }}>
+                <div style={{ marginBottom: '15px', padding: '10px', background: 'var(--tableHeader)', borderRadius: '6px' }}>
                   <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Calculation Method:</div>
                   <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
@@ -1592,7 +1592,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                   </div>
                 </div>
 
-                <div style={{ marginBottom: '15px', padding: '10px', background: '#f8f9fa', borderRadius: '6px' }}>
+                <div style={{ marginBottom: '15px', padding: '10px', background: 'var(--tableHeader)', borderRadius: '6px' }}>
                   <div style={{ marginBottom: '5px' }}>
                     <strong>Current Position:</strong> {currentPosition} shares
                   </div>
@@ -1641,7 +1641,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                   const methodLabel = whatIfMethod === 'real' ? 'Real P&L' : whatIfMethod === 'fifo' ? 'FIFO' : 'LIFO'
 
                   return (
-                    <div style={{ padding: '15px', background: '#e7f3ff', borderRadius: '8px', border: '2px solid #667eea' }}>
+                    <div style={{ padding: '15px', background: 'var(--surface)', borderRadius: '8px', border: '2px solid #667eea' }}>
                       <div style={{ marginBottom: '10px', fontSize: '16px', fontWeight: 'bold', color: '#0056b3' }}>
                         📈 Results ({methodLabel}):
                       </div>

@@ -127,18 +127,29 @@ class SocketService {
         return
       }
 
+      const resultHandler = (response) => {
+        this.socket.off('lookup-signal-result', resultHandler)
+        this.socket.off('lookup-signal-error', errorHandler)
+        clearTimeout(timeoutId)
+        resolve(response.signal)
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('lookup-signal-result', resultHandler)
+        this.socket.off('lookup-signal-error', errorHandler)
+        clearTimeout(timeoutId)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('lookup-signal-result', resultHandler)
+      this.socket.on('lookup-signal-error', errorHandler)
+
       this.socket.emit('lookup-signal', { symbol })
 
-      this.socket.once('lookup-signal-result', (response) => {
-        resolve(response.signal)
-      })
-
-      this.socket.once('lookup-signal-error', (response) => {
-        reject(new Error(response.error))
-      })
-
       // Timeout after 15 seconds
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
+        this.socket.off('lookup-signal-result', resultHandler)
+        this.socket.off('lookup-signal-error', errorHandler)
         reject(new Error('Signal lookup timeout'))
       }, 15000)
     })

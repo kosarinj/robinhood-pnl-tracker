@@ -18,6 +18,7 @@ import { socketService } from '../services/socketService'
 
 function PriceChart({ symbol, trades, onClose, useServer = false, connected = false }) {
   const [priceData, setPriceData] = useState([])
+  const [rawData, setRawData] = useState([]) // Store raw data separately
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [chartReady, setChartReady] = useState(false)
@@ -59,6 +60,9 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         if (historical.length === 0) {
           throw new Error('No historical data available. The data provider may be unavailable or the symbol may be invalid.')
         }
+
+        // Store raw historical data
+        setRawData(historical)
 
         // Add technical indicators
         const dataWithIndicators = addIndicators(historical, indicators)
@@ -108,7 +112,31 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     }
 
     loadData()
-  }, [symbol, trades, indicators, useServer, connected])
+  }, [symbol, trades, useServer, connected])
+
+  // Recalculate indicators when they change (without refetching data)
+  useEffect(() => {
+    if (rawData.length === 0) return
+
+    const dataWithIndicators = addIndicators(rawData, indicators)
+    const enrichedData = dataWithIndicators.map(candle => {
+      const candleDate = new Date(candle.date).setHours(0, 0, 0, 0)
+      const dayTrades = trades.filter(trade => {
+        const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
+        return tradeDate === candleDate
+      })
+      const buys = dayTrades.filter(t => t.isBuy)
+      const sells = dayTrades.filter(t => !t.isBuy)
+      return {
+        ...candle,
+        buyPrice: buys.length > 0 ? buys.reduce((sum, t) => sum + t.price, 0) / buys.length : null,
+        sellPrice: sells.length > 0 ? sells.reduce((sum, t) => sum + t.price, 0) / sells.length : null,
+        buyQuantity: buys.reduce((sum, t) => sum + t.quantity, 0),
+        sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0)
+      }
+    })
+    setPriceData(enrichedData)
+  }, [indicators, rawData, trades])
 
   const toggleIndicator = (indicator) => {
     setIndicators(prev => ({
