@@ -139,7 +139,14 @@ function App() {
             setTrades(result.trades)
             setDeposits(result.deposits || [])
             setTotalPrincipal(result.totalPrincipal || 0)
-            setMessage(`Auto-loaded ${result.trades.length} trades from ${result.uploadDate}`)
+            // Set historical prices and P&L data
+            if (result.currentPrices) {
+              setCurrentPrices(result.currentPrices)
+            }
+            if (result.pnlData) {
+              setPnlData(result.pnlData)
+            }
+            // No popup message for auto-load
           } else {
             console.log('ℹ️  No saved trades found on server')
           }

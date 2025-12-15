@@ -302,14 +302,28 @@ io.on('connection', (socket) => {
       if (trades.length > 0) {
         console.log(`✓ Found ${trades.length} trades from ${uploadDate}`)
 
-        // Parse deposits from the same session if available
-        // For now, we'll just send the trades and let the client handle deposits separately
+        // Get unique stock symbols
+        const allSymbols = [...new Set(trades.map(t => t.symbol))]
+        const stockSymbols = allSymbols.filter(s => {
+          return !s.includes(' ') && !s.includes('Put') && !s.includes('Call')
+        })
+
+        // Fetch historical prices for the upload date
+        console.log(`📅 Fetching historical prices for ${uploadDate}...`)
+        const historicalPrices = await priceService.getPricesForDate(stockSymbols, uploadDate)
+        console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
+
+        // Calculate P&L using historical prices
+        const pnlData = calculatePnL(trades, historicalPrices)
+
         socket.emit('latest-trades-result', {
           success: true,
           trades,
           uploadDate,
           deposits: [],
-          totalPrincipal: 0
+          totalPrincipal: 0,
+          currentPrices: historicalPrices,
+          pnlData
         })
       } else {
         console.log(`ℹ️  No saved trades found`)
@@ -344,12 +358,29 @@ io.on('connection', (socket) => {
     console.log(`📂 Received load-trades request for: ${uploadDate}`)
     try {
       const trades = databaseService.getTrades(uploadDate)
+
+      // Get unique stock symbols
+      const allSymbols = [...new Set(trades.map(t => t.symbol))]
+      const stockSymbols = allSymbols.filter(s => {
+        return !s.includes(' ') && !s.includes('Put') && !s.includes('Call')
+      })
+
+      // Fetch historical prices for the upload date
+      console.log(`📅 Fetching historical prices for ${uploadDate}...`)
+      const historicalPrices = await priceService.getPricesForDate(stockSymbols, uploadDate)
+      console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
+
+      // Calculate P&L using historical prices
+      const pnlData = calculatePnL(trades, historicalPrices)
+
       socket.emit('trades-loaded', {
         success: true,
         uploadDate,
         trades,
         deposits: [],
-        totalPrincipal: 0
+        totalPrincipal: 0,
+        currentPrices: historicalPrices,
+        pnlData
       })
     } catch (error) {
       console.error(`❌ Error loading trades:`, error)
