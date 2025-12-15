@@ -146,7 +146,7 @@ h1 {
   gap: 20px;
   flex-wrap: wrap;
   padding: 20px;
-  background: #f8f9fa;
+  background: var(--tableHeader);
   border-radius: 12px;
 }
 
@@ -155,9 +155,9 @@ h1 {
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  background: white;
+  background: var(--surface);
   border-radius: 8px;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--border);
   flex-wrap: wrap;
 }
 
@@ -310,18 +310,18 @@ thead th:nth-child(3) {
   z-index: 101;
 }
 
-/* Ensure body cells have white background */
+/* Ensure body cells have surface background */
 tbody td:nth-child(1),
 tbody td:nth-child(2),
 tbody td:nth-child(3) {
-  background: white;
+  background: var(--surface);
 }
 
-/* Ensure footer cells have gray background */
+/* Ensure footer cells have header background */
 tfoot td:nth-child(1),
 tfoot td:nth-child(2),
 tfoot td:nth-child(3) {
-  background: #f8f9fa;
+  background: var(--tableHeader);
 }
 
 tbody tr {
@@ -329,9 +329,9 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background-color: #f8f9fa;
+  background-color: var(--surfaceHover);
   transform: scale(1.01);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px var(--shadow);
 }
 
 .positive {
@@ -562,18 +562,18 @@ button:disabled {
 }
 
 .expanded-row {
-  background: white !important;
+  background: var(--surface) !important;
 }
 
 .expanded-row td {
   padding: 0 !important;
-  background: white !important;
+  background: var(--surface) !important;
 }
 
 .trades-detail {
   padding: 20px;
   animation: slideDown 0.3s ease;
-  background: white;
+  background: var(--surface);
   min-height: 200px;
 }
 
@@ -582,7 +582,7 @@ button:disabled {
   border-radius: 8px;
   overflow: hidden;
   margin-bottom: 20px;
-  background: white;
+  background: var(--surface);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
@@ -652,7 +652,7 @@ button:disabled {
 }
 
 .signals-panel {
-  background: white;
+  background: var(--surface);
   border-radius: 12px;
   padding: 24px;
   margin-bottom: 30px;
@@ -724,7 +724,7 @@ button:disabled {
 }
 
 .signal-card {
-  background: white;
+  background: var(--surface);
   border: 2px solid #e9ecef;
   border-left: 6px solid #667eea;
   border-radius: 12px;
@@ -1014,7 +1014,7 @@ button:disabled {
   width: 350px;
   max-height: 500px;
   overflow-y: auto;
-  background: white;
+  background: var(--surface);
   border: 2px solid #e9ecef;
   border-left: 6px solid #667eea;
   border-radius: 12px;
@@ -1066,7 +1066,7 @@ button:disabled {
 }
 
 .signals-modal {
-  background: white;
+  background: var(--surface);
   border-radius: 16px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   width: 100%;
