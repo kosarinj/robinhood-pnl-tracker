@@ -166,22 +166,32 @@ function App() {
     // Listen for price updates from server
     socketService.onPriceUpdate((data) => {
       console.log('📈 Received price update from server')
-      setCurrentPrices(data.currentPrices)
-      setPnlData(data.pnlData)
-      setLastPriceUpdate(new Date(data.timestamp))
+      // Only apply updates if not viewing historical data
+      if (!currentUploadDate && !isViewingSnapshot) {
+        setCurrentPrices(data.currentPrices)
+        setPnlData(data.pnlData)
+        setLastPriceUpdate(new Date(data.timestamp))
+      } else {
+        console.log('⏸️  Ignoring price update - viewing historical data')
+      }
     })
 
     // Listen for P&L updates
     socketService.onPnLUpdate((data) => {
       console.log('💰 Received P&L update from server')
-      setPnlData(data.pnlData)
+      // Only apply updates if not viewing historical data
+      if (!currentUploadDate && !isViewingSnapshot) {
+        setPnlData(data.pnlData)
+      } else {
+        console.log('⏸️  Ignoring P&L update - viewing historical data')
+      }
     })
 
     // Cleanup on unmount
     return () => {
       socketService.disconnect()
     }
-  }, [useServer])
+  }, [useServer, currentUploadDate, isViewingSnapshot])
 
   const handleManualPriceUpdate = (symbol, price) => {
     const updatedManualPrices = { ...manualPrices, [symbol]: parseFloat(price) }
