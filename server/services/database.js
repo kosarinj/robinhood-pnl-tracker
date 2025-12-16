@@ -88,6 +88,7 @@ db.exec(`
     amount REAL NOT NULL,
     description TEXT,
     is_buy INTEGER NOT NULL,
+    is_option INTEGER DEFAULT 0,
     created_at INTEGER DEFAULT (strftime('%s', 'now'))
   );
 
@@ -144,6 +145,27 @@ db.exec(`
 
 console.log(`Database initialized at: ${dbPath}`)
 
+// Migration: Add is_option column to trades table if it doesn't exist
+try {
+  const tableInfo = db.pragma('table_info(trades)')
+  const hasIsOption = tableInfo.some(col => col.name === 'is_option')
+
+  if (!hasIsOption) {
+    console.log('Adding is_option column to trades table...')
+    db.exec('ALTER TABLE trades ADD COLUMN is_option INTEGER DEFAULT 0')
+
+    // Update existing trades to set is_option based on description
+    db.exec(`
+      UPDATE trades
+      SET is_option = 1
+      WHERE description LIKE '%Call%' OR description LIKE '%Put%'
+    `)
+    console.log('✅ Added is_option column and updated existing trades')
+  }
+} catch (error) {
+  console.error('Migration error:', error)
+}
+
 // Prepared statements for better performance
 const insertSignalSnapshot = db.prepare(`
   INSERT INTO signal_snapshots (symbol, timestamp, signal, strength, strength_label, price, ema9, ema21, rsi, trend, volume)
@@ -178,8 +200,8 @@ const upsertPnLSnapshot = db.prepare(`
 `)
 
 const insertTrade = db.prepare(`
-  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy)
-  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy)
+  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option)
+  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption)
 `)
 
 const upsertCsvUpload = db.prepare(`
@@ -510,7 +532,8 @@ export class DatabaseService {
             price: trade.price,
             amount: trade.amount,
             description: trade.description || null,
-            isBuy: trade.isBuy ? 1 : 0
+            isBuy: trade.isBuy ? 1 : 0,
+            isOption: trade.isOption ? 1 : 0
           })
         }
 
@@ -551,7 +574,8 @@ export class DatabaseService {
         price: row.price,
         amount: row.amount,
         description: row.description,
-        isBuy: row.is_buy === 1
+        isBuy: row.is_buy === 1,
+        isOption: row.is_option === 1
       }))
     } catch (error) {
       console.error('Error getting trades:', error)
