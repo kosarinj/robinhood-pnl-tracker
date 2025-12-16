@@ -16,9 +16,11 @@ const extractParentInstrument = (description) => {
   return result
 }
 
-// Helper to check if an option has expired
-// e.g., "PLTR 11/14/2025 Call $190.00" -> check if 11/14/2025 is in the past
-const isOptionExpired = (symbol) => {
+// Helper to check if an option has expired relative to a specific date
+// e.g., "PLTR 11/14/2025 Call $190.00" expired on 11/14/2025
+// If asofDate is 12/15/2025, this option is expired
+// If asofDate is 10/15/2025, this option is NOT expired yet
+const isOptionExpired = (symbol, asofDate = null) => {
   if (!symbol) return false
 
   // Match date pattern MM/DD/YYYY
@@ -27,14 +29,17 @@ const isOptionExpired = (symbol) => {
 
   const [, month, day, year] = dateMatch
   const expirationDate = new Date(year, month - 1, day) // month is 0-indexed
-  const today = new Date()
-  today.setHours(0, 0, 0, 0) // Reset time to midnight for date-only comparison
+  expirationDate.setHours(0, 0, 0, 0)
 
-  return expirationDate < today
+  // Use provided asofDate or today's date
+  const referenceDate = asofDate ? new Date(asofDate) : new Date()
+  referenceDate.setHours(0, 0, 0, 0)
+
+  return expirationDate < referenceDate
 }
 
 // Calculate P&L using Average Cost, FIFO, and LIFO methods
-export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null) => {
+export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null, asofDate = null) => {
   const debugLog = (msg) => {
     if (debugCallback) debugCallback(msg)
   }
@@ -91,9 +96,9 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
       parentInstrument
     }
 
-    // Check if this is an expired option - if so, set position to 0
-    if (isOption && isOptionExpired(symbol)) {
-      debugLog(`⏰ Expired option detected: ${symbol} - Realized P&L: $${item.real.realizedPnL}`)
+    // Check if this is an expired option relative to the data date - if so, set position to 0
+    if (isOption && isOptionExpired(symbol, asofDate)) {
+      debugLog(`⏰ Expired option detected: ${symbol} (as of ${asofDate || 'today'}) - Realized P&L: $${item.real.realizedPnL}`)
       // Keep realized P&L but zero out position and unrealized P&L
       item.real.position = 0
       item.real.unrealizedPnL = 0

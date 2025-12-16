@@ -139,7 +139,7 @@ io.on('connection', (socket) => {
       console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
 
       // Calculate P&L using historical prices from the asof_date
-      const pnlData = calculatePnL(trades, historicalPrices)
+      const pnlData = calculatePnL(trades, historicalPrices, true, null, asofDate)
 
       // Save P&L snapshot to database with historical prices
       try {
@@ -335,7 +335,7 @@ io.on('connection', (socket) => {
         console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
 
         // Calculate P&L using historical prices
-        const pnlData = calculatePnL(trades, historicalPrices)
+        const pnlData = calculatePnL(trades, historicalPrices, true, null, uploadDate)
 
         // Get price benchmarks for each position
         const pnlDataWithBenchmarks = pnlData.map(position => {
@@ -427,7 +427,7 @@ io.on('connection', (socket) => {
       })
 
       // Calculate P&L using historical prices
-      const pnlData = calculatePnL(trades, historicalPrices)
+      const pnlData = calculatePnL(trades, historicalPrices, true, null, uploadDate)
 
       // Get price benchmarks for each position
       const pnlDataWithBenchmarks = pnlData.map(position => {
