@@ -163,7 +163,15 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
   })
 
   // Filter out individual options, keep only stocks
-  return results.filter(item => !item.isOption).sort((a, b) => a.symbol.localeCompare(b.symbol))
+  const stocksOnly = results.filter(item => !item.isOption)
+  const optionsFiltered = results.filter(item => item.isOption)
+
+  console.log(`🔍 calculatePnL returning ${stocksOnly.length} stocks (filtered out ${optionsFiltered.length} individual options)`)
+  if (optionsFiltered.length > 0) {
+    console.log(`   Filtered options: ${optionsFiltered.map(o => o.symbol).slice(0, 5).join(', ')}${optionsFiltered.length > 5 ? '...' : ''}`)
+  }
+
+  return stocksOnly.sort((a, b) => a.symbol.localeCompare(b.symbol))
 }
 
 // Rollup options under their parent instrument
