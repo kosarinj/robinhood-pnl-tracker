@@ -16,6 +16,23 @@ const extractParentInstrument = (description) => {
   return result
 }
 
+// Helper to check if an option has expired
+// e.g., "PLTR 11/14/2025 Call $190.00" -> check if 11/14/2025 is in the past
+const isOptionExpired = (symbol) => {
+  if (!symbol) return false
+
+  // Match date pattern MM/DD/YYYY
+  const dateMatch = symbol.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (!dateMatch) return false
+
+  const [, month, day, year] = dateMatch
+  const expirationDate = new Date(year, month - 1, day) // month is 0-indexed
+  const today = new Date()
+  today.setHours(0, 0, 0, 0) // Reset time to midnight for date-only comparison
+
+  return expirationDate < today
+}
+
 // Calculate P&L using Average Cost, FIFO, and LIFO methods
 export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null) => {
   const debugLog = (msg) => {
@@ -72,6 +89,19 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
       fifo,
       lifo,
       parentInstrument
+    }
+
+    // Check if this is an expired option - if so, set position to 0
+    if (isOption && isOptionExpired(symbol)) {
+      debugLog(`⏰ Expired option detected: ${symbol}`)
+      item.real.position = 0
+      item.real.unrealizedPnL = 0
+      item.avgCost.position = 0
+      item.avgCost.unrealizedPnL = 0
+      item.fifo.position = 0
+      item.fifo.unrealizedPnL = 0
+      item.lifo.position = 0
+      item.lifo.unrealizedPnL = 0
     }
 
     results.push(item)
