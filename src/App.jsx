@@ -28,6 +28,8 @@ function App() {
   const [snapshotDates, setSnapshotDates] = useState([])
   const [currentSnapshotDate, setCurrentSnapshotDate] = useState(null)
   const [isViewingSnapshot, setIsViewingSnapshot] = useState(false)
+  const [uploadDates, setUploadDates] = useState([])
+  const [currentUploadDate, setCurrentUploadDate] = useState(null)
   const [failedSymbols, setFailedSymbols] = useState([])
   const [showSignals, setShowSignals] = useState(false)
   const [visiblePnlColumns, setVisiblePnlColumns] = useState({
@@ -530,6 +532,57 @@ function App() {
     }
   }, [useServer, connected])
 
+  // Load upload dates when connected to server
+  useEffect(() => {
+    if (useServer && connected) {
+      console.log('Fetching upload dates...')
+      socketService.getUploadDates()
+        .then(dates => {
+          console.log('✅ Received upload dates:', dates)
+          setUploadDates(dates || [])
+        })
+        .catch(err => {
+          console.error('❌ Error loading upload dates:', err)
+          setUploadDates([])
+        })
+    }
+  }, [useServer, connected])
+
+  const handleLoadTrades = async (uploadDate) => {
+    if (!uploadDate) {
+      // Clear - could reload latest or just return
+      setCurrentUploadDate(null)
+      return
+    }
+
+    try {
+      setLoading(true)
+      console.log(`Loading trades for ${uploadDate}...`)
+
+      const result = await socketService.loadTrades(uploadDate)
+      console.log(`Received trades:`, result)
+
+      if (result.success && result.trades) {
+        setTrades(result.trades)
+        setDeposits(result.deposits || [])
+        setTotalPrincipal(result.totalPrincipal || 0)
+        if (result.currentPrices) {
+          setCurrentPrices(result.currentPrices)
+        }
+        if (result.pnlData) {
+          setPnlData(result.pnlData)
+        }
+        setCurrentUploadDate(uploadDate)
+        console.log(`✅ Loaded ${result.trades.length} trades from ${uploadDate}`)
+      }
+    } catch (error) {
+      console.error('Error loading trades:', error)
+      setError(`Failed to load trades: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleLoadSnapshot = async (asofDate) => {
     if (!asofDate) {
       // Clear snapshot view - return to live mode
@@ -803,6 +856,30 @@ function App() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {useServer && connected && uploadDates.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: '14px', fontWeight: '500' }}>Saved Data:</label>
+              <select
+                value={currentUploadDate || ''}
+                onChange={(e) => handleLoadTrades(e.target.value || null)}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #ccc',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  background: currentUploadDate ? '#d4edda' : 'white'
+                }}
+              >
+                <option value="">Select Date...</option>
+                {uploadDates.map(item => (
+                  <option key={item.upload_date} value={item.upload_date}>
+                    {item.upload_date} ({item.trade_count} trades)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {useServer && connected && snapshotDates.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <label style={{ fontSize: '14px', fontWeight: '500' }}>Load Snapshot:</label>
