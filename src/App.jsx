@@ -839,7 +839,7 @@ function App() {
 
   // Filter by open positions only
   if (showOpenOnly) {
-    filteredData = filteredData.filter(item => item.avgCost.position > 0)
+    filteredData = filteredData.filter(item => item.avgCost?.position > 0)
   }
 
   // Filter by symbol search
