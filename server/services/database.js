@@ -98,8 +98,19 @@ db.exec(`
     upload_date TEXT NOT NULL UNIQUE,
     latest_trade_date TEXT NOT NULL,
     trade_count INTEGER NOT NULL,
+    total_principal REAL DEFAULT 0,
     created_at INTEGER DEFAULT (strftime('%s', 'now')),
     updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+  );
+
+  -- Table to store deposits (ACH deposits from CSV)
+  CREATE TABLE IF NOT EXISTS deposits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    upload_date TEXT NOT NULL,
+    deposit_date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
   );
 
   -- Table to store P&L benchmarks at specific price levels
@@ -166,6 +177,20 @@ try {
   console.error('Migration error:', error)
 }
 
+// Migration: Add total_principal column to csv_uploads table if it doesn't exist
+try {
+  const csvUploadsInfo = db.pragma('table_info(csv_uploads)')
+  const hasTotalPrincipal = csvUploadsInfo.some(col => col.name === 'total_principal')
+
+  if (!hasTotalPrincipal) {
+    console.log('Adding total_principal column to csv_uploads table...')
+    db.exec('ALTER TABLE csv_uploads ADD COLUMN total_principal REAL DEFAULT 0')
+    console.log('✅ Added total_principal column to csv_uploads')
+  }
+} catch (error) {
+  console.error('Migration error:', error)
+}
+
 // Prepared statements for better performance
 const insertSignalSnapshot = db.prepare(`
   INSERT INTO signal_snapshots (symbol, timestamp, signal, strength, strength_label, price, ema9, ema21, rsi, trend, volume)
@@ -205,12 +230,18 @@ const insertTrade = db.prepare(`
 `)
 
 const upsertCsvUpload = db.prepare(`
-  INSERT INTO csv_uploads (upload_date, latest_trade_date, trade_count)
-  VALUES (@uploadDate, @latestTradeDate, @tradeCount)
+  INSERT INTO csv_uploads (upload_date, latest_trade_date, trade_count, total_principal)
+  VALUES (@uploadDate, @latestTradeDate, @tradeCount, @totalPrincipal)
   ON CONFLICT(upload_date) DO UPDATE SET
     latest_trade_date = excluded.latest_trade_date,
     trade_count = excluded.trade_count,
+    total_principal = excluded.total_principal,
     updated_at = strftime('%s', 'now')
+`)
+
+const insertDeposit = db.prepare(`
+  INSERT INTO deposits (upload_date, deposit_date, amount, description)
+  VALUES (@uploadDate, @depositDate, @amount, @description)
 `)
 
 export class DatabaseService {
@@ -503,7 +534,7 @@ export class DatabaseService {
   }
 
   // Save trades from CSV upload
-  saveTrades(trades, uploadDate = null) {
+  saveTrades(trades, uploadDate = null, deposits = [], totalPrincipal = 0) {
     try {
       // Use provided upload date or generate from latest trade date
       if (!uploadDate && trades.length > 0) {
@@ -516,11 +547,12 @@ export class DatabaseService {
         uploadDate = new Date(latestTrade.date || latestTrade.transDate).toISOString().split('T')[0]
       }
 
-      // Delete existing trades for this upload date
+      // Delete existing trades and deposits for this upload date
       db.prepare('DELETE FROM trades WHERE upload_date = ?').run(uploadDate)
+      db.prepare('DELETE FROM deposits WHERE upload_date = ?').run(uploadDate)
 
-      // Save all trades in a transaction
-      const saveTrades = db.transaction((trades, uploadDate) => {
+      // Save all trades and deposits in a transaction
+      const saveData = db.transaction((trades, deposits, uploadDate, totalPrincipal) => {
         for (const trade of trades) {
           const transDate = new Date(trade.date || trade.transDate).toISOString().split('T')[0]
           insertTrade.run({
@@ -537,16 +569,28 @@ export class DatabaseService {
           })
         }
 
+        // Save deposits
+        for (const deposit of deposits) {
+          const depositDate = new Date(deposit.date).toISOString().split('T')[0]
+          insertDeposit.run({
+            uploadDate,
+            depositDate,
+            amount: deposit.amount,
+            description: deposit.description || null
+          })
+        }
+
         // Update metadata
         upsertCsvUpload.run({
           uploadDate,
           latestTradeDate: uploadDate,
-          tradeCount: trades.length
+          tradeCount: trades.length,
+          totalPrincipal
         })
       })
 
-      saveTrades(trades, uploadDate)
-      console.log(`✅ Saved ${trades.length} trades for ${uploadDate}`)
+      saveData(trades, deposits, uploadDate, totalPrincipal)
+      console.log(`✅ Saved ${trades.length} trades and ${deposits.length} deposits for ${uploadDate} (principal: $${totalPrincipal.toFixed(2)})`)
       return uploadDate
     } catch (error) {
       console.error('Error saving trades:', error)
@@ -580,6 +624,42 @@ export class DatabaseService {
     } catch (error) {
       console.error('Error getting trades:', error)
       return []
+    }
+  }
+
+  // Get deposits for a specific upload date
+  getDeposits(uploadDate) {
+    try {
+      const stmt = db.prepare(`
+        SELECT * FROM deposits
+        WHERE upload_date = ?
+        ORDER BY deposit_date ASC
+      `)
+      const rows = stmt.all(uploadDate)
+
+      return rows.map(row => ({
+        date: row.deposit_date,
+        amount: row.amount,
+        description: row.description
+      }))
+    } catch (error) {
+      console.error('Error getting deposits:', error)
+      return []
+    }
+  }
+
+  // Get total principal for a specific upload date
+  getTotalPrincipal(uploadDate) {
+    try {
+      const stmt = db.prepare(`
+        SELECT total_principal FROM csv_uploads
+        WHERE upload_date = ?
+      `)
+      const row = stmt.get(uploadDate)
+      return row ? row.total_principal : 0
+    } catch (error) {
+      console.error('Error getting total principal:', error)
+      return 0
     }
   }
 

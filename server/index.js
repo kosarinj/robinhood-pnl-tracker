@@ -149,10 +149,10 @@ io.on('connection', (socket) => {
         console.error('Error saving P&L snapshot:', error)
       }
 
-      // Save trades to database
+      // Save trades and deposits to database
       try {
-        databaseService.saveTrades(trades, asofDate)
-        console.log(`💾 Saved ${trades.length} trades to database for ${asofDate}`)
+        databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal)
+        console.log(`💾 Saved ${trades.length} trades and ${deposits.length} deposits to database for ${asofDate}`)
       } catch (error) {
         console.error('Error saving trades:', error)
       }
@@ -346,12 +346,15 @@ io.on('connection', (socket) => {
           }
         })
 
+        const deposits = databaseService.getDeposits(uploadDate)
+        const totalPrincipal = databaseService.getTotalPrincipal(uploadDate)
+
         socket.emit('latest-trades-result', {
           success: true,
           trades,
           uploadDate,
-          deposits: [],
-          totalPrincipal: 0,
+          deposits,
+          totalPrincipal,
           currentPrices: historicalPrices,
           pnlData: pnlDataWithBenchmarks
         })
@@ -448,6 +451,9 @@ io.on('connection', (socket) => {
         }
       })
 
+      const deposits = databaseService.getDeposits(uploadDate)
+      const totalPrincipal = databaseService.getTotalPrincipal(uploadDate)
+
       console.log(`📤 Sending ${pnlDataWithBenchmarks.length} positions to client (load-trades)`)
       console.log(`   Positions: ${pnlDataWithBenchmarks.map(p => p.symbol).join(', ')}`)
 
@@ -455,8 +461,8 @@ io.on('connection', (socket) => {
         success: true,
         uploadDate,
         trades,
-        deposits: [],
-        totalPrincipal: 0,
+        deposits,
+        totalPrincipal,
         currentPrices: historicalPrices,
         pnlData: pnlDataWithBenchmarks
       })
