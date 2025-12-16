@@ -539,10 +539,11 @@ export class DatabaseService {
       const stmt = db.prepare(`
         SELECT
           asof_date,
-          SUM(total_pnl) as total_pnl,
+          SUM(total_pnl + COALESCE(options_pnl, 0)) as total_pnl,
           SUM(realized_pnl) as realized_pnl,
           SUM(unrealized_pnl) as unrealized_pnl,
-          SUM(daily_pnl) as daily_pnl
+          SUM(daily_pnl) as daily_pnl,
+          SUM(COALESCE(options_pnl, 0)) as options_pnl
         FROM pnl_snapshots
         GROUP BY asof_date
         ORDER BY asof_date ASC
