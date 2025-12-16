@@ -600,6 +600,9 @@ export class DatabaseService {
   // Save price benchmarks for P&L tracking
   savePriceBenchmarks(pnlData, asofDate) {
     try {
+      // Delete existing benchmarks for this date first (allow re-uploading)
+      db.prepare('DELETE FROM price_benchmarks WHERE asof_date = ?').run(asofDate)
+
       const timestamp = Date.now()
       const stmt = db.prepare(`
         INSERT INTO price_benchmarks (symbol, price_level, total_pnl, position, avg_cost, realized_pnl, unrealized_pnl, asof_date, timestamp)
@@ -623,7 +626,7 @@ export class DatabaseService {
       })
 
       insertMany(pnlData)
-      console.log(`💾 Saved ${pnlData.length} price benchmarks for ${asofDate}`)
+      console.log(`💾 Saved ${pnlData.length} price benchmarks for ${asofDate} (overwrote existing if any)`)
     } catch (error) {
       console.error('Error saving price benchmarks:', error)
       throw error
