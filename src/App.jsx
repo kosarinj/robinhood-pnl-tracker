@@ -839,10 +839,17 @@ function App() {
 
   // Filter by open positions only
   if (showOpenOnly) {
+    console.log('🔍 Filtering for open positions only...')
+    console.log('Before filter:', filteredData.length, 'positions')
     filteredData = filteredData.filter(item => {
       const position = item.avgCost?.position || 0
-      return position >= 0.01 // Filter out closed positions (including tiny fractional shares from rounding)
+      const isOpen = position >= 0.01
+      if (!isOpen) {
+        console.log(`  ❌ Filtering out ${item.symbol}: position = ${position}`)
+      }
+      return isOpen // Filter out closed positions (including tiny fractional shares from rounding)
     })
+    console.log('After filter:', filteredData.length, 'positions')
   }
 
   // Filter by symbol search
