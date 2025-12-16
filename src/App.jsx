@@ -19,7 +19,7 @@ function App() {
   const [symbolFilter, setSymbolFilter] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [debugInfo, setDebugInfo] = useState([])
+  const [debugInfo, setDebugInfo] = useState(null)
   const [csvStats, setCsvStats] = useState(null)
   const [manualPrices, setManualPrices] = useState({})
   const [currentPrices, setCurrentPrices] = useState({})
@@ -87,7 +87,6 @@ function App() {
   const [showSignalPerformance, setShowSignalPerformance] = useState(false)
   const [showRiskManagement, setShowRiskManagement] = useState(false)
   const [riskAllocations, setRiskAllocations] = useState({})
-  const [debugInfo, setDebugInfo] = useState(null)
   const [totalRiskBudget, setTotalRiskBudget] = useState(10000) // Default $10k risk budget
   const [stockSymbols, setStockSymbols] = useState([]) // Stock symbols (excluding options)
 
