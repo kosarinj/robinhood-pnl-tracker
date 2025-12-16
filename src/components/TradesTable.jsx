@@ -1101,6 +1101,68 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                           Trades for this symbol: {getTradesForSymbol(row.symbol, true, row.options).length}
                         </div>
 
+                        {/* Price Benchmarks Section */}
+                        {row.benchmarks && row.benchmarks.length > 0 && (
+                          <div style={{
+                            background: 'var(--surface)',
+                            padding: '15px',
+                            marginBottom: '15px',
+                            border: '2px solid #4caf50',
+                            borderRadius: '8px'
+                          }}>
+                            <h4 style={{ color: '#4caf50', marginTop: 0, marginBottom: '10px' }}>
+                              📊 Price Benchmarks - Historical P&L at Similar Prices
+                            </h4>
+                            <p style={{ fontSize: '13px', color: 'var(--text)', marginBottom: '10px', opacity: 0.8 }}>
+                              Compare your current P&L to previous times when {row.symbol} was at similar prices (±5%)
+                            </p>
+                            <div style={{ overflowX: 'auto' }}>
+                              <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+                                <thead>
+                                  <tr style={{ background: 'var(--tableHeader)', borderBottom: '2px solid #4caf50' }}>
+                                    <th style={{ padding: '8px', textAlign: 'left' }}>Date</th>
+                                    <th style={{ padding: '8px', textAlign: 'right' }}>Price</th>
+                                    <th style={{ padding: '8px', textAlign: 'right' }}>Position</th>
+                                    <th style={{ padding: '8px', textAlign: 'right' }}>Avg Cost</th>
+                                    <th style={{ padding: '8px', textAlign: 'right' }}>Realized P&L</th>
+                                    <th style={{ padding: '8px', textAlign: 'right' }}>Unrealized P&L</th>
+                                    <th style={{ padding: '8px', textAlign: 'right' }}>Total P&L</th>
+                                    <th style={{ padding: '8px', textAlign: 'left' }}>vs Current</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {row.benchmarks.map((benchmark, idx) => {
+                                    const currentPnL = row.real?.totalPnL || 0
+                                    const pnlDiff = currentPnL - benchmark.total_pnl
+                                    const isImproving = pnlDiff > 0
+
+                                    return (
+                                      <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                                        <td style={{ padding: '8px' }}>{benchmark.asof_date}</td>
+                                        <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(benchmark.price_level)}</td>
+                                        <td style={{ padding: '8px', textAlign: 'right' }}>{benchmark.position.toFixed(2)}</td>
+                                        <td style={{ padding: '8px', textAlign: 'right' }}>{formatCurrency(benchmark.avg_cost || 0)}</td>
+                                        <td style={{ padding: '8px', textAlign: 'right' }} className={getClassName(benchmark.realized_pnl)}>
+                                          {formatCurrency(benchmark.realized_pnl || 0)}
+                                        </td>
+                                        <td style={{ padding: '8px', textAlign: 'right' }} className={getClassName(benchmark.unrealized_pnl)}>
+                                          {formatCurrency(benchmark.unrealized_pnl || 0)}
+                                        </td>
+                                        <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }} className={getClassName(benchmark.total_pnl)}>
+                                          {formatCurrency(benchmark.total_pnl)}
+                                        </td>
+                                        <td style={{ padding: '8px', fontWeight: 'bold' }} className={getClassName(pnlDiff)}>
+                                          {isImproving ? '📈' : '📉'} {formatCurrency(Math.abs(pnlDiff))} {isImproving ? 'better' : 'worse'}
+                                        </td>
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+
                     {/* TradingView Chart for stocks only */}
                     {showChartsInHistory && !row.isOption && (
                       <div className="chart-container" style={{ marginBottom: '20px' }}>
