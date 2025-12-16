@@ -93,15 +93,22 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
 
     // Check if this is an expired option - if so, set position to 0
     if (isOption && isOptionExpired(symbol)) {
-      debugLog(`⏰ Expired option detected: ${symbol}`)
+      debugLog(`⏰ Expired option detected: ${symbol} - Realized P&L: $${item.real.realizedPnL}`)
+      // Keep realized P&L but zero out position and unrealized P&L
       item.real.position = 0
       item.real.unrealizedPnL = 0
+      item.real.totalPnL = item.real.realizedPnL // Recalculate total to only include realized
+
       item.avgCost.position = 0
       item.avgCost.unrealizedPnL = 0
+
       item.fifo.position = 0
       item.fifo.unrealizedPnL = 0
+      item.fifo.totalPnL = item.fifo.realizedPnL // Recalculate total to only include realized
+
       item.lifo.position = 0
       item.lifo.unrealizedPnL = 0
+      item.lifo.totalPnL = item.lifo.realizedPnL // Recalculate total to only include realized
     }
 
     results.push(item)
