@@ -101,6 +101,21 @@ db.exec(`
     updated_at INTEGER DEFAULT (strftime('%s', 'now'))
   );
 
+  -- Table to store P&L benchmarks at specific price levels
+  CREATE TABLE IF NOT EXISTS price_benchmarks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    price_level REAL NOT NULL,
+    total_pnl REAL NOT NULL,
+    position REAL NOT NULL,
+    avg_cost REAL,
+    realized_pnl REAL,
+    unrealized_pnl REAL,
+    asof_date TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+  );
+
   -- Indexes for faster queries
   CREATE INDEX IF NOT EXISTS idx_signal_snapshots_symbol_timestamp
     ON signal_snapshots(symbol, timestamp DESC);
@@ -122,6 +137,9 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_csv_uploads_date
     ON csv_uploads(upload_date DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_price_benchmarks_symbol_price
+    ON price_benchmarks(symbol, price_level, timestamp DESC);
 `)
 
 console.log(`Database initialized at: ${dbPath}`)
@@ -575,6 +593,77 @@ export class DatabaseService {
       return stmt.all()
     } catch (error) {
       console.error('Error getting upload dates:', error)
+      return []
+    }
+  }
+
+  // Save price benchmarks for P&L tracking
+  savePriceBenchmarks(pnlData, asofDate) {
+    try {
+      const timestamp = Date.now()
+      const stmt = db.prepare(`
+        INSERT INTO price_benchmarks (symbol, price_level, total_pnl, position, avg_cost, realized_pnl, unrealized_pnl, asof_date, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      const insertMany = db.transaction((benchmarks) => {
+        for (const benchmark of benchmarks) {
+          stmt.run(
+            benchmark.symbol,
+            benchmark.price_level,
+            benchmark.total_pnl,
+            benchmark.position,
+            benchmark.avg_cost,
+            benchmark.realized_pnl,
+            benchmark.unrealized_pnl,
+            asofDate,
+            timestamp
+          )
+        }
+      })
+
+      insertMany(pnlData)
+      console.log(`💾 Saved ${pnlData.length} price benchmarks for ${asofDate}`)
+    } catch (error) {
+      console.error('Error saving price benchmarks:', error)
+      throw error
+    }
+  }
+
+  // Get price benchmarks for a symbol near a specific price
+  getPriceBenchmarks(symbol, targetPrice, tolerance = 0.05) {
+    try {
+      const minPrice = targetPrice * (1 - tolerance)
+      const maxPrice = targetPrice * (1 + tolerance)
+
+      const stmt = db.prepare(`
+        SELECT symbol, price_level, total_pnl, position, avg_cost, realized_pnl, unrealized_pnl, asof_date, timestamp
+        FROM price_benchmarks
+        WHERE symbol = ? AND price_level BETWEEN ? AND ?
+        ORDER BY timestamp DESC
+        LIMIT 10
+      `)
+
+      return stmt.all(symbol, minPrice, maxPrice)
+    } catch (error) {
+      console.error('Error getting price benchmarks:', error)
+      return []
+    }
+  }
+
+  // Get all benchmark history for a symbol
+  getBenchmarkHistory(symbol) {
+    try {
+      const stmt = db.prepare(`
+        SELECT symbol, price_level, total_pnl, position, avg_cost, realized_pnl, unrealized_pnl, asof_date, timestamp
+        FROM price_benchmarks
+        WHERE symbol = ?
+        ORDER BY timestamp DESC
+      `)
+
+      return stmt.all(symbol)
+    } catch (error) {
+      console.error('Error getting benchmark history:', error)
       return []
     }
   }

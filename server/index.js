@@ -157,13 +157,38 @@ io.on('connection', (socket) => {
         console.error('Error saving trades:', error)
       }
 
+      // Save price benchmarks for P&L comparison
+      try {
+        const benchmarks = pnlData.map(position => ({
+          symbol: position.symbol,
+          price_level: position.currentPrice,
+          total_pnl: position.real?.totalPnL || 0,
+          position: position.avgCost?.position || 0,
+          avg_cost: position.avgCost?.avgCostBasis || 0,
+          realized_pnl: position.real?.realizedPnL || 0,
+          unrealized_pnl: position.real?.unrealizedPnL || 0
+        }))
+        databaseService.savePriceBenchmarks(benchmarks, asofDate)
+      } catch (error) {
+        console.error('Error saving price benchmarks:', error)
+      }
+
+      // Get price benchmarks for each position
+      const pnlDataWithBenchmarks = pnlData.map(position => {
+        const benchmarks = databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
+        return {
+          ...position,
+          benchmarks
+        }
+      })
+
       // Send initial data with historical prices (not current prices)
       // This ensures the uploaded file shows prices from the upload date
       socket.emit('csv-processed', {
         success: true,
         data: {
           trades,
-          pnlData: pnlData,  // Use historical P&L data
+          pnlData: pnlDataWithBenchmarks,  // Use historical P&L data with benchmarks
           totalPrincipal,
           deposits,
           currentPrices: historicalPrices,  // Use historical prices
@@ -312,6 +337,15 @@ io.on('connection', (socket) => {
         // Calculate P&L using historical prices
         const pnlData = calculatePnL(trades, historicalPrices)
 
+        // Get price benchmarks for each position
+        const pnlDataWithBenchmarks = pnlData.map(position => {
+          const benchmarks = databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
+          return {
+            ...position,
+            benchmarks
+          }
+        })
+
         socket.emit('latest-trades-result', {
           success: true,
           trades,
@@ -319,7 +353,7 @@ io.on('connection', (socket) => {
           deposits: [],
           totalPrincipal: 0,
           currentPrices: historicalPrices,
-          pnlData
+          pnlData: pnlDataWithBenchmarks
         })
       } else {
         console.log(`ℹ️  No saved trades found`)
@@ -395,6 +429,15 @@ io.on('connection', (socket) => {
       // Calculate P&L using historical prices
       const pnlData = calculatePnL(trades, historicalPrices)
 
+      // Get price benchmarks for each position
+      const pnlDataWithBenchmarks = pnlData.map(position => {
+        const benchmarks = databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
+        return {
+          ...position,
+          benchmarks
+        }
+      })
+
       socket.emit('trades-loaded', {
         success: true,
         uploadDate,
@@ -402,7 +445,7 @@ io.on('connection', (socket) => {
         deposits: [],
         totalPrincipal: 0,
         currentPrices: historicalPrices,
-        pnlData
+        pnlData: pnlDataWithBenchmarks
       })
     } catch (error) {
       console.error(`❌ Error loading trades:`, error)
