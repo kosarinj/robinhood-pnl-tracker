@@ -483,6 +483,19 @@ io.on('connection', (socket) => {
       socket.emit('database-cleared', { success: false, error: error.message })
     }
   })
+
+  // Get daily P&L history for charting
+  socket.on('get-daily-pnl', () => {
+    console.log(`📊 Received get-daily-pnl request`)
+    try {
+      const dailyPnL = databaseService.getDailyPnLHistory()
+      console.log(`✅ Sending ${dailyPnL.length} days of P&L history`)
+      socket.emit('daily-pnl-result', { success: true, data: dailyPnL })
+    } catch (error) {
+      console.error(`❌ Error getting daily P&L:`, error)
+      socket.emit('daily-pnl-error', { error: error.message })
+    }
+  })
 })
 
 // Helper function to apply split adjustments

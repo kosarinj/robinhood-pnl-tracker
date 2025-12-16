@@ -5,6 +5,7 @@ import TradingSignals from './components/TradingSignals'
 import MarketAnalysis from './components/MarketAnalysis'
 import SignalPerformance from './components/SignalPerformance'
 import ThemeToggle from './components/ThemeToggle'
+import DailyPnLChart from './components/DailyPnLChart'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -1138,6 +1139,9 @@ function App() {
           {connected ? '✅ Connected to server - Real-time updates enabled' : '⚠️ Not connected to server - Check if server is running'}
         </div>
       )}
+
+      {/* Daily P&L Chart */}
+      <DailyPnLChart useServer={useServer} connected={connected} />
 
       {/* Lookup Symbol Signal & Market Analysis - Always visible */}
       <div style={{ textAlign: 'center', marginBottom: '20px' }}>

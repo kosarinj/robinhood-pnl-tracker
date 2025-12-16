@@ -533,6 +533,27 @@ export class DatabaseService {
     }
   }
 
+  // Get daily P&L history for charting (aggregate across all symbols per day)
+  getDailyPnLHistory() {
+    try {
+      const stmt = db.prepare(`
+        SELECT
+          asof_date,
+          SUM(total_pnl) as total_pnl,
+          SUM(realized_pnl) as realized_pnl,
+          SUM(unrealized_pnl) as unrealized_pnl,
+          SUM(daily_pnl) as daily_pnl
+        FROM pnl_snapshots
+        GROUP BY asof_date
+        ORDER BY asof_date ASC
+      `)
+      return stmt.all()
+    } catch (error) {
+      console.error('Error getting daily P&L history:', error)
+      return []
+    }
+  }
+
   // Save trades from CSV upload
   saveTrades(trades, uploadDate = null, deposits = [], totalPrincipal = 0) {
     try {

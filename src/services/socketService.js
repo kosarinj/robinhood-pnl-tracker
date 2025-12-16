@@ -448,6 +448,44 @@ class SocketService {
     })
   }
 
+  // Get daily P&L history for charting
+  getDailyPnLHistory() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('daily-pnl-result', resultHandler)
+        this.socket.off('daily-pnl-error', errorHandler)
+        clearTimeout(timeoutId)
+        if (response.success) {
+          resolve(response.data)
+        } else {
+          reject(new Error(response.error))
+        }
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('daily-pnl-result', resultHandler)
+        this.socket.off('daily-pnl-error', errorHandler)
+        clearTimeout(timeoutId)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('daily-pnl-result', resultHandler)
+      this.socket.on('daily-pnl-error', errorHandler)
+      this.socket.emit('get-daily-pnl')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('daily-pnl-result', resultHandler)
+        this.socket.off('daily-pnl-error', errorHandler)
+        reject(new Error('Get daily P&L timeout'))
+      }, 10000)
+    })
+  }
+
   // Remove listeners
   off(event, callback) {
     if (this.socket) {
