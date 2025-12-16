@@ -546,7 +546,6 @@ function App() {
 
       const snapshotData = await socketService.loadPnLSnapshot(asofDate)
       console.log(`Received snapshot data:`, snapshotData)
-      alert(`Loading snapshot for ${asofDate} - received ${snapshotData?.length || 0} rows`)
 
       if (!snapshotData || snapshotData.length === 0) {
         setError(`No data found for ${asofDate}. Upload a CSV to save data first.`)
