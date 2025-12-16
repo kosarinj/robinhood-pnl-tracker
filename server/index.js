@@ -353,6 +353,27 @@ io.on('connection', (socket) => {
     }
   })
 
+  // Manually trigger signal performance analysis
+  socket.on('analyze-signal-performance', async () => {
+    console.log(`📊 Received analyze-signal-performance request`)
+    try {
+      const performance = databaseService.analyzeSignalPerformance()
+      const accuracy = databaseService.getSignalAccuracy()
+
+      socket.emit('signal-performance-result', {
+        success: true,
+        performance,
+        accuracy,
+        message: `Analyzed ${performance.length} signal data points`
+      })
+
+      console.log(`✅ Signal performance analysis complete: ${performance.length} data points`)
+    } catch (error) {
+      console.error(`❌ Error analyzing signal performance:`, error)
+      socket.emit('signal-performance-error', { error: error.message })
+    }
+  })
+
   // Load trades for a specific date
   socket.on('load-trades', async ({ uploadDate }) => {
     console.log(`📂 Received load-trades request for: ${uploadDate}`)

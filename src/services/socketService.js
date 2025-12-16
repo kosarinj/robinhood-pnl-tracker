@@ -313,6 +313,40 @@ class SocketService {
     })
   }
 
+  // Analyze signal performance manually
+  analyzeSignalPerformance() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('signal-performance-result', resultHandler)
+        this.socket.off('signal-performance-error', errorHandler)
+        clearTimeout(timeoutId)
+        resolve(response)
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('signal-performance-result', resultHandler)
+        this.socket.off('signal-performance-error', errorHandler)
+        clearTimeout(timeoutId)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('signal-performance-result', resultHandler)
+      this.socket.on('signal-performance-error', errorHandler)
+      this.socket.emit('analyze-signal-performance')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('signal-performance-result', resultHandler)
+        this.socket.off('signal-performance-error', errorHandler)
+        reject(new Error('Analyze signal performance timeout'))
+      }, 30000)
+    })
+  }
+
   // Fetch historical price data
   fetchHistoricalData(symbol, range = '6mo', interval = '1d') {
     return new Promise((resolve, reject) => {

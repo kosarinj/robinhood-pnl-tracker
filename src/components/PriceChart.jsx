@@ -70,6 +70,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         console.log('First point with indicators:', dataWithIndicators[0])
 
         // Add buy/sell markers from trades
+        console.log(`Processing ${trades.length} trades for ${symbol}:`, trades.slice(0, 3))
+
         const enrichedData = dataWithIndicators.map(candle => {
           const candleDate = new Date(candle.date).setHours(0, 0, 0, 0)
 
@@ -82,6 +84,10 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           const buys = dayTrades.filter(t => t.isBuy)
           const sells = dayTrades.filter(t => !t.isBuy)
 
+          if (buys.length > 0 || sells.length > 0) {
+            console.log(`Found trades on ${candle.date}: ${buys.length} buys, ${sells.length} sells`)
+          }
+
           return {
             ...candle,
             buyPrice: buys.length > 0 ? buys.reduce((sum, t) => sum + t.price, 0) / buys.length : null,
@@ -90,6 +96,9 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
             sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0)
           }
         })
+
+        const tradesWithMarkers = enrichedData.filter(d => d.buyPrice || d.sellPrice)
+        console.log(`Chart has ${tradesWithMarkers.length} days with buy/sell markers`)
 
         console.log('Final enriched data:', enrichedData.length, 'points')
         console.log('Sample enriched point:', enrichedData[Math.floor(enrichedData.length / 2)])

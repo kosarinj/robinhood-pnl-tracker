@@ -258,6 +258,22 @@ function TradingSignals({ openPositions, onClose, onSignalsUpdate, fetchingEnabl
           <button onClick={analyzePositions} disabled={loading || !fetchingEnabled} className="btn-small">
             {loading ? 'Analyzing...' : 'Refresh Now'}
           </button>
+          {useServer && connected && (
+            <button
+              onClick={async () => {
+                try {
+                  const result = await socketService.analyzeSignalPerformance()
+                  alert(result.message || 'Signal performance analysis complete!')
+                } catch (error) {
+                  alert(`Error: ${error.message}`)
+                }
+              }}
+              className="btn-small"
+              style={{ background: '#17a2b8', color: 'white' }}
+            >
+              Analyze Performance
+            </button>
+          )}
           <button onClick={onClose} className="btn-small btn-cancel">
             Close
           </button>
