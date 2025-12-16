@@ -734,6 +734,14 @@ function App() {
         setFailedSymbols(response.failedSymbols || [])
         setLastPriceUpdate(new Date(response.timestamp))
 
+        // If uploadDate is present, we're viewing historical data
+        if (response.uploadDate) {
+          setCurrentUploadDate(response.uploadDate)
+          console.log(`📅 Viewing historical data for ${response.uploadDate}`)
+        } else {
+          setCurrentUploadDate(null)
+        }
+
         // Count options vs stocks for debugging
         const optionCount = response.trades.filter(t => t.isOption).length
         const stockCount = response.trades.filter(t => !t.isOption).length

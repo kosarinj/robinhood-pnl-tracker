@@ -157,22 +157,18 @@ io.on('connection', (socket) => {
         console.error('Error saving trades:', error)
       }
 
-      // Get current prices for live view
-      const prices = await priceService.getPrices(stockSymbols)
-
-      // Calculate P&L again with current prices for live view
-      const livePnlData = calculatePnL(trades, prices)
-
-      // Send initial data
+      // Send initial data with historical prices (not current prices)
+      // This ensures the uploaded file shows prices from the upload date
       socket.emit('csv-processed', {
         success: true,
         data: {
           trades,
-          pnlData: livePnlData,
+          pnlData: pnlData,  // Use historical P&L data
           totalPrincipal,
           deposits,
-          currentPrices: prices,
-          asofDate
+          currentPrices: historicalPrices,  // Use historical prices
+          asofDate,
+          uploadDate: asofDate  // Add uploadDate to indicate viewing historical data
         }
       })
 
