@@ -87,6 +87,7 @@ function App() {
   const [showSignalPerformance, setShowSignalPerformance] = useState(false)
   const [showRiskManagement, setShowRiskManagement] = useState(false)
   const [riskAllocations, setRiskAllocations] = useState({})
+  const [debugInfo, setDebugInfo] = useState(null)
   const [totalRiskBudget, setTotalRiskBudget] = useState(10000) // Default $10k risk budget
   const [stockSymbols, setStockSymbols] = useState([]) // Stock symbols (excluding options)
 
@@ -590,13 +591,15 @@ function App() {
           console.log(`  - Total P&L: $${result.pnlData.reduce((sum, p) => sum + (p.real?.totalPnL || 0), 0).toFixed(2)}`)
 
           // DEBUG: Show what we received from loading saved data
-          console.log('🔵 LOAD SAVED - Received pnlData:', result.pnlData.length, 'items')
           const optionItems = result.pnlData.filter(item => item.isOption)
           const stockItems = result.pnlData.filter(item => !item.isOption)
-          console.log('   Stocks:', stockItems.length, '- Options (should be 0):', optionItems.length)
-          if (optionItems.length > 0) {
-            console.log('   ⚠️ FOUND OPTIONS IN PNLDATA:', optionItems.map(o => o.symbol))
-          }
+          setDebugInfo({
+            source: '🔵 LOAD SAVED',
+            totalItems: result.pnlData.length,
+            stocks: stockItems.length,
+            options: optionItems.length,
+            optionSymbols: optionItems.map(o => o.symbol)
+          })
         }
         setCurrentUploadDate(uploadDate)
         console.log(`✅ Loaded ${result.trades.length} trades from ${uploadDate}`)
@@ -744,13 +747,15 @@ function App() {
         setLastPriceUpdate(new Date(response.timestamp))
 
         // DEBUG: Show what we received from CSV upload
-        console.log('🟢 CSV UPLOAD - Received pnlData:', response.pnlData.length, 'items')
         const optionItems = response.pnlData.filter(item => item.isOption)
         const stockItems = response.pnlData.filter(item => !item.isOption)
-        console.log('   Stocks:', stockItems.length, '- Options (should be 0):', optionItems.length)
-        if (optionItems.length > 0) {
-          console.log('   ⚠️ FOUND OPTIONS IN PNLDATA:', optionItems.map(o => o.symbol))
-        }
+        setDebugInfo({
+          source: '🟢 CSV UPLOAD',
+          totalItems: response.pnlData.length,
+          stocks: stockItems.length,
+          options: optionItems.length,
+          optionSymbols: optionItems.map(o => o.symbol)
+        })
 
         // If uploadDate is present, we're viewing historical data
         if (response.uploadDate) {
@@ -906,6 +911,38 @@ function App() {
   return (
     <div className="app-container">
       <ThemeToggle />
+
+      {/* DEBUG PANEL */}
+      {debugInfo && (
+        <div style={{
+          position: 'fixed',
+          top: '10px',
+          right: '10px',
+          background: debugInfo.options > 0 ? '#ff4444' : '#44ff44',
+          color: 'black',
+          padding: '15px',
+          borderRadius: '8px',
+          boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+          zIndex: 9999,
+          fontSize: '14px',
+          fontFamily: 'monospace',
+          maxWidth: '400px'
+        }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>{debugInfo.source}</div>
+          <div>Total Items: {debugInfo.totalItems}</div>
+          <div>Stocks: {debugInfo.stocks}</div>
+          <div style={{ color: debugInfo.options > 0 ? '#fff' : '#000', fontWeight: 'bold' }}>
+            Options: {debugInfo.options} {debugInfo.options > 0 ? '⚠️ SHOULD BE 0!' : '✓'}
+          </div>
+          {debugInfo.optionSymbols.length > 0 && (
+            <div style={{ marginTop: '8px', fontSize: '12px', background: 'rgba(255,255,255,0.2)', padding: '5px', borderRadius: '4px' }}>
+              {debugInfo.optionSymbols.slice(0, 5).join(', ')}
+              {debugInfo.optionSymbols.length > 5 && `... +${debugInfo.optionSymbols.length - 5} more`}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
