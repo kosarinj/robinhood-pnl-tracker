@@ -881,34 +881,17 @@ function App() {
     )
   }
 
-  // DEBUG: Check ALL symbols in filteredData
-  const allSymbolsDebug = filteredData.map(item => ({
-    symbol: item.symbol,
-    isOption: item.isOption,
-    position: item.avgCost?.position || 0,
-    isRollup: item.isRollup
-  }))
-
-  // Find symbols that look like options
-  const suspiciousSymbols = filteredData.filter(item => {
+  // DEBUG: Find symbols that look like options (for display only, don't setState during render)
+  const suspiciousSymbolsForDisplay = filteredData.filter(item => {
     const hasDatePattern = /\d{1,2}\/\d{1,2}\/\d{4}/.test(item.symbol)
     const hasCallOrPut = item.symbol.includes('Call') || item.symbol.includes('Put')
     return hasDatePattern || hasCallOrPut
-  })
-
-  if (debugInfo) {
-    // Always update debug info to include all symbols and suspicious ones
-    setDebugInfo({
-      ...debugInfo,
-      filteredCount: filteredData.length,
-      suspiciousSymbols: suspiciousSymbols.length > 0 ? suspiciousSymbols.map(s => ({
-        symbol: s.symbol,
-        isOption: s.isOption,
-        position: s.avgCost?.position || 0,
-        isRollup: s.isRollup
-      })) : undefined
-    })
-  }
+  }).map(s => ({
+    symbol: s.symbol,
+    isOption: s.isOption,
+    position: s.avgCost?.position || 0,
+    isRollup: s.isRollup
+  }))
 
   // Filter by signal type
   if (tradingSignals.length > 0) {
@@ -964,10 +947,10 @@ function App() {
           <div style={{ color: debugInfo.options > 0 ? '#fff' : '#000', fontWeight: 'bold' }}>
             Options: {debugInfo.options} {debugInfo.options > 0 ? '⚠️ SHOULD BE 0!' : '✓'}
           </div>
-          {debugInfo.filteredCount !== undefined && (
+          {filteredData && filteredData.length > 0 && (
             <div style={{ marginTop: '8px', borderTop: '1px solid #fff', paddingTop: '8px' }}>
               <div style={{ fontWeight: 'bold' }}>After Filtering:</div>
-              <div>Displayed Rows: {debugInfo.filteredCount}</div>
+              <div>Displayed Rows: {filteredData.length}</div>
             </div>
           )}
           {debugInfo.optionSymbols && debugInfo.optionSymbols.length > 0 && (
@@ -976,13 +959,13 @@ function App() {
               {debugInfo.optionSymbols.length > 5 && `... +${debugInfo.optionSymbols.length - 5} more`}
             </div>
           )}
-          {debugInfo.suspiciousSymbols && debugInfo.suspiciousSymbols.length > 0 && (
+          {suspiciousSymbolsForDisplay && suspiciousSymbolsForDisplay.length > 0 && (
             <div style={{ marginTop: '12px', borderTop: '2px solid #fff', paddingTop: '8px' }}>
               <div style={{ fontWeight: 'bold', color: '#ff0000', marginBottom: '5px' }}>
-                ⚠️ {debugInfo.suspiciousSymbols.length} symbols with dates/Call/Put in grid:
+                ⚠️ {suspiciousSymbolsForDisplay.length} symbols with dates/Call/Put in grid:
               </div>
               <div style={{ fontSize: '11px', background: 'rgba(255,0,0,0.1)', padding: '5px', borderRadius: '4px', maxHeight: '200px', overflowY: 'auto' }}>
-                {debugInfo.suspiciousSymbols.map((item, idx) => (
+                {suspiciousSymbolsForDisplay.map((item, idx) => (
                   <div key={idx} style={{ marginBottom: '3px' }}>
                     {item.symbol}
                     <br/>
