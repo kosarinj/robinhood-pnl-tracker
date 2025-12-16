@@ -573,6 +573,12 @@ function App() {
       console.log(`Received trades:`, result)
 
       if (result.success && result.trades) {
+        console.log(`📊 Loading data for ${uploadDate}:`)
+        console.log(`  - Trades: ${result.trades.length}`)
+        console.log(`  - Prices:`, result.currentPrices ? Object.keys(result.currentPrices).length : 0, 'symbols')
+        console.log(`  - Sample prices:`, result.currentPrices ? Object.entries(result.currentPrices).slice(0, 3) : [])
+        console.log(`  - P&L data:`, result.pnlData ? result.pnlData.length : 0, 'positions')
+
         setTrades(result.trades)
         setDeposits(result.deposits || [])
         setTotalPrincipal(result.totalPrincipal || 0)
@@ -581,6 +587,7 @@ function App() {
         }
         if (result.pnlData) {
           setPnlData(result.pnlData)
+          console.log(`  - Total P&L: $${result.pnlData.reduce((sum, p) => sum + (p.real?.totalPnL || 0), 0).toFixed(2)}`)
         }
         setCurrentUploadDate(uploadDate)
         console.log(`✅ Loaded ${result.trades.length} trades from ${uploadDate}`)

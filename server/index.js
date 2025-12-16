@@ -390,6 +390,11 @@ io.on('connection', (socket) => {
       console.log(`📅 Fetching historical prices for ${uploadDate}...`)
       const historicalPrices = await priceService.getPricesForDate(stockSymbols, uploadDate)
       console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
+      // Log sample prices for debugging
+      const sampleSymbols = Object.keys(historicalPrices).slice(0, 3)
+      sampleSymbols.forEach(sym => {
+        console.log(`  ${sym}: $${historicalPrices[sym]}`)
+      })
 
       // Calculate P&L using historical prices
       const pnlData = calculatePnL(trades, historicalPrices)
