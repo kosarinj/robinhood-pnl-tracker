@@ -11,8 +11,10 @@ import {
   ReferenceLine
 } from 'recharts'
 import { socketService } from '../services/socketService'
+import { useTheme } from '../contexts/ThemeContext'
 
 function DailyPnLChart({ useServer, connected }) {
+  const { isDark } = useTheme()
   const [chartData, setChartData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -77,11 +79,12 @@ function DailyPnLChart({ useServer, connected }) {
     if (active && payload && payload.length) {
       return (
         <div style={{
-          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          backgroundColor: isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(255, 255, 255, 0.95)',
           padding: '10px',
-          border: '1px solid #ccc',
+          border: `1px solid ${isDark ? '#555' : '#ccc'}`,
           borderRadius: '6px',
-          fontSize: '13px'
+          fontSize: '13px',
+          color: isDark ? '#e0e0e0' : '#333'
         }}>
           <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
             {new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -105,10 +108,11 @@ function DailyPnLChart({ useServer, connected }) {
     return (
       <div style={{
         padding: '20px',
-        background: '#f8f9fa',
+        background: isDark ? '#2a2a2a' : '#f8f9fa',
         borderRadius: '8px',
         marginBottom: '20px',
-        textAlign: 'center'
+        textAlign: 'center',
+        color: isDark ? '#e0e0e0' : '#333'
       }}>
         Loading daily P&L history...
       </div>
@@ -119,8 +123,8 @@ function DailyPnLChart({ useServer, connected }) {
     return (
       <div style={{
         padding: '15px',
-        background: '#fff3cd',
-        color: '#856404',
+        background: isDark ? '#3a3a2a' : '#fff3cd',
+        color: isDark ? '#ffeb3b' : '#856404',
         borderRadius: '8px',
         marginBottom: '20px',
         fontSize: '14px'
@@ -136,12 +140,12 @@ function DailyPnLChart({ useServer, connected }) {
 
   return (
     <div style={{
-      background: 'white',
+      background: isDark ? '#1e1e1e' : 'white',
       borderRadius: '12px',
       padding: collapsed ? '15px' : '20px',
       marginBottom: '20px',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-      border: '1px solid #e0e0e0'
+      boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.1)',
+      border: `1px solid ${isDark ? '#444' : '#e0e0e0'}`
     }}>
       <div style={{
         display: 'flex',
@@ -149,7 +153,7 @@ function DailyPnLChart({ useServer, connected }) {
         alignItems: 'center',
         marginBottom: collapsed ? '0' : '15px'
       }}>
-        <h3 style={{ margin: 0, fontSize: '18px', color: '#333' }}>
+        <h3 style={{ margin: 0, fontSize: '18px', color: isDark ? '#e0e0e0' : '#333' }}>
           📈 Daily Total P&L History
         </h3>
         <button
@@ -175,14 +179,15 @@ function DailyPnLChart({ useServer, connected }) {
             display: 'flex',
             gap: '20px',
             marginBottom: '15px',
-            fontSize: '14px'
+            fontSize: '14px',
+            color: isDark ? '#b0b0b0' : '#666'
           }}>
             <div>
-              <span style={{ color: '#666' }}>Days tracked:</span>{' '}
-              <strong>{chartData.length}</strong>
+              <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Days tracked:</span>{' '}
+              <strong style={{ color: isDark ? '#e0e0e0' : '#333' }}>{chartData.length}</strong>
             </div>
             <div>
-              <span style={{ color: '#666' }}>Latest Total P&L:</span>{' '}
+              <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Latest Total P&L:</span>{' '}
               <strong style={{
                 color: chartData[chartData.length - 1]?.totalPnL >= 0 ? '#28a745' : '#dc3545'
               }}>
@@ -193,16 +198,16 @@ function DailyPnLChart({ useServer, connected }) {
 
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+              <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#444' : '#e0e0e0'} />
               <XAxis
                 dataKey="date"
                 tickFormatter={formatDate}
-                stroke="#666"
+                stroke={isDark ? '#999' : '#666'}
                 style={{ fontSize: '12px' }}
               />
               <YAxis
                 tickFormatter={formatCurrency}
-                stroke="#666"
+                stroke={isDark ? '#999' : '#666'}
                 style={{ fontSize: '12px' }}
               />
               <Tooltip content={<CustomTooltip />} />
@@ -233,7 +238,7 @@ function DailyPnLChart({ useServer, connected }) {
 
           <div style={{
             fontSize: '12px',
-            color: '#666',
+            color: isDark ? '#999' : '#666',
             marginTop: '10px',
             fontStyle: 'italic'
           }}>
