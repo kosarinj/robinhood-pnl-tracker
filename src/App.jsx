@@ -588,6 +588,15 @@ function App() {
         if (result.pnlData) {
           setPnlData(result.pnlData)
           console.log(`  - Total P&L: $${result.pnlData.reduce((sum, p) => sum + (p.real?.totalPnL || 0), 0).toFixed(2)}`)
+
+          // DEBUG: Show what we received from loading saved data
+          console.log('🔵 LOAD SAVED - Received pnlData:', result.pnlData.length, 'items')
+          const optionItems = result.pnlData.filter(item => item.isOption)
+          const stockItems = result.pnlData.filter(item => !item.isOption)
+          console.log('   Stocks:', stockItems.length, '- Options (should be 0):', optionItems.length)
+          if (optionItems.length > 0) {
+            console.log('   ⚠️ FOUND OPTIONS IN PNLDATA:', optionItems.map(o => o.symbol))
+          }
         }
         setCurrentUploadDate(uploadDate)
         console.log(`✅ Loaded ${result.trades.length} trades from ${uploadDate}`)
@@ -733,6 +742,15 @@ function App() {
         setPnlData(response.pnlData)
         setFailedSymbols(response.failedSymbols || [])
         setLastPriceUpdate(new Date(response.timestamp))
+
+        // DEBUG: Show what we received from CSV upload
+        console.log('🟢 CSV UPLOAD - Received pnlData:', response.pnlData.length, 'items')
+        const optionItems = response.pnlData.filter(item => item.isOption)
+        const stockItems = response.pnlData.filter(item => !item.isOption)
+        console.log('   Stocks:', stockItems.length, '- Options (should be 0):', optionItems.length)
+        if (optionItems.length > 0) {
+          console.log('   ⚠️ FOUND OPTIONS IN PNLDATA:', optionItems.map(o => o.symbol))
+        }
 
         // If uploadDate is present, we're viewing historical data
         if (response.uploadDate) {
