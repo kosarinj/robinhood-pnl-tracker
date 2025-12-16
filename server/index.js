@@ -432,11 +432,24 @@ io.on('connection', (socket) => {
       // Get price benchmarks for each position
       const pnlDataWithBenchmarks = pnlData.map(position => {
         const benchmarks = databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
+
+        // Debug: Log if this position has options with expired ones
+        if (position.options && position.options.length > 0) {
+          const expiredOpts = position.options.filter(opt => opt.avgCost?.position === 0)
+          if (expiredOpts.length > 0) {
+            console.log(`📍 ${position.symbol} has ${expiredOpts.length} expired options (position=0):`)
+            expiredOpts.forEach(opt => console.log(`   - ${opt.symbol}: position=${opt.avgCost?.position}`))
+          }
+        }
+
         return {
           ...position,
           benchmarks
         }
       })
+
+      console.log(`📤 Sending ${pnlDataWithBenchmarks.length} positions to client (load-trades)`)
+      console.log(`   Positions: ${pnlDataWithBenchmarks.map(p => p.symbol).join(', ')}`)
 
       socket.emit('trades-loaded', {
         success: true,
