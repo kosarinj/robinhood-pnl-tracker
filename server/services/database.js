@@ -671,6 +671,20 @@ export class DatabaseService {
     }
   }
 
+  // Clear all saved data (useful after code changes that affect P&L calculation)
+  clearAllData() {
+    try {
+      db.prepare('DELETE FROM price_benchmarks').run()
+      db.prepare('DELETE FROM pnl_snapshots').run()
+      db.prepare('DELETE FROM trades').run()
+      db.prepare('DELETE FROM csv_uploads').run()
+      console.log('✅ Cleared all saved data from database')
+    } catch (error) {
+      console.error('Error clearing database:', error)
+      throw error
+    }
+  }
+
   // Close database connection
   close() {
     db.close()

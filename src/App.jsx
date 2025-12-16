@@ -913,6 +913,35 @@ function App() {
                   </option>
                 ))}
               </select>
+              <button
+                onClick={async () => {
+                  if (window.confirm('⚠️ Clear all saved data from database? This cannot be undone. You will need to re-upload all CSV files.')) {
+                    try {
+                      await socketService.clearDatabase()
+                      setUploadDates([])
+                      setCurrentUploadDate(null)
+                      setTrades([])
+                      setPnlData([])
+                      alert('✅ Database cleared successfully! Please re-upload your CSV files.')
+                    } catch (error) {
+                      alert(`Error clearing database: ${error.message}`)
+                    }
+                  }
+                }}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  background: '#dc3545',
+                  color: 'white'
+                }}
+                title="Clear all saved data from database"
+              >
+                🗑️ Clear DB
+              </button>
             </div>
           )}
           {useServer && connected && snapshotDates.length > 0 && (

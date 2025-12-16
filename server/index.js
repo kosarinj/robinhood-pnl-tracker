@@ -452,6 +452,18 @@ io.on('connection', (socket) => {
       socket.emit('trades-loaded', { success: false, error: error.message })
     }
   })
+
+  // Clear all saved data (admin function)
+  socket.on('clear-database', () => {
+    console.log(`🗑️  Received clear-database request`)
+    try {
+      databaseService.clearAllData()
+      socket.emit('database-cleared', { success: true })
+    } catch (error) {
+      console.error(`❌ Error clearing database:`, error)
+      socket.emit('database-cleared', { success: false, error: error.message })
+    }
+  })
 })
 
 // Helper function to apply split adjustments

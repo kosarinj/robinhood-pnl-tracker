@@ -420,6 +420,34 @@ class SocketService {
     }
   }
 
+  // Clear all saved data from database
+  clearDatabase() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('database-cleared', resultHandler)
+        clearTimeout(timeoutId)
+        if (response.success) {
+          resolve()
+        } else {
+          reject(new Error(response.error))
+        }
+      }
+
+      this.socket.on('database-cleared', resultHandler)
+      this.socket.emit('clear-database')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('database-cleared', resultHandler)
+        reject(new Error('Clear database timeout'))
+      }, 10000)
+    })
+  }
+
   // Remove listeners
   off(event, callback) {
     if (this.socket) {
