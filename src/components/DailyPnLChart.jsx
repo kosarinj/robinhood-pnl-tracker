@@ -98,10 +98,11 @@ function DailyPnLChart({ useServer, connected }) {
         return
       }
 
-      // Get current (latest) position and avg cost
+      // Get current (latest) data
       const latestData = data[data.length - 1]
       const currentPosition = parseFloat(latestData.position || 0)
-      const currentAvgCost = parseFloat(latestData.avg_cost || 0)
+      const currentPrice = parseFloat(latestData.current_price || 0)
+      const currentPnL = parseFloat(latestData.total_pnl || 0)
 
       // Transform data for chart
       const symbolChartData = data.map(row => {
@@ -109,8 +110,8 @@ function DailyPnLChart({ useServer, connected }) {
         const position = parseFloat(row.position || 0)
         const avgCost = parseFloat(row.avg_cost || 0)
 
-        // Calculate hypothetical P&L with current position at historical price
-        const hypotheticalPnL = currentPosition * (historicalPrice - currentAvgCost)
+        // Calculate hypothetical P&L: current P&L + (current shares * (historical price - current price))
+        const hypotheticalPnL = currentPnL + (currentPosition * (historicalPrice - currentPrice))
 
         return {
           date: row.asof_date,
@@ -121,12 +122,13 @@ function DailyPnLChart({ useServer, connected }) {
           avgCost: avgCost,
           hypotheticalPnL: hypotheticalPnL,
           currentPosition: currentPosition,
-          currentAvgCost: currentAvgCost
+          currentPrice: currentPrice,
+          currentPnL: currentPnL
         }
       })
 
       console.log(`✅ Loaded ${symbolChartData.length} days of P&L for ${symbol}`)
-      console.log(`Current position: ${currentPosition} shares @ $${currentAvgCost.toFixed(2)} avg cost`)
+      console.log(`Current: ${currentPosition} shares @ $${currentPrice.toFixed(2)}, P&L: ${currentPnL.toFixed(2)}`)
       setSymbolData(symbolChartData)
     } catch (err) {
       console.error(`Error loading P&L for ${symbol}:`, err)
@@ -184,7 +186,7 @@ function DailyPnLChart({ useServer, connected }) {
                   Hypothetical P&L: {formatCurrency(dataPoint.hypotheticalPnL)}
                 </div>
                 <div style={{ color: isDark ? '#999' : '#666', fontSize: '11px', marginTop: '2px' }}>
-                  ({dataPoint.currentPosition.toFixed(0)} shares @ ${dataPoint.price.toFixed(2)})
+                  If price was ${dataPoint.price.toFixed(2)} (from ${dataPoint.currentPrice.toFixed(2)})
                 </div>
               </div>
             </>
@@ -484,7 +486,7 @@ function DailyPnLChart({ useServer, connected }) {
               }}>
                 * Chart shows {selectedSymbol} stock price (right axis) and P&L (left axis) over time
                 <br />
-                * Hypothetical P&L shows what your P&L would be if you had your current position at that historical price
+                * Hypothetical P&L shows what your current P&L would be if the price moved to that historical level
               </div>
             </>
           )}
