@@ -291,6 +291,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   let unrealizedPnL = 0
   let avgCostBasis = 0
   let lowestOpenBuyPrice = 0
+  let lowestOpenBuyDaysAgo = 0
 
   if (position > 0) {
     // Unrealized P&L = Current value of remaining position
@@ -310,17 +311,19 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
         avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
       }
 
-      // Find the lowest price among remaining open buys from the past 2 trading days
-      const twoTradingDaysAgo = getTwoTradingDaysAgo()
-      const recentBuys = buyQueue.filter(buy => {
-        const buyDate = new Date(buy.date)
-        buyDate.setHours(0, 0, 0, 0)
-        return buyDate >= twoTradingDaysAgo
+      // Find the lowest price among remaining open buys and when it was purchased
+      const lowestBuy = buyQueue.reduce((lowest, buy) => {
+        return buy.price < lowest.price ? buy : lowest
       })
 
-      if (recentBuys.length > 0) {
-        lowestOpenBuyPrice = Math.min(...recentBuys.map(buy => buy.price))
-      }
+      lowestOpenBuyPrice = lowestBuy.price
+
+      // Calculate how many days ago this buy was made
+      const buyDate = new Date(lowestBuy.date)
+      buyDate.setHours(0, 0, 0, 0)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      lowestOpenBuyDaysAgo = Math.floor((today - buyDate) / (1000 * 60 * 60 * 24))
     } else {
       // Fallback
       avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
@@ -341,6 +344,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     avgCostBasis: roundToTwo(avgCostBasis),
     percentageReturn: roundToTwo(percentageReturn),
     lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice),
+    lowestOpenBuyDaysAgo: lowestOpenBuyDaysAgo,
     todaysRealizedProfit: roundToTwo(todaysRealizedProfit)
   }
 }
@@ -502,25 +506,4 @@ const calculateLIFO = (trades, currentPrice) => {
 // Helper function to round to 2 decimal places
 const roundToTwo = (num) => {
   return Math.round((num + Number.EPSILON) * 100) / 100
-}
-
-// Helper function to get the date 2 trading days ago (skipping weekends)
-const getTwoTradingDaysAgo = () => {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  let tradingDaysBack = 0
-  let currentDate = new Date(today)
-
-  while (tradingDaysBack < 2) {
-    currentDate.setDate(currentDate.getDate() - 1)
-    const dayOfWeek = currentDate.getDay()
-
-    // Skip weekends (0 = Sunday, 6 = Saturday)
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      tradingDaysBack++
-    }
-  }
-
-  return currentDate
 }

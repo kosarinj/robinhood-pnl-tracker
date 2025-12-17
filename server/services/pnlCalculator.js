@@ -279,31 +279,26 @@ const calculateReal = (trades, currentPrice, symbol) => {
   let unrealizedPnL = 0
   let avgCostBasis = 0
   let lowestOpenBuyPrice = 0
+  let lowestOpenBuyDaysAgo = 0
 
   if (position > 0) {
     unrealizedPnL = position * currentPrice
     avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
 
-    // Find the lowest price among remaining open buys from the past 2 trading days
+    // Find the lowest price among remaining open buys and when it was purchased
     if (buyQueue.length > 0) {
-      const twoTradingDaysAgo = getTwoTradingDaysAgo()
-      const recentBuys = buyQueue.filter(buy => {
-        const buyDate = new Date(buy.date)
-        buyDate.setHours(0, 0, 0, 0)
-        return buyDate >= twoTradingDaysAgo
+      const lowestBuy = buyQueue.reduce((lowest, buy) => {
+        return buy.price < lowest.price ? buy : lowest
       })
 
-      console.log(`[${symbol}] Total open buys: ${buyQueue.length}, Recent buys (past 2 days): ${recentBuys.length}, Cutoff: ${twoTradingDaysAgo.toISOString().split('T')[0]}`)
-      if (buyQueue.length > 0) {
-        console.log(`[${symbol}] Buy dates in queue: ${buyQueue.map(b => new Date(b.date).toISOString().split('T')[0]).join(', ')}`)
-      }
+      lowestOpenBuyPrice = lowestBuy.price
 
-      if (recentBuys.length > 0) {
-        lowestOpenBuyPrice = Math.min(...recentBuys.map(buy => buy.price))
-        console.log(`[${symbol}] Lowest buy (past 2 days): $${lowestOpenBuyPrice}`)
-      } else {
-        console.log(`[${symbol}] No buys in past 2 trading days`)
-      }
+      // Calculate how many days ago this buy was made
+      const buyDate = new Date(lowestBuy.date)
+      buyDate.setHours(0, 0, 0, 0)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      lowestOpenBuyDaysAgo = Math.floor((today - buyDate) / (1000 * 60 * 60 * 24))
     }
   }
 
@@ -320,7 +315,8 @@ const calculateReal = (trades, currentPrice, symbol) => {
     position: roundToTwo(position),
     avgCostBasis: roundToTwo(avgCostBasis),
     percentageReturn: roundToTwo(percentageReturn),
-    lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice)
+    lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice),
+    lowestOpenBuyDaysAgo: lowestOpenBuyDaysAgo
   }
 }
 
@@ -481,25 +477,4 @@ const calculateLIFO = (trades, currentPrice) => {
 // Helper function to round to 2 decimal places
 const roundToTwo = (num) => {
   return Math.round((num + Number.EPSILON) * 100) / 100
-}
-
-// Helper function to get the date 2 trading days ago (skipping weekends)
-const getTwoTradingDaysAgo = () => {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  let tradingDaysBack = 0
-  let currentDate = new Date(today)
-
-  while (tradingDaysBack < 2) {
-    currentDate.setDate(currentDate.getDate() - 1)
-    const dayOfWeek = currentDate.getDay()
-
-    // Skip weekends (0 = Sunday, 6 = Saturday)
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      tradingDaysBack++
-    }
-  }
-
-  return currentDate
 }

@@ -357,13 +357,22 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     },
     lowestBuy: {
       header: () => (
-        <th onClick={() => handleSort('real.lowestOpenBuyPrice')} className="sortable" style={{ minWidth: '100px', maxWidth: '100px' }}>
+        <th onClick={() => handleSort('real.lowestOpenBuyPrice')} className="sortable" style={{ minWidth: '120px', maxWidth: '120px' }}>
           Lowest Buy{getSortIcon('real.lowestOpenBuyPrice')}
         </th>
       ),
       cell: (row) => (
-        <td style={{ minWidth: '100px', maxWidth: '100px' }}>
-          {row.real.lowestOpenBuyPrice > 0 ? formatCurrency(row.real.lowestOpenBuyPrice) : '-'}
+        <td style={{ minWidth: '120px', maxWidth: '120px' }}>
+          {row.real.lowestOpenBuyPrice > 0 ? (
+            <span>
+              {formatCurrency(row.real.lowestOpenBuyPrice)}
+              {row.real.lowestOpenBuyDaysAgo !== undefined && (
+                <span style={{ fontSize: '0.85em', color: '#888', marginLeft: '4px' }}>
+                  ({row.real.lowestOpenBuyDaysAgo}d)
+                </span>
+              )}
+            </span>
+          ) : '-'}
         </td>
       ),
       footer: () => <td></td>

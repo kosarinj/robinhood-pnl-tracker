@@ -677,7 +677,8 @@ function App() {
               optionsPnL: num(row.options_pnl),
               percentage: num(row.percentage),
               percentageReturn: num(row.percentage),
-              lowestOpenBuyPrice: 0
+              lowestOpenBuyPrice: num(row.lowest_open_buy_price),
+              lowestOpenBuyDaysAgo: row.lowest_open_buy_days_ago || 0
             },
             real: {
               position: num(row.position),
@@ -690,7 +691,8 @@ function App() {
               optionsPnL: num(row.options_pnl),
               percentage: num(row.percentage),
               percentageReturn: num(row.percentage),
-              lowestOpenBuyPrice: 0
+              lowestOpenBuyPrice: num(row.lowest_open_buy_price),
+              lowestOpenBuyDaysAgo: row.lowest_open_buy_days_ago || 0
             },
             lifo: { ...emptyPnl },
             fifo: { ...emptyPnl }

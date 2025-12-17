@@ -72,6 +72,8 @@ db.exec(`
     daily_pnl REAL,
     options_pnl REAL,
     percentage REAL,
+    lowest_open_buy_price REAL,
+    lowest_open_buy_days_ago INTEGER,
     created_at INTEGER DEFAULT (strftime('%s', 'now')),
     UNIQUE(asof_date, symbol)
   );
@@ -208,8 +210,8 @@ const insertSignalPerformance = db.prepare(`
 `)
 
 const upsertPnLSnapshot = db.prepare(`
-  INSERT INTO pnl_snapshots (asof_date, symbol, position, avg_cost, current_price, current_value, realized_pnl, unrealized_pnl, total_pnl, daily_pnl, options_pnl, percentage)
-  VALUES (@asofDate, @symbol, @position, @avgCost, @currentPrice, @currentValue, @realizedPnl, @unrealizedPnl, @totalPnl, @dailyPnl, @optionsPnl, @percentage)
+  INSERT INTO pnl_snapshots (asof_date, symbol, position, avg_cost, current_price, current_value, realized_pnl, unrealized_pnl, total_pnl, daily_pnl, options_pnl, percentage, lowest_open_buy_price, lowest_open_buy_days_ago)
+  VALUES (@asofDate, @symbol, @position, @avgCost, @currentPrice, @currentValue, @realizedPnl, @unrealizedPnl, @totalPnl, @dailyPnl, @optionsPnl, @percentage, @lowestOpenBuyPrice, @lowestOpenBuyDaysAgo)
   ON CONFLICT(asof_date, symbol) DO UPDATE SET
     position = excluded.position,
     avg_cost = excluded.avg_cost,
@@ -221,6 +223,8 @@ const upsertPnLSnapshot = db.prepare(`
     daily_pnl = excluded.daily_pnl,
     options_pnl = excluded.options_pnl,
     percentage = excluded.percentage,
+    lowest_open_buy_price = excluded.lowest_open_buy_price,
+    lowest_open_buy_days_ago = excluded.lowest_open_buy_days_ago,
     created_at = strftime('%s', 'now')
 `)
 
@@ -491,7 +495,9 @@ export class DatabaseService {
             totalPnl: item.real?.totalPnL || null,
             dailyPnl: item.real?.dailyPnL || null,
             optionsPnl: item.optionsPnL || null,
-            percentage: item.real?.percentage || null
+            percentage: item.real?.percentage || null,
+            lowestOpenBuyPrice: item.real?.lowestOpenBuyPrice || null,
+            lowestOpenBuyDaysAgo: item.real?.lowestOpenBuyDaysAgo || null
           })
         }
       })
