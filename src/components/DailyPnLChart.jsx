@@ -98,16 +98,35 @@ function DailyPnLChart({ useServer, connected }) {
         return
       }
 
+      // Get current (latest) position and avg cost
+      const latestData = data[data.length - 1]
+      const currentPosition = parseFloat(latestData.position || 0)
+      const currentAvgCost = parseFloat(latestData.avg_cost || 0)
+
       // Transform data for chart
-      const symbolChartData = data.map(row => ({
-        date: row.asof_date,
-        price: parseFloat(row.current_price || 0),
-        totalPnL: parseFloat(row.total_pnl || 0),
-        dailyPnL: parseFloat(row.daily_pnl || 0),
-        position: parseFloat(row.position || 0)
-      }))
+      const symbolChartData = data.map(row => {
+        const historicalPrice = parseFloat(row.current_price || 0)
+        const position = parseFloat(row.position || 0)
+        const avgCost = parseFloat(row.avg_cost || 0)
+
+        // Calculate hypothetical P&L with current position at historical price
+        const hypotheticalPnL = currentPosition * (historicalPrice - currentAvgCost)
+
+        return {
+          date: row.asof_date,
+          price: historicalPrice,
+          totalPnL: parseFloat(row.total_pnl || 0),
+          dailyPnL: parseFloat(row.daily_pnl || 0),
+          position: position,
+          avgCost: avgCost,
+          hypotheticalPnL: hypotheticalPnL,
+          currentPosition: currentPosition,
+          currentAvgCost: currentAvgCost
+        }
+      })
 
       console.log(`✅ Loaded ${symbolChartData.length} days of P&L for ${symbol}`)
+      console.log(`Current position: ${currentPosition} shares @ $${currentAvgCost.toFixed(2)} avg cost`)
       setSymbolData(symbolChartData)
     } catch (err) {
       console.error(`Error loading P&L for ${symbol}:`, err)
@@ -132,6 +151,10 @@ function DailyPnLChart({ useServer, connected }) {
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
+      // Check if this is symbol-specific data (has hypothetical P&L)
+      const dataPoint = payload[0]?.payload
+      const hasHypothetical = dataPoint && dataPoint.hypotheticalPnL !== undefined
+
       return (
         <div style={{
           backgroundColor: isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(255, 255, 255, 0.95)',
@@ -149,6 +172,23 @@ function DailyPnLChart({ useServer, connected }) {
               {entry.name}: {formatCurrency(entry.value)}
             </div>
           ))}
+          {hasHypothetical && (
+            <>
+              <div style={{
+                borderTop: `1px solid ${isDark ? '#555' : '#ddd'}`,
+                marginTop: '6px',
+                paddingTop: '6px',
+                fontSize: '12px'
+              }}>
+                <div style={{ color: '#9333ea', fontWeight: '500' }}>
+                  Hypothetical P&L: {formatCurrency(dataPoint.hypotheticalPnL)}
+                </div>
+                <div style={{ color: isDark ? '#999' : '#666', fontSize: '11px', marginTop: '2px' }}>
+                  ({dataPoint.currentPosition.toFixed(0)} shares @ ${dataPoint.price.toFixed(2)})
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )
     }
@@ -406,7 +446,19 @@ function DailyPnLChart({ useServer, connected }) {
                     stroke="#28a745"
                     strokeWidth={3}
                     dot={{ fill: '#28a745', r: 3 }}
-                    name="Total P&L"
+                    name="Actual P&L"
+                    connectNulls={true}
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    yAxisId="pnl"
+                    type="monotone"
+                    dataKey="hypotheticalPnL"
+                    stroke="#9333ea"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={{ fill: '#9333ea', r: 2 }}
+                    name="Hypothetical P&L"
                     connectNulls={true}
                     isAnimationActive={false}
                   />
@@ -415,8 +467,8 @@ function DailyPnLChart({ useServer, connected }) {
                     type="monotone"
                     dataKey="dailyPnL"
                     stroke="#f59e0b"
-                    strokeWidth={2}
-                    dot={{ fill: '#f59e0b', r: 2 }}
+                    strokeWidth={1.5}
+                    dot={{ fill: '#f59e0b', r: 1.5 }}
                     name="Daily P&L"
                     connectNulls={true}
                     isAnimationActive={false}
@@ -431,6 +483,8 @@ function DailyPnLChart({ useServer, connected }) {
                 fontStyle: 'italic'
               }}>
                 * Chart shows {selectedSymbol} stock price (right axis) and P&L (left axis) over time
+                <br />
+                * Hypothetical P&L shows what your P&L would be if you had your current position at that historical price
               </div>
             </>
           )}
