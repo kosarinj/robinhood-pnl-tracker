@@ -172,10 +172,20 @@ function App() {
       const today = new Date().toISOString().split('T')[0]
       const isViewingToday = isViewingSnapshot && currentSnapshotDate === today
 
+      console.log('🔍 Price update check:', {
+        isViewingSnapshot,
+        currentSnapshotDate,
+        today,
+        isViewingToday,
+        currentUploadDate,
+        willUpdate: !currentUploadDate && (!isViewingSnapshot || isViewingToday)
+      })
+
       // Only apply updates if:
       // 1. Not viewing any historical upload date AND
       // 2. Either not viewing snapshot OR viewing today's snapshot
       if (!currentUploadDate && (!isViewingSnapshot || isViewingToday)) {
+        console.log('✅ Applying price update')
         setCurrentPrices(data.currentPrices)
         setPnlData(data.pnlData)
         setLastPriceUpdate(new Date(data.timestamp))
