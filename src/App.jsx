@@ -170,23 +170,25 @@ function App() {
       console.log('📈 Received price update from server')
       setPriceUpdateCount(prev => prev + 1)
 
-      // Check if viewing today's snapshot
+      // Check if viewing today's data
       const today = new Date().toISOString().split('T')[0]
-      const isViewingToday = isViewingSnapshot && currentSnapshotDate === today
+      const isViewingTodaysSnapshot = isViewingSnapshot && currentSnapshotDate === today
+      const isViewingTodaysUpload = currentUploadDate && currentUploadDate === today
 
       console.log('🔍 Price update check:', {
         isViewingSnapshot,
         currentSnapshotDate,
-        today,
-        isViewingToday,
         currentUploadDate,
-        willUpdate: !currentUploadDate && (!isViewingSnapshot || isViewingToday)
+        today,
+        isViewingTodaysSnapshot,
+        isViewingTodaysUpload,
+        willUpdate: (!currentUploadDate || isViewingTodaysUpload) && (!isViewingSnapshot || isViewingTodaysSnapshot)
       })
 
-      // Only apply updates if:
-      // 1. Not viewing any historical upload date AND
-      // 2. Either not viewing snapshot OR viewing today's snapshot
-      if (!currentUploadDate && (!isViewingSnapshot || isViewingToday)) {
+      // Allow updates if viewing today's data (either snapshot or upload)
+      const shouldUpdate = (!currentUploadDate || isViewingTodaysUpload) && (!isViewingSnapshot || isViewingTodaysSnapshot)
+
+      if (shouldUpdate) {
         console.log('✅ Applying price update')
         setCurrentPrices(data.currentPrices)
         setPnlData(data.pnlData)
@@ -200,12 +202,15 @@ function App() {
     socketService.onPnLUpdate((data) => {
       console.log('💰 Received P&L update from server')
 
-      // Check if viewing today's snapshot
+      // Check if viewing today's data
       const today = new Date().toISOString().split('T')[0]
-      const isViewingToday = isViewingSnapshot && currentSnapshotDate === today
+      const isViewingTodaysSnapshot = isViewingSnapshot && currentSnapshotDate === today
+      const isViewingTodaysUpload = currentUploadDate && currentUploadDate === today
 
-      // Only apply updates if not viewing historical data (or if viewing today's snapshot)
-      if (!currentUploadDate && (!isViewingSnapshot || isViewingToday)) {
+      // Allow updates if viewing today's data (either snapshot or upload)
+      const shouldUpdate = (!currentUploadDate || isViewingTodaysUpload) && (!isViewingSnapshot || isViewingTodaysSnapshot)
+
+      if (shouldUpdate) {
         setPnlData(data.pnlData)
       } else {
         console.log('⏸️  Ignoring P&L update - viewing historical data')
@@ -1073,13 +1078,21 @@ function App() {
         <strong>🔍 Auto-Update Debug:</strong><br/>
         <strong style={{ color: priceUpdateCount > 0 ? 'green' : 'red' }}>
           Updates Received: {priceUpdateCount}
-        </strong> |
-        Snapshot: {isViewingSnapshot ? 'YES' : 'NO'} |
-        Date: {currentSnapshotDate || 'none'} |
-        Today: {new Date().toISOString().split('T')[0]} |
-        Match: {isViewingSnapshot && currentSnapshotDate === new Date().toISOString().split('T')[0] ? 'YES' : 'NO'} |
-        Upload Date: {currentUploadDate || 'none'} |
-        Should Update: {!currentUploadDate && (!isViewingSnapshot || (isViewingSnapshot && currentSnapshotDate === new Date().toISOString().split('T')[0])) ? 'YES ✅' : 'NO ❌'}
+        </strong> | {(() => {
+          const today = new Date().toISOString().split('T')[0]
+          const isViewingTodaysSnapshot = isViewingSnapshot && currentSnapshotDate === today
+          const isViewingTodaysUpload = currentUploadDate && currentUploadDate === today
+          const shouldUpdate = (!currentUploadDate || isViewingTodaysUpload) && (!isViewingSnapshot || isViewingTodaysSnapshot)
+          return (
+            <>
+              Snapshot: {isViewingSnapshot ? 'YES' : 'NO'} |
+              Snap Date: {currentSnapshotDate || 'none'} |
+              Upload Date: {currentUploadDate || 'none'} |
+              Today: {today} |
+              Should Update: {shouldUpdate ? 'YES ✅' : 'NO ❌'}
+            </>
+          )
+        })()}
       </div>
 
       {isViewingSnapshot && (
