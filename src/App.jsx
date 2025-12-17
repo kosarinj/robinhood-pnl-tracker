@@ -1041,6 +1041,25 @@ function App() {
         </div>
       </div>
 
+      {/* Debug Panel */}
+      <div style={{
+        background: '#e3f2fd',
+        border: '2px solid #2196f3',
+        borderRadius: '6px',
+        padding: '12px 16px',
+        marginBottom: '16px',
+        fontFamily: 'monospace',
+        fontSize: '12px'
+      }}>
+        <strong>🔍 Auto-Update Debug:</strong><br/>
+        Snapshot: {isViewingSnapshot ? 'YES' : 'NO'} |
+        Date: {currentSnapshotDate || 'none'} |
+        Today: {new Date().toISOString().split('T')[0]} |
+        Match: {isViewingSnapshot && currentSnapshotDate === new Date().toISOString().split('T')[0] ? 'YES' : 'NO'} |
+        Upload Date: {currentUploadDate || 'none'} |
+        Should Update: {!currentUploadDate && (!isViewingSnapshot || (isViewingSnapshot && currentSnapshotDate === new Date().toISOString().split('T')[0])) ? 'YES ✅' : 'NO ❌'}
+      </div>
+
       {isViewingSnapshot && (
         <div style={{
           background: '#fff3cd',
