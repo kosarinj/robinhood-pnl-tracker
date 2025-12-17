@@ -734,7 +734,24 @@ function App() {
       console.log('Setting pnlData to transformed data...')
       setPnlData(transformedData)
       console.log('pnlData set - about to render')
-      setTrades([]) // Clear trades when viewing snapshot (historical data only)
+
+      // If viewing today's snapshot, load trades so server can send price updates
+      const today = new Date().toISOString().split('T')[0]
+      if (asofDate === today && useServer) {
+        console.log('📥 Loading latest trades for today\'s snapshot to enable price updates...')
+        try {
+          const result = await socketService.getLatestTrades()
+          if (result.trades && result.trades.length > 0) {
+            setTrades(result.trades)
+            console.log(`✅ Loaded ${result.trades.length} trades for server session`)
+          }
+        } catch (err) {
+          console.error('Error loading trades for today\'s snapshot:', err)
+        }
+      } else {
+        setTrades([]) // Clear trades for historical snapshots
+      }
+
       setCurrentSnapshotDate(asofDate)
       setIsViewingSnapshot(true)
       setLoading(false)
