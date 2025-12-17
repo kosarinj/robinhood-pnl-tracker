@@ -167,8 +167,15 @@ function App() {
     // Listen for price updates from server
     socketService.onPriceUpdate((data) => {
       console.log('📈 Received price update from server')
-      // Only apply updates if not viewing historical data
-      if (!currentUploadDate && !isViewingSnapshot) {
+
+      // Check if viewing today's snapshot
+      const today = new Date().toISOString().split('T')[0]
+      const isViewingToday = isViewingSnapshot && currentSnapshotDate === today
+
+      // Only apply updates if:
+      // 1. Not viewing any historical upload date AND
+      // 2. Either not viewing snapshot OR viewing today's snapshot
+      if (!currentUploadDate && (!isViewingSnapshot || isViewingToday)) {
         setCurrentPrices(data.currentPrices)
         setPnlData(data.pnlData)
         setLastPriceUpdate(new Date(data.timestamp))
@@ -180,8 +187,13 @@ function App() {
     // Listen for P&L updates
     socketService.onPnLUpdate((data) => {
       console.log('💰 Received P&L update from server')
-      // Only apply updates if not viewing historical data
-      if (!currentUploadDate && !isViewingSnapshot) {
+
+      // Check if viewing today's snapshot
+      const today = new Date().toISOString().split('T')[0]
+      const isViewingToday = isViewingSnapshot && currentSnapshotDate === today
+
+      // Only apply updates if not viewing historical data (or if viewing today's snapshot)
+      if (!currentUploadDate && (!isViewingSnapshot || isViewingToday)) {
         setPnlData(data.pnlData)
       } else {
         console.log('⏸️  Ignoring P&L update - viewing historical data')
@@ -192,7 +204,7 @@ function App() {
     return () => {
       socketService.disconnect()
     }
-  }, [useServer, currentUploadDate, isViewingSnapshot])
+  }, [useServer, currentUploadDate, isViewingSnapshot, currentSnapshotDate])
 
   const handleManualPriceUpdate = (symbol, price) => {
     const updatedManualPrices = { ...manualPrices, [symbol]: parseFloat(price) }
