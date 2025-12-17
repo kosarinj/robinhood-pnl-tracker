@@ -576,25 +576,48 @@ setInterval(async () => {
     }
 
     // Broadcast price updates to all clients
+    console.log(`🔄 Starting price update broadcast to ${clientSessions.size} client(s)...`)
+
+    let successCount = 0
+    let skipCount = 0
+
     for (const [socketId, session] of clientSessions.entries()) {
       const socket = io.sockets.sockets.get(socketId)
-      if (!socket) continue
+      if (!socket) {
+        console.log(`  ⏭️  Socket ${socketId.substring(0, 8)} not found`)
+        skipCount++
+        continue
+      }
 
-      // Merge with manual prices
-      const prices = { ...updatedPrices, ...session.manualPrices }
+      if (!session.trades || session.trades.length === 0) {
+        console.log(`  ⏭️  Socket ${socketId.substring(0, 8)} has no trades, skipping`)
+        skipCount++
+        continue
+      }
 
-      // Recalculate P&L with new prices
-      const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
-      const pnlData = calculatePnL(adjustedTrades, prices)
+      try {
+        // Merge with manual prices
+        const prices = { ...updatedPrices, ...session.manualPrices }
 
-      socket.emit('price-update', {
-        currentPrices: prices,
-        pnlData,
-        timestamp: new Date()
-      })
+        // Recalculate P&L with new prices
+        const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
+        const pnlData = calculatePnL(adjustedTrades, prices)
+
+        socket.emit('price-update', {
+          currentPrices: prices,
+          pnlData,
+          timestamp: new Date()
+        })
+
+        console.log(`  ✅ Sent update to ${socketId.substring(0, 8)} (${session.trades.length} trades, ${pnlData.length} positions)`)
+        successCount++
+      } catch (err) {
+        console.error(`  ❌ Error broadcasting to ${socketId.substring(0, 8)}:`, err.message)
+        skipCount++
+      }
     }
 
-    console.log(`Price update broadcast to ${clientSessions.size} clients`)
+    console.log(`📡 Price update complete: ${successCount} sent, ${skipCount} skipped`)
   } catch (error) {
     console.error('Error updating prices:', error)
   }
