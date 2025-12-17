@@ -142,30 +142,7 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_pnl_snapshots_asof_date
     ON pnl_snapshots(asof_date DESC, symbol);
-`)
 
-// Run migrations to add new columns to existing tables
-try {
-  db.exec(`ALTER TABLE pnl_snapshots ADD COLUMN lowest_open_buy_price REAL;`)
-  console.log('✅ Added lowest_open_buy_price column to pnl_snapshots')
-} catch (err) {
-  // Column already exists, that's fine
-  if (!err.message.includes('duplicate column')) {
-    console.error('Error adding lowest_open_buy_price column:', err.message)
-  }
-}
-
-try {
-  db.exec(`ALTER TABLE pnl_snapshots ADD COLUMN lowest_open_buy_days_ago INTEGER;`)
-  console.log('✅ Added lowest_open_buy_days_ago column to pnl_snapshots')
-} catch (err) {
-  // Column already exists, that's fine
-  if (!err.message.includes('duplicate column')) {
-    console.error('Error adding lowest_open_buy_days_ago column:', err.message)
-  }
-}
-
-db.exec(`
   CREATE INDEX IF NOT EXISTS idx_trades_upload_date
     ON trades(upload_date DESC, trans_date DESC);
 
@@ -197,6 +174,27 @@ try {
       WHERE description LIKE '%Call%' OR description LIKE '%Put%'
     `)
     console.log('✅ Added is_option column and updated existing trades')
+  }
+} catch (error) {
+  console.error('Migration error:', error)
+}
+
+// Migration: Add lowest_open_buy_price and lowest_open_buy_days_ago columns to pnl_snapshots
+try {
+  const tableInfo = db.pragma('table_info(pnl_snapshots)')
+  const hasLowestBuyPrice = tableInfo.some(col => col.name === 'lowest_open_buy_price')
+  const hasLowestBuyDays = tableInfo.some(col => col.name === 'lowest_open_buy_days_ago')
+
+  if (!hasLowestBuyPrice) {
+    console.log('Adding lowest_open_buy_price column to pnl_snapshots table...')
+    db.exec('ALTER TABLE pnl_snapshots ADD COLUMN lowest_open_buy_price REAL')
+    console.log('✅ Added lowest_open_buy_price column')
+  }
+
+  if (!hasLowestBuyDays) {
+    console.log('Adding lowest_open_buy_days_ago column to pnl_snapshots table...')
+    db.exec('ALTER TABLE pnl_snapshots ADD COLUMN lowest_open_buy_days_ago INTEGER')
+    console.log('✅ Added lowest_open_buy_days_ago column')
   }
 } catch (error) {
   console.error('Migration error:', error)
