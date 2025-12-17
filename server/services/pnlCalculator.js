@@ -293,8 +293,16 @@ const calculateReal = (trades, currentPrice, symbol) => {
         return buyDate >= twoTradingDaysAgo
       })
 
+      console.log(`[${symbol}] Total open buys: ${buyQueue.length}, Recent buys (past 2 days): ${recentBuys.length}, Cutoff: ${twoTradingDaysAgo.toISOString().split('T')[0]}`)
+      if (buyQueue.length > 0) {
+        console.log(`[${symbol}] Buy dates in queue: ${buyQueue.map(b => new Date(b.date).toISOString().split('T')[0]).join(', ')}`)
+      }
+
       if (recentBuys.length > 0) {
         lowestOpenBuyPrice = Math.min(...recentBuys.map(buy => buy.price))
+        console.log(`[${symbol}] Lowest buy (past 2 days): $${lowestOpenBuyPrice}`)
+      } else {
+        console.log(`[${symbol}] No buys in past 2 trading days`)
       }
     }
   }
