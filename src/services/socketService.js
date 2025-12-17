@@ -486,6 +486,84 @@ class SocketService {
     })
   }
 
+  // Get symbol-specific daily P&L with price
+  getSymbolDailyPnL(symbol) {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        if (response.symbol === symbol) {
+          this.socket.off('symbol-pnl-result', resultHandler)
+          this.socket.off('symbol-pnl-error', errorHandler)
+          clearTimeout(timeoutId)
+          if (response.success) {
+            resolve(response.data)
+          } else {
+            reject(new Error(response.error))
+          }
+        }
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('symbol-pnl-result', resultHandler)
+        this.socket.off('symbol-pnl-error', errorHandler)
+        clearTimeout(timeoutId)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('symbol-pnl-result', resultHandler)
+      this.socket.on('symbol-pnl-error', errorHandler)
+      this.socket.emit('get-symbol-pnl', { symbol })
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('symbol-pnl-result', resultHandler)
+        this.socket.off('symbol-pnl-error', errorHandler)
+        reject(new Error('Get symbol P&L timeout'))
+      }, 10000)
+    })
+  }
+
+  // Get list of symbols with snapshot data
+  getSymbolsList() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('symbols-list-result', resultHandler)
+        this.socket.off('symbols-list-error', errorHandler)
+        clearTimeout(timeoutId)
+        if (response.success) {
+          resolve(response.data)
+        } else {
+          reject(new Error(response.error))
+        }
+      }
+
+      const errorHandler = (response) => {
+        this.socket.off('symbols-list-result', resultHandler)
+        this.socket.off('symbols-list-error', errorHandler)
+        clearTimeout(timeoutId)
+        reject(new Error(response.error))
+      }
+
+      this.socket.on('symbols-list-result', resultHandler)
+      this.socket.on('symbols-list-error', errorHandler)
+      this.socket.emit('get-symbols-list')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('symbols-list-result', resultHandler)
+        this.socket.off('symbols-list-error', errorHandler)
+        reject(new Error('Get symbols list timeout'))
+      }, 10000)
+    })
+  }
+
   // Remove listeners
   off(event, callback) {
     if (this.socket) {

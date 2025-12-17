@@ -555,6 +555,47 @@ export class DatabaseService {
     }
   }
 
+  // Get daily P&L history for a specific symbol with price
+  getSymbolDailyPnL(symbol) {
+    try {
+      const stmt = db.prepare(`
+        SELECT
+          asof_date,
+          symbol,
+          current_price,
+          total_pnl + COALESCE(options_pnl, 0) as total_pnl,
+          realized_pnl,
+          unrealized_pnl,
+          daily_pnl,
+          COALESCE(options_pnl, 0) as options_pnl,
+          position,
+          avg_cost
+        FROM pnl_snapshots
+        WHERE symbol = ?
+        ORDER BY asof_date ASC
+      `)
+      return stmt.all(symbol)
+    } catch (error) {
+      console.error('Error getting symbol daily P&L:', error)
+      return []
+    }
+  }
+
+  // Get list of all symbols that have snapshot data
+  getSymbolsWithSnapshots() {
+    try {
+      const stmt = db.prepare(`
+        SELECT DISTINCT symbol
+        FROM pnl_snapshots
+        ORDER BY symbol ASC
+      `)
+      return stmt.all().map(row => row.symbol)
+    } catch (error) {
+      console.error('Error getting symbols with snapshots:', error)
+      return []
+    }
+  }
+
   // Save trades from CSV upload
   saveTrades(trades, uploadDate = null, deposits = [], totalPrincipal = 0) {
     try {

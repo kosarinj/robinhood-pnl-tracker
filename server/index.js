@@ -496,6 +496,32 @@ io.on('connection', (socket) => {
       socket.emit('daily-pnl-error', { error: error.message })
     }
   })
+
+  // Get symbol-specific daily P&L with price
+  socket.on('get-symbol-pnl', ({ symbol }) => {
+    console.log(`📊 Received get-symbol-pnl request for ${symbol}`)
+    try {
+      const symbolPnL = databaseService.getSymbolDailyPnL(symbol)
+      console.log(`✅ Sending ${symbolPnL.length} days of P&L for ${symbol}`)
+      socket.emit('symbol-pnl-result', { success: true, symbol, data: symbolPnL })
+    } catch (error) {
+      console.error(`❌ Error getting symbol P&L:`, error)
+      socket.emit('symbol-pnl-error', { error: error.message })
+    }
+  })
+
+  // Get list of symbols with snapshot data
+  socket.on('get-symbols-list', () => {
+    console.log(`📋 Received get-symbols-list request`)
+    try {
+      const symbols = databaseService.getSymbolsWithSnapshots()
+      console.log(`✅ Sending ${symbols.length} symbols`)
+      socket.emit('symbols-list-result', { success: true, data: symbols })
+    } catch (error) {
+      console.error(`❌ Error getting symbols list:`, error)
+      socket.emit('symbols-list-error', { error: error.message })
+    }
+  })
 })
 
 // Helper function to apply split adjustments
