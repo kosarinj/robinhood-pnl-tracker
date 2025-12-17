@@ -246,7 +246,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
       position += trade.quantity
       buyQueue.push({
         quantity: trade.quantity,
-        price: trade.price
+        price: trade.price,
+        date: trade.date || trade.transDate
       })
     } else {
       totalSellAmount += trade.quantity * trade.price
@@ -309,7 +310,17 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
         avgCostBasis = totalRemainingShares > 0 ? totalCostOfRemaining / totalRemainingShares : 0
       }
 
-      lowestOpenBuyPrice = Math.min(...buyQueue.map(buy => buy.price))
+      // Find the lowest price among remaining open buys from the past 2 trading days
+      const twoTradingDaysAgo = getTwoTradingDaysAgo()
+      const recentBuys = buyQueue.filter(buy => {
+        const buyDate = new Date(buy.date)
+        buyDate.setHours(0, 0, 0, 0)
+        return buyDate >= twoTradingDaysAgo
+      })
+
+      if (recentBuys.length > 0) {
+        lowestOpenBuyPrice = Math.min(...recentBuys.map(buy => buy.price))
+      }
     } else {
       // Fallback
       avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
@@ -491,4 +502,25 @@ const calculateLIFO = (trades, currentPrice) => {
 // Helper function to round to 2 decimal places
 const roundToTwo = (num) => {
   return Math.round((num + Number.EPSILON) * 100) / 100
+}
+
+// Helper function to get the date 2 trading days ago (skipping weekends)
+const getTwoTradingDaysAgo = () => {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  let tradingDaysBack = 0
+  let currentDate = new Date(today)
+
+  while (tradingDaysBack < 2) {
+    currentDate.setDate(currentDate.getDate() - 1)
+    const dayOfWeek = currentDate.getDay()
+
+    // Skip weekends (0 = Sunday, 6 = Saturday)
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      tradingDaysBack++
+    }
+  }
+
+  return currentDate
 }
