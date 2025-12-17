@@ -287,6 +287,13 @@ const calculateReal = (trades, currentPrice, symbol) => {
 
     // Find the lowest price among remaining open buys and when it was purchased
     if (buyQueue.length > 0) {
+      // Debug: Log all buys in the queue for this symbol
+      console.log(`[${symbol}] Buy queue (${buyQueue.length} open buys):`)
+      buyQueue.forEach((buy, idx) => {
+        const buyDate = new Date(buy.date)
+        console.log(`  [${idx}] Price: $${buy.price}, Qty: ${buy.quantity}, Date: ${buyDate.toISOString().split('T')[0]}`)
+      })
+
       const lowestBuy = buyQueue.reduce((lowest, buy) => {
         return buy.price < lowest.price ? buy : lowest
       })
@@ -299,6 +306,8 @@ const calculateReal = (trades, currentPrice, symbol) => {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       lowestOpenBuyDaysAgo = Math.floor((today - buyDate) / (1000 * 60 * 60 * 24))
+
+      console.log(`[${symbol}] Lowest buy: $${lowestOpenBuyPrice} from ${buyDate.toISOString().split('T')[0]} (${lowestOpenBuyDaysAgo} days ago)`)
     }
   }
 
