@@ -464,17 +464,6 @@ function DailyPnLChart({ useServer, connected }) {
                     connectNulls={true}
                     isAnimationActive={false}
                   />
-                  <Line
-                    yAxisId="pnl"
-                    type="monotone"
-                    dataKey="dailyPnL"
-                    stroke="#f59e0b"
-                    strokeWidth={1.5}
-                    dot={{ fill: '#f59e0b', r: 1.5 }}
-                    name="Daily P&L"
-                    connectNulls={true}
-                    isAnimationActive={false}
-                  />
                 </ComposedChart>
               </ResponsiveContainer>
 

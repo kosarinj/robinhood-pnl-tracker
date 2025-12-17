@@ -924,61 +924,6 @@ function App() {
     <div className="app-container">
       <ThemeToggle />
 
-      {/* DEBUG PANEL */}
-      {debugInfo && (
-        <div style={{
-          position: 'fixed',
-          top: '10px',
-          right: '10px',
-          background: debugInfo.options > 0 ? '#ff4444' : '#44ff44',
-          color: 'black',
-          padding: '15px',
-          borderRadius: '8px',
-          boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
-          zIndex: 9999,
-          fontSize: '14px',
-          fontFamily: 'monospace',
-          maxWidth: '400px',
-          maxHeight: '80vh',
-          overflowY: 'auto'
-        }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>{debugInfo.source}</div>
-          <div>Total Items: {debugInfo.totalItems}</div>
-          <div>Stocks: {debugInfo.stocks}</div>
-          <div style={{ color: debugInfo.options > 0 ? '#fff' : '#000', fontWeight: 'bold' }}>
-            Options: {debugInfo.options} {debugInfo.options > 0 ? '⚠️ SHOULD BE 0!' : '✓'}
-          </div>
-          {filteredData && filteredData.length > 0 && (
-            <div style={{ marginTop: '8px', borderTop: '1px solid #fff', paddingTop: '8px' }}>
-              <div style={{ fontWeight: 'bold' }}>After Filtering:</div>
-              <div>Displayed Rows: {filteredData.length}</div>
-            </div>
-          )}
-          {debugInfo.optionSymbols && debugInfo.optionSymbols.length > 0 && (
-            <div style={{ marginTop: '8px', fontSize: '12px', background: 'rgba(255,255,255,0.2)', padding: '5px', borderRadius: '4px' }}>
-              {debugInfo.optionSymbols.slice(0, 5).join(', ')}
-              {debugInfo.optionSymbols.length > 5 && `... +${debugInfo.optionSymbols.length - 5} more`}
-            </div>
-          )}
-          {suspiciousSymbolsForDisplay && suspiciousSymbolsForDisplay.length > 0 && (
-            <div style={{ marginTop: '12px', borderTop: '2px solid #fff', paddingTop: '8px' }}>
-              <div style={{ fontWeight: 'bold', color: '#ff0000', marginBottom: '5px' }}>
-                ⚠️ {suspiciousSymbolsForDisplay.length} symbols with dates/Call/Put in grid:
-              </div>
-              <div style={{ fontSize: '11px', background: 'rgba(255,0,0,0.1)', padding: '5px', borderRadius: '4px', maxHeight: '200px', overflowY: 'auto' }}>
-                {suspiciousSymbolsForDisplay.map((item, idx) => (
-                  <div key={idx} style={{ marginBottom: '3px' }}>
-                    {item.symbol}
-                    <br/>
-                    isOption: {item.isOption ? 'YES' : 'NO'}, pos: {item.position}, rollup: {item.isRollup ? 'YES' : 'NO'}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
