@@ -242,6 +242,9 @@ const calculateReal = (trades, currentPrice, symbol) => {
   // Track buy queue to calculate lowest open buy price (using FIFO)
   const buyQueue = []
 
+  // Track ALL buys to find the lowest buy price ever
+  let lowestBuyEver = null
+
   trades.forEach((trade) => {
     if (trade.isBuy) {
       totalBuyAmount += trade.quantity * trade.price
@@ -252,6 +255,14 @@ const calculateReal = (trades, currentPrice, symbol) => {
         price: trade.price,
         date: trade.date || trade.transDate
       })
+
+      // Track lowest buy ever (including sold positions)
+      if (!lowestBuyEver || trade.price < lowestBuyEver.price) {
+        lowestBuyEver = {
+          price: trade.price,
+          date: trade.date || trade.transDate
+        }
+      }
     } else {
       totalSellAmount += trade.quantity * trade.price
       totalSellShares += trade.quantity
@@ -284,31 +295,18 @@ const calculateReal = (trades, currentPrice, symbol) => {
   if (position > 0) {
     unrealizedPnL = position * currentPrice
     avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+  }
 
-    // Find the lowest price among remaining open buys and when it was purchased
-    if (buyQueue.length > 0) {
-      // Debug: Log all buys in the queue for this symbol
-      console.log(`[${symbol}] Buy queue (${buyQueue.length} open buys):`)
-      buyQueue.forEach((buy, idx) => {
-        const buyDate = new Date(buy.date)
-        console.log(`  [${idx}] Price: $${buy.price}, Qty: ${buy.quantity}, Date: ${buyDate.toISOString().split('T')[0]}`)
-      })
+  // Find the lowest buy price from ALL buys (not just open positions)
+  if (lowestBuyEver) {
+    lowestOpenBuyPrice = lowestBuyEver.price
 
-      const lowestBuy = buyQueue.reduce((lowest, buy) => {
-        return buy.price < lowest.price ? buy : lowest
-      })
-
-      lowestOpenBuyPrice = lowestBuy.price
-
-      // Calculate how many days ago this buy was made
-      const buyDate = new Date(lowestBuy.date)
-      buyDate.setHours(0, 0, 0, 0)
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      lowestOpenBuyDaysAgo = Math.floor((today - buyDate) / (1000 * 60 * 60 * 24))
-
-      console.log(`[${symbol}] Lowest buy: $${lowestOpenBuyPrice} from ${buyDate.toISOString().split('T')[0]} (${lowestOpenBuyDaysAgo} days ago)`)
-    }
+    // Calculate how many days ago this buy was made
+    const buyDate = new Date(lowestBuyEver.date)
+    buyDate.setHours(0, 0, 0, 0)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    lowestOpenBuyDaysAgo = Math.floor((today - buyDate) / (1000 * 60 * 60 * 24))
   }
 
   // Total P&L = Realized + Unrealized
