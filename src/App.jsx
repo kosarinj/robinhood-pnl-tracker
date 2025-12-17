@@ -59,6 +59,7 @@ function App() {
     ]
   })
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null)
+  const [priceUpdateCount, setPriceUpdateCount] = useState(0)
   const [prevCloseDebug, setPrevCloseDebug] = useState(null)
   const [tradingSignals, setTradingSignals] = useState([])
   const [signalFilter, setSignalFilter] = useState({
@@ -167,6 +168,7 @@ function App() {
     // Listen for price updates from server
     socketService.onPriceUpdate((data) => {
       console.log('📈 Received price update from server')
+      setPriceUpdateCount(prev => prev + 1)
 
       // Check if viewing today's snapshot
       const today = new Date().toISOString().split('T')[0]
@@ -1052,6 +1054,9 @@ function App() {
         fontSize: '12px'
       }}>
         <strong>🔍 Auto-Update Debug:</strong><br/>
+        <strong style={{ color: priceUpdateCount > 0 ? 'green' : 'red' }}>
+          Updates Received: {priceUpdateCount}
+        </strong> |
         Snapshot: {isViewingSnapshot ? 'YES' : 'NO'} |
         Date: {currentSnapshotDate || 'none'} |
         Today: {new Date().toISOString().split('T')[0]} |
