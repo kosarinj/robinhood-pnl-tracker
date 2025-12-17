@@ -1086,9 +1086,11 @@ function App() {
           return (
             <>
               Snapshot: {isViewingSnapshot ? 'YES' : 'NO'} |
-              Snap Date: {currentSnapshotDate || 'none'} |
-              Upload Date: {currentUploadDate || 'none'} |
-              Today: {today} |
+              Snap Date: "{currentSnapshotDate || 'none'}" |
+              Upload Date: "{currentUploadDate || 'none'}" |
+              Today: "{today}" |
+              Match Upload: {isViewingTodaysUpload ? 'YES' : 'NO'} |
+              Match Snap: {isViewingTodaysSnapshot ? 'YES' : 'NO'} |
               Should Update: {shouldUpdate ? 'YES ✅' : 'NO ❌'}
             </>
           )
