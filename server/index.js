@@ -454,6 +454,18 @@ io.on('connection', (socket) => {
       const deposits = databaseService.getDeposits(uploadDate)
       const totalPrincipal = databaseService.getTotalPrincipal(uploadDate)
 
+      // Store session data so client receives auto-updates
+      clientSessions.set(socket.id, {
+        trades,
+        deposits,
+        totalPrincipal,
+        stockSymbols,
+        splitAdjustments: {},
+        manualPrices: {},
+        lastActivity: Date.now()
+      })
+      console.log(`✅ Created session for ${socket.id.substring(0, 8)} with ${trades.length} trades`)
+
       console.log(`📤 Sending ${pnlDataWithBenchmarks.length} positions to client (load-trades)`)
       console.log(`   Positions: ${pnlDataWithBenchmarks.map(p => p.symbol).join(', ')}`)
 
