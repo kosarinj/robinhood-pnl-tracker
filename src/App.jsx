@@ -43,8 +43,7 @@ function App() {
   const [draggedColumn, setDraggedColumn] = useState(null)
   const [dragOverIndex, setDragOverIndex] = useState(null)
   const [realPnlColumnOrder, setRealPnlColumnOrder] = useState(() => {
-    const saved = localStorage.getItem('realPnlColumnOrder')
-    return saved ? JSON.parse(saved) : [
+    const defaultOrder = [
       'avgCost',
       'lowestBuy',
       'recentLowestBuy',
@@ -58,6 +57,25 @@ function App() {
       'optionsPnL',
       'percentage'
     ]
+
+    const saved = localStorage.getItem('realPnlColumnOrder')
+    if (!saved) return defaultOrder
+
+    const savedOrder = JSON.parse(saved)
+
+    // Migration: Add new columns to saved order if they don't exist
+    if (!savedOrder.includes('recentLowestBuy')) {
+      // Insert recentLowestBuy after lowestBuy
+      const lowestBuyIndex = savedOrder.indexOf('lowestBuy')
+      if (lowestBuyIndex !== -1) {
+        savedOrder.splice(lowestBuyIndex + 1, 0, 'recentLowestBuy')
+      } else {
+        // If lowestBuy not found, just add at the beginning
+        savedOrder.unshift('recentLowestBuy')
+      }
+    }
+
+    return savedOrder
   })
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null)
   const [priceUpdateCount, setPriceUpdateCount] = useState(0)
