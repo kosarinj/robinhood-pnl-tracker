@@ -538,20 +538,32 @@ function App() {
     }
   }, [trades, deposits, pnlTotals])
 
-  // Auto-refresh prices every 1 minute (STANDALONE MODE ONLY)
+  // Auto-refresh prices every 1 minute when viewing today's data
   useEffect(() => {
-    // Skip auto-refresh in server mode (server pushes updates)
-    if (useServer) return
     if (trades.length === 0) return
+
+    // Only auto-refresh when viewing today's data (not historical snapshots/uploads)
+    const today = new Date().toISOString().split('T')[0]
+    const isViewingTodaysSnapshot = isViewingSnapshot && currentSnapshotDate === today
+    const isViewingTodaysUpload = currentUploadDate && currentUploadDate === today
+    const isViewingToday = (!currentUploadDate || isViewingTodaysUpload) && (!isViewingSnapshot || isViewingTodaysSnapshot)
+
+    if (!isViewingToday) {
+      console.log('⏸️  Auto-refresh disabled - viewing historical data')
+      return
+    }
+
+    console.log('✅ Auto-refresh enabled - viewing today\'s data')
 
     // Set up interval for auto-refresh
     const interval = setInterval(() => {
+      console.log('🔄 Auto-refreshing prices...')
       refreshPrices()
     }, 60000) // 1 minute = 60000ms
 
     // Clean up on unmount
     return () => clearInterval(interval)
-  }, [trades, manualPrices, splitAdjustments, useServer])
+  }, [trades, manualPrices, splitAdjustments, currentUploadDate, currentSnapshotDate, isViewingSnapshot])
 
   // Load snapshot dates when connected to server
   useEffect(() => {
