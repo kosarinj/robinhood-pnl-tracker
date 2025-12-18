@@ -47,6 +47,7 @@ function App() {
     return saved ? JSON.parse(saved) : [
       'avgCost',
       'lowestBuy',
+      'recentLowestBuy',
       'realized',
       'currentValue',
       'unrealized',
@@ -311,6 +312,7 @@ function App() {
     const defaultOrder = [
       'avgCost',
       'lowestBuy',
+      'recentLowestBuy',
       'realized',
       'currentValue',
       'unrealized',
@@ -1815,6 +1817,7 @@ function App() {
                 const columnNames = {
                   avgCost: 'Avg Cost',
                   lowestBuy: 'Lowest Buy',
+                  recentLowestBuy: 'Recent Lowest Buy',
                   realized: 'Realized P&L',
                   currentValue: 'Current Value',
                   unrealized: 'Unrealized P&L',

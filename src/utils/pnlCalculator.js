@@ -237,10 +237,16 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   // Track ALL buys to find the lowest buy price ever
   let lowestBuyEver = null
 
+  // Track recent buys (past 2-3 days) to find recent lowest buy
+  let recentLowestBuy = null
+  const daysToLookBack = 3 // Look back 3 days
+
   // Track realized profit from today's sells (for Made Up Ground)
   let todaysRealizedProfit = 0
   const today = new Date()
   today.setHours(0, 0, 0, 0) // Start of today
+  const cutoffDate = new Date(today)
+  cutoffDate.setDate(cutoffDate.getDate() - daysToLookBack)
 
   trades.forEach((trade) => {
     if (trade.isBuy) {
@@ -253,11 +259,24 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
         date: trade.date || trade.transDate
       })
 
+      const tradeDate = new Date(trade.date || trade.transDate)
+      tradeDate.setHours(0, 0, 0, 0)
+
       // Track lowest buy ever (including sold positions)
       if (!lowestBuyEver || trade.price < lowestBuyEver.price) {
         lowestBuyEver = {
           price: trade.price,
           date: trade.date || trade.transDate
+        }
+      }
+
+      // Track recent lowest buy (past 2-3 days)
+      if (tradeDate >= cutoffDate) {
+        if (!recentLowestBuy || trade.price < recentLowestBuy.price) {
+          recentLowestBuy = {
+            price: trade.price,
+            date: trade.date || trade.transDate
+          }
         }
       }
     } else {
@@ -303,6 +322,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   let avgCostBasis = 0
   let lowestOpenBuyPrice = 0
   let lowestOpenBuyDaysAgo = 0
+  let recentLowestBuyPrice = 0
+  let recentLowestBuyDaysAgo = 0
 
   if (position > 0) {
     // Unrealized P&L = Current value of remaining position
@@ -334,9 +355,21 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     // Calculate how many days ago this buy was made
     const buyDate = new Date(lowestBuyEver.date)
     buyDate.setHours(0, 0, 0, 0)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    lowestOpenBuyDaysAgo = Math.floor((today - buyDate) / (1000 * 60 * 60 * 24))
+    const todayCalc = new Date()
+    todayCalc.setHours(0, 0, 0, 0)
+    lowestOpenBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
+  }
+
+  // Find the recent lowest buy price (past 2-3 days)
+  if (recentLowestBuy) {
+    recentLowestBuyPrice = recentLowestBuy.price
+
+    // Calculate how many days ago this buy was made
+    const buyDate = new Date(recentLowestBuy.date)
+    buyDate.setHours(0, 0, 0, 0)
+    const todayCalc = new Date()
+    todayCalc.setHours(0, 0, 0, 0)
+    recentLowestBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
   }
 
   // Total P&L = Realized + Unrealized
@@ -354,6 +387,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     percentageReturn: roundToTwo(percentageReturn),
     lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice),
     lowestOpenBuyDaysAgo: lowestOpenBuyDaysAgo,
+    recentLowestBuyPrice: roundToTwo(recentLowestBuyPrice),
+    recentLowestBuyDaysAgo: recentLowestBuyDaysAgo,
     todaysRealizedProfit: roundToTwo(todaysRealizedProfit)
   }
 }
