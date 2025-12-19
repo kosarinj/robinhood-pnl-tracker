@@ -237,10 +237,10 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   // Track ALL buys to find the lowest buy price ever
   let lowestBuyEver = null
 
-  // Track recent buys (past 2-3 days) to find recent lowest buy
-  let recentLowestBuy = null
-  // Track most recent sell (past 2-3 days)
-  let mostRecentSell = null
+  // Track recent buys (past 2-3 days) - keep top 3 lowest
+  let recentLowestBuys = []
+  // Track most recent sells (past 2-3 days) - keep top 3 most recent
+  let mostRecentSells = []
   const daysToLookBack = 3 // Look back 3 days
 
   // Track realized profit from today's sells (for Made Up Ground)
@@ -272,14 +272,12 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
         }
       }
 
-      // Track recent lowest buy (past 2-3 days)
+      // Track recent lowest buys (past 2-3 days) - keep top 3 lowest
       if (tradeDate >= cutoffDate) {
-        if (!recentLowestBuy || trade.price < recentLowestBuy.price) {
-          recentLowestBuy = {
-            price: trade.price,
-            date: trade.date || trade.transDate
-          }
-        }
+        recentLowestBuys.push({
+          price: trade.price,
+          date: trade.date || trade.transDate
+        })
       }
     } else {
       totalSellAmount += trade.quantity * trade.price
@@ -291,14 +289,13 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
       tradeDate.setHours(0, 0, 0, 0)
       const isTodaysSell = tradeDate.getTime() === today.getTime()
 
-      // Track most recent sell (past 2-3 days) - by date, not price
+      // Track most recent sells (past 2-3 days) - keep top 3 most recent
       if (tradeDate >= cutoffDate) {
-        if (!mostRecentSell || tradeDate > new Date(mostRecentSell.date)) {
-          mostRecentSell = {
-            price: trade.price,
-            date: trade.date || trade.transDate
-          }
-        }
+        mostRecentSells.push({
+          price: trade.price,
+          date: trade.date || trade.transDate,
+          dateObj: tradeDate
+        })
       }
 
       // Remove sold shares from buy queue (FIFO) and track today's profit
@@ -374,28 +371,48 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     lowestOpenBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
   }
 
-  // Find the recent lowest buy price (past 2-3 days)
-  if (recentLowestBuy) {
-    recentLowestBuyPrice = recentLowestBuy.price
+  // Sort and keep top 3 recent lowest buys (by price, ascending)
+  recentLowestBuys.sort((a, b) => a.price - b.price)
+  recentLowestBuys = recentLowestBuys.slice(0, 3)
 
-    // Calculate how many days ago this buy was made
-    const buyDate = new Date(recentLowestBuy.date)
+  // Calculate days ago for each buy
+  const todayCalc = new Date()
+  todayCalc.setHours(0, 0, 0, 0)
+  const recentBuysWithDays = recentLowestBuys.map(buy => {
+    const buyDate = new Date(buy.date)
     buyDate.setHours(0, 0, 0, 0)
-    const todayCalc = new Date()
-    todayCalc.setHours(0, 0, 0, 0)
-    recentLowestBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
-  }
+    const daysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
+    return {
+      price: roundToTwo(buy.price),
+      date: buy.date,
+      daysAgo: daysAgo
+    }
+  })
 
-  // Find the most recent sell (past 2-3 days)
-  if (mostRecentSell) {
-    recentLowestSellPrice = mostRecentSell.price
+  // Sort and keep top 3 most recent sells (by date, descending)
+  mostRecentSells.sort((a, b) => b.dateObj - a.dateObj)
+  mostRecentSells = mostRecentSells.slice(0, 3)
 
-    // Calculate how many days ago this sell was made
-    const sellDate = new Date(mostRecentSell.date)
+  // Calculate days ago for each sell
+  const recentSellsWithDays = mostRecentSells.map(sell => {
+    const sellDate = new Date(sell.date)
     sellDate.setHours(0, 0, 0, 0)
-    const todayCalc = new Date()
-    todayCalc.setHours(0, 0, 0, 0)
-    recentLowestSellDaysAgo = Math.floor((todayCalc - sellDate) / (1000 * 60 * 60 * 24))
+    const daysAgo = Math.floor((todayCalc - sellDate) / (1000 * 60 * 60 * 24))
+    return {
+      price: roundToTwo(sell.price),
+      date: sell.date,
+      daysAgo: daysAgo
+    }
+  })
+
+  // Set legacy single values for backwards compatibility (first item from each array)
+  if (recentBuysWithDays.length > 0) {
+    recentLowestBuyPrice = recentBuysWithDays[0].price
+    recentLowestBuyDaysAgo = recentBuysWithDays[0].daysAgo
+  }
+  if (recentSellsWithDays.length > 0) {
+    recentLowestSellPrice = recentSellsWithDays[0].price
+    recentLowestSellDaysAgo = recentSellsWithDays[0].daysAgo
   }
 
   // Total P&L = Realized + Unrealized
@@ -417,6 +434,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     recentLowestBuyDaysAgo: recentLowestBuyDaysAgo,
     recentLowestSellPrice: roundToTwo(recentLowestSellPrice),
     recentLowestSellDaysAgo: recentLowestSellDaysAgo,
+    recentLowestBuys: recentBuysWithDays,  // Array of top 3
+    recentSells: recentSellsWithDays,  // Array of top 3
     todaysRealizedProfit: roundToTwo(todaysRealizedProfit)
   }
 }

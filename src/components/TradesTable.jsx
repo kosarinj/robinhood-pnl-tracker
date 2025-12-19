@@ -383,20 +383,36 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
           Recent Lowest Buy{getSortIcon('real.recentLowestBuyPrice')}
         </th>
       ),
-      cell: (row) => (
-        <td style={{ minWidth: '120px', maxWidth: '120px' }}>
-          {row.real.recentLowestBuyPrice > 0 ? (
-            <span>
-              {formatCurrency(row.real.recentLowestBuyPrice)}
-              {row.real.recentLowestBuyDaysAgo !== undefined && (
-                <span style={{ fontSize: '0.85em', color: '#888', marginLeft: '4px' }}>
-                  ({row.real.recentLowestBuyDaysAgo}d)
-                </span>
-              )}
-            </span>
-          ) : '-'}
-        </td>
-      ),
+      cell: (row) => {
+        const buys = row.real.recentLowestBuys || []
+        const hasMultiple = buys.length > 1
+        const tooltipText = hasMultiple
+          ? buys.map((b, i) => `#${i + 1}: ${formatCurrency(b.price)} (${b.daysAgo}d ago)`).join('\n')
+          : ''
+
+        return (
+          <td
+            style={{ minWidth: '120px', maxWidth: '120px', cursor: hasMultiple ? 'help' : 'default' }}
+            title={tooltipText}
+          >
+            {row.real.recentLowestBuyPrice > 0 ? (
+              <span>
+                {formatCurrency(row.real.recentLowestBuyPrice)}
+                {row.real.recentLowestBuyDaysAgo !== undefined && (
+                  <span style={{ fontSize: '0.85em', color: '#888', marginLeft: '4px' }}>
+                    ({row.real.recentLowestBuyDaysAgo}d)
+                  </span>
+                )}
+                {hasMultiple && (
+                  <span style={{ fontSize: '0.85em', color: '#667eea', marginLeft: '4px' }}>
+                    +{buys.length - 1}
+                  </span>
+                )}
+              </span>
+            ) : '-'}
+          </td>
+        )
+      },
       footer: () => <td></td>
     },
     recentLowestSell: {
@@ -405,20 +421,36 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
           Most Recent Sell{getSortIcon('real.recentLowestSellPrice')}
         </th>
       ),
-      cell: (row) => (
-        <td style={{ minWidth: '140px', maxWidth: '140px' }}>
-          {row.real.recentLowestSellPrice > 0 ? (
-            <span>
-              {formatCurrency(row.real.recentLowestSellPrice)}
-              {row.real.recentLowestSellDaysAgo !== undefined && (
-                <span style={{ fontSize: '0.85em', color: '#888', marginLeft: '4px' }}>
-                  ({row.real.recentLowestSellDaysAgo}d)
-                </span>
-              )}
-            </span>
-          ) : '-'}
-        </td>
-      ),
+      cell: (row) => {
+        const sells = row.real.recentSells || []
+        const hasMultiple = sells.length > 1
+        const tooltipText = hasMultiple
+          ? sells.map((s, i) => `#${i + 1}: ${formatCurrency(s.price)} (${s.daysAgo}d ago)`).join('\n')
+          : ''
+
+        return (
+          <td
+            style={{ minWidth: '140px', maxWidth: '140px', cursor: hasMultiple ? 'help' : 'default' }}
+            title={tooltipText}
+          >
+            {row.real.recentLowestSellPrice > 0 ? (
+              <span>
+                {formatCurrency(row.real.recentLowestSellPrice)}
+                {row.real.recentLowestSellDaysAgo !== undefined && (
+                  <span style={{ fontSize: '0.85em', color: '#888', marginLeft: '4px' }}>
+                    ({row.real.recentLowestSellDaysAgo}d)
+                  </span>
+                )}
+                {hasMultiple && (
+                  <span style={{ fontSize: '0.85em', color: '#667eea', marginLeft: '4px' }}>
+                    +{sells.length - 1}
+                  </span>
+                )}
+              </span>
+            ) : '-'}
+          </td>
+        )
+      },
       footer: () => <td></td>
     },
     realized: {
