@@ -727,6 +727,24 @@ app.get('/health', (req, res) => {
   })
 })
 
+// Debug endpoint to see what snapshot dates exist
+app.get('/api/debug/snapshot-dates', (req, res) => {
+  try {
+    const dates = databaseService.getSnapshotDates()
+    res.json({
+      success: true,
+      dates: dates,
+      count: dates.length,
+      latest: dates[dates.length - 1]
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
 // Get list of tracked symbols
 app.get('/api/tracked-symbols', (req, res) => {
   try {

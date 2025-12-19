@@ -320,6 +320,21 @@ function DailyPnLChart({ useServer, connected }) {
 
           {!symbolLoading && !selectedSymbol && (
             <>
+              {/* DEBUG INFO */}
+              <div style={{
+                background: '#fff3cd',
+                border: '1px solid #ffc107',
+                borderRadius: '6px',
+                padding: '12px',
+                marginBottom: '15px',
+                fontSize: '13px',
+                fontFamily: 'monospace'
+              }}>
+                <strong>🐛 DEBUG:</strong> Chart has {chartData.length} days |
+                Dates: {chartData.length > 0 ? `${chartData[0].date} to ${chartData[chartData.length - 1].date}` : 'No data'} |
+                All dates: {chartData.map(d => d.date).join(', ')}
+              </div>
+
               <div style={{
                 display: 'flex',
                 gap: '20px',
