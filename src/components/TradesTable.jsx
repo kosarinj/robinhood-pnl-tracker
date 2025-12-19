@@ -470,6 +470,41 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         </td>
       )
     },
+    madeUpGround: {
+      header: () => (
+        <th onClick={() => handleSort('madeUpGround')} className="sortable" style={{ minWidth: '140px', maxWidth: '140px' }}>
+          Made Up Ground{getSortIcon('madeUpGround')}
+        </th>
+      ),
+      cell: (row) => {
+        if (!row.madeUpGroundAvailable || row.madeUpGround === null) {
+          return <td style={{ minWidth: '140px', maxWidth: '140px', color: '#888' }}>N/A</td>
+        }
+
+        return (
+          <td
+            className={getClassName(row.madeUpGround)}
+            style={{ minWidth: '140px', maxWidth: '140px', cursor: 'help' }}
+            title={`P&L from trading vs price movement\nWeek ago: ${formatCurrency(row.weekAgoData?.realizedPnL || 0)} (${row.weekAgoData?.position || 0} shares @ ${formatCurrency(row.weekAgoData?.price || 0)})`}
+          >
+            {formatCurrency(row.madeUpGround)}
+          </td>
+        )
+      },
+      footer: () => {
+        const total = pnlData
+          .filter(row => row.madeUpGroundAvailable && row.madeUpGround !== null)
+          .reduce((sum, row) => sum + (row.madeUpGround || 0), 0)
+
+        return total !== 0 ? (
+          <td className={getClassName(total)} style={{ minWidth: '140px', maxWidth: '140px' }}>
+            <strong>{formatCurrency(total)}</strong>
+          </td>
+        ) : (
+          <td style={{ minWidth: '140px', maxWidth: '140px', color: '#888' }}>N/A</td>
+        )
+      }
+    },
     currentValue: {
       header: () => <th style={{ minWidth: '120px' }}>Current Value</th>,
       cell: (row) => (

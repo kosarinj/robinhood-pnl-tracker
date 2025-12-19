@@ -186,13 +186,19 @@ io.on('connection', (socket) => {
       }
 
       // Get price benchmarks for each position
-      const pnlDataWithBenchmarks = pnlData.map(position => {
+      let pnlDataWithBenchmarks = pnlData.map(position => {
         const benchmarks = databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
         return {
           ...position,
           benchmarks
         }
       })
+
+      // Enrich with Made Up Ground
+      const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+      if (weekAgoSnapshot.length > 0) {
+        pnlDataWithBenchmarks = enrichWithMadeUpGround(pnlDataWithBenchmarks, weekAgoSnapshot)
+      }
 
       // Send initial data with historical prices (not current prices)
       // This ensures the uploaded file shows prices from the upload date
@@ -205,7 +211,8 @@ io.on('connection', (socket) => {
           deposits,
           currentPrices: historicalPrices,  // Use historical prices
           asofDate,
-          uploadDate: asofDate  // Add uploadDate to indicate viewing historical data
+          uploadDate: asofDate,  // Add uploadDate to indicate viewing historical data
+          madeUpGroundDate: weekAgoDate
         }
       })
 
@@ -229,9 +236,15 @@ io.on('connection', (socket) => {
     // Recalculate P&L with manual price
     const prices = { ...priceService.getCurrentPrices(), ...session.manualPrices }
     const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
-    const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
+    let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
-    socket.emit('pnl-update', { pnlData, currentPrices: prices })
+    // Enrich with Made Up Ground
+    const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+    if (weekAgoSnapshot.length > 0) {
+      pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+    }
+
+    socket.emit('pnl-update', { pnlData, currentPrices: prices, madeUpGroundDate: weekAgoDate })
   })
 
   // Handle split adjustments
@@ -244,9 +257,15 @@ io.on('connection', (socket) => {
     // Recalculate P&L with splits
     const prices = { ...priceService.getCurrentPrices(), ...session.manualPrices }
     const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
-    const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
+    let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
-    socket.emit('pnl-update', { pnlData, currentPrices: prices })
+    // Enrich with Made Up Ground
+    const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+    if (weekAgoSnapshot.length > 0) {
+      pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+    }
+
+    socket.emit('pnl-update', { pnlData, currentPrices: prices, madeUpGroundDate: weekAgoDate })
   })
 
   // Request trading signals
@@ -563,6 +582,53 @@ function applysplits(trades, splits) {
   })
 }
 
+// Helper function to enrich P&L data with Made Up Ground calculation
+// Formula: (today real PNL - 1 week ago real pnl) - (1 week ago quantity * (today price - 1 week ago price))
+function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
+  // Create a map of week-ago data by symbol for quick lookup
+  const weekAgoMap = {}
+  weekAgoSnapshot.forEach(snap => {
+    weekAgoMap[snap.symbol] = snap
+  })
+
+  // Enrich each current P&L entry with Made Up Ground
+  return currentPnL.map(position => {
+    const weekAgo = weekAgoMap[position.symbol]
+
+    if (!weekAgo) {
+      // No historical data for this symbol - might be a new position
+      return {
+        ...position,
+        madeUpGround: null,
+        madeUpGroundAvailable: false
+      }
+    }
+
+    // Calculate Made Up Ground
+    // (today real PNL - 1 week ago real pnl) - (1 week ago quantity * (today price - 1 week ago price))
+    const todayRealPnL = position.real?.realizedPnL || 0
+    const weekAgoRealPnL = weekAgo.realized_pnl || 0
+    const weekAgoQuantity = weekAgo.position || 0
+    const todayPrice = position.currentPrice || 0
+    const weekAgoPrice = weekAgo.current_price || 0
+
+    const pnlChange = todayRealPnL - weekAgoRealPnL
+    const priceMovementEffect = weekAgoQuantity * (todayPrice - weekAgoPrice)
+    const madeUpGround = pnlChange - priceMovementEffect
+
+    return {
+      ...position,
+      madeUpGround: Number.isFinite(madeUpGround) ? madeUpGround : null,
+      madeUpGroundAvailable: true,
+      weekAgoData: {
+        realizedPnL: weekAgoRealPnL,
+        position: weekAgoQuantity,
+        price: weekAgoPrice
+      }
+    }
+  })
+}
+
 // Background job: Update prices every minute and broadcast to clients
 let recordingCounter = 0
 setInterval(async () => {
@@ -606,6 +672,9 @@ setInterval(async () => {
     let successCount = 0
     let skipCount = 0
 
+    // Fetch 1-week-ago snapshot for Made Up Ground calculation (once for all clients)
+    const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+
     for (const [socketId, session] of clientSessions.entries()) {
       const socket = io.sockets.sockets.get(socketId)
       if (!socket) {
@@ -626,12 +695,18 @@ setInterval(async () => {
 
         // Recalculate P&L with new prices
         const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
-        const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
+        let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
+
+        // Enrich with Made Up Ground if we have historical data
+        if (weekAgoSnapshot.length > 0) {
+          pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+        }
 
         socket.emit('price-update', {
           currentPrices: prices,
           pnlData,
-          timestamp: new Date()
+          timestamp: new Date(),
+          madeUpGroundDate: weekAgoDate
         })
 
         console.log(`  ✅ Sent update to ${socketId.substring(0, 8)} (${session.trades.length} trades, ${pnlData.length} positions)`)

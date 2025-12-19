@@ -614,6 +614,46 @@ export class DatabaseService {
     }
   }
 
+  // Get P&L snapshot from approximately N days ago (closest available date)
+  getPnLSnapshotFromDaysAgo(daysAgo = 7) {
+    try {
+      // Calculate target date (N days ago)
+      const targetDate = new Date()
+      targetDate.setDate(targetDate.getDate() - daysAgo)
+      const targetDateStr = targetDate.toISOString().split('T')[0]
+
+      // Find the closest snapshot date to the target (prefer earlier dates)
+      const stmt = db.prepare(`
+        SELECT DISTINCT asof_date
+        FROM pnl_snapshots
+        WHERE asof_date <= ?
+        ORDER BY asof_date DESC
+        LIMIT 1
+      `)
+      const result = stmt.get(targetDateStr)
+
+      if (!result) {
+        console.log(`No snapshot found from ${daysAgo} days ago (target: ${targetDateStr})`)
+        return { date: null, data: [] }
+      }
+
+      // Get the snapshot data for that date
+      const snapshotDate = result.asof_date
+      const dataStmt = db.prepare(`
+        SELECT * FROM pnl_snapshots
+        WHERE asof_date = ?
+        ORDER BY symbol
+      `)
+      const data = dataStmt.all(snapshotDate)
+
+      console.log(`📅 Found snapshot from ${snapshotDate} (${daysAgo} days ago target: ${targetDateStr})`)
+      return { date: snapshotDate, data }
+    } catch (error) {
+      console.error('Error getting snapshot from days ago:', error)
+      return { date: null, data: [] }
+    }
+  }
+
   // Get daily P&L history for charting (aggregate across all symbols per day)
   getDailyPnLHistory() {
     try {
