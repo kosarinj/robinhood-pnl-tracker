@@ -564,7 +564,7 @@ export class DatabaseService {
             realizedPnl: item.real?.realizedPnL || null,
             unrealizedPnl: item.real?.unrealizedPnL || null,
             totalPnl: item.real?.totalPnL || null,
-            dailyPnL: item.real?.dailyPnL || null,
+            dailyPnL: 0, // TODO: Calculate daily change from previous snapshot
             optionsPnl: item.optionsPnL || null,
             percentage: item.real?.percentage || null,
             lowestOpenBuyPrice: item.real?.lowestOpenBuyPrice || null,
