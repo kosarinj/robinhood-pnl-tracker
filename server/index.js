@@ -345,6 +345,34 @@ io.on('connection', (socket) => {
     }
   })
 
+  // Debug: Check pnl_snapshots table directly
+  socket.on('debug-snapshots-raw', () => {
+    console.log(`🔍 Received debug-snapshots-raw request`)
+    try {
+      const db = databaseService.db
+      const snapshots = db.prepare('SELECT asof_date, symbol, total_pnl, realized_pnl, unrealized_pnl FROM pnl_snapshots ORDER BY asof_date DESC, symbol LIMIT 50').all()
+      const dates = db.prepare('SELECT DISTINCT asof_date FROM pnl_snapshots ORDER BY asof_date DESC').all()
+      const count = db.prepare('SELECT COUNT(*) as count FROM pnl_snapshots').get()
+
+      console.log(`✅ Found ${count.count} total snapshots, ${dates.length} unique dates`)
+
+      socket.emit('debug-snapshots-result', {
+        success: true,
+        totalCount: count.count,
+        uniqueDates: dates.length,
+        dates: dates.map(d => d.asof_date),
+        sampleSnapshots: snapshots.slice(0, 10),
+        allSnapshots: snapshots
+      })
+    } catch (error) {
+      console.error(`❌ Error in debug-snapshots-raw:`, error)
+      socket.emit('debug-snapshots-result', {
+        success: false,
+        error: error.message
+      })
+    }
+  })
+
   // Get latest saved trades
   socket.on('get-latest-trades', async () => {
     console.log(`📥 Received get-latest-trades request`)
@@ -831,6 +859,28 @@ app.get('/api/debug/daily-pnl', (req, res) => {
       data: dailyPnL,
       count: dailyPnL.length,
       sample: dailyPnL.slice(0, 5)
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// Debug endpoint to check pnl_snapshots table directly
+app.get('/api/debug/snapshots-raw', (req, res) => {
+  try {
+    const db = databaseService.db
+    const snapshots = db.prepare('SELECT asof_date, symbol, total_pnl FROM pnl_snapshots ORDER BY asof_date DESC LIMIT 20').all()
+    const dates = db.prepare('SELECT DISTINCT asof_date FROM pnl_snapshots ORDER BY asof_date DESC').all()
+
+    res.json({
+      success: true,
+      snapshotCount: snapshots.length,
+      uniqueDates: dates.length,
+      dates: dates.map(d => d.asof_date),
+      sampleSnapshots: snapshots
     })
   } catch (error) {
     res.status(500).json({

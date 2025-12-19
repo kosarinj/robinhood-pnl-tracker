@@ -187,6 +187,34 @@ class SocketService {
     })
   }
 
+  // Debug: Query pnl_snapshots table directly
+  debugSnapshotsRaw() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('debug-snapshots-result', resultHandler)
+        clearTimeout(timeoutId)
+        if (response.success) {
+          resolve(response)
+        } else {
+          reject(new Error(response.error || 'Unknown error'))
+        }
+      }
+
+      this.socket.on('debug-snapshots-result', resultHandler)
+      this.socket.emit('debug-snapshots-raw')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('debug-snapshots-result', resultHandler)
+        reject(new Error('Debug snapshots timeout'))
+      }, 10000)
+    })
+  }
+
   // Load P&L snapshot
   loadPnLSnapshot(asofDate) {
     return new Promise((resolve, reject) => {

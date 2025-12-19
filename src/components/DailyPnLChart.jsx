@@ -293,6 +293,34 @@ function DailyPnLChart({ useServer, connected }) {
             🔄 Refresh
           </button>
           <button
+            onClick={async () => {
+              console.log('🔍 Requesting debug snapshots raw data...')
+              try {
+                const result = await socketService.debugSnapshotsRaw()
+                console.log('🐛 DEBUG SNAPSHOTS RAW RESULT:', result)
+                console.table(result.dates)
+                if (result.sampleSnapshots && result.sampleSnapshots.length > 0) {
+                  console.table(result.sampleSnapshots)
+                }
+              } catch (err) {
+                console.error('❌ Error getting debug snapshots:', err)
+              }
+            }}
+            style={{
+              background: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '500',
+              marginRight: '10px'
+            }}
+          >
+            🐛 Debug DB
+          </button>
+          <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
               background: '#667eea',
