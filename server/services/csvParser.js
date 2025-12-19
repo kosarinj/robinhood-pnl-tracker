@@ -70,20 +70,57 @@ export const parseTrades = (file) => {
             }
           })
 
-          // Filter out invalid trades and sort by date
+          // Separate trades from dividends/interest
           const validTrades = trades
-            .filter(t => t.symbol && t.quantity > 0 && t.price > 0)
+            .filter(t => {
+              const tc = t.transCode
+              // Exclude dividends and interest from trades
+              if (tc === 'CDIV' || tc === 'MDIV' || tc === 'INT' || tc === 'MINT') {
+                return false
+              }
+              return t.symbol && t.quantity > 0 && t.price > 0
+            })
+            .sort((a, b) => a.date - b.date)
+
+          // Extract dividends and interest
+          const dividendsAndInterest = results.data
+            .map((row, index) => {
+              const transCode = (row['Trans Code'] || '').toUpperCase()
+              if (!['CDIV', 'MDIV', 'INT', 'MINT'].includes(transCode)) {
+                return null
+              }
+
+              const instrument = row['Instrument'] || row['Symbol'] || ''
+              const amount = parseCurrency(row['Amount'] || 0)
+              const dateStr = row['Activity Date'] || row['Date'] || row['Trade Date']
+              const date = new Date(dateStr)
+
+              return {
+                id: index,
+                date,
+                symbol: instrument.trim(),
+                amount: Math.abs(amount),
+                transCode,
+                isDividend: transCode === 'CDIV' || transCode === 'MDIV',
+                isInterest: transCode === 'INT' || transCode === 'MINT',
+                description: row['Description'] || ''
+              }
+            })
+            .filter(item => item !== null)
             .sort((a, b) => a.date - b.date)
 
           // Count options for debugging
           const optionCount = validTrades.filter(t => t.isOption).length
           const stockCount = validTrades.filter(t => !t.isOption).length
-          console.log(`📊 CSV Parsed: ${stockCount} stock trades, ${optionCount} option trades`)
+          console.log(`📊 CSV Parsed: ${stockCount} stock trades, ${optionCount} option trades, ${dividendsAndInterest.length} dividends/interest`)
 
           if (validTrades.length === 0) {
             reject(new Error('No valid trades found in CSV. Please check the file format.'))
           } else {
-            resolve(validTrades)
+            resolve({
+              trades: validTrades,
+              dividendsAndInterest: dividendsAndInterest
+            })
           }
         } catch (error) {
           reject(new Error(`Error parsing CSV: ${error.message}`))

@@ -107,8 +107,8 @@ io.on('connection', (socket) => {
 
       console.log(`Processing CSV for client ${socket.id}`)
 
-      // Parse trades and deposits
-      const trades = await parseTrades(csvContent)
+      // Parse trades, dividends/interest, and deposits
+      const { trades, dividendsAndInterest } = await parseTrades(csvContent)
       const { deposits, totalPrincipal } = await parseDeposits(csvContent)
 
       // Get unique stock symbols
@@ -122,6 +122,7 @@ io.on('connection', (socket) => {
         trades,
         deposits,
         totalPrincipal,
+        dividendsAndInterest,
         stockSymbols,
         splitAdjustments: {},
         manualPrices: {},
@@ -150,7 +151,7 @@ io.on('connection', (socket) => {
       console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
 
       // Calculate P&L using historical prices from the asof_date
-      const pnlData = calculatePnL(trades, historicalPrices, true, null, asofDate)
+      const pnlData = calculatePnL(trades, historicalPrices, true, null, asofDate, [])
 
       // Save P&L snapshot to database with historical prices
       try {
@@ -228,7 +229,7 @@ io.on('connection', (socket) => {
     // Recalculate P&L with manual price
     const prices = { ...priceService.getCurrentPrices(), ...session.manualPrices }
     const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
-    const pnlData = calculatePnL(adjustedTrades, prices)
+    const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
     socket.emit('pnl-update', { pnlData, currentPrices: prices })
   })
@@ -243,7 +244,7 @@ io.on('connection', (socket) => {
     // Recalculate P&L with splits
     const prices = { ...priceService.getCurrentPrices(), ...session.manualPrices }
     const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
-    const pnlData = calculatePnL(adjustedTrades, prices)
+    const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
     socket.emit('pnl-update', { pnlData, currentPrices: prices })
   })
@@ -346,7 +347,7 @@ io.on('connection', (socket) => {
         console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
 
         // Calculate P&L using historical prices
-        const pnlData = calculatePnL(trades, historicalPrices, true, null, uploadDate)
+        const pnlData = calculatePnL(trades, historicalPrices, true, null, uploadDate, [])
 
         // Get price benchmarks for each position
         const pnlDataWithBenchmarks = pnlData.map(position => {
@@ -441,7 +442,7 @@ io.on('connection', (socket) => {
       })
 
       // Calculate P&L using historical prices
-      const pnlData = calculatePnL(trades, historicalPrices, true, null, uploadDate)
+      const pnlData = calculatePnL(trades, historicalPrices, true, null, uploadDate, [])
 
       // Get price benchmarks for each position
       const pnlDataWithBenchmarks = pnlData.map(position => {
@@ -470,6 +471,7 @@ io.on('connection', (socket) => {
         trades,
         deposits,
         totalPrincipal,
+        dividendsAndInterest: [], // TODO: Load from database
         stockSymbols,
         splitAdjustments: {},
         manualPrices: {},
@@ -624,7 +626,7 @@ setInterval(async () => {
 
         // Recalculate P&L with new prices
         const adjustedTrades = applysplits(session.trades, session.splitAdjustments)
-        const pnlData = calculatePnL(adjustedTrades, prices)
+        const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
         socket.emit('price-update', {
           currentPrices: prices,
@@ -654,7 +656,7 @@ setInterval(async () => {
         // Use session trades if available
         const prices = { ...updatedPrices, ...firstSession.manualPrices }
         const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
-        const pnlData = calculatePnL(adjustedTrades, prices)
+        const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, firstSession.dividendsAndInterest || [])
 
         databaseService.savePnLSnapshot(todayDate, pnlData)
         console.log(`💾 Saved P&L snapshot for today (${todayDate}) from active session`)
@@ -664,7 +666,7 @@ setInterval(async () => {
         if (latestUpload && latestUpload.upload_date) {
           trades = databaseService.getTrades(latestUpload.upload_date)
           if (trades && trades.length > 0) {
-            const pnlData = calculatePnL(trades, updatedPrices)
+            const pnlData = calculatePnL(trades, updatedPrices, true, null, null, [])
             databaseService.savePnLSnapshot(todayDate, pnlData)
             console.log(`💾 Saved P&L snapshot for today (${todayDate}) from database (${trades.length} trades)`)
           }
@@ -826,8 +828,8 @@ app.post('/api/robinhood/download', async (req, res) => {
       // Read the downloaded file
       const csvContent = fs.readFileSync(result.filePath, 'utf-8')
 
-      // Parse trades and deposits
-      const trades = await parseTrades(csvContent)
+      // Parse trades, dividends/interest, and deposits
+      const { trades, dividendsAndInterest } = await parseTrades(csvContent)
       const { deposits, totalPrincipal } = await parseDeposits(csvContent)
 
       // Store in database

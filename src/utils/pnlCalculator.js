@@ -17,7 +17,7 @@ const extractParentInstrument = (description) => {
 }
 
 // Calculate P&L using Average Cost, FIFO, and LIFO methods
-export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null, previousClosePrices = {}) => {
+export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugCallback = null, previousClosePrices = {}, dividendsAndInterest = []) => {
   // Log when calculatePnL is called to catch duplicate calls
   const prevCloseCount = Object.keys(previousClosePrices).length
   const hasPrevClose = Object.values(previousClosePrices).some(v => v > 0)
@@ -58,7 +58,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     const isOption = symbolTrades.some(t => t.isOption)
 
     // Calculate Real P&L (simple buy/sell matching)
-    const real = calculateReal(symbolTrades, currentPrice, symbol, debugCallback)
+    const real = calculateReal(symbolTrades, currentPrice, symbol, debugCallback, dividendsAndInterest)
 
     // Calculate Average Cost P&L
     const avgCost = calculateAverageCost(symbolTrades, currentPrice)
@@ -224,7 +224,7 @@ const rollupOptionsByParent = (pnlData) => {
 }
 
 // Real P&L calculation - Simple approach: sum all buy/sell amounts
-const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
+const calculateReal = (trades, currentPrice, symbol, debugCallback = null, dividendsAndInterest = []) => {
   let totalBuyAmount = 0
   let totalSellAmount = 0
   let totalBuyShares = 0
@@ -318,8 +318,22 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     }
   })
 
-  // Realized P&L = Total sell amount - Total buy amount
-  const realizedPnL = totalSellAmount - totalBuyAmount
+  // Calculate total dividends and interest for this symbol
+  let totalDividends = 0
+  let totalInterest = 0
+
+  dividendsAndInterest.forEach(item => {
+    if (item.symbol === symbol) {
+      if (item.isDividend) {
+        totalDividends += item.amount
+      } else if (item.isInterest) {
+        totalInterest += item.amount
+      }
+    }
+  })
+
+  // Realized P&L = Total sell amount - Total buy amount + Dividends - Interest
+  const realizedPnL = totalSellAmount - totalBuyAmount + totalDividends - totalInterest
 
   // Calculate average cost basis and unrealized P&L for remaining position
   let unrealizedPnL = 0
@@ -366,8 +380,14 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     lowestOpenBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
   }
 
-  // Sort and keep top 10 most recent buys (by date, descending - newest first)
-  mostRecentBuys.sort((a, b) => b.dateObj - a.dateObj)
+  // Sort and keep top 10 most recent buys (by date descending, then price ascending)
+  mostRecentBuys.sort((a, b) => {
+    // First sort by date (descending - newest first)
+    const dateDiff = b.dateObj - a.dateObj
+    if (dateDiff !== 0) return dateDiff
+    // Then by price (ascending - lowest first) for same-day buys
+    return a.price - b.price
+  })
   mostRecentBuys = mostRecentBuys.slice(0, maxToTrack)
 
   // Calculate days ago for each buy

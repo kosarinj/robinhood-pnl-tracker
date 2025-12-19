@@ -113,6 +113,7 @@ function App() {
   const [lookupError, setLookupError] = useState(null)
   const [totalPrincipal, setTotalPrincipal] = useState(0)
   const [deposits, setDeposits] = useState([])
+  const [dividendsAndInterest, setDividendsAndInterest] = useState([])
   const [pnlPercentages, setPnlPercentages] = useState({
     realizedPercent: 0,
     unrealizedPercent: 0,
@@ -271,7 +272,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...updatedManualPrices }
         const adjustedTrades = applySplitAdjustments(trades, splitAdjustments)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices) // Always rollup options
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices, dividendsAndInterest) // Always rollup options
         setPnlData(pnl)
       }
     }
@@ -303,7 +304,7 @@ function App() {
       if (trades.length > 0) {
         const mergedPrices = { ...currentPrices, ...manualPrices }
         const adjustedTrades = applySplitAdjustments(trades, updatedSplits)
-        const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices) // Always rollup options
+        const pnl = calculatePnL(adjustedTrades, mergedPrices, true, null, previousClosePrices, dividendsAndInterest) // Always rollup options
         setPnlData(pnl)
       }
     }
@@ -472,7 +473,7 @@ function App() {
     const pnl = calculatePnL(adjustedTrades, mergedPrices, true, (msg) => {
       console.log('DEBUG:', msg)
       warnings.push(msg)
-    }, fetchedPrevClosePrices) // Always rollup options
+    }, fetchedPrevClosePrices, dividendsAndInterest) // Always rollup options
     setPnlData(pnl)
     setDebugInfo(warnings) // Show warnings on screen
 
@@ -875,15 +876,20 @@ function App() {
         // STANDALONE MODE: Process locally (original logic)
         console.log('💻 Processing CSV locally (standalone mode)...')
 
-        // Parse CSV file for trades
-        const parsedTrades = await parseTrades(file)
+        // Parse CSV file for trades and dividends/interest
+        const { trades: parsedTrades, dividendsAndInterest } = await parseTrades(file)
         setTrades(parsedTrades)
+        setDividendsAndInterest(dividendsAndInterest)
 
         // Count options vs stocks for debugging
         const optionCount = parsedTrades.filter(t => t.isOption).length
         const stockCount = parsedTrades.filter(t => !t.isOption).length
         const stats = { total: parsedTrades.length, options: optionCount, stocks: stockCount }
         setCsvStats(stats)
+
+        console.log(`📊 Dividends/Interest: ${dividendsAndInterest.length} entries`)
+        console.log(`💰 Dividends: ${dividendsAndInterest.filter(d => d.isDividend).length}`)
+        console.log(`💸 Interest: ${dividendsAndInterest.filter(d => d.isInterest).length}`)
 
         // Parse CSV file for deposits to calculate principal
         const { deposits: parsedDeposits, totalPrincipal: principal } = await parseDeposits(file)
@@ -933,7 +939,7 @@ function App() {
         const pnl = calculatePnL(adjustedTrades, mergedPrices, true, (msg) => {
           console.log('DEBUG CALLBACK:', msg)
           debugMessages.push(msg)
-        }, fetchedPrevClosePrices)
+        }, fetchedPrevClosePrices, dividendsAndInterest)
         setPnlData(pnl)
         console.log('Debug messages collected:', debugMessages.length)
         setDebugInfo(debugMessages)
