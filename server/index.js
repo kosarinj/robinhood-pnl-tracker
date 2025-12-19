@@ -643,24 +643,35 @@ setInterval(async () => {
     console.log(`📡 Price update complete: ${successCount} sent, ${skipCount} skipped`)
 
     // Save snapshot for today with updated prices (for chart history)
-    if (successCount > 0) {
-      try {
-        const todayDate = new Date().toISOString().split('T')[0]
+    try {
+      const todayDate = new Date().toISOString().split('T')[0]
 
-        // Get the first session that has trades (to save a snapshot)
-        const firstSession = Array.from(clientSessions.values()).find(s => s.trades && s.trades.length > 0)
+      // Try to get trades from an active session, or load from database
+      let trades = null
+      const firstSession = Array.from(clientSessions.values()).find(s => s.trades && s.trades.length > 0)
 
-        if (firstSession) {
-          const prices = { ...updatedPrices, ...firstSession.manualPrices }
-          const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
-          const pnlData = calculatePnL(adjustedTrades, prices)
+      if (firstSession) {
+        // Use session trades if available
+        const prices = { ...updatedPrices, ...firstSession.manualPrices }
+        const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
+        const pnlData = calculatePnL(adjustedTrades, prices)
 
-          databaseService.savePnLSnapshot(todayDate, pnlData)
-          console.log(`💾 Saved P&L snapshot for today (${todayDate})`)
+        databaseService.savePnLSnapshot(todayDate, pnlData)
+        console.log(`💾 Saved P&L snapshot for today (${todayDate}) from active session`)
+      } else {
+        // No active sessions - load latest trades from database
+        const latestUpload = databaseService.getLatestCsvUpload()
+        if (latestUpload && latestUpload.upload_date) {
+          trades = databaseService.getTrades(latestUpload.upload_date)
+          if (trades && trades.length > 0) {
+            const pnlData = calculatePnL(trades, updatedPrices)
+            databaseService.savePnLSnapshot(todayDate, pnlData)
+            console.log(`💾 Saved P&L snapshot for today (${todayDate}) from database (${trades.length} trades)`)
+          }
         }
-      } catch (error) {
-        console.error('Error saving daily snapshot:', error)
       }
+    } catch (error) {
+      console.error('Error saving daily snapshot:', error)
     }
   } catch (error) {
     console.error('Error updating prices:', error)
