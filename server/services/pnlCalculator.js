@@ -245,9 +245,9 @@ const calculateReal = (trades, currentPrice, symbol) => {
   // Track ALL buys to find the lowest buy price ever
   let lowestBuyEver = null
 
-  // Track recent buys - keep top 10 lowest
-  let recentLowestBuys = []
-  // Track most recent sells - keep top 10 most recent
+  // Track most recent buys - keep top 10 most recent by date
+  let mostRecentBuys = []
+  // Track most recent sells - keep top 10 most recent by date
   let mostRecentSells = []
   const maxToTrack = 10 // Track up to 10 of each
 
@@ -273,10 +273,11 @@ const calculateReal = (trades, currentPrice, symbol) => {
         }
       }
 
-      // Track all buys for recent lowest buys list
-      recentLowestBuys.push({
+      // Track all buys for most recent buys list
+      mostRecentBuys.push({
         price: trade.price,
-        date: trade.date || trade.transDate
+        date: trade.date || trade.transDate,
+        dateObj: tradeDate
       })
     } else {
       totalSellAmount += trade.quantity * trade.price
@@ -338,14 +339,14 @@ const calculateReal = (trades, currentPrice, symbol) => {
     lowestOpenBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
   }
 
-  // Sort and keep top 10 lowest buys (by price, ascending)
-  recentLowestBuys.sort((a, b) => a.price - b.price)
-  recentLowestBuys = recentLowestBuys.slice(0, maxToTrack)
+  // Sort and keep top 10 most recent buys (by date, descending - newest first)
+  mostRecentBuys.sort((a, b) => b.dateObj - a.dateObj)
+  mostRecentBuys = mostRecentBuys.slice(0, maxToTrack)
 
   // Calculate days ago for each buy
   const todayCalc = new Date()
   todayCalc.setHours(0, 0, 0, 0)
-  const recentBuysWithDays = recentLowestBuys.map(buy => {
+  const recentBuysWithDays = mostRecentBuys.map(buy => {
     const buyDate = new Date(buy.date)
     buyDate.setHours(0, 0, 0, 0)
     const daysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))

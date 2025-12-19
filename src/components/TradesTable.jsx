@@ -380,7 +380,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     recentLowestBuy: {
       header: () => (
         <th onClick={() => handleSort('real.recentLowestBuyPrice')} className="sortable" style={{ minWidth: '120px', maxWidth: '120px' }}>
-          Recent Lowest Buy{getSortIcon('real.recentLowestBuyPrice')}
+          Most Recent Buy{getSortIcon('real.recentLowestBuyPrice')}
         </th>
       ),
       cell: (row) => {

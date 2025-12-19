@@ -1917,7 +1917,7 @@ function App() {
                 const columnNames = {
                   avgCost: 'Avg Cost',
                   lowestBuy: 'Lowest Buy',
-                  recentLowestBuy: 'Recent Lowest Buy',
+                  recentLowestBuy: 'Most Recent Buy',
                   recentLowestSell: 'Most Recent Sell',
                   realized: 'Realized P&L',
                   currentValue: 'Current Value',
