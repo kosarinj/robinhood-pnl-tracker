@@ -632,6 +632,27 @@ setInterval(async () => {
     }
 
     console.log(`📡 Price update complete: ${successCount} sent, ${skipCount} skipped`)
+
+    // Save snapshot for today with updated prices (for chart history)
+    if (successCount > 0) {
+      try {
+        const todayDate = new Date().toISOString().split('T')[0]
+
+        // Get the first session that has trades (to save a snapshot)
+        const firstSession = Array.from(clientSessions.values()).find(s => s.trades && s.trades.length > 0)
+
+        if (firstSession) {
+          const prices = { ...updatedPrices, ...firstSession.manualPrices }
+          const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
+          const pnlData = calculatePnL(adjustedTrades, prices)
+
+          databaseService.savePnLSnapshot(todayDate, pnlData)
+          console.log(`💾 Saved P&L snapshot for today (${todayDate})`)
+        }
+      } catch (error) {
+        console.error('Error saving daily snapshot:', error)
+      }
+    }
   } catch (error) {
     console.error('Error updating prices:', error)
   }
