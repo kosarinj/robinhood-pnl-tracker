@@ -76,6 +76,8 @@ db.exec(`
     lowest_open_buy_days_ago INTEGER,
     recent_lowest_buy_price REAL,
     recent_lowest_buy_days_ago INTEGER,
+    recent_lowest_sell_price REAL,
+    recent_lowest_sell_days_ago INTEGER,
     created_at INTEGER DEFAULT (strftime('%s', 'now')),
     UNIQUE(asof_date, symbol)
   );
@@ -223,6 +225,27 @@ try {
   console.error('Migration error:', error)
 }
 
+// Migration: Add recent_lowest_sell_price and recent_lowest_sell_days_ago columns to pnl_snapshots
+try {
+  const tableInfo = db.pragma('table_info(pnl_snapshots)')
+  const hasRecentSellPrice = tableInfo.some(col => col.name === 'recent_lowest_sell_price')
+  const hasRecentSellDays = tableInfo.some(col => col.name === 'recent_lowest_sell_days_ago')
+
+  if (!hasRecentSellPrice) {
+    console.log('Adding recent_lowest_sell_price column to pnl_snapshots table...')
+    db.exec('ALTER TABLE pnl_snapshots ADD COLUMN recent_lowest_sell_price REAL')
+    console.log('✅ Added recent_lowest_sell_price column')
+  }
+
+  if (!hasRecentSellDays) {
+    console.log('Adding recent_lowest_sell_days_ago column to pnl_snapshots table...')
+    db.exec('ALTER TABLE pnl_snapshots ADD COLUMN recent_lowest_sell_days_ago INTEGER')
+    console.log('✅ Added recent_lowest_sell_days_ago column')
+  }
+} catch (error) {
+  console.error('Migration error:', error)
+}
+
 // Migration: Add total_principal column to csv_uploads table if it doesn't exist
 try {
   const csvUploadsInfo = db.pragma('table_info(csv_uploads)')
@@ -254,8 +277,8 @@ const insertSignalPerformance = db.prepare(`
 `)
 
 const upsertPnLSnapshot = db.prepare(`
-  INSERT INTO pnl_snapshots (asof_date, symbol, position, avg_cost, current_price, current_value, realized_pnl, unrealized_pnl, total_pnl, daily_pnl, options_pnl, percentage, lowest_open_buy_price, lowest_open_buy_days_ago, recent_lowest_buy_price, recent_lowest_buy_days_ago)
-  VALUES (@asofDate, @symbol, @position, @avgCost, @currentPrice, @currentValue, @realizedPnl, @unrealizedPnl, @totalPnl, @dailyPnl, @optionsPnl, @percentage, @lowestOpenBuyPrice, @lowestOpenBuyDaysAgo, @recentLowestBuyPrice, @recentLowestBuyDaysAgo)
+  INSERT INTO pnl_snapshots (asof_date, symbol, position, avg_cost, current_price, current_value, realized_pnl, unrealized_pnl, total_pnl, daily_pnl, options_pnl, percentage, lowest_open_buy_price, lowest_open_buy_days_ago, recent_lowest_buy_price, recent_lowest_buy_days_ago, recent_lowest_sell_price, recent_lowest_sell_days_ago)
+  VALUES (@asofDate, @symbol, @position, @avgCost, @currentPrice, @currentValue, @realizedPnl, @unrealizedPnl, @totalPnl, @dailyPnl, @optionsPnl, @percentage, @lowestOpenBuyPrice, @lowestOpenBuyDaysAgo, @recentLowestBuyPrice, @recentLowestBuyDaysAgo, @recentLowestSellPrice, @recentLowestSellDaysAgo)
   ON CONFLICT(asof_date, symbol) DO UPDATE SET
     position = excluded.position,
     avg_cost = excluded.avg_cost,
@@ -271,6 +294,8 @@ const upsertPnLSnapshot = db.prepare(`
     lowest_open_buy_days_ago = excluded.lowest_open_buy_days_ago,
     recent_lowest_buy_price = excluded.recent_lowest_buy_price,
     recent_lowest_buy_days_ago = excluded.recent_lowest_buy_days_ago,
+    recent_lowest_sell_price = excluded.recent_lowest_sell_price,
+    recent_lowest_sell_days_ago = excluded.recent_lowest_sell_days_ago,
     created_at = strftime('%s', 'now')
 `)
 
@@ -545,7 +570,9 @@ export class DatabaseService {
             lowestOpenBuyPrice: item.real?.lowestOpenBuyPrice || null,
             lowestOpenBuyDaysAgo: item.real?.lowestOpenBuyDaysAgo || null,
             recentLowestBuyPrice: item.real?.recentLowestBuyPrice || null,
-            recentLowestBuyDaysAgo: item.real?.recentLowestBuyDaysAgo || null
+            recentLowestBuyDaysAgo: item.real?.recentLowestBuyDaysAgo || null,
+            recentLowestSellPrice: item.real?.recentLowestSellPrice || null,
+            recentLowestSellDaysAgo: item.real?.recentLowestSellDaysAgo || null
           })
         }
       })

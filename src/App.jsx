@@ -47,6 +47,7 @@ function App() {
       'avgCost',
       'lowestBuy',
       'recentLowestBuy',
+      'recentLowestSell',
       'realized',
       'currentValue',
       'unrealized',
@@ -72,6 +73,22 @@ function App() {
       } else {
         // If lowestBuy not found, just add at the beginning
         savedOrder.unshift('recentLowestBuy')
+      }
+    }
+
+    if (!savedOrder.includes('recentLowestSell')) {
+      // Insert recentLowestSell after recentLowestBuy
+      const recentLowestBuyIndex = savedOrder.indexOf('recentLowestBuy')
+      if (recentLowestBuyIndex !== -1) {
+        savedOrder.splice(recentLowestBuyIndex + 1, 0, 'recentLowestSell')
+      } else {
+        // If recentLowestBuy not found, add after lowestBuy
+        const lowestBuyIndex = savedOrder.indexOf('lowestBuy')
+        if (lowestBuyIndex !== -1) {
+          savedOrder.splice(lowestBuyIndex + 1, 0, 'recentLowestSell')
+        } else {
+          savedOrder.unshift('recentLowestSell')
+        }
       }
     }
 
@@ -331,6 +348,7 @@ function App() {
       'avgCost',
       'lowestBuy',
       'recentLowestBuy',
+      'recentLowestSell',
       'realized',
       'currentValue',
       'unrealized',
@@ -1836,6 +1854,7 @@ function App() {
                   avgCost: 'Avg Cost',
                   lowestBuy: 'Lowest Buy',
                   recentLowestBuy: 'Recent Lowest Buy',
+                  recentLowestSell: 'Recent Lowest Sell',
                   realized: 'Realized P&L',
                   currentValue: 'Current Value',
                   unrealized: 'Unrealized P&L',

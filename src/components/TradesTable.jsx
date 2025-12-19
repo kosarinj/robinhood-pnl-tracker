@@ -399,6 +399,28 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       ),
       footer: () => <td></td>
     },
+    recentLowestSell: {
+      header: () => (
+        <th onClick={() => handleSort('real.recentLowestSellPrice')} className="sortable" style={{ minWidth: '140px', maxWidth: '140px' }}>
+          Recent Lowest Sell{getSortIcon('real.recentLowestSellPrice')}
+        </th>
+      ),
+      cell: (row) => (
+        <td style={{ minWidth: '140px', maxWidth: '140px' }}>
+          {row.real.recentLowestSellPrice > 0 ? (
+            <span>
+              {formatCurrency(row.real.recentLowestSellPrice)}
+              {row.real.recentLowestSellDaysAgo !== undefined && (
+                <span style={{ fontSize: '0.85em', color: '#888', marginLeft: '4px' }}>
+                  ({row.real.recentLowestSellDaysAgo}d)
+                </span>
+              )}
+            </span>
+          ) : '-'}
+        </td>
+      ),
+      footer: () => <td></td>
+    },
     realized: {
       header: () => (
         <th onClick={() => handleSort('real.realizedPnL')} className="sortable">

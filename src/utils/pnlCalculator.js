@@ -239,6 +239,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
 
   // Track recent buys (past 2-3 days) to find recent lowest buy
   let recentLowestBuy = null
+  // Track recent sells (past 2-3 days) to find recent lowest sell
+  let recentLowestSell = null
   const daysToLookBack = 3 // Look back 3 days
 
   // Track realized profit from today's sells (for Made Up Ground)
@@ -289,6 +291,16 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
       tradeDate.setHours(0, 0, 0, 0)
       const isTodaysSell = tradeDate.getTime() === today.getTime()
 
+      // Track recent lowest sell (past 2-3 days)
+      if (tradeDate >= cutoffDate) {
+        if (!recentLowestSell || trade.price < recentLowestSell.price) {
+          recentLowestSell = {
+            price: trade.price,
+            date: trade.date || trade.transDate
+          }
+        }
+      }
+
       // Remove sold shares from buy queue (FIFO) and track today's profit
       let remainingSellQty = trade.quantity
       const sellPrice = trade.price
@@ -324,6 +336,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
   let lowestOpenBuyDaysAgo = 0
   let recentLowestBuyPrice = 0
   let recentLowestBuyDaysAgo = 0
+  let recentLowestSellPrice = 0
+  let recentLowestSellDaysAgo = 0
 
   if (position > 0) {
     // Unrealized P&L = Current value of remaining position
@@ -372,6 +386,18 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     recentLowestBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
   }
 
+  // Find the recent lowest sell price (past 2-3 days)
+  if (recentLowestSell) {
+    recentLowestSellPrice = recentLowestSell.price
+
+    // Calculate how many days ago this sell was made
+    const sellDate = new Date(recentLowestSell.date)
+    sellDate.setHours(0, 0, 0, 0)
+    const todayCalc = new Date()
+    todayCalc.setHours(0, 0, 0, 0)
+    recentLowestSellDaysAgo = Math.floor((todayCalc - sellDate) / (1000 * 60 * 60 * 24))
+  }
+
   // Total P&L = Realized + Unrealized
   const totalPnL = realizedPnL + unrealizedPnL
 
@@ -389,6 +415,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     lowestOpenBuyDaysAgo: lowestOpenBuyDaysAgo,
     recentLowestBuyPrice: roundToTwo(recentLowestBuyPrice),
     recentLowestBuyDaysAgo: recentLowestBuyDaysAgo,
+    recentLowestSellPrice: roundToTwo(recentLowestSellPrice),
+    recentLowestSellDaysAgo: recentLowestSellDaysAgo,
     todaysRealizedProfit: roundToTwo(todaysRealizedProfit)
   }
 }

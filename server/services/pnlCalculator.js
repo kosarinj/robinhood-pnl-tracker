@@ -191,7 +191,7 @@ const rollupOptionsByParent = (pnlData) => {
           currentPrice: 0, // Parent stock price would need to be fetched separately
           options: [],
           // Initialize aggregated P&L values
-          real: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0, percentageReturn: 0, lowestOpenBuyPrice: 0, lowestOpenBuyDaysAgo: 0, recentLowestBuyPrice: 0, recentLowestBuyDaysAgo: 0 },
+          real: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0, percentageReturn: 0, lowestOpenBuyPrice: 0, lowestOpenBuyDaysAgo: 0, recentLowestBuyPrice: 0, recentLowestBuyDaysAgo: 0, recentLowestSellPrice: 0, recentLowestSellDaysAgo: 0 },
           avgCost: { unrealizedPnL: 0, position: 0, avgCostBasis: 0 },
           fifo: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0 },
           lifo: { realizedPnL: 0, unrealizedPnL: 0, totalPnL: 0, position: 0, avgCostBasis: 0 }
@@ -247,6 +247,8 @@ const calculateReal = (trades, currentPrice, symbol) => {
 
   // Track recent buys (past 2-3 days) to find recent lowest buy
   let recentLowestBuy = null
+  // Track recent sells (past 2-3 days) to find recent lowest sell
+  let recentLowestSell = null
   const daysToLookBack = 3 // Look back 3 days
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -289,6 +291,19 @@ const calculateReal = (trades, currentPrice, symbol) => {
       totalSellShares += trade.quantity
       position -= trade.quantity
 
+      const tradeDate = new Date(trade.date || trade.transDate)
+      tradeDate.setHours(0, 0, 0, 0)
+
+      // Track recent lowest sell (past 2-3 days)
+      if (tradeDate >= cutoffDate) {
+        if (!recentLowestSell || trade.price < recentLowestSell.price) {
+          recentLowestSell = {
+            price: trade.price,
+            date: trade.date || trade.transDate
+          }
+        }
+      }
+
       // Remove sold shares from buy queue (FIFO)
       let remainingSellQty = trade.quantity
       while (remainingSellQty > 0 && buyQueue.length > 0) {
@@ -314,6 +329,8 @@ const calculateReal = (trades, currentPrice, symbol) => {
   let lowestOpenBuyDaysAgo = 0
   let recentLowestBuyPrice = 0
   let recentLowestBuyDaysAgo = 0
+  let recentLowestSellPrice = 0
+  let recentLowestSellDaysAgo = 0
 
   if (position > 0) {
     unrealizedPnL = position * currentPrice
@@ -344,6 +361,18 @@ const calculateReal = (trades, currentPrice, symbol) => {
     recentLowestBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
   }
 
+  // Find the recent lowest sell price (past 2-3 days)
+  if (recentLowestSell) {
+    recentLowestSellPrice = recentLowestSell.price
+
+    // Calculate how many days ago this sell was made
+    const sellDate = new Date(recentLowestSell.date)
+    sellDate.setHours(0, 0, 0, 0)
+    const todayCalc = new Date()
+    todayCalc.setHours(0, 0, 0, 0)
+    recentLowestSellDaysAgo = Math.floor((todayCalc - sellDate) / (1000 * 60 * 60 * 24))
+  }
+
   // Total P&L = Realized + Unrealized
   const totalPnL = realizedPnL + unrealizedPnL
 
@@ -360,7 +389,9 @@ const calculateReal = (trades, currentPrice, symbol) => {
     lowestOpenBuyPrice: roundToTwo(lowestOpenBuyPrice),
     lowestOpenBuyDaysAgo: lowestOpenBuyDaysAgo,
     recentLowestBuyPrice: roundToTwo(recentLowestBuyPrice),
-    recentLowestBuyDaysAgo: recentLowestBuyDaysAgo
+    recentLowestBuyDaysAgo: recentLowestBuyDaysAgo,
+    recentLowestSellPrice: roundToTwo(recentLowestSellPrice),
+    recentLowestSellDaysAgo: recentLowestSellDaysAgo
   }
 }
 
