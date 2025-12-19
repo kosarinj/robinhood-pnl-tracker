@@ -1854,7 +1854,7 @@ function App() {
                   avgCost: 'Avg Cost',
                   lowestBuy: 'Lowest Buy',
                   recentLowestBuy: 'Recent Lowest Buy',
-                  recentLowestSell: 'Recent Lowest Sell',
+                  recentLowestSell: 'Most Recent Sell',
                   realized: 'Realized P&L',
                   currentValue: 'Current Value',
                   unrealized: 'Unrealized P&L',

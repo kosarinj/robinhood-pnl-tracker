@@ -239,8 +239,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
 
   // Track recent buys (past 2-3 days) to find recent lowest buy
   let recentLowestBuy = null
-  // Track recent sells (past 2-3 days) to find recent lowest sell
-  let recentLowestSell = null
+  // Track most recent sell (past 2-3 days)
+  let mostRecentSell = null
   const daysToLookBack = 3 // Look back 3 days
 
   // Track realized profit from today's sells (for Made Up Ground)
@@ -291,10 +291,10 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
       tradeDate.setHours(0, 0, 0, 0)
       const isTodaysSell = tradeDate.getTime() === today.getTime()
 
-      // Track recent lowest sell (past 2-3 days)
+      // Track most recent sell (past 2-3 days) - by date, not price
       if (tradeDate >= cutoffDate) {
-        if (!recentLowestSell || trade.price < recentLowestSell.price) {
-          recentLowestSell = {
+        if (!mostRecentSell || tradeDate > new Date(mostRecentSell.date)) {
+          mostRecentSell = {
             price: trade.price,
             date: trade.date || trade.transDate
           }
@@ -386,12 +386,12 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null) => {
     recentLowestBuyDaysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
   }
 
-  // Find the recent lowest sell price (past 2-3 days)
-  if (recentLowestSell) {
-    recentLowestSellPrice = recentLowestSell.price
+  // Find the most recent sell (past 2-3 days)
+  if (mostRecentSell) {
+    recentLowestSellPrice = mostRecentSell.price
 
     // Calculate how many days ago this sell was made
-    const sellDate = new Date(recentLowestSell.date)
+    const sellDate = new Date(mostRecentSell.date)
     sellDate.setHours(0, 0, 0, 0)
     const todayCalc = new Date()
     todayCalc.setHours(0, 0, 0, 0)
