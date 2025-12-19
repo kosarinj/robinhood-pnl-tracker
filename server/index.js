@@ -9,8 +9,17 @@ import { PriceService } from './services/priceService.js'
 import { SignalService } from './services/signalService.js'
 import { PolygonService } from './services/polygonService.js'
 import { databaseService } from './services/database.js'
-import { downloadRobinhoodReport } from './services/robinhoodDownloader.js'
 import fs from 'fs'
+
+// Conditionally import Puppeteer-based downloader (only available locally, not on Railway)
+let downloadRobinhoodReport = null
+try {
+  const module = await import('./services/robinhoodDownloader.js')
+  downloadRobinhoodReport = module.downloadRobinhoodReport
+  console.log('✅ Robinhood downloader available (running locally)')
+} catch (error) {
+  console.log('ℹ️  Robinhood downloader not available (Puppeteer not installed)')
+}
 
 const app = express()
 const httpServer = createServer(app)
@@ -772,6 +781,14 @@ app.get('/prices', async (req, res) => {
 app.post('/api/robinhood/download', async (req, res) => {
   try {
     console.log('🤖 Received request to download from Robinhood')
+
+    // Check if downloader is available (only works locally, not on Railway)
+    if (!downloadRobinhoodReport) {
+      return res.status(503).json({
+        success: false,
+        error: 'Robinhood download is only available when running locally. Please use the CSV upload feature instead.'
+      })
+    }
 
     // Start the download process
     const result = await downloadRobinhoodReport()
