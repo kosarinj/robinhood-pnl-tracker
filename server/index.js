@@ -822,6 +822,24 @@ app.get('/api/debug/snapshot-dates', (req, res) => {
   }
 })
 
+// Debug endpoint to check daily P&L data
+app.get('/api/debug/daily-pnl', (req, res) => {
+  try {
+    const dailyPnL = databaseService.getDailyPnLHistory()
+    res.json({
+      success: true,
+      data: dailyPnL,
+      count: dailyPnL.length,
+      sample: dailyPnL.slice(0, 5)
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
 // Get list of tracked symbols
 app.get('/api/tracked-symbols', (req, res) => {
   try {
