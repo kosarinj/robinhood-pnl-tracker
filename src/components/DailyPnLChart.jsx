@@ -277,6 +277,22 @@ function DailyPnLChart({ useServer, connected }) {
             </select>
           )}
           <button
+            onClick={() => loadDailyPnL()}
+            style={{
+              background: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '500',
+              marginRight: '10px'
+            }}
+          >
+            🔄 Refresh
+          </button>
+          <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
               background: '#667eea',

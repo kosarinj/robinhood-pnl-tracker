@@ -1167,9 +1167,14 @@ function App() {
             className="upload-button"
             onClick={handleRobinhoodDownload}
             disabled={loading}
-            style={{ marginLeft: '10px' }}
+            style={{
+              marginLeft: '10px',
+              opacity: useServer && connected ? 0.5 : 1,
+              cursor: useServer && connected ? 'not-allowed' : 'pointer'
+            }}
+            title={useServer && connected ? 'This feature only works when running locally. Use CSV upload on Railway.' : 'Opens browser to download from Robinhood'}
           >
-            {loading ? '⏳ Downloading...' : '🤖 Download from Robinhood'}
+            {loading ? '⏳ Downloading...' : '🤖 Download from Robinhood (Local Only)'}
           </button>
         </div>
       </div>
