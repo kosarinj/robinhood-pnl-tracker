@@ -405,7 +405,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 )}
                 {hasMultiple && (
                   <span style={{ fontSize: '0.85em', color: '#667eea', marginLeft: '4px' }}>
-                    +{buys.length - 1}
+                    (+{buys.length})
                   </span>
                 )}
               </span>
@@ -443,7 +443,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                 )}
                 {hasMultiple && (
                   <span style={{ fontSize: '0.85em', color: '#667eea', marginLeft: '4px' }}>
-                    +{sells.length - 1}
+                    (+{sells.length})
                   </span>
                 )}
               </span>
