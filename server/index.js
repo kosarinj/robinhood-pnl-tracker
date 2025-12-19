@@ -9,6 +9,8 @@ import { PriceService } from './services/priceService.js'
 import { SignalService } from './services/signalService.js'
 import { PolygonService } from './services/polygonService.js'
 import { databaseService } from './services/database.js'
+import { downloadRobinhoodReport } from './services/robinhoodDownloader.js'
+import fs from 'fs'
 
 const app = express()
 const httpServer = createServer(app)
@@ -743,6 +745,56 @@ app.get('/prices', async (req, res) => {
 
   const prices = await priceService.getPrices(symbolArray)
   res.json(prices)
+})
+
+// Robinhood automated download endpoint
+app.post('/api/robinhood/download', async (req, res) => {
+  try {
+    console.log('🤖 Received request to download from Robinhood')
+
+    // Start the download process
+    const result = await downloadRobinhoodReport()
+
+    if (result.success) {
+      // Read the downloaded file
+      const csvContent = fs.readFileSync(result.filePath, 'utf-8')
+
+      // Parse trades and deposits
+      const trades = await parseTrades(csvContent)
+      const { deposits, totalPrincipal } = await parseDeposits(csvContent)
+
+      // Store in database
+      const uploadDate = new Date().toISOString().split('T')[0]
+      const latestTradeDate = trades.length > 0
+        ? trades.reduce((latest, t) => t.transDate > latest ? t.transDate : latest, trades[0].transDate)
+        : uploadDate
+
+      databaseService.storeTrades(uploadDate, trades)
+      databaseService.storeDeposits(uploadDate, deposits)
+      databaseService.upsertCsvUpload(uploadDate, latestTradeDate, trades.length, totalPrincipal)
+
+      console.log(`✅ Imported ${trades.length} trades from Robinhood download`)
+
+      // Clean up downloaded file
+      fs.unlinkSync(result.filePath)
+
+      res.json({
+        success: true,
+        message: 'Successfully downloaded and imported from Robinhood',
+        trades: trades.length,
+        uploadDate: uploadDate,
+        manualDownload: result.manualDownload || false
+      })
+    } else {
+      throw new Error('Download failed')
+    }
+  } catch (error) {
+    console.error('❌ Error downloading from Robinhood:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
 })
 
 const PORT = process.env.PORT || 3001

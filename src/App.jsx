@@ -953,6 +953,57 @@ function App() {
     }
   }
 
+  const handleRobinhoodDownload = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      console.log('🤖 Initiating Robinhood download...')
+
+      const API_BASE = useServer && connected
+        ? `http://localhost:${socketService.port || 5000}`
+        : 'http://localhost:5000'
+
+      const response = await fetch(`${API_BASE}/api/robinhood/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to download from Robinhood: ${response.statusText}`)
+      }
+
+      const result = await response.json()
+
+      if (result.success) {
+        console.log('✅ Successfully downloaded and imported from Robinhood')
+
+        if (result.manualDownload) {
+          alert('CSV downloaded manually and imported successfully!')
+        } else {
+          alert('CSV downloaded automatically and imported successfully!')
+        }
+
+        // Refresh data by fetching latest from server
+        if (useServer && connected) {
+          const refreshResponse = await socketService.emitWithResponse('getLatestData', {})
+          setTrades(refreshResponse.trades)
+          setDeposits(refreshResponse.deposits)
+          setTotalPrincipal(refreshResponse.totalPrincipal)
+          setCurrentPrices(refreshResponse.currentPrices)
+          setPnlData(refreshResponse.pnlData)
+          setCurrentUploadDate(result.uploadDate)
+        }
+      }
+
+      setLoading(false)
+    } catch (err) {
+      console.error('❌ Robinhood download error:', err)
+      setError(err.message)
+      setLoading(false)
+    }
+  }
+
   let filteredData = pnlData
 
   // Filter out individual options - they're shown as aggregated P&L in the Options P&L column
@@ -1112,6 +1163,14 @@ function App() {
               style={{ display: 'none' }}
             />
           </label>
+          <button
+            className="upload-button"
+            onClick={handleRobinhoodDownload}
+            disabled={loading}
+            style={{ marginLeft: '10px' }}
+          >
+            {loading ? '⏳ Downloading...' : '🤖 Download from Robinhood'}
+          </button>
         </div>
       </div>
 
