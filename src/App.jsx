@@ -969,11 +969,11 @@ function App() {
         headers: { 'Content-Type': 'application/json' }
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to download from Robinhood: ${response.statusText}`)
-      }
-
       const result = await response.json()
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || `Failed to download from Robinhood: ${response.statusText}`)
+      }
 
       if (result.success) {
         console.log('✅ Successfully downloaded and imported from Robinhood')
