@@ -870,6 +870,22 @@ export class DatabaseService {
     }
   }
 
+  // Get latest CSV upload metadata without loading trades
+  getLatestCsvUpload() {
+    try {
+      const stmt = db.prepare(`
+        SELECT upload_date, latest_trade_date, trade_count
+        FROM csv_uploads
+        ORDER BY upload_date DESC
+        LIMIT 1
+      `)
+      return stmt.get()
+    } catch (error) {
+      console.error('Error getting latest CSV upload:', error)
+      return null
+    }
+  }
+
   // Get all available upload dates
   getUploadDates() {
     try {
