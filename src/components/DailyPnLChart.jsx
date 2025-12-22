@@ -226,7 +226,40 @@ function DailyPnLChart({ useServer, connected }) {
         marginBottom: '20px',
         fontSize: '14px'
       }}>
-        ℹ️ {error}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>ℹ️ {error}</div>
+          <button
+            onClick={async () => {
+              console.log('🔍 Requesting debug snapshots raw data...')
+              try {
+                const result = await socketService.debugSnapshotsRaw()
+                console.log('🐛 DEBUG SNAPSHOTS RAW RESULT:', result)
+                console.log('📊 Total snapshots in DB:', result.totalCount)
+                console.log('📅 Unique dates:', result.uniqueDates)
+                console.log('📋 Dates list:', result.dates)
+                console.table(result.dates)
+                if (result.sampleSnapshots && result.sampleSnapshots.length > 0) {
+                  console.log('📦 Sample snapshots:')
+                  console.table(result.sampleSnapshots)
+                }
+              } catch (err) {
+                console.error('❌ Error getting debug snapshots:', err)
+              }
+            }}
+            style={{
+              background: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '500'
+            }}
+          >
+            🐛 Debug DB
+          </button>
+        </div>
       </div>
     )
   }
