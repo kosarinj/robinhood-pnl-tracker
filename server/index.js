@@ -738,33 +738,49 @@ setInterval(async () => {
     // Save snapshot for today with updated prices (for chart history)
     try {
       const todayDate = new Date().toISOString().split('T')[0]
+      console.log(`\n📸 Attempting to save snapshot for ${todayDate}...`)
 
       // Try to get trades from an active session, or load from database
       let trades = null
       const firstSession = Array.from(clientSessions.values()).find(s => s.trades && s.trades.length > 0)
+      console.log(`   Active sessions: ${clientSessions.size}`)
 
       if (firstSession) {
         // Use session trades if available
+        console.log(`   ✓ Using active session with ${firstSession.trades.length} trades`)
         const prices = { ...updatedPrices, ...firstSession.manualPrices }
         const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
         const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, firstSession.dividendsAndInterest || [])
+        console.log(`   ✓ Calculated P&L for ${pnlData.length} positions`)
 
         databaseService.savePnLSnapshot(todayDate, pnlData)
-        console.log(`💾 Saved P&L snapshot for today (${todayDate}) from active session`)
+        console.log(`   💾 Saved P&L snapshot for today (${todayDate}) from active session`)
       } else {
         // No active sessions - load latest trades from database
+        console.log(`   ✗ No active sessions, trying to load from database...`)
         const latestUpload = databaseService.getLatestCsvUpload()
+        console.log(`   Latest upload:`, latestUpload)
+
         if (latestUpload && latestUpload.upload_date) {
+          console.log(`   ✓ Found upload date: ${latestUpload.upload_date}`)
           trades = databaseService.getTrades(latestUpload.upload_date)
+          console.log(`   Loaded ${trades?.length || 0} trades from database`)
+
           if (trades && trades.length > 0) {
             const pnlData = calculatePnL(trades, updatedPrices, true, null, null, [])
+            console.log(`   ✓ Calculated P&L for ${pnlData.length} positions`)
             databaseService.savePnLSnapshot(todayDate, pnlData)
-            console.log(`💾 Saved P&L snapshot for today (${todayDate}) from database (${trades.length} trades)`)
+            console.log(`   💾 Saved P&L snapshot for today (${todayDate}) from database (${trades.length} trades)`)
+          } else {
+            console.log(`   ✗ No trades found for upload date ${latestUpload.upload_date}`)
           }
+        } else {
+          console.log(`   ✗ No latest upload found in database`)
         }
       }
     } catch (error) {
-      console.error('Error saving daily snapshot:', error)
+      console.error('❌ Error saving daily snapshot:', error)
+      console.error('   Stack:', error.stack)
     }
   } catch (error) {
     console.error('Error updating prices:', error)
