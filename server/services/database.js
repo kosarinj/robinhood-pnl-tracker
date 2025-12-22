@@ -614,6 +614,44 @@ export class DatabaseService {
     }
   }
 
+  // Debug: Get raw snapshot data from database
+  getSnapshotsDebugInfo() {
+    try {
+      const snapshots = db.prepare(`
+        SELECT asof_date, symbol, total_pnl, realized_pnl, unrealized_pnl
+        FROM pnl_snapshots
+        ORDER BY asof_date DESC, symbol
+        LIMIT 50
+      `).all()
+
+      const dates = db.prepare(`
+        SELECT DISTINCT asof_date
+        FROM pnl_snapshots
+        ORDER BY asof_date DESC
+      `).all()
+
+      const count = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM pnl_snapshots
+      `).get()
+
+      return {
+        success: true,
+        totalCount: count.count,
+        uniqueDates: dates.length,
+        dates: dates.map(d => d.asof_date),
+        sampleSnapshots: snapshots.slice(0, 10),
+        allSnapshots: snapshots
+      }
+    } catch (error) {
+      console.error('Error getting snapshots debug info:', error)
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  }
+
   // Get P&L snapshot from approximately N days ago (closest available date)
   getPnLSnapshotFromDaysAgo(daysAgo = 7) {
     try {

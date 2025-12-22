@@ -349,21 +349,9 @@ io.on('connection', (socket) => {
   socket.on('debug-snapshots-raw', () => {
     console.log(`🔍 Received debug-snapshots-raw request`)
     try {
-      const db = databaseService.db
-      const snapshots = db.prepare('SELECT asof_date, symbol, total_pnl, realized_pnl, unrealized_pnl FROM pnl_snapshots ORDER BY asof_date DESC, symbol LIMIT 50').all()
-      const dates = db.prepare('SELECT DISTINCT asof_date FROM pnl_snapshots ORDER BY asof_date DESC').all()
-      const count = db.prepare('SELECT COUNT(*) as count FROM pnl_snapshots').get()
-
-      console.log(`✅ Found ${count.count} total snapshots, ${dates.length} unique dates`)
-
-      socket.emit('debug-snapshots-result', {
-        success: true,
-        totalCount: count.count,
-        uniqueDates: dates.length,
-        dates: dates.map(d => d.asof_date),
-        sampleSnapshots: snapshots.slice(0, 10),
-        allSnapshots: snapshots
-      })
+      const debugInfo = databaseService.getSnapshotsDebugInfo()
+      console.log(`✅ Found ${debugInfo.totalCount} total snapshots, ${debugInfo.uniqueDates} unique dates`)
+      socket.emit('debug-snapshots-result', debugInfo)
     } catch (error) {
       console.error(`❌ Error in debug-snapshots-raw:`, error)
       socket.emit('debug-snapshots-result', {
@@ -871,17 +859,8 @@ app.get('/api/debug/daily-pnl', (req, res) => {
 // Debug endpoint to check pnl_snapshots table directly
 app.get('/api/debug/snapshots-raw', (req, res) => {
   try {
-    const db = databaseService.db
-    const snapshots = db.prepare('SELECT asof_date, symbol, total_pnl FROM pnl_snapshots ORDER BY asof_date DESC LIMIT 20').all()
-    const dates = db.prepare('SELECT DISTINCT asof_date FROM pnl_snapshots ORDER BY asof_date DESC').all()
-
-    res.json({
-      success: true,
-      snapshotCount: snapshots.length,
-      uniqueDates: dates.length,
-      dates: dates.map(d => d.asof_date),
-      sampleSnapshots: snapshots
-    })
+    const debugInfo = databaseService.getSnapshotsDebugInfo()
+    res.json(debugInfo)
   } catch (error) {
     res.status(500).json({
       success: false,
