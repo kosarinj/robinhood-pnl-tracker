@@ -715,13 +715,29 @@ export class DatabaseService {
   // Get P&L snapshot from approximately N days ago (closest available date)
   getPnLSnapshotFromDaysAgo(daysAgo = 7) {
     try {
-      // Calculate target date (N days ago) without timezone conversion
-      const targetDate = new Date()
+      // Get the most recent snapshot date first (instead of using server's current date)
+      const mostRecentStmt = db.prepare(`
+        SELECT DISTINCT asof_date
+        FROM pnl_snapshots
+        ORDER BY asof_date DESC
+        LIMIT 1
+      `)
+      const mostRecent = mostRecentStmt.get()
+
+      if (!mostRecent) {
+        console.log(`No snapshots found in database`)
+        return { date: null, data: [] }
+      }
+
+      // Calculate target date as N days before the most recent snapshot
+      // Parse YYYY-MM-DD without timezone issues
+      const [year, month, day] = mostRecent.asof_date.split('-').map(Number)
+      const targetDate = new Date(year, month - 1, day)
       targetDate.setDate(targetDate.getDate() - daysAgo)
-      const year = targetDate.getFullYear()
-      const month = String(targetDate.getMonth() + 1).padStart(2, '0')
-      const day = String(targetDate.getDate()).padStart(2, '0')
-      const targetDateStr = `${year}-${month}-${day}`
+      const targetYear = targetDate.getFullYear()
+      const targetMonth = String(targetDate.getMonth() + 1).padStart(2, '0')
+      const targetDay = String(targetDate.getDate()).padStart(2, '0')
+      const targetDateStr = `${targetYear}-${targetMonth}-${targetDay}`
 
       // Find the closest snapshot date to the target (prefer earlier dates)
       const stmt = db.prepare(`
