@@ -592,6 +592,35 @@ class SocketService {
     })
   }
 
+  // Delete snapshot for a specific date (admin function)
+  deleteSnapshot(date) {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('snapshot-deleted', resultHandler)
+        clearTimeout(timeoutId)
+        if (response.success) {
+          console.log(`✅ Deleted ${response.deletedCount} snapshot records for ${response.date}`)
+          resolve(response)
+        } else {
+          reject(new Error(response.error))
+        }
+      }
+
+      this.socket.on('snapshot-deleted', resultHandler)
+      this.socket.emit('delete-snapshot', { date })
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('snapshot-deleted', resultHandler)
+        reject(new Error('Delete snapshot timeout'))
+      }, 10000)
+    })
+  }
+
   // Remove listeners
   off(event, callback) {
     if (this.socket) {
@@ -602,3 +631,8 @@ class SocketService {
 
 // Export singleton instance
 export const socketService = new SocketService()
+
+// Expose socketService to window for admin console commands
+if (typeof window !== 'undefined') {
+  window.socketService = socketService
+}
