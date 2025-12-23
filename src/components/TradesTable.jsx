@@ -439,14 +439,19 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         const hasMultiple = buys.length > 1
         const sellOpp = getSellOpportunity(row)
 
-        // Show sell opportunities in tooltip if they exist, otherwise show all buys
-        const tooltipText = sellOpp.hasOpportunity
-          ? `Sell opportunity! Eligible buys:\n${sellOpp.eligibleBuys.map(b =>
-              `• ${formatCurrency(b.price)} (${b.daysAgo}d ago) → Profit: ${formatCurrency(b.profit)}`
-            ).join('\n')}`
-          : (hasMultiple
-            ? buys.map((b, i) => `#${i + 1}: ${formatCurrency(b.price)} (${b.daysAgo}d ago)`).join('\n')
-            : '')
+        // Build tooltip with sell opportunities AND all recent buys
+        let tooltipText = ''
+        if (sellOpp.hasOpportunity) {
+          tooltipText = `🎯 Sell Opportunities:\n${sellOpp.eligibleBuys.map(b =>
+            `  • ${formatCurrency(b.price)} (${b.daysAgo}d ago) → Profit: ${formatCurrency(b.profit)}`
+          ).join('\n')}`
+        }
+        if (hasMultiple) {
+          if (tooltipText) tooltipText += '\n\n'
+          tooltipText += `📋 All Recent Buys:\n${buys.map((b, i) =>
+            `  #${i + 1}: ${formatCurrency(b.price)} (${b.daysAgo}d ago)`
+          ).join('\n')}`
+        }
 
         return (
           <td
