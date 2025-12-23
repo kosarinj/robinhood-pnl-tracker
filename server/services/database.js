@@ -767,7 +767,9 @@ export class DatabaseService {
         GROUP BY asof_date
         ORDER BY asof_date ASC
       `)
-      return stmt.all()
+      const results = stmt.all()
+      console.log('🔍 getDailyPnLHistory results:', results.map(r => ({ date: r.asof_date, total: r.total_pnl })))
+      return results
     } catch (error) {
       console.error('Error getting daily P&L history:', error)
       return []
