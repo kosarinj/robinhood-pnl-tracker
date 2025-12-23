@@ -641,6 +641,8 @@ function applysplits(trades, splits) {
 // Helper function to enrich P&L data with Made Up Ground calculation
 // Formula: (today real PNL - 1 week ago real pnl) - (1 week ago quantity * (today price - 1 week ago price))
 function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
+  console.log(`🔍 enrichWithMadeUpGround: Processing ${currentPnL.length} positions with ${weekAgoSnapshot.length} week-ago snapshots`)
+
   // Create a map of week-ago data by symbol for quick lookup
   const weekAgoMap = {}
   weekAgoSnapshot.forEach(snap => {
@@ -648,7 +650,8 @@ function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
   })
 
   // Enrich each current P&L entry with Made Up Ground
-  return currentPnL.map(position => {
+  let enrichedCount = 0
+  const result = currentPnL.map(position => {
     const weekAgo = weekAgoMap[position.symbol]
 
     if (!weekAgo) {
@@ -659,6 +662,8 @@ function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
         madeUpGroundAvailable: false
       }
     }
+
+    enrichedCount++
 
     // Calculate Made Up Ground
     // (today real PNL - 1 week ago real pnl) - (1 week ago quantity * (today price - 1 week ago price))
@@ -683,6 +688,9 @@ function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
       }
     }
   })
+
+  console.log(`✅ Enriched ${enrichedCount} positions with Made Up Ground data`)
+  return result
 }
 
 // Background job: Update prices every minute and broadcast to clients
