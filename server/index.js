@@ -557,6 +557,19 @@ io.on('connection', (socket) => {
     }
   })
 
+  // Clear all P&L snapshots (admin function)
+  socket.on('clear-all-snapshots', () => {
+    console.log(`🗑️ Received clear-all-snapshots request`)
+    try {
+      const deletedCount = databaseService.clearAllSnapshots()
+      console.log(`✅ Cleared all snapshots (${deletedCount} records)`)
+      socket.emit('snapshots-cleared', { success: true, deletedCount })
+    } catch (error) {
+      console.error(`❌ Error clearing snapshots:`, error)
+      socket.emit('snapshots-cleared', { success: false, error: error.message })
+    }
+  })
+
   // Get daily P&L history for charting
   socket.on('get-daily-pnl', () => {
     console.log(`📊 Received get-daily-pnl request`)

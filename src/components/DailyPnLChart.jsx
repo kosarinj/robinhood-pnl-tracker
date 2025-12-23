@@ -138,6 +138,26 @@ function DailyPnLChart({ useServer, connected }) {
     }
   }
 
+  const handleClearSnapshots = async () => {
+    if (!window.confirm('Are you sure you want to delete ALL P&L snapshots? This will clear all historical data. You can reload your CSV files to recreate them.')) {
+      return
+    }
+
+    try {
+      console.log('🗑️ Clearing all snapshots...')
+      const result = await socketService.clearAllSnapshots()
+      console.log(`✅ Cleared ${result.deletedCount} snapshot records`)
+
+      // Reload the chart to show empty state
+      setChartData([])
+      setSymbolData([])
+      setError('All snapshots cleared. Upload CSV files to recreate historical data.')
+    } catch (err) {
+      console.error('Error clearing snapshots:', err)
+      alert('Failed to clear snapshots: ' + err.message)
+    }
+  }
+
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -286,11 +306,25 @@ function DailyPnLChart({ useServer, connected }) {
               padding: '6px 12px',
               cursor: 'pointer',
               fontSize: '13px',
-              fontWeight: '500',
-              marginRight: '10px'
+              fontWeight: '500'
             }}
           >
             🔄 Refresh
+          </button>
+          <button
+            onClick={handleClearSnapshots}
+            style={{
+              background: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '500'
+            }}
+          >
+            🗑️ Clear Snapshots
           </button>
           <button
             onClick={() => setCollapsed(!collapsed)}

@@ -621,6 +621,35 @@ class SocketService {
     })
   }
 
+  // Clear all P&L snapshots (admin function)
+  clearAllSnapshots() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('snapshots-cleared', resultHandler)
+        clearTimeout(timeoutId)
+        if (response.success) {
+          console.log(`✅ Cleared all snapshots (${response.deletedCount} records)`)
+          resolve(response)
+        } else {
+          reject(new Error(response.error))
+        }
+      }
+
+      this.socket.on('snapshots-cleared', resultHandler)
+      this.socket.emit('clear-all-snapshots')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('snapshots-cleared', resultHandler)
+        reject(new Error('Clear all snapshots timeout'))
+      }, 10000)
+    })
+  }
+
   // Remove listeners
   off(event, callback) {
     if (this.socket) {

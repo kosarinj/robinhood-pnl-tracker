@@ -1087,6 +1087,18 @@ export class DatabaseService {
     }
   }
 
+  // Clear all P&L snapshots only (keeps trades and uploads)
+  clearAllSnapshots() {
+    try {
+      const result = db.prepare('DELETE FROM pnl_snapshots').run()
+      console.log(`✅ Cleared all P&L snapshots (${result.changes} records deleted)`)
+      return result.changes
+    } catch (error) {
+      console.error('Error clearing snapshots:', error)
+      throw error
+    }
+  }
+
   // Close database connection
   close() {
     db.close()
