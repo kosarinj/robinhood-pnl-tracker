@@ -906,6 +906,17 @@ app.get('/api/prices/:symbol', (req, res) => {
   }
 })
 
+// Delete snapshot for a specific date
+app.delete('/api/snapshot/:date', (req, res) => {
+  try {
+    const { date } = req.params
+    const deletedCount = databaseService.deletePnLSnapshot(date)
+    res.json({ success: true, deletedCount, message: `Deleted ${deletedCount} records for ${date}` })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 app.get('/prices', async (req, res) => {
   const { symbols } = req.query
   const symbolArray = symbols ? symbols.split(',') : []

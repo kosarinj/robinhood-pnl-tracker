@@ -628,6 +628,22 @@ export class DatabaseService {
     }
   }
 
+  // Delete P&L snapshot for a specific date
+  deletePnLSnapshot(asofDate) {
+    try {
+      const stmt = db.prepare(`
+        DELETE FROM pnl_snapshots
+        WHERE asof_date = ?
+      `)
+      const result = stmt.run(asofDate)
+      console.log(`🗑️ Deleted ${result.changes} snapshot records for ${asofDate}`)
+      return result.changes
+    } catch (error) {
+      console.error('Error deleting P&L snapshot:', error)
+      throw error
+    }
+  }
+
   // Get P&L snapshot for a specific date
   getPnLSnapshot(asofDate) {
     try {
