@@ -773,8 +773,12 @@ setInterval(async () => {
         let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
         // Enrich with Made Up Ground if we have historical data
+        console.log(`  🔍 About to check enrichment: weekAgoSnapshot.length = ${weekAgoSnapshot.length}`)
         if (weekAgoSnapshot.length > 0) {
+          console.log(`  ✅ Calling enrichWithMadeUpGround with ${pnlData.length} positions`)
           pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+        } else {
+          console.log(`  ❌ Skipping enrichment: no week-ago data`)
         }
 
         socket.emit('price-update', {
