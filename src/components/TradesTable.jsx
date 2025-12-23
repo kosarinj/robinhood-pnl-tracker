@@ -33,23 +33,33 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     return ''
   }
 
-  // Check if there's a potential sell opportunity by comparing recent buys with recent sells
+  // Check if there's a potential sell opportunity by comparing recent buys with recent sells or current price
   const hasSellOpportunity = (row) => {
     const recentBuys = row.real?.recentLowestBuys || []
     const recentSells = row.real?.recentSells || []
+    const currentPrice = row.currentPrice || 0
 
-    if (recentBuys.length === 0 || recentSells.length === 0) {
+    if (recentBuys.length === 0) {
       return false
     }
 
-    // Compare each buy with corresponding sell (pair them 1-to-1)
-    for (let i = 0; i < Math.min(recentBuys.length, recentSells.length); i++) {
+    // Check if current price is higher than any recent buy (sell opportunity)
+    for (let i = 0; i < recentBuys.length; i++) {
       const buyPrice = recentBuys[i]?.price || 0
-      const sellPrice = recentSells[i]?.price || 0
-
-      // If sell price is higher than buy price, there's a potential opportunity
-      if (sellPrice > buyPrice) {
+      if (currentPrice > buyPrice && buyPrice > 0) {
         return true
+      }
+    }
+
+    // Also check if recent sells are higher than recent buys
+    if (recentSells.length > 0) {
+      for (let i = 0; i < Math.min(recentBuys.length, recentSells.length); i++) {
+        const buyPrice = recentBuys[i]?.price || 0
+        const sellPrice = recentSells[i]?.price || 0
+
+        if (sellPrice > buyPrice) {
+          return true
+        }
       }
     }
 
@@ -879,7 +889,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     backgroundColor: 'rgba(255, 193, 7, 0.15)',
                     borderLeft: '4px solid #ffc107'
                   } : {}}
-                  title={sellOpportunity ? 'Potential sell opportunity: Recent sells are higher than recent buys' : ''}
+                  title={sellOpportunity ? 'Potential sell opportunity: Current price or recent sells are higher than recent buys' : ''}
                 >
                 <td onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
