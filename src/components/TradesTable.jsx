@@ -446,7 +446,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
             `  • ${formatCurrency(b.price)} (${b.daysAgo}d ago) → Profit: ${formatCurrency(b.profit)}`
           ).join('\n')}`
         }
-        if (hasMultiple) {
+        if (buys.length > 0) {
           if (tooltipText) tooltipText += '\n\n'
           tooltipText += `📋 All Recent Buys:\n${buys.map((b, i) =>
             `  #${i + 1}: ${formatCurrency(b.price)} (${b.daysAgo}d ago)`
