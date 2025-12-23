@@ -735,41 +735,24 @@ setInterval(async () => {
 
     console.log(`📡 Price update complete: ${successCount} sent, ${skipCount} skipped`)
 
-    // Save snapshot for today with updated prices (for chart history)
+    // Save snapshot only if there's an active session viewing the data
+    // Don't create snapshots for dates without actual CSV uploads
     try {
-      const todayDate = new Date().toISOString().split('T')[0]
-
-      // Try to get trades from an active session, or load from database
-      let trades = null
       const firstSession = Array.from(clientSessions.values()).find(s => s.trades && s.trades.length > 0)
 
       if (firstSession) {
-        // Use session trades if available
-        console.log(`📊 Using active session trades (${firstSession.trades.length} trades)`)
+        // Only save snapshots when someone is actively viewing their portfolio
+        const todayDate = new Date().toISOString().split('T')[0]
+        console.log(`📊 Active session detected, updating snapshot for ${todayDate}`)
         const prices = { ...updatedPrices, ...firstSession.manualPrices }
         const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
         const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, firstSession.dividendsAndInterest || [])
 
         databaseService.savePnLSnapshot(todayDate, pnlData)
-      } else {
-        // No active sessions - load latest trades from database
-        const latestUpload = databaseService.getLatestCsvUpload()
-        console.log(`📊 No active session, loading from database...`)
-        console.log(`   Latest CSV upload: ${latestUpload?.upload_date || 'none'}`)
-
-        if (latestUpload && latestUpload.upload_date) {
-          trades = databaseService.getTrades(latestUpload.upload_date)
-          console.log(`   Loaded ${trades?.length || 0} trades from ${latestUpload.upload_date}`)
-
-          if (trades && trades.length > 0) {
-            const pnlData = calculatePnL(trades, updatedPrices, true, null, null, [])
-            console.log(`   Calculated P&L for ${pnlData.length} positions`)
-            databaseService.savePnLSnapshot(todayDate, pnlData)
-          }
-        }
       }
+      // No active sessions - don't create snapshots for dates without CSV uploads
     } catch (error) {
-      console.error('Error saving daily snapshot:', error)
+      console.error('Error saving snapshot:', error)
     }
   } catch (error) {
     console.error('Error updating prices:', error)
