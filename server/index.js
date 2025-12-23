@@ -357,14 +357,26 @@ io.on('connection', (socket) => {
     try {
       let snapshot = databaseService.getPnLSnapshot(asofDate)
 
-      // Enrich with Made Up Ground (calculate from 7 days before this snapshot)
+      // Transform snapshot data to match P&L calculation format for enrichment
+      let transformedSnapshot = snapshot.map(row => ({
+        symbol: row.symbol,
+        currentPrice: row.current_price,
+        real: {
+          realizedPnL: row.realized_pnl || 0,
+          unrealizedPnL: row.unrealized_pnl || 0,
+          totalPnL: row.total_pnl || 0
+        }
+      }))
+
+      // Enrich with Made Up Ground
       const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
       console.log(`🔍 Enriching snapshot ${asofDate} with week-ago data from ${weekAgoDate || 'null'}`)
       if (weekAgoSnapshot.length > 0) {
-        snapshot = enrichWithMadeUpGround(snapshot, weekAgoSnapshot)
+        transformedSnapshot = enrichWithMadeUpGround(transformedSnapshot, weekAgoSnapshot)
       }
 
-      socket.emit('pnl-snapshot-loaded', { success: true, asofDate, data: snapshot, madeUpGroundDate: weekAgoDate })
+      // Send enriched snapshot (transformed back to original structure if needed)
+      socket.emit('pnl-snapshot-loaded', { success: true, asofDate, data: transformedSnapshot, madeUpGroundDate: weekAgoDate })
     } catch (error) {
       console.error(`❌ Error loading P&L snapshot:`, error)
       socket.emit('pnl-snapshot-loaded', { success: false, error: error.message })
