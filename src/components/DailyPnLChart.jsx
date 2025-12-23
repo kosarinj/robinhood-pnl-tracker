@@ -24,7 +24,6 @@ function DailyPnLChart({ useServer, connected }) {
   const [symbolLoading, setSymbolLoading] = useState(false)
   const [error, setError] = useState(null)
   const [collapsed, setCollapsed] = useState(false)
-  const [debugInfo, setDebugInfo] = useState(null)
 
   useEffect(() => {
     if (useServer && connected) {
@@ -219,125 +218,15 @@ function DailyPnLChart({ useServer, connected }) {
 
   if (error) {
     return (
-      <div>
-        <div style={{
-          padding: '15px',
-          background: isDark ? '#3a3a2a' : '#fff3cd',
-          color: isDark ? '#ffeb3b' : '#856404',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          fontSize: '14px'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>ℹ️ {error}</div>
-            <button
-              onClick={async () => {
-                console.log('🔍 Requesting debug snapshots raw data...')
-                try {
-                  const result = await socketService.debugSnapshotsRaw()
-                  console.log('🐛 DEBUG SNAPSHOTS RAW RESULT:', result)
-                  setDebugInfo(result)
-                } catch (err) {
-                  console.error('❌ Error getting debug snapshots:', err)
-                  setDebugInfo({ error: err.message })
-                }
-              }}
-              style={{
-                background: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                padding: '6px 12px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: '500'
-              }}
-            >
-              🐛 Debug DB
-            </button>
-          </div>
-        </div>
-
-        {debugInfo && (
-          <div style={{
-            padding: '20px',
-            background: isDark ? '#1e1e1e' : 'white',
-            borderRadius: '8px',
-            marginBottom: '20px',
-            border: `1px solid ${isDark ? '#444' : '#e0e0e0'}`,
-            fontFamily: 'monospace',
-            fontSize: '13px',
-            color: isDark ? '#e0e0e0' : '#333'
-          }}>
-            <h3 style={{ marginTop: 0, color: isDark ? '#e0e0e0' : '#333' }}>🐛 Debug Info - pnl_snapshots Table</h3>
-
-            {debugInfo.error ? (
-              <div style={{ color: '#dc3545', padding: '10px', background: '#fee', borderRadius: '4px' }}>
-                ❌ Error: {debugInfo.error}
-              </div>
-            ) : (
-              <>
-                <div style={{ marginBottom: '15px', padding: '10px', background: isDark ? '#2a2a2a' : '#f8f9fa', borderRadius: '4px' }}>
-                  <div style={{ marginBottom: '8px' }}>📊 <strong>Total Snapshots:</strong> {debugInfo.totalCount}</div>
-                  <div style={{ marginBottom: '8px' }}>📅 <strong>Unique Dates:</strong> {debugInfo.uniqueDates}</div>
-                  <div>
-                    <strong>Dates List:</strong>
-                    {debugInfo.dates && debugInfo.dates.length > 0 ? (
-                      <div style={{ marginTop: '5px', marginLeft: '20px' }}>
-                        {debugInfo.dates.map((date, i) => (
-                          <div key={i}>• {date}</div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: '#dc3545', marginLeft: '10px' }}>None found</span>
-                    )}
-                  </div>
-                </div>
-
-                {debugInfo.sampleSnapshots && debugInfo.sampleSnapshots.length > 0 && (
-                  <div>
-                    <strong>Sample Snapshots (first 10):</strong>
-                    <div style={{
-                      marginTop: '10px',
-                      maxHeight: '400px',
-                      overflow: 'auto',
-                      background: isDark ? '#2a2a2a' : '#f8f9fa',
-                      padding: '10px',
-                      borderRadius: '4px'
-                    }}>
-                      <table style={{
-                        width: '100%',
-                        borderCollapse: 'collapse',
-                        fontSize: '12px'
-                      }}>
-                        <thead>
-                          <tr style={{ borderBottom: `2px solid ${isDark ? '#444' : '#ddd'}` }}>
-                            <th style={{ padding: '8px', textAlign: 'left' }}>Date</th>
-                            <th style={{ padding: '8px', textAlign: 'left' }}>Symbol</th>
-                            <th style={{ padding: '8px', textAlign: 'right' }}>Total P&L</th>
-                            <th style={{ padding: '8px', textAlign: 'right' }}>Realized</th>
-                            <th style={{ padding: '8px', textAlign: 'right' }}>Unrealized</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {debugInfo.sampleSnapshots.slice(0, 10).map((snap, i) => (
-                            <tr key={i} style={{ borderBottom: `1px solid ${isDark ? '#333' : '#eee'}` }}>
-                              <td style={{ padding: '8px' }}>{snap.asof_date}</td>
-                              <td style={{ padding: '8px' }}>{snap.symbol}</td>
-                              <td style={{ padding: '8px', textAlign: 'right' }}>${snap.total_pnl?.toFixed(2) || '0.00'}</td>
-                              <td style={{ padding: '8px', textAlign: 'right' }}>${snap.realized_pnl?.toFixed(2) || '0.00'}</td>
-                              <td style={{ padding: '8px', textAlign: 'right' }}>${snap.unrealized_pnl?.toFixed(2) || '0.00'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
+      <div style={{
+        padding: '15px',
+        background: isDark ? '#3a3a2a' : '#fff3cd',
+        color: isDark ? '#ffeb3b' : '#856404',
+        borderRadius: '8px',
+        marginBottom: '20px',
+        fontSize: '14px'
+      }}>
+        ℹ️ {error}
       </div>
     )
   }
@@ -402,34 +291,6 @@ function DailyPnLChart({ useServer, connected }) {
             }}
           >
             🔄 Refresh
-          </button>
-          <button
-            onClick={async () => {
-              console.log('🔍 Requesting debug snapshots raw data...')
-              try {
-                const result = await socketService.debugSnapshotsRaw()
-                console.log('🐛 DEBUG SNAPSHOTS RAW RESULT:', result)
-                console.table(result.dates)
-                if (result.sampleSnapshots && result.sampleSnapshots.length > 0) {
-                  console.table(result.sampleSnapshots)
-                }
-              } catch (err) {
-                console.error('❌ Error getting debug snapshots:', err)
-              }
-            }}
-            style={{
-              background: '#dc3545',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '500',
-              marginRight: '10px'
-            }}
-          >
-            🐛 Debug DB
           </button>
           <button
             onClick={() => setCollapsed(!collapsed)}

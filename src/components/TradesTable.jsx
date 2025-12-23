@@ -437,13 +437,25 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       cell: (row) => {
         const buys = row.real.recentLowestBuys || []
         const hasMultiple = buys.length > 1
-        const tooltipText = hasMultiple
-          ? buys.map((b, i) => `#${i + 1}: ${formatCurrency(b.price)} (${b.daysAgo}d ago)`).join('\n')
-          : ''
+        const sellOpp = getSellOpportunity(row)
+
+        // Show sell opportunities in tooltip if they exist, otherwise show all buys
+        const tooltipText = sellOpp.hasOpportunity
+          ? `Sell opportunity! Eligible buys:\n${sellOpp.eligibleBuys.map(b =>
+              `• ${formatCurrency(b.price)} (${b.daysAgo}d ago) → Profit: ${formatCurrency(b.profit)}`
+            ).join('\n')}`
+          : (hasMultiple
+            ? buys.map((b, i) => `#${i + 1}: ${formatCurrency(b.price)} (${b.daysAgo}d ago)`).join('\n')
+            : '')
 
         return (
           <td
-            style={{ minWidth: '120px', maxWidth: '120px', cursor: hasMultiple ? 'help' : 'default' }}
+            style={{
+              minWidth: '120px',
+              maxWidth: '120px',
+              cursor: (hasMultiple || sellOpp.hasOpportunity) ? 'help' : 'default',
+              backgroundColor: sellOpp.hasOpportunity ? 'rgba(255, 193, 7, 0.15)' : 'transparent'
+            }}
             title={tooltipText}
           >
             {row.real.recentLowestBuyPrice > 0 ? (
@@ -897,22 +909,11 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         </thead>
         <tbody>
           {sortedData.map((row, index) => {
-            const sellOpp = getSellOpportunity(row)
-            const tooltipText = sellOpp.hasOpportunity
-              ? `Sell opportunity! Eligible buys:\n${sellOpp.eligibleBuys.map(b =>
-                  `• $${b.price.toFixed(2)} (${b.daysAgo} days ago) → Profit: $${b.profit.toFixed(2)}`
-                ).join('\n')}`
-              : ''
             return (
               <React.Fragment key={index}>
                 <tr
                   className="main-row"
                   onClick={() => toggleExpand(row.symbol)}
-                  style={sellOpp.hasOpportunity ? {
-                    backgroundColor: 'rgba(255, 193, 7, 0.15)',
-                    borderLeft: '4px solid #ffc107'
-                  } : {}}
-                  title={tooltipText}
                 >
                 <td onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
