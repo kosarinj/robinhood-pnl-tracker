@@ -715,10 +715,13 @@ export class DatabaseService {
   // Get P&L snapshot from approximately N days ago (closest available date)
   getPnLSnapshotFromDaysAgo(daysAgo = 7) {
     try {
-      // Calculate target date (N days ago)
+      // Calculate target date (N days ago) without timezone conversion
       const targetDate = new Date()
       targetDate.setDate(targetDate.getDate() - daysAgo)
-      const targetDateStr = targetDate.toISOString().split('T')[0]
+      const year = targetDate.getFullYear()
+      const month = String(targetDate.getMonth() + 1).padStart(2, '0')
+      const day = String(targetDate.getDate()).padStart(2, '0')
+      const targetDateStr = `${year}-${month}-${day}`
 
       // Find the closest snapshot date to the target (prefer earlier dates)
       const stmt = db.prepare(`
