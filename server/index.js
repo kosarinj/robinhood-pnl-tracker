@@ -355,8 +355,16 @@ io.on('connection', (socket) => {
   socket.on('load-pnl-snapshot', async ({ asofDate }) => {
     console.log(`📂 Received load-pnl-snapshot request for: ${asofDate}`)
     try {
-      const snapshot = databaseService.getPnLSnapshot(asofDate)
-      socket.emit('pnl-snapshot-loaded', { success: true, asofDate, data: snapshot })
+      let snapshot = databaseService.getPnLSnapshot(asofDate)
+
+      // Enrich with Made Up Ground (calculate from 7 days before this snapshot)
+      const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+      console.log(`🔍 Enriching snapshot ${asofDate} with week-ago data from ${weekAgoDate || 'null'}`)
+      if (weekAgoSnapshot.length > 0) {
+        snapshot = enrichWithMadeUpGround(snapshot, weekAgoSnapshot)
+      }
+
+      socket.emit('pnl-snapshot-loaded', { success: true, asofDate, data: snapshot, madeUpGroundDate: weekAgoDate })
     } catch (error) {
       console.error(`❌ Error loading P&L snapshot:`, error)
       socket.emit('pnl-snapshot-loaded', { success: false, error: error.message })
