@@ -253,7 +253,9 @@ io.on('connection', (socket) => {
     let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
     // Enrich with Made Up Ground
+    console.log('🔍 Checking for Made Up Ground enrichment')
     const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+    console.log(`   Week ago: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
     if (weekAgoSnapshot.length > 0) {
       pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
     }
@@ -274,7 +276,9 @@ io.on('connection', (socket) => {
     let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
     // Enrich with Made Up Ground
+    console.log('🔍 Checking for Made Up Ground enrichment')
     const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+    console.log(`   Week ago: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
     if (weekAgoSnapshot.length > 0) {
       pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
     }
