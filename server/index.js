@@ -544,6 +544,19 @@ io.on('connection', (socket) => {
     }
   })
 
+  // Delete snapshot for a specific date (manual admin function)
+  socket.on('delete-snapshot', ({ date }) => {
+    console.log(`🗑️ Received delete-snapshot request for ${date}`)
+    try {
+      const deletedCount = databaseService.deletePnLSnapshot(date)
+      console.log(`✅ Deleted ${deletedCount} snapshot records for ${date}`)
+      socket.emit('snapshot-deleted', { success: true, date, deletedCount })
+    } catch (error) {
+      console.error(`❌ Error deleting snapshot:`, error)
+      socket.emit('snapshot-deleted', { success: false, error: error.message })
+    }
+  })
+
   // Get daily P&L history for charting
   socket.on('get-daily-pnl', () => {
     console.log(`📊 Received get-daily-pnl request`)
