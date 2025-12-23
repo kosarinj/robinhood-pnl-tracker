@@ -578,6 +578,7 @@ export class DatabaseService {
       }
 
       const saveSnapshot = db.transaction((asofDate, pnlData) => {
+        let totalDailyPnl = 0
         for (const item of pnlData) {
           const currentTotalPnl = item.real?.totalPnL || 0
           const previousTotalPnl = previousPnLMap[item.symbol] || 0
@@ -585,6 +586,7 @@ export class DatabaseService {
           // Daily P&L = today's total - yesterday's total
           // If no previous day, daily P&L = total P&L
           const dailyPnl = previousDayDate ? (currentTotalPnl - previousTotalPnl) : currentTotalPnl
+          totalDailyPnl += dailyPnl
 
           upsertPnLSnapshot.run({
             asofDate,
@@ -609,7 +611,12 @@ export class DatabaseService {
         }
       })
       saveSnapshot(asofDate, pnlData)
-      console.log(`✅ Saved P&L snapshot for ${asofDate}: ${pnlData.length} symbols`)
+      const totalPnl = pnlData.reduce((sum, item) => sum + (item.real?.totalPnL || 0), 0)
+      console.log(`✅ Saved P&L snapshot for ${asofDate}:`)
+      console.log(`   Previous day: ${previousDayDate || 'none (first snapshot)'}`)
+      console.log(`   Total P&L: ${totalPnl.toFixed(2)}`)
+      console.log(`   Daily P&L: ${totalDailyPnl.toFixed(2)}`)
+      console.log(`   Symbols: ${pnlData.length}`)
     } catch (error) {
       console.error('Error saving P&L snapshot:', error)
       throw error
