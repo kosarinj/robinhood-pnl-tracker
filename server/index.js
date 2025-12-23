@@ -142,11 +142,22 @@ io.on('connection', (socket) => {
         return tradeDate > latest ? tradeDate : latest
       }, new Date(0))
 
+      // Debug: Log the latest trade date details
+      console.log('🔍 Latest trade date object:', latestTradeDate)
+      console.log('🔍 Date components:', {
+        year: latestTradeDate.getFullYear(),
+        month: latestTradeDate.getMonth() + 1,
+        day: latestTradeDate.getDate(),
+        hours: latestTradeDate.getHours(),
+        timezone: latestTradeDate.getTimezoneOffset()
+      })
+
       // Format as YYYY-MM-DD without timezone conversion
       const year = latestTradeDate.getFullYear()
       const month = String(latestTradeDate.getMonth() + 1).padStart(2, '0')
       const day = String(latestTradeDate.getDate()).padStart(2, '0')
       const asofDate = `${year}-${month}-${day}`
+      console.log('🔍 Final asofDate:', asofDate)
 
       // Get historical prices for the asof_date (closing prices from that day)
       console.log(`📅 Fetching historical prices for ${asofDate}...`)
