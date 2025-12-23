@@ -50,8 +50,8 @@ export const parseTrades = (file) => {
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
             const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
 
-            // Parse date
-            const dateStr = row['Activity Date'] || row['Date'] || row['Trade Date']
+            // Parse date - use Process Date (when trade settled) instead of Activity Date
+            const dateStr = row['Process Date'] || row['Activity Date'] || row['Date'] || row['Trade Date']
             const date = new Date(dateStr)
 
             return {
@@ -92,7 +92,7 @@ export const parseTrades = (file) => {
 
               const instrument = row['Instrument'] || row['Symbol'] || ''
               const amount = parseCurrency(row['Amount'] || 0)
-              const dateStr = row['Activity Date'] || row['Date'] || row['Trade Date']
+              const dateStr = row['Process Date'] || row['Activity Date'] || row['Date'] || row['Trade Date']
               const date = new Date(dateStr)
 
               return {
