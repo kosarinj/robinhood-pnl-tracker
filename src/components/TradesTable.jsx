@@ -33,14 +33,15 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     return ''
   }
 
-  // Check if there's a potential sell opportunity by comparing recent buys with recent sells or current price
-  const hasSellOpportunity = (row) => {
+  // Check if there's a potential sell opportunity and return eligible buys
+  const getSellOpportunity = (row) => {
     const recentBuys = row.real?.recentLowestBuys || []
     const recentSells = row.real?.recentSells || []
     const currentPrice = row.currentPrice || 0
+    const eligibleBuys = []
 
     if (recentBuys.length === 0) {
-      return false
+      return { hasOpportunity: false, eligibleBuys: [] }
     }
 
     // Check each buy to see if current price > buy price
@@ -66,14 +67,21 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
           }
         }
 
-        // Only highlight if opportunity hasn't been taken yet
+        // Add to eligible list if opportunity hasn't been taken yet
         if (!alreadySold) {
-          return true
+          eligibleBuys.push({
+            price: buyPrice,
+            daysAgo: buy?.daysAgo || 0,
+            profit: currentPrice - buyPrice
+          })
         }
       }
     }
 
-    return false
+    return {
+      hasOpportunity: eligibleBuys.length > 0,
+      eligibleBuys
+    }
   }
 
   // Helper function to get dynamic gradient color for Daily PNL cells
@@ -889,17 +897,22 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         </thead>
         <tbody>
           {sortedData.map((row, index) => {
-            const sellOpportunity = hasSellOpportunity(row)
+            const sellOpp = getSellOpportunity(row)
+            const tooltipText = sellOpp.hasOpportunity
+              ? `Sell opportunity! Eligible buys:\n${sellOpp.eligibleBuys.map(b =>
+                  `• $${b.price.toFixed(2)} (${b.daysAgo} days ago) → Profit: $${b.profit.toFixed(2)}`
+                ).join('\n')}`
+              : ''
             return (
               <React.Fragment key={index}>
                 <tr
                   className="main-row"
                   onClick={() => toggleExpand(row.symbol)}
-                  style={sellOpportunity ? {
+                  style={sellOpp.hasOpportunity ? {
                     backgroundColor: 'rgba(255, 193, 7, 0.15)',
                     borderLeft: '4px solid #ffc107'
                   } : {}}
-                  title={sellOpportunity ? 'Potential sell opportunity: Current price is higher than recent buy(s) that haven\'t been sold yet' : ''}
+                  title={tooltipText}
                 >
                 <td onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

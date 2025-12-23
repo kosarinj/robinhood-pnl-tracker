@@ -552,8 +552,40 @@ export class DatabaseService {
   // Save P&L snapshot for a specific date
   savePnLSnapshot(asofDate, pnlData) {
     try {
+      // Get previous day's snapshot to calculate daily P&L
+      const previousDayStmt = db.prepare(`
+        SELECT DISTINCT asof_date
+        FROM pnl_snapshots
+        WHERE asof_date < ?
+        ORDER BY asof_date DESC
+        LIMIT 1
+      `)
+      const previousDay = previousDayStmt.get(asofDate)
+      const previousDayDate = previousDay?.asof_date
+
+      // Get previous day's P&L for each symbol if it exists
+      const previousPnLMap = {}
+      if (previousDayDate) {
+        const prevStmt = db.prepare(`
+          SELECT symbol, total_pnl
+          FROM pnl_snapshots
+          WHERE asof_date = ?
+        `)
+        const prevSnapshots = prevStmt.all(previousDayDate)
+        prevSnapshots.forEach(snap => {
+          previousPnLMap[snap.symbol] = snap.total_pnl || 0
+        })
+      }
+
       const saveSnapshot = db.transaction((asofDate, pnlData) => {
         for (const item of pnlData) {
+          const currentTotalPnl = item.real?.totalPnL || 0
+          const previousTotalPnl = previousPnLMap[item.symbol] || 0
+
+          // Daily P&L = today's total - yesterday's total
+          // If no previous day, daily P&L = total P&L
+          const dailyPnl = previousDayDate ? (currentTotalPnl - previousTotalPnl) : currentTotalPnl
+
           upsertPnLSnapshot.run({
             asofDate,
             symbol: item.symbol,
@@ -563,8 +595,8 @@ export class DatabaseService {
             currentValue: item.real?.currentValue || null,
             realizedPnl: item.real?.realizedPnL || null,
             unrealizedPnl: item.real?.unrealizedPnL || null,
-            totalPnl: item.real?.totalPnL || null,
-            dailyPnl: 0, // TODO: Calculate daily change from previous snapshot
+            totalPnl: currentTotalPnl,
+            dailyPnl: dailyPnl,
             optionsPnl: item.optionsPnL || null,
             percentage: item.real?.percentage || null,
             lowestOpenBuyPrice: item.real?.lowestOpenBuyPrice || null,
