@@ -746,7 +746,9 @@ setInterval(async () => {
     let skipCount = 0
 
     // Fetch 1-week-ago snapshot for Made Up Ground calculation (once for all clients)
+    console.log('🔍 Background job: Checking for Made Up Ground data')
     const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+    console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
 
     for (const [socketId, session] of clientSessions.entries()) {
       const socket = io.sockets.sockets.get(socketId)
