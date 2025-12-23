@@ -590,6 +590,11 @@ io.on('connection', (socket) => {
     try {
       const dailyPnL = databaseService.getDailyPnLHistory()
       console.log(`✅ Sending ${dailyPnL.length} days of P&L history`)
+
+      // Debug: Show what dates we have snapshots for
+      const dates = databaseService.getSnapshotDates()
+      console.log(`📅 Available snapshot dates: ${dates.join(', ')}`)
+
       socket.emit('daily-pnl-result', { success: true, data: dailyPnL })
     } catch (error) {
       console.error(`❌ Error getting daily P&L:`, error)
