@@ -577,8 +577,9 @@ export class DatabaseService {
         })
       }
 
+      let totalDailyPnl = 0
       const saveSnapshot = db.transaction((asofDate, pnlData) => {
-        let totalDailyPnl = 0
+        totalDailyPnl = 0
         for (const item of pnlData) {
           const currentTotalPnl = item.real?.totalPnL || 0
           const previousTotalPnl = previousPnLMap[item.symbol] || 0

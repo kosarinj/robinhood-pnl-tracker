@@ -745,23 +745,26 @@ setInterval(async () => {
 
       if (firstSession) {
         // Use session trades if available
+        console.log(`📊 Using active session trades (${firstSession.trades.length} trades)`)
         const prices = { ...updatedPrices, ...firstSession.manualPrices }
         const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
         const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, firstSession.dividendsAndInterest || [])
 
         databaseService.savePnLSnapshot(todayDate, pnlData)
-        console.log(`💾 Saved P&L snapshot for ${todayDate}`)
       } else {
         // No active sessions - load latest trades from database
         const latestUpload = databaseService.getLatestCsvUpload()
+        console.log(`📊 No active session, loading from database...`)
+        console.log(`   Latest CSV upload: ${latestUpload?.upload_date || 'none'}`)
 
         if (latestUpload && latestUpload.upload_date) {
           trades = databaseService.getTrades(latestUpload.upload_date)
+          console.log(`   Loaded ${trades?.length || 0} trades from ${latestUpload.upload_date}`)
 
           if (trades && trades.length > 0) {
             const pnlData = calculatePnL(trades, updatedPrices, true, null, null, [])
+            console.log(`   Calculated P&L for ${pnlData.length} positions`)
             databaseService.savePnLSnapshot(todayDate, pnlData)
-            console.log(`💾 Saved P&L snapshot for ${todayDate}`)
           }
         }
       }
