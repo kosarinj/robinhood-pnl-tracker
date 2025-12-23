@@ -168,7 +168,10 @@ function DailyPnLChart({ useServer, connected }) {
   }
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    // Parse YYYY-MM-DD without timezone conversion
+    const [year, month, day] = dateString.split('-').map(Number)
+    const date = new Date(year, month - 1, day) // months are 0-indexed
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
   const CustomTooltip = ({ active, payload, label }) => {
@@ -187,7 +190,11 @@ function DailyPnLChart({ useServer, connected }) {
           color: isDark ? '#e0e0e0' : '#333'
         }}>
           <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-            {new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            {(() => {
+              const [year, month, day] = label.split('-').map(Number)
+              const date = new Date(year, month - 1, day)
+              return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+            })()}
           </div>
           {payload.map((entry, index) => (
             <div key={index} style={{ color: entry.color }}>
