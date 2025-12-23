@@ -43,21 +43,31 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       return false
     }
 
-    // Check if current price is higher than any recent buy (sell opportunity)
+    // Check each buy to see if current price > buy price
+    // BUT skip if there's already a sell after that buy at a higher price
     for (let i = 0; i < recentBuys.length; i++) {
-      const buyPrice = recentBuys[i]?.price || 0
+      const buy = recentBuys[i]
+      const buyPrice = buy?.price || 0
+      const buyDate = buy?.date
+
       if (currentPrice > buyPrice && buyPrice > 0) {
-        return true
-      }
-    }
+        // Check if there's a sell after this buy that already captured this opportunity
+        let alreadySold = false
 
-    // Also check if recent sells are higher than recent buys
-    if (recentSells.length > 0) {
-      for (let i = 0; i < Math.min(recentBuys.length, recentSells.length); i++) {
-        const buyPrice = recentBuys[i]?.price || 0
-        const sellPrice = recentSells[i]?.price || 0
+        for (let j = 0; j < recentSells.length; j++) {
+          const sell = recentSells[j]
+          const sellPrice = sell?.price || 0
+          const sellDate = sell?.date
 
-        if (sellPrice > buyPrice) {
+          // If there's a sell after this buy at a higher price, opportunity already taken
+          if (sellDate && buyDate && sellDate > buyDate && sellPrice >= buyPrice) {
+            alreadySold = true
+            break
+          }
+        }
+
+        // Only highlight if opportunity hasn't been taken yet
+        if (!alreadySold) {
           return true
         }
       }
@@ -889,7 +899,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     backgroundColor: 'rgba(255, 193, 7, 0.15)',
                     borderLeft: '4px solid #ffc107'
                   } : {}}
-                  title={sellOpportunity ? 'Potential sell opportunity: Current price or recent sells are higher than recent buys' : ''}
+                  title={sellOpportunity ? 'Potential sell opportunity: Current price is higher than recent buy(s) that haven\'t been sold yet' : ''}
                 >
                 <td onClick={(e) => e.stopPropagation()}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
