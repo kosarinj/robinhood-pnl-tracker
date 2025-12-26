@@ -1228,6 +1228,94 @@ function App() {
         })()}
       </div>
 
+      {/* Made Up Ground Manual Calculation */}
+      {pnlData.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <button
+            className="upload-button"
+            onClick={async () => {
+              try {
+                console.log('🔄 Manually calculating Made Up Ground...')
+
+                // Get current viewing date
+                const viewingDate = currentSnapshotDate || currentUploadDate
+                if (!viewingDate) {
+                  alert('No viewing date available')
+                  return
+                }
+
+                // Calculate 7 days ago
+                const [year, month, day] = viewingDate.split('-').map(Number)
+                const date = new Date(year, month - 1, day)
+                date.setDate(date.getDate() - 7)
+                const weekAgoDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+                console.log(`Loading snapshot from ${weekAgoDate}...`)
+                const weekAgoData = await socketService.loadPnLSnapshot(weekAgoDate)
+
+                if (!weekAgoData || weekAgoData.length === 0) {
+                  alert(`No snapshot found for ${weekAgoDate}`)
+                  return
+                }
+
+                console.log(`Loaded ${weekAgoData.length} positions from ${weekAgoDate}`)
+
+                // Create lookup map
+                const weekAgoMap = {}
+                weekAgoData.forEach(row => {
+                  weekAgoMap[row.symbol] = row
+                })
+
+                // Enrich current pnlData
+                const enriched = pnlData.map(position => {
+                  const weekAgo = weekAgoMap[position.symbol]
+                  if (!weekAgo) {
+                    return {
+                      ...position,
+                      madeUpGround: null,
+                      madeUpGroundAvailable: false
+                    }
+                  }
+
+                  const todayRealPnL = position.real?.realizedPnL || 0
+                  const weekAgoRealPnL = weekAgo.realized_pnl || weekAgo.real?.realizedPnL || 0
+                  const weekAgoQuantity = weekAgo.position || 0
+                  const todayPrice = position.currentPrice || 0
+                  const weekAgoPrice = weekAgo.current_price || weekAgo.currentPrice || 0
+
+                  const pnlChange = todayRealPnL - weekAgoRealPnL
+                  const priceMovementEffect = weekAgoQuantity * (todayPrice - weekAgoPrice)
+                  const madeUpGround = pnlChange - priceMovementEffect
+
+                  return {
+                    ...position,
+                    madeUpGround: Number.isFinite(madeUpGround) ? madeUpGround : null,
+                    madeUpGroundAvailable: true,
+                    weekAgoData: {
+                      realizedPnL: weekAgoRealPnL,
+                      position: weekAgoQuantity,
+                      price: weekAgoPrice
+                    }
+                  }
+                })
+
+                console.log('✅ Made Up Ground calculated')
+                setPnlData(enriched)
+              } catch (err) {
+                console.error('Error calculating Made Up Ground:', err)
+                alert(`Error: ${err.message}`)
+              }
+            }}
+            style={{ marginRight: '10px' }}
+          >
+            📊 Calculate Made Up Ground
+          </button>
+          <span style={{ fontSize: '12px', color: '#666' }}>
+            Compares current data against snapshot from 7 days ago
+          </span>
+        </div>
+      )}
+
       {isViewingSnapshot && (
         <div style={{
           background: '#fff3cd',
