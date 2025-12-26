@@ -1421,9 +1421,33 @@ function App() {
                       color: #0d47a1;
                       margin-bottom: 8px;
                     }
+                    .close-btn {
+                      position: fixed;
+                      top: 16px;
+                      right: 16px;
+                      width: 36px;
+                      height: 36px;
+                      background: #dc3545;
+                      color: white;
+                      border: none;
+                      border-radius: 50%;
+                      font-size: 24px;
+                      font-weight: bold;
+                      cursor: pointer;
+                      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                      z-index: 1000;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      line-height: 1;
+                    }
+                    .close-btn:active {
+                      background: #c82333;
+                    }
                   </style>
                 </head>
                 <body>
+                  <button class="close-btn" onclick="window.close()">×</button>
                   <h1>Sale Opportunities <span class="count">${opportunities.length}</span></h1>
                   ${opportunities.map(opp => `
                     <div class="card" style="position: relative;">
