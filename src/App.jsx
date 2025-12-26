@@ -1476,9 +1476,9 @@ function App() {
                           </div>
                         </div>
                         <div class="metric">
-                          <div class="metric-label">Unrealized P&L</div>
-                          <div class="metric-value ${opp.unrealizedPnL >= 0 ? 'positive' : 'negative'}">
-                            ${opp.unrealizedPnL >= 0 ? '+' : ''}$${opp.unrealizedPnL.toFixed(2)}
+                          <div class="metric-label">Total P&L</div>
+                          <div class="metric-value ${opp.totalPnL >= 0 ? 'positive' : 'negative'}">
+                            ${opp.totalPnL >= 0 ? '+' : ''}$${opp.totalPnL.toFixed(2)}
                           </div>
                         </div>
                         <div class="metric">
