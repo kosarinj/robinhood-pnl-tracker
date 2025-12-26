@@ -760,6 +760,16 @@ function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
     const priceMovementEffect = weekAgoQuantity * (todayPrice - weekAgoPrice)
     const madeUpGround = pnlChange - priceMovementEffect
 
+    // Debug first symbol to see actual values
+    if (enrichedCount === 1) {
+      console.log(`   📊 Sample calculation for ${position.symbol}:`)
+      console.log(`      Today real P&L: ${todayRealPnL}, Week ago real P&L: ${weekAgoRealPnL}`)
+      console.log(`      P&L change: ${pnlChange}`)
+      console.log(`      Week ago position: ${weekAgoQuantity}, Today price: ${todayPrice}, Week ago price: ${weekAgoPrice}`)
+      console.log(`      Price movement effect: ${priceMovementEffect}`)
+      console.log(`      Made Up Ground: ${madeUpGround}`)
+    }
+
     return {
       ...position,
       madeUpGround: Number.isFinite(madeUpGround) ? madeUpGround : null,
