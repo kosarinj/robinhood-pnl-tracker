@@ -337,8 +337,9 @@ const calculateReal = (trades, currentPrice, symbol, dividendsAndInterest = []) 
   let recentLowestSellDaysAgo = 0
 
   if (position > 0) {
-    unrealizedPnL = position * currentPrice
     avgCostBasis = totalBuyAmount > 0 ? totalBuyAmount / totalBuyShares : 0
+    const currentValue = position * currentPrice
+    unrealizedPnL = currentValue + realizedPnL
   }
 
   // Find the lowest buy price from ALL buys (not just open positions)
