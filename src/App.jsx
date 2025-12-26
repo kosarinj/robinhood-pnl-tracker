@@ -1245,18 +1245,38 @@ function App() {
                   const avgCost = row.real?.avgCostBasis || 0
                   const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
 
-                  // Get sell opportunities from recent buys
+                  // Get sell opportunities from recent buys (same logic as grid)
                   const recentBuys = row.real?.recentLowestBuys || []
+                  const recentSells = row.real?.recentSells || []
                   const eligibleBuys = []
 
                   for (const buy of recentBuys) {
                     const buyPrice = buy?.price || 0
+                    const buyDate = buy?.date
+
                     if (currentPrice > buyPrice && buyPrice > 0) {
-                      eligibleBuys.push({
-                        price: buyPrice,
-                        daysAgo: buy.daysAgo || 0,
-                        profit: currentPrice - buyPrice
-                      })
+                      // Check if there's a sell after this buy that already captured this opportunity
+                      let alreadySold = false
+
+                      for (const sell of recentSells) {
+                        const sellPrice = sell?.price || 0
+                        const sellDate = sell?.date
+
+                        // If there's a sell after this buy at a higher price, opportunity already taken
+                        if (sellDate && buyDate && sellDate > buyDate && sellPrice >= buyPrice) {
+                          alreadySold = true
+                          break
+                        }
+                      }
+
+                      // Add to eligible list if opportunity hasn't been taken yet
+                      if (!alreadySold) {
+                        eligibleBuys.push({
+                          price: buyPrice,
+                          daysAgo: buy.daysAgo || 0,
+                          profit: currentPrice - buyPrice
+                        })
+                      }
                     }
                   }
 
