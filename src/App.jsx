@@ -1228,9 +1228,188 @@ function App() {
         })()}
       </div>
 
-      {/* Made Up Ground Manual Calculation */}
+      {/* Sale Opportunities View */}
       {pnlData.length > 0 && (
         <div style={{ marginBottom: '16px' }}>
+          <button
+            className="upload-button"
+            onClick={() => {
+              const opportunities = pnlData
+                .filter(row => !row.isOption && !row.isRollup)
+                .map(row => {
+                  const signal = tradingSignals?.find(s => s.symbol === row.symbol)
+                  const unrealizedPnL = row.real?.unrealizedPnL || 0
+                  const totalPnL = row.real?.totalPnL || 0
+                  const position = row.real?.position || 0
+                  const currentPrice = row.currentPrice || 0
+                  const avgCost = row.real?.avgCostBasis || 0
+                  const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
+
+                  // Score the opportunity (higher = better sale candidate)
+                  let score = 0
+                  if (signal?.signal === 'SELL') score += 10
+                  if (unrealizedPnL > 0) score += 5
+                  if (gainPercent > 20) score += 3
+                  if (gainPercent > 50) score += 5
+                  if (totalPnL > 1000) score += 2
+
+                  return {
+                    symbol: row.symbol,
+                    currentPrice,
+                    position,
+                    avgCost,
+                    unrealizedPnL,
+                    totalPnL,
+                    gainPercent,
+                    signal: signal?.signal || 'HOLD',
+                    signalStrength: signal?.strengthLabel || 'N/A',
+                    score
+                  }
+                })
+                .filter(opp => opp.score > 0 || opp.unrealizedPnL > 100)
+                .sort((a, b) => b.score - a.score)
+
+              const html = `
+                <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Sale Opportunities</title>
+                  <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      padding: 16px;
+                      background: #f5f5f5;
+                    }
+                    h1 {
+                      font-size: 24px;
+                      margin-bottom: 16px;
+                      color: #333;
+                    }
+                    .count {
+                      background: #2196f3;
+                      color: white;
+                      padding: 4px 12px;
+                      border-radius: 12px;
+                      font-size: 14px;
+                      margin-left: 8px;
+                    }
+                    .card {
+                      background: white;
+                      border-radius: 12px;
+                      padding: 16px;
+                      margin-bottom: 12px;
+                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    }
+                    .symbol {
+                      font-size: 20px;
+                      font-weight: bold;
+                      color: #333;
+                      margin-bottom: 8px;
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                    }
+                    .signal-badge {
+                      padding: 4px 12px;
+                      border-radius: 16px;
+                      font-size: 12px;
+                      font-weight: bold;
+                    }
+                    .sell { background: #dc3545; color: white; }
+                    .buy { background: #28a745; color: white; }
+                    .hold { background: #6c757d; color: white; }
+                    .metrics {
+                      display: grid;
+                      grid-template-columns: 1fr 1fr;
+                      gap: 12px;
+                      margin-top: 12px;
+                    }
+                    .metric {
+                      display: flex;
+                      flex-direction: column;
+                    }
+                    .metric-label {
+                      font-size: 11px;
+                      color: #666;
+                      text-transform: uppercase;
+                      margin-bottom: 4px;
+                    }
+                    .metric-value {
+                      font-size: 16px;
+                      font-weight: 600;
+                    }
+                    .positive { color: #28a745; }
+                    .negative { color: #dc3545; }
+                    .score {
+                      position: absolute;
+                      top: 16px;
+                      right: 16px;
+                      background: #ffc107;
+                      color: #000;
+                      padding: 4px 8px;
+                      border-radius: 8px;
+                      font-size: 12px;
+                      font-weight: bold;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <h1>Sale Opportunities <span class="count">${opportunities.length}</span></h1>
+                  ${opportunities.map(opp => `
+                    <div class="card" style="position: relative;">
+                      ${opp.score > 10 ? `<div class="score">★ ${opp.score}</div>` : ''}
+                      <div class="symbol">
+                        <span>${opp.symbol}</span>
+                        <span class="signal-badge ${opp.signal.toLowerCase()}">${opp.signal} ${opp.signalStrength}</span>
+                      </div>
+                      <div class="metrics">
+                        <div class="metric">
+                          <div class="metric-label">Price</div>
+                          <div class="metric-value">$${opp.currentPrice.toFixed(2)}</div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Position</div>
+                          <div class="metric-value">${opp.position.toFixed(2)} shares</div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Avg Cost</div>
+                          <div class="metric-value">$${opp.avgCost.toFixed(2)}</div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Gain %</div>
+                          <div class="metric-value ${opp.gainPercent >= 0 ? 'positive' : 'negative'}">
+                            ${opp.gainPercent >= 0 ? '+' : ''}${opp.gainPercent.toFixed(1)}%
+                          </div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Unrealized P&L</div>
+                          <div class="metric-value ${opp.unrealizedPnL >= 0 ? 'positive' : 'negative'}">
+                            ${opp.unrealizedPnL >= 0 ? '+' : ''}$${opp.unrealizedPnL.toFixed(2)}
+                          </div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Total P&L</div>
+                          <div class="metric-value ${opp.totalPnL >= 0 ? 'positive' : 'negative'}">
+                            ${opp.totalPnL >= 0 ? '+' : ''}$${opp.totalPnL.toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  `).join('')}
+                </body>
+                </html>
+              `
+
+              const newWindow = window.open('', '_blank', 'width=400,height=800')
+              newWindow.document.write(html)
+              newWindow.document.close()
+            }}
+            style={{ marginRight: '10px' }}
+          >
+            💰 View Sale Opportunities
+          </button>
+
           <button
             className="upload-button"
             onClick={async () => {
