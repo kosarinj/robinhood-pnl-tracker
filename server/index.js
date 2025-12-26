@@ -253,13 +253,19 @@ io.on('connection', (socket) => {
     let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
     // Enrich with Made Up Ground
-    console.log('🔍 Checking for Made Up Ground enrichment')
+    console.log('🔍 [SOCKET EVENT] Checking for Made Up Ground enrichment')
+    console.log(`   PNL data: ${pnlData.length} positions`)
     const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
     console.log(`   Week ago: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
     if (weekAgoSnapshot.length > 0) {
       pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+      const sample = pnlData[0]
+      console.log(`   ✅ After enrichment - Sample: ${sample?.symbol} madeUpGround=${sample?.madeUpGround}, available=${sample?.madeUpGroundAvailable}`)
+    } else {
+      console.log(`   ⚠️ Skipping enrichment - no week-ago data`)
     }
 
+    console.log(`   📤 Emitting pnl-update to client`)
     socket.emit('pnl-update', { pnlData, currentPrices: prices, madeUpGroundDate: weekAgoDate })
   })
 
@@ -276,13 +282,19 @@ io.on('connection', (socket) => {
     let pnlData = calculatePnL(adjustedTrades, prices, true, null, null, session.dividendsAndInterest || [])
 
     // Enrich with Made Up Ground
-    console.log('🔍 Checking for Made Up Ground enrichment')
+    console.log('🔍 [SOCKET EVENT] Checking for Made Up Ground enrichment')
+    console.log(`   PNL data: ${pnlData.length} positions`)
     const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
     console.log(`   Week ago: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
     if (weekAgoSnapshot.length > 0) {
       pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+      const sample = pnlData[0]
+      console.log(`   ✅ After enrichment - Sample: ${sample?.symbol} madeUpGround=${sample?.madeUpGround}, available=${sample?.madeUpGroundAvailable}`)
+    } else {
+      console.log(`   ⚠️ Skipping enrichment - no week-ago data`)
     }
 
+    console.log(`   📤 Emitting pnl-update to client`)
     socket.emit('pnl-update', { pnlData, currentPrices: prices, madeUpGroundDate: weekAgoDate })
   })
 
