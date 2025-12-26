@@ -443,6 +443,19 @@ io.on('connection', (socket) => {
           }
         })
 
+        // Enrich with Made Up Ground
+        console.log('🔍 [get-latest-trades] Checking for Made Up Ground enrichment')
+        const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+        console.log(`   Week ago: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
+        let enrichedPnlData = pnlDataWithBenchmarks
+        if (weekAgoSnapshot.length > 0) {
+          enrichedPnlData = enrichWithMadeUpGround(pnlDataWithBenchmarks, weekAgoSnapshot)
+          const sample = enrichedPnlData[0]
+          console.log(`   ✅ After enrichment - Sample: ${sample?.symbol} madeUpGround=${sample?.madeUpGround}`)
+        } else {
+          console.log(`   ⚠️ Skipping enrichment - no week-ago data`)
+        }
+
         const deposits = databaseService.getDeposits(uploadDate)
         const totalPrincipal = databaseService.getTotalPrincipal(uploadDate)
 
@@ -453,7 +466,8 @@ io.on('connection', (socket) => {
           deposits,
           totalPrincipal,
           currentPrices: historicalPrices,
-          pnlData: pnlDataWithBenchmarks
+          pnlData: enrichedPnlData,
+          madeUpGroundDate: weekAgoDate
         })
       } else {
         console.log(`ℹ️  No saved trades found`)
