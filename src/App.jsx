@@ -226,12 +226,13 @@ function App() {
       const shouldUpdate = (!currentUploadDate || isViewingTodaysUpload) && (!isViewingSnapshot || isViewingTodaysSnapshot)
 
       if (shouldUpdate) {
-        console.log('✅ Applying price update')
+        const hasMadeUpGround = data.pnlData?.some(d => d.madeUpGround !== null && d.madeUpGround !== undefined)
+        console.warn(`🔄 APPLYING PRICE UPDATE: ${data.pnlData?.length} positions, Made Up Ground: ${hasMadeUpGround ? 'YES ✅' : 'NO ❌'}`)
         setCurrentPrices(data.currentPrices)
         setPnlData(data.pnlData)
         setLastPriceUpdate(new Date(data.timestamp))
       } else {
-        console.log('⏸️  Ignoring price update - viewing historical data')
+        console.warn('⏸️  IGNORING PRICE UPDATE - viewing historical data')
       }
     })
 
@@ -788,6 +789,12 @@ function App() {
 
       // Set snapshot data
       console.log('Setting pnlData to transformed data...')
+      const hasMadeUpGround = transformedData.some(d => d.madeUpGround !== null && d.madeUpGround !== undefined)
+      console.warn(`🎯 SNAPSHOT LOADED: ${transformedData.length} positions, Made Up Ground: ${hasMadeUpGround ? 'YES ✅' : 'NO ❌'}`)
+      if (hasMadeUpGround) {
+        const sample = transformedData.find(d => d.madeUpGround != null)
+        console.warn(`   Sample: ${sample.symbol} = ${sample.madeUpGround}`)
+      }
       setPnlData(transformedData)
       console.log('pnlData set - about to render')
 
