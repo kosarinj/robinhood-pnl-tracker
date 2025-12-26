@@ -729,6 +729,8 @@ export class DatabaseService {
         return { date: null, data: [] }
       }
 
+      console.log(`🔍 Most recent snapshot: ${mostRecent.asof_date}`)
+
       // Calculate target date as N days before the most recent snapshot
       // Parse YYYY-MM-DD without timezone issues
       const [year, month, day] = mostRecent.asof_date.split('-').map(Number)
