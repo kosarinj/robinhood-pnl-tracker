@@ -380,11 +380,26 @@ io.on('connection', (socket) => {
         }
       }))
 
-      // Enrich with Made Up Ground
-      const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
-      console.log(`🔍 Enriching snapshot ${asofDate} with week-ago data from ${weekAgoDate || 'null'}`)
+      // Enrich with Made Up Ground - calculate from the asofDate being viewed
+      console.log(`🔍 Enriching snapshot ${asofDate} with week-ago data`)
+
+      // Calculate week ago date from the asofDate, not from most recent snapshot
+      const [year, month, day] = asofDate.split('-').map(Number)
+      const viewingDate = new Date(year, month - 1, day)
+      viewingDate.setDate(viewingDate.getDate() - 7)
+      const weekAgoYear = viewingDate.getFullYear()
+      const weekAgoMonth = String(viewingDate.getMonth() + 1).padStart(2, '0')
+      const weekAgoDay = String(viewingDate.getDate()).padStart(2, '0')
+      const weekAgoDate = `${weekAgoYear}-${weekAgoMonth}-${weekAgoDay}`
+
+      console.log(`   Calculated week ago: ${weekAgoDate}`)
+      const weekAgoSnapshot = databaseService.getPnLSnapshot(weekAgoDate)
+      console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records`)
+
       if (weekAgoSnapshot.length > 0) {
         transformedSnapshot = enrichWithMadeUpGround(transformedSnapshot, weekAgoSnapshot)
+      } else {
+        console.log(`   ⚠️ No snapshot for ${weekAgoDate}`)
       }
 
       // Send enriched snapshot (transformed back to original structure if needed)
@@ -443,17 +458,30 @@ io.on('connection', (socket) => {
           }
         })
 
-        // Enrich with Made Up Ground
+        // Enrich with Made Up Ground - calculate from the uploadDate being viewed
         console.log('🔍 [get-latest-trades] Checking for Made Up Ground enrichment')
-        const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
-        console.log(`   Week ago: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
+        console.log(`   Viewing date: ${uploadDate}`)
+
+        // Calculate week ago date from the uploadDate, not from most recent snapshot
+        const [year, month, day] = uploadDate.split('-').map(Number)
+        const viewingDate = new Date(year, month - 1, day)
+        viewingDate.setDate(viewingDate.getDate() - 7)
+        const weekAgoYear = viewingDate.getFullYear()
+        const weekAgoMonth = String(viewingDate.getMonth() + 1).padStart(2, '0')
+        const weekAgoDay = String(viewingDate.getDate()).padStart(2, '0')
+        const weekAgoDate = `${weekAgoYear}-${weekAgoMonth}-${weekAgoDay}`
+
+        console.log(`   Calculated week ago: ${weekAgoDate}`)
+        const weekAgoSnapshot = databaseService.getPnLSnapshot(weekAgoDate)
+        console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records from ${weekAgoDate}`)
+
         let enrichedPnlData = pnlDataWithBenchmarks
         if (weekAgoSnapshot.length > 0) {
           enrichedPnlData = enrichWithMadeUpGround(pnlDataWithBenchmarks, weekAgoSnapshot)
           const sample = enrichedPnlData[0]
           console.log(`   ✅ After enrichment - Sample: ${sample?.symbol} madeUpGround=${sample?.madeUpGround}`)
         } else {
-          console.log(`   ⚠️ Skipping enrichment - no week-ago data`)
+          console.log(`   ⚠️ Skipping enrichment - no snapshot for ${weekAgoDate}`)
         }
 
         const deposits = databaseService.getDeposits(uploadDate)
