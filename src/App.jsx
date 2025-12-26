@@ -776,7 +776,11 @@ function App() {
               lowestOpenBuyDaysAgo: row.lowest_open_buy_days_ago || 0
             },
             lifo: { ...emptyPnl },
-            fifo: { ...emptyPnl }
+            fifo: { ...emptyPnl },
+            // Preserve Made Up Ground fields from server enrichment
+            madeUpGround: row.madeUpGround ?? null,
+            madeUpGroundAvailable: row.madeUpGroundAvailable ?? false,
+            weekAgoData: row.weekAgoData || null
           }
         } catch (err) {
           console.error('Error transforming row:', row, err)
