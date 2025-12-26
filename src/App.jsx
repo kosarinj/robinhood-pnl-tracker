@@ -1235,7 +1235,7 @@ function App() {
             className="upload-button"
             onClick={() => {
               const opportunities = pnlData
-                .filter(row => !row.isOption && !row.isRollup)
+                .filter(row => !row.isOption && !row.isRollup && (row.real?.position || 0) > 0)
                 .map(row => {
                   const signal = tradingSignals?.find(s => s.symbol === row.symbol)
                   const unrealizedPnL = row.real?.unrealizedPnL || 0
@@ -1245,9 +1245,25 @@ function App() {
                   const avgCost = row.real?.avgCostBasis || 0
                   const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
 
+                  // Get sell opportunities from recent buys
+                  const recentBuys = row.real?.recentLowestBuys || []
+                  const eligibleBuys = []
+
+                  for (const buy of recentBuys) {
+                    const buyPrice = buy?.price || 0
+                    if (currentPrice > buyPrice && buyPrice > 0) {
+                      eligibleBuys.push({
+                        price: buyPrice,
+                        daysAgo: buy.daysAgo || 0,
+                        profit: currentPrice - buyPrice
+                      })
+                    }
+                  }
+
                   // Score the opportunity (higher = better sale candidate)
                   let score = 0
                   if (signal?.signal === 'SELL') score += 10
+                  if (eligibleBuys.length > 0) score += 8
                   if (unrealizedPnL > 0) score += 5
                   if (gainPercent > 20) score += 3
                   if (gainPercent > 50) score += 5
@@ -1262,12 +1278,13 @@ function App() {
                     totalPnL,
                     gainPercent,
                     signal: signal?.signal || 'HOLD',
-                    signalStrength: signal?.strengthLabel || 'N/A',
-                    score
+                    signalStrength: signal?.signalStrength || 'N/A',
+                    score,
+                    eligibleBuys,
+                    recentBuys
                   }
                 })
-                .filter(opp => opp.score > 0 || opp.unrealizedPnL > 100)
-                .sort((a, b) => b.score - a.score)
+                .sort((a, b) => a.symbol.localeCompare(b.symbol))
 
               const html = `
                 <html>
@@ -1352,6 +1369,38 @@ function App() {
                       font-size: 12px;
                       font-weight: bold;
                     }
+                    .sell-opps {
+                      margin-top: 12px;
+                      padding: 12px;
+                      background: #fff3cd;
+                      border-left: 4px solid #ffc107;
+                      border-radius: 4px;
+                    }
+                    .sell-opps-title {
+                      font-size: 12px;
+                      font-weight: bold;
+                      color: #856404;
+                      margin-bottom: 8px;
+                    }
+                    .buy-item {
+                      font-size: 13px;
+                      color: #333;
+                      margin-bottom: 4px;
+                      padding-left: 8px;
+                    }
+                    .recent-buys {
+                      margin-top: 12px;
+                      padding: 12px;
+                      background: #e3f2fd;
+                      border-left: 4px solid #2196f3;
+                      border-radius: 4px;
+                    }
+                    .recent-buys-title {
+                      font-size: 12px;
+                      font-weight: bold;
+                      color: #0d47a1;
+                      margin-bottom: 8px;
+                    }
                   </style>
                 </head>
                 <body>
@@ -1395,6 +1444,22 @@ function App() {
                           </div>
                         </div>
                       </div>
+                      ${opp.eligibleBuys.length > 0 ? `
+                        <div class="sell-opps">
+                          <div class="sell-opps-title">🎯 Sell Opportunities</div>
+                          ${opp.eligibleBuys.map(buy => `
+                            <div class="buy-item">• $${buy.price.toFixed(2)} (${buy.daysAgo}d ago) → Profit: +$${buy.profit.toFixed(2)}</div>
+                          `).join('')}
+                        </div>
+                      ` : ''}
+                      ${opp.recentBuys && opp.recentBuys.length > 0 ? `
+                        <div class="recent-buys">
+                          <div class="recent-buys-title">📋 All Recent Buys</div>
+                          ${opp.recentBuys.map((buy, i) => `
+                            <div class="buy-item">#${i + 1}: $${buy.price?.toFixed(2) || '0.00'} (${buy.daysAgo || 0}d ago)</div>
+                          `).join('')}
+                        </div>
+                      ` : ''}
                     </div>
                   `).join('')}
                 </body>
