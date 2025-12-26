@@ -369,10 +369,10 @@ io.on('connection', (socket) => {
     try {
       let snapshot = databaseService.getPnLSnapshot(asofDate)
 
-      // Transform snapshot data to match P&L calculation format for enrichment
-      let transformedSnapshot = snapshot.map(row => ({
-        symbol: row.symbol,
-        currentPrice: row.current_price,
+      // Add enrichment-compatible fields to snapshot data (keep all original fields)
+      let snapshotWithRealField = snapshot.map(row => ({
+        ...row,  // Keep all DB fields (position, avg_cost, current_price, etc.)
+        currentPrice: row.current_price,  // Add alias for enrichment
         real: {
           realizedPnL: row.realized_pnl || 0,
           unrealizedPnL: row.unrealized_pnl || 0,
@@ -397,13 +397,13 @@ io.on('connection', (socket) => {
       console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records`)
 
       if (weekAgoSnapshot.length > 0) {
-        transformedSnapshot = enrichWithMadeUpGround(transformedSnapshot, weekAgoSnapshot)
+        snapshotWithRealField = enrichWithMadeUpGround(snapshotWithRealField, weekAgoSnapshot)
       } else {
         console.log(`   ⚠️ No snapshot for ${weekAgoDate}`)
       }
 
-      // Send enriched snapshot (transformed back to original structure if needed)
-      socket.emit('pnl-snapshot-loaded', { success: true, asofDate, data: transformedSnapshot, madeUpGroundDate: weekAgoDate })
+      // Send enriched snapshot with all fields
+      socket.emit('pnl-snapshot-loaded', { success: true, asofDate, data: snapshotWithRealField, madeUpGroundDate: weekAgoDate })
     } catch (error) {
       console.error(`❌ Error loading P&L snapshot:`, error)
       socket.emit('pnl-snapshot-loaded', { success: false, error: error.message })
