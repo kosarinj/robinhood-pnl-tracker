@@ -1255,6 +1255,7 @@ function App() {
                     if (currentPrice > buyPrice && buyPrice > 0) {
                       eligibleBuys.push({
                         price: buyPrice,
+                        quantity: buy.quantity || 0,
                         daysAgo: buy.daysAgo || 0,
                         profit: currentPrice - buyPrice,
                         profitPercent: ((currentPrice - buyPrice) / buyPrice * 100)
@@ -1488,7 +1489,7 @@ function App() {
                                   style="cursor: pointer; width: 16px; height: 16px;"
                                 />
                                 <label for="${checkboxId}" style="cursor: pointer; flex: 1;">
-                                  $${buy.price.toFixed(2)} (${buy.daysAgo}d ago) → Profit: +$${buy.profit.toFixed(2)} (+${buy.profitPercent.toFixed(1)}%)
+                                  ${buy.quantity.toFixed(2)} shares @ $${buy.price.toFixed(2)} (${buy.daysAgo}d ago) → Profit: +$${buy.profit.toFixed(2)} (+${buy.profitPercent.toFixed(1)}%)
                                 </label>
                               </div>
                             `;
@@ -1506,7 +1507,7 @@ function App() {
                             const textColor = isUnderwater ? '#dc3545' : '#28a745';
                             return `
                               <div class="buy-item" style="color: ${isUnderwater ? '#dc3545' : 'inherit'};">
-                                #${i + 1}: $${buyPrice.toFixed(2)} (${buy.daysAgo || 0}d ago)
+                                #${i + 1}: ${buy.quantity?.toFixed(2) || '0'} shares @ $${buyPrice.toFixed(2)} (${buy.daysAgo || 0}d ago)
                                 <span style="color: ${textColor}; margin-left: 8px; font-weight: 500;">
                                   ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)} (${profitPercent >= 0 ? '+' : ''}${profitPercent.toFixed(1)}%)
                                 </span>

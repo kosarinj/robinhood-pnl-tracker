@@ -276,6 +276,7 @@ const calculateReal = (trades, currentPrice, symbol, dividendsAndInterest = []) 
       // Track all buys for most recent buys list
       mostRecentBuys.push({
         price: trade.price,
+        quantity: trade.quantity,
         date: trade.date || trade.transDate,
         dateObj: tradeDate
       })
@@ -372,6 +373,7 @@ const calculateReal = (trades, currentPrice, symbol, dividendsAndInterest = []) 
     const daysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
     return {
       price: roundToTwo(buy.price),
+      quantity: roundToTwo(buy.quantity),
       date: buy.date,
       daysAgo: daysAgo
     }
