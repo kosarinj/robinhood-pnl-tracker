@@ -1288,10 +1288,9 @@ function App() {
                 })
                 .filter(opp => {
                   // Show all positions where you have shares (you can always sell if you own it)
-                  // But prioritize by showing high-scoring opportunities first
                   return opp.position > 0
                 })
-                .sort((a, b) => b.score - a.score) // Sort by score (highest opportunities first)
+                .sort((a, b) => a.symbol.localeCompare(b.symbol)) // Sort alphabetically by symbol
 
               const html = `
                 <html>
