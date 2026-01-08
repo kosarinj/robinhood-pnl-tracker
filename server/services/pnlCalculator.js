@@ -245,11 +245,11 @@ const calculateReal = (trades, currentPrice, symbol, dividendsAndInterest = []) 
   // Track ALL buys to find the lowest buy price ever
   let lowestBuyEver = null
 
-  // Track most recent buys - keep top 10 most recent by date
+  // Track most recent buys - keep top 50 most recent by date
   let mostRecentBuys = []
-  // Track most recent sells - keep top 10 most recent by date
+  // Track most recent sells - keep top 50 most recent by date
   let mostRecentSells = []
-  const maxToTrack = 10 // Track up to 10 of each
+  const maxToTrack = 50 // Track up to 50 of each
 
   trades.forEach((trade) => {
     if (trade.isBuy) {
@@ -422,8 +422,8 @@ const calculateReal = (trades, currentPrice, symbol, dividendsAndInterest = []) 
     recentLowestBuyDaysAgo: recentLowestBuyDaysAgo,
     recentLowestSellPrice: roundToTwo(recentLowestSellPrice),
     recentLowestSellDaysAgo: recentLowestSellDaysAgo,
-    recentLowestBuys: recentBuysWithDays,  // Array of top 10 most recent
-    recentSells: recentSellsWithDays  // Array of top 10 most recent
+    recentLowestBuys: recentBuysWithDays,  // Array of top 50 most recent
+    recentSells: recentSellsWithDays  // Array of top 50 most recent
   }
 }
 
