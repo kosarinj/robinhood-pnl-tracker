@@ -1612,6 +1612,226 @@ function App() {
           <button
             className="upload-button"
             onClick={() => {
+              // Calculate recommended buy quantities
+              const recommendations = pnlData
+                .filter(row => !row.isOption && !row.isRollup)
+                .map(row => {
+                  const symbol = row.symbol
+                  const symbolTrades = trades.filter(t => t.symbol === symbol)
+                  const currentPrice = row.currentPrice || 0
+
+                  if (currentPrice === 0) return null
+
+                  // Calculate average capital deployed per trade
+                  const buyTrades = symbolTrades.filter(t => t.isBuy)
+                  const avgCapitalPerTrade = buyTrades.length > 0
+                    ? buyTrades.reduce((sum, t) => sum + (t.price * t.quantity), 0) / buyTrades.length
+                    : 0
+
+                  // Calculate how much the stock dropped from recent highs
+                  const recentBuys = row.real?.recentLowestBuys || []
+                  const recentHighBuy = recentBuys.length > 0
+                    ? Math.max(...recentBuys.map(b => b.price))
+                    : currentPrice
+
+                  const priceDrop = recentHighBuy > 0
+                    ? ((recentHighBuy - currentPrice) / recentHighBuy * 100)
+                    : 0
+
+                  // Recommended quantity based on average capital deployed
+                  const recommendedQty = avgCapitalPerTrade > 0
+                    ? Math.floor(avgCapitalPerTrade / currentPrice)
+                    : 0
+
+                  const recommendedCost = recommendedQty * currentPrice
+
+                  return {
+                    symbol,
+                    currentPrice,
+                    recentHighBuy,
+                    priceDrop,
+                    avgCapitalPerTrade,
+                    recommendedQty,
+                    recommendedCost,
+                    position: row.real?.position || 0,
+                    avgCostBasis: row.real?.avgCostBasis || 0
+                  }
+                })
+                .filter(r => r && r.recommendedQty > 0) // Only show symbols with valid recommendations
+                .sort((a, b) => b.priceDrop - a.priceDrop) // Sort by highest price drop first
+
+              // Create HTML for popup
+              const html = `
+                <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Recommended Buy Quantities</title>
+                  <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      padding: 20px;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      min-height: 100vh;
+                    }
+                    h1 {
+                      color: white;
+                      margin-bottom: 20px;
+                      font-size: 24px;
+                      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    }
+                    .count {
+                      background: rgba(255,255,255,0.2);
+                      padding: 4px 12px;
+                      border-radius: 12px;
+                      font-size: 14px;
+                      margin-left: 10px;
+                    }
+                    .card {
+                      background: white;
+                      border-radius: 12px;
+                      padding: 16px;
+                      margin-bottom: 12px;
+                      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                      transition: transform 0.2s, box-shadow 0.2s;
+                    }
+                    .card:hover {
+                      transform: translateY(-2px);
+                      box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+                    }
+                    .card-header {
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      margin-bottom: 12px;
+                    }
+                    .symbol {
+                      font-size: 20px;
+                      font-weight: bold;
+                      color: #333;
+                    }
+                    .drop-badge {
+                      padding: 6px 12px;
+                      border-radius: 20px;
+                      font-weight: bold;
+                      font-size: 14px;
+                      background: #fff3cd;
+                      color: #856404;
+                    }
+                    .recommendation {
+                      background: #d4edda;
+                      border-left: 4px solid #28a745;
+                      padding: 12px;
+                      margin: 12px 0;
+                      border-radius: 6px;
+                    }
+                    .recommendation-title {
+                      font-weight: bold;
+                      color: #155724;
+                      margin-bottom: 8px;
+                      font-size: 16px;
+                    }
+                    .recommendation-value {
+                      font-size: 24px;
+                      font-weight: bold;
+                      color: #28a745;
+                    }
+                    .recommendation-cost {
+                      font-size: 14px;
+                      color: #666;
+                      margin-top: 4px;
+                    }
+                    .metric-row {
+                      display: flex;
+                      justify-content: space-between;
+                      padding: 8px 0;
+                      border-bottom: 1px solid #f0f0f0;
+                    }
+                    .metric-row:last-child {
+                      border-bottom: none;
+                    }
+                    .metric-label {
+                      color: #666;
+                      font-size: 14px;
+                    }
+                    .metric-value {
+                      color: #333;
+                      font-weight: 600;
+                      font-size: 14px;
+                    }
+                    .close-btn {
+                      position: fixed;
+                      top: 20px;
+                      right: 20px;
+                      background: rgba(255,255,255,0.9);
+                      border: none;
+                      border-radius: 50%;
+                      width: 36px;
+                      height: 36px;
+                      font-size: 24px;
+                      cursor: pointer;
+                      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                      z-index: 1000;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <button class="close-btn" onclick="window.close()">×</button>
+                  <h1>🎯 Recommended Buy Quantities <span class="count">${recommendations.length}</span></h1>
+                  <div style="color: white; margin-bottom: 20px; font-size: 14px; opacity: 0.9;">
+                    Based on your average capital deployment per trade
+                  </div>
+                  ${recommendations.map(r => `
+                    <div class="card">
+                      <div class="card-header">
+                        <span class="symbol">${r.symbol}</span>
+                        ${r.priceDrop > 0 ? `<span class="drop-badge">📉 ${r.priceDrop.toFixed(2)}% drop</span>` : ''}
+                      </div>
+                      <div class="recommendation">
+                        <div class="recommendation-title">💡 Recommended Buy</div>
+                        <div class="recommendation-value">${r.recommendedQty} shares</div>
+                        <div class="recommendation-cost">Est. cost: $${r.recommendedCost.toFixed(2)}</div>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">📍 Current Price</span>
+                        <span class="metric-value">$${r.currentPrice.toFixed(2)}</span>
+                      </div>
+                      ${r.recentHighBuy > r.currentPrice ? `
+                        <div class="metric-row">
+                          <span class="metric-label">📈 Recent High</span>
+                          <span class="metric-value">$${r.recentHighBuy.toFixed(2)}</span>
+                        </div>
+                      ` : ''}
+                      <div class="metric-row">
+                        <span class="metric-label">💰 Avg Capital/Trade</span>
+                        <span class="metric-value">$${r.avgCapitalPerTrade.toFixed(2)}</span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">📦 Current Position</span>
+                        <span class="metric-value">${r.position.toFixed(2)} shares</span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">💵 Avg Cost Basis</span>
+                        <span class="metric-value">$${r.avgCostBasis.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  `).join('')}
+                </body>
+                </html>
+              `
+
+              const newWindow = window.open('', '_blank', 'width=400,height=800')
+              newWindow.document.write(html)
+              newWindow.document.close()
+            }}
+            style={{ marginRight: '10px', marginTop: '10px' }}
+          >
+            🎯 Recommended Buy Quantities
+          </button>
+
+          <button
+            className="upload-button"
+            onClick={() => {
               // Calculate capital efficiency metrics for each symbol
               const metrics = pnlData
                 .filter(row => !row.isOption && !row.isRollup)
