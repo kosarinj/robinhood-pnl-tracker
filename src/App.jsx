@@ -1092,7 +1092,7 @@ function App() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           {useServer && connected && uploadDates.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <label style={{ fontSize: '14px', fontWeight: '500' }}>Saved Data:</label>
@@ -1303,6 +1303,13 @@ function App() {
                     eligibleBuys,
                     recentBuys
                   }
+                })
+                .filter(opp => {
+                  // Show if: has sell signal, has eligible buys, or has significant gains
+                  return opp.signal === 'SELL' ||
+                         opp.eligibleBuys.length > 0 ||
+                         opp.gainPercent > 20 ||
+                         opp.unrealizedPnL > 500
                 })
                 .sort((a, b) => a.symbol.localeCompare(b.symbol))
 

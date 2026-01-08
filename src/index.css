@@ -1236,6 +1236,12 @@ button:disabled {
     padding: 10px 16px !important;
   }
 
+  /* Upload button - adjust for mobile */
+  .upload-button {
+    width: 100%;
+    justify-content: center;
+  }
+
   /* Signal popup - full screen on mobile */
   .signal-popup {
     width: 95% !important;
