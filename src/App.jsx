@@ -1478,20 +1478,20 @@ function App() {
                         <div class="sell-opps">
                           <div class="sell-opps-title">🎯 Sell Opportunities (${opp.eligibleBuys.length})</div>
                           ${opp.eligibleBuys.map((buy, idx) => {
-                            const checkboxId = \`sold-\${opp.symbol}-\${buy.price.toFixed(2)}-\${buy.daysAgo}\`;
-                            return \`
+                            const checkboxId = 'sold-' + opp.symbol + '-' + buy.price.toFixed(2) + '-' + buy.daysAgo;
+                            return `
                               <div class="buy-item" style="display: flex; align-items: center; gap: 8px;">
                                 <input
                                   type="checkbox"
-                                  id="\${checkboxId}"
-                                  onchange="toggleSold('\${checkboxId}')"
+                                  id="${checkboxId}"
+                                  onchange="toggleSold('${checkboxId}')"
                                   style="cursor: pointer; width: 16px; height: 16px;"
                                 />
-                                <label for="\${checkboxId}" style="cursor: pointer; flex: 1;">
-                                  $\${buy.price.toFixed(2)} (\${buy.daysAgo}d ago) → Profit: +$\${buy.profit.toFixed(2)} (+\${buy.profitPercent.toFixed(1)}%)
+                                <label for="${checkboxId}" style="cursor: pointer; flex: 1;">
+                                  $${buy.price.toFixed(2)} (${buy.daysAgo}d ago) → Profit: +$${buy.profit.toFixed(2)} (+${buy.profitPercent.toFixed(1)}%)
                                 </label>
                               </div>
-                            \`;
+                            `;
                           }).join('')}
                         </div>
                       ` : ''}
@@ -1527,7 +1527,7 @@ function App() {
                     // Load checkbox states from server
                     async function loadCheckboxStates() {
                       try {
-                        const response = await fetch(\`\${API_BASE}/api/sold-opportunities\`);
+                        const response = await fetch(API_BASE + '/api/sold-opportunities');
                         soldItems = await response.json();
 
                         soldItems.forEach(id => {
@@ -1551,7 +1551,7 @@ function App() {
                     // Save to server
                     async function saveSoldItems() {
                       try {
-                        await fetch(\`\${API_BASE}/api/sold-opportunities\`, {
+                        await fetch(API_BASE + '/api/sold-opportunities', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ soldItems })
