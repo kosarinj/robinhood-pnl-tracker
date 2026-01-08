@@ -1134,6 +1134,41 @@ app.post('/api/robinhood/download', async (req, res) => {
   }
 })
 
+// Sold opportunities tracking
+const SOLD_OPPORTUNITIES_FILE = './data/sold-opportunities.json'
+
+// Ensure data directory exists
+if (!fs.existsSync('./data')) {
+  fs.mkdirSync('./data', { recursive: true })
+}
+
+// GET sold opportunities
+app.get('/api/sold-opportunities', (req, res) => {
+  try {
+    if (fs.existsSync(SOLD_OPPORTUNITIES_FILE)) {
+      const data = fs.readFileSync(SOLD_OPPORTUNITIES_FILE, 'utf-8')
+      res.json(JSON.parse(data))
+    } else {
+      res.json([])
+    }
+  } catch (error) {
+    console.error('Error reading sold opportunities:', error)
+    res.status(500).json({ error: 'Failed to read sold opportunities' })
+  }
+})
+
+// POST sold opportunities (save/update)
+app.post('/api/sold-opportunities', (req, res) => {
+  try {
+    const soldItems = req.body.soldItems || []
+    fs.writeFileSync(SOLD_OPPORTUNITIES_FILE, JSON.stringify(soldItems, null, 2))
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Error saving sold opportunities:', error)
+    res.status(500).json({ error: 'Failed to save sold opportunities' })
+  }
+})
+
 const PORT = process.env.PORT || 3001
 const HOST = '0.0.0.0' // Listen on all interfaces for Railway
 

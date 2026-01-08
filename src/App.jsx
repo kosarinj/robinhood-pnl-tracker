@@ -1477,21 +1477,119 @@ function App() {
                       ${opp.eligibleBuys.length > 0 ? `
                         <div class="sell-opps">
                           <div class="sell-opps-title">🎯 Sell Opportunities (${opp.eligibleBuys.length})</div>
-                          ${opp.eligibleBuys.map(buy => `
-                            <div class="buy-item">• $${buy.price.toFixed(2)} (${buy.daysAgo}d ago) → Profit: +$${buy.profit.toFixed(2)} (+${buy.profitPercent.toFixed(1)}%)</div>
-                          `).join('')}
+                          ${opp.eligibleBuys.map((buy, idx) => {
+                            const checkboxId = \`sold-\${opp.symbol}-\${buy.price.toFixed(2)}-\${buy.daysAgo}\`;
+                            return \`
+                              <div class="buy-item" style="display: flex; align-items: center; gap: 8px;">
+                                <input
+                                  type="checkbox"
+                                  id="\${checkboxId}"
+                                  onchange="toggleSold('\${checkboxId}')"
+                                  style="cursor: pointer; width: 16px; height: 16px;"
+                                />
+                                <label for="\${checkboxId}" style="cursor: pointer; flex: 1;">
+                                  $\${buy.price.toFixed(2)} (\${buy.daysAgo}d ago) → Profit: +$\${buy.profit.toFixed(2)} (+\${buy.profitPercent.toFixed(1)}%)
+                                </label>
+                              </div>
+                            \`;
+                          }).join('')}
                         </div>
                       ` : ''}
                       ${opp.recentBuys && opp.recentBuys.length > 0 ? `
                         <div class="recent-buys">
                           <div class="recent-buys-title">📋 Recent Buys</div>
-                          ${opp.recentBuys.map((buy, i) => `
-                            <div class="buy-item">#${i + 1}: $${buy.price?.toFixed(2) || '0.00'} (${buy.daysAgo || 0}d ago)</div>
-                          `).join('')}
+                          ${opp.recentBuys.map((buy, i) => {
+                            const buyPrice = buy.price || 0;
+                            const isUnderwater = opp.currentPrice < buyPrice;
+                            const profit = opp.currentPrice - buyPrice;
+                            const profitPercent = buyPrice > 0 ? (profit / buyPrice * 100) : 0;
+                            const textColor = isUnderwater ? '#dc3545' : '#28a745';
+                            return `
+                              <div class="buy-item" style="color: ${isUnderwater ? '#dc3545' : 'inherit'};">
+                                #${i + 1}: $${buyPrice.toFixed(2)} (${buy.daysAgo || 0}d ago)
+                                <span style="color: ${textColor}; margin-left: 8px; font-weight: 500;">
+                                  ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)} (${profitPercent >= 0 ? '+' : ''}${profitPercent.toFixed(1)}%)
+                                </span>
+                              </div>
+                            `;
+                          }).join('')}
                         </div>
                       ` : ''}
                     </div>
                   `).join('')}
+                  <script>
+                    const API_BASE = window.location.origin.includes('localhost')
+                      ? 'http://localhost:3001'
+                      : window.location.origin;
+
+                    let soldItems = [];
+
+                    // Load checkbox states from server
+                    async function loadCheckboxStates() {
+                      try {
+                        const response = await fetch(\`\${API_BASE}/api/sold-opportunities\`);
+                        soldItems = await response.json();
+
+                        soldItems.forEach(id => {
+                          const checkbox = document.getElementById(id);
+                          if (checkbox) {
+                            checkbox.checked = true;
+                            // Style the checked item
+                            const label = checkbox.nextElementSibling;
+                            if (label) {
+                              label.style.textDecoration = 'line-through';
+                              label.style.opacity = '0.5';
+                            }
+                          }
+                        });
+                      } catch (error) {
+                        console.error('Failed to load sold opportunities:', error);
+                        soldItems = [];
+                      }
+                    }
+
+                    // Save to server
+                    async function saveSoldItems() {
+                      try {
+                        await fetch(\`\${API_BASE}/api/sold-opportunities\`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ soldItems })
+                        });
+                      } catch (error) {
+                        console.error('Failed to save sold opportunities:', error);
+                      }
+                    }
+
+                    // Toggle sold state
+                    async function toggleSold(checkboxId) {
+                      const checkbox = document.getElementById(checkboxId);
+                      const label = checkbox.nextElementSibling;
+
+                      if (checkbox.checked) {
+                        // Mark as sold
+                        if (!soldItems.includes(checkboxId)) {
+                          soldItems.push(checkboxId);
+                        }
+                        if (label) {
+                          label.style.textDecoration = 'line-through';
+                          label.style.opacity = '0.5';
+                        }
+                      } else {
+                        // Unmark as sold
+                        soldItems = soldItems.filter(id => id !== checkboxId);
+                        if (label) {
+                          label.style.textDecoration = 'none';
+                          label.style.opacity = '1';
+                        }
+                      }
+
+                      await saveSoldItems();
+                    }
+
+                    // Load states on page load
+                    window.onload = loadCheckboxStates;
+                  </script>
                 </body>
                 </html>
               `
