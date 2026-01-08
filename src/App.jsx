@@ -1305,13 +1305,11 @@ function App() {
                   }
                 })
                 .filter(opp => {
-                  // Show if: has sell signal, has eligible buys, or has significant gains
-                  return opp.signal === 'SELL' ||
-                         opp.eligibleBuys.length > 0 ||
-                         opp.gainPercent > 20 ||
-                         opp.unrealizedPnL > 500
+                  // Show all positions where you have shares (you can always sell if you own it)
+                  // But prioritize by showing high-scoring opportunities first
+                  return opp.position > 0
                 })
-                .sort((a, b) => a.symbol.localeCompare(b.symbol))
+                .sort((a, b) => b.score - a.score) // Sort by score (highest opportunities first)
 
               const html = `
                 <html>
