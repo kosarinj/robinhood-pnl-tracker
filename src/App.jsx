@@ -1915,12 +1915,11 @@ function App() {
                 .filter(row => !row.isOption && !row.isRollup)
                 .map(row => {
                   const symbol = row.symbol
-                  const symbolTrades = trades.filter(t => t.symbol === symbol)
+                  const currentPrice = row.currentPrice || 0
+                  const position = row.real?.position || 0
 
-                  // Calculate total capital deployed (sum of all buy amounts)
-                  const totalCapitalDeployed = symbolTrades
-                    .filter(t => t.isBuy)
-                    .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+                  // Calculate capital deployed (current price × current position)
+                  const totalCapitalDeployed = currentPrice * position
 
                   // Get total P&L
                   const totalPnL = row.real?.totalPnL || 0
@@ -1939,8 +1938,8 @@ function App() {
                     realizedPnL,
                     unrealizedPnL,
                     returnPercent,
-                    currentPrice: row.currentPrice || 0,
-                    position: row.real?.position || 0
+                    currentPrice,
+                    position
                   }
                 })
                 .filter(m => m.totalCapitalDeployed > 0) // Only show symbols with actual capital deployed
