@@ -409,6 +409,19 @@ const calculateReal = (trades, currentPrice, symbol, dividendsAndInterest = []) 
   // Calculate percentage return: Total P&L / total invested
   const percentageReturn = totalBuyAmount > 0 ? (totalPnL / totalBuyAmount) * 100 : 0
 
+  // Format buyQueue (open positions) with days ago for each buy
+  const openBuysWithDays = buyQueue.map(buy => {
+    const buyDate = new Date(buy.date)
+    buyDate.setHours(0, 0, 0, 0)
+    const daysAgo = Math.floor((todayCalc - buyDate) / (1000 * 60 * 60 * 24))
+    return {
+      price: roundToTwo(buy.price),
+      date: buy.date,
+      daysAgo: daysAgo,
+      quantity: roundToTwo(buy.quantity)
+    }
+  })
+
   return {
     realizedPnL: roundToTwo(realizedPnL),
     unrealizedPnL: roundToTwo(unrealizedPnL),
@@ -422,8 +435,9 @@ const calculateReal = (trades, currentPrice, symbol, dividendsAndInterest = []) 
     recentLowestBuyDaysAgo: recentLowestBuyDaysAgo,
     recentLowestSellPrice: roundToTwo(recentLowestSellPrice),
     recentLowestSellDaysAgo: recentLowestSellDaysAgo,
-    recentLowestBuys: recentBuysWithDays,  // Array of top 3
-    recentSells: recentSellsWithDays  // Array of top 3
+    recentLowestBuys: recentBuysWithDays,  // Array of top 10 most recent
+    recentSells: recentSellsWithDays,  // Array of top 10 most recent
+    openBuys: openBuysWithDays  // Array of all open buy positions (FIFO tracked)
   }
 }
 
