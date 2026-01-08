@@ -1245,19 +1245,17 @@ function App() {
                   const avgCost = row.real?.avgCostBasis || 0
                   const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
 
-                  // Get sell opportunities from OPEN buys (these are actual positions you can sell)
-                  const openBuys = row.real?.openBuys || []
+                  // Get sell opportunities from recent buys
+                  const recentBuys = row.real?.recentLowestBuys || []
                   const eligibleBuys = []
 
-                  for (const buy of openBuys) {
+                  for (const buy of recentBuys) {
                     const buyPrice = buy?.price || 0
 
                     if (currentPrice > buyPrice && buyPrice > 0) {
-                      // This is an open position with profit potential
                       eligibleBuys.push({
                         price: buyPrice,
                         daysAgo: buy.daysAgo || 0,
-                        quantity: buy.quantity || 0,
                         profit: currentPrice - buyPrice,
                         profitPercent: ((currentPrice - buyPrice) / buyPrice * 100)
                       })
@@ -1285,7 +1283,7 @@ function App() {
                     signalStrength: signal?.signalStrength || 'N/A',
                     score,
                     eligibleBuys,
-                    openBuys
+                    recentBuys
                   }
                 })
                 .filter(opp => {
@@ -1479,28 +1477,18 @@ function App() {
                       </div>
                       ${opp.eligibleBuys.length > 0 ? `
                         <div class="sell-opps">
-                          <div class="sell-opps-title">🎯 Profitable Open Positions (${opp.eligibleBuys.length})</div>
+                          <div class="sell-opps-title">🎯 Sell Opportunities (${opp.eligibleBuys.length})</div>
                           ${opp.eligibleBuys.map(buy => `
-                            <div class="buy-item">• ${buy.quantity?.toFixed(2) || '0'} shares @ $${buy.price.toFixed(2)} (${buy.daysAgo}d ago) → Profit: +$${buy.profit.toFixed(2)} (+${buy.profitPercent.toFixed(1)}%)</div>
+                            <div class="buy-item">• $${buy.price.toFixed(2)} (${buy.daysAgo}d ago) → Profit: +$${buy.profit.toFixed(2)} (+${buy.profitPercent.toFixed(1)}%)</div>
                           `).join('')}
                         </div>
                       ` : ''}
-                      ${opp.openBuys && opp.openBuys.length > 0 ? `
+                      ${opp.recentBuys && opp.recentBuys.length > 0 ? `
                         <div class="recent-buys">
-                          <div class="recent-buys-title">📋 All Open Buy Positions</div>
-                          ${opp.openBuys.map((buy, i) => {
-                            const profit = opp.currentPrice - (buy.price || 0)
-                            const profitPercent = buy.price > 0 ? (profit / buy.price * 100) : 0
-                            const profitColor = profit >= 0 ? '#28a745' : '#dc3545'
-                            return `
-                              <div class="buy-item">
-                                #${i + 1}: ${buy.quantity?.toFixed(2) || '0'} shares @ $${buy.price?.toFixed(2) || '0.00'} (${buy.daysAgo || 0}d ago)
-                                <span style="color: ${profitColor}; margin-left: 8px;">
-                                  ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)} (${profitPercent >= 0 ? '+' : ''}${profitPercent.toFixed(1)}%)
-                                </span>
-                              </div>
-                            `
-                          }).join('')}
+                          <div class="recent-buys-title">📋 Recent Buys</div>
+                          ${opp.recentBuys.map((buy, i) => `
+                            <div class="buy-item">#${i + 1}: $${buy.price?.toFixed(2) || '0.00'} (${buy.daysAgo || 0}d ago)</div>
+                          `).join('')}
                         </div>
                       ` : ''}
                     </div>
