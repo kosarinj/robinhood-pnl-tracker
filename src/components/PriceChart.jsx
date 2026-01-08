@@ -69,13 +69,40 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         console.log('After adding indicators:', dataWithIndicators.length, 'points')
         console.log('First point with indicators:', dataWithIndicators[0])
 
-        // Add buy/sell markers from trades
+        // Calculate running P&L and add buy/sell markers from trades
         console.log(`Processing ${trades.length} trades for ${symbol}:`, trades.slice(0, 3))
+
+        // Calculate running P&L for each date
+        let runningBuyAmount = 0
+        let runningSellAmount = 0
+        let runningPosition = 0
 
         const enrichedData = dataWithIndicators.map(candle => {
           const candleDate = new Date(candle.date).setHours(0, 0, 0, 0)
 
-          // Find trades on this date
+          // Find trades on or before this date
+          const tradesUpToDate = trades.filter(trade => {
+            const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
+            return tradeDate <= candleDate
+          })
+
+          // Calculate cumulative buys, sells, and position
+          runningBuyAmount = tradesUpToDate
+            .filter(t => t.isBuy)
+            .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+          runningSellAmount = tradesUpToDate
+            .filter(t => !t.isBuy)
+            .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+          runningPosition = tradesUpToDate.reduce((pos, t) =>
+            t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
+
+          // Running P&L = Sell proceeds + Current position value - Buy cost
+          const currentPositionValue = runningPosition * candle.close
+          const runningPnL = runningSellAmount + currentPositionValue - runningBuyAmount
+
+          // Find trades on this specific date for markers
           const dayTrades = trades.filter(trade => {
             const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
             return tradeDate === candleDate
@@ -85,7 +112,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           const sells = dayTrades.filter(t => !t.isBuy)
 
           if (buys.length > 0 || sells.length > 0) {
-            console.log(`Found trades on ${candle.date}: ${buys.length} buys, ${sells.length} sells`)
+            console.log(`Found trades on ${candle.date}: ${buys.length} buys, ${sells.length} sells, Running P&L: $${runningPnL.toFixed(2)}`)
           }
 
           return {
@@ -93,7 +120,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
             buyPrice: buys.length > 0 ? buys.reduce((sum, t) => sum + t.price, 0) / buys.length : null,
             sellPrice: sells.length > 0 ? sells.reduce((sum, t) => sum + t.price, 0) / sells.length : null,
             buyQuantity: buys.reduce((sum, t) => sum + t.quantity, 0),
-            sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0)
+            sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0),
+            runningPnL: runningPnL
           }
         })
 
@@ -130,18 +158,42 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     const dataWithIndicators = addIndicators(rawData, indicators)
     const enrichedData = dataWithIndicators.map(candle => {
       const candleDate = new Date(candle.date).setHours(0, 0, 0, 0)
+
+      // Calculate running P&L
+      const tradesUpToDate = trades.filter(trade => {
+        const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
+        return tradeDate <= candleDate
+      })
+
+      const runningBuyAmount = tradesUpToDate
+        .filter(t => t.isBuy)
+        .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+      const runningSellAmount = tradesUpToDate
+        .filter(t => !t.isBuy)
+        .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+      const runningPosition = tradesUpToDate.reduce((pos, t) =>
+        t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
+
+      const currentPositionValue = runningPosition * candle.close
+      const runningPnL = runningSellAmount + currentPositionValue - runningBuyAmount
+
+      // Find trades on this specific date
       const dayTrades = trades.filter(trade => {
         const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
         return tradeDate === candleDate
       })
       const buys = dayTrades.filter(t => t.isBuy)
       const sells = dayTrades.filter(t => !t.isBuy)
+
       return {
         ...candle,
         buyPrice: buys.length > 0 ? buys.reduce((sum, t) => sum + t.price, 0) / buys.length : null,
         sellPrice: sells.length > 0 ? sells.reduce((sum, t) => sum + t.price, 0) / sells.length : null,
         buyQuantity: buys.reduce((sum, t) => sum + t.quantity, 0),
-        sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0)
+        sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0),
+        runningPnL: runningPnL
       }
     })
     setPriceData(enrichedData)
@@ -227,33 +279,6 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           </div>
         )}
 
-        {/* Indicator toggles */}
-        <div style={{ marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {[
-            { key: 'showEMA9', label: 'EMA 9', color: '#8884d8' },
-            { key: 'showEMA21', label: 'EMA 21', color: '#82ca9d' },
-            { key: 'showRSI', label: 'RSI', color: '#ffc658' },
-            { key: 'showMACD', label: 'MACD', color: '#ff7c7c' }
-          ].map(({ key, label, color }) => (
-            <button
-              key={key}
-              onClick={() => toggleIndicator(key)}
-              style={{
-                background: indicators[key] ? color : '#e9ecef',
-                color: indicators[key] ? 'white' : '#495057',
-                border: 'none',
-                borderRadius: '6px',
-                padding: '8px 16px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: '500',
-                transition: 'all 0.2s'
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
 
         {/* Loading/Error states */}
         {loading && (
@@ -295,16 +320,17 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   tickFormatter={formatPrice}
                   stroke="#666"
                   style={{ fontSize: '12px' }}
+                  label={{ value: 'Price', angle: -90, position: 'insideLeft' }}
                 />
-                {indicators.showRSI && (
-                  <YAxis
-                    yAxisId="rsi"
-                    orientation="right"
-                    domain={[0, 100]}
-                    stroke="#ffc658"
-                    style={{ fontSize: '12px' }}
-                  />
-                )}
+                <YAxis
+                  yAxisId="pnl"
+                  orientation="right"
+                  domain={['auto', 'auto']}
+                  tickFormatter={formatPrice}
+                  stroke="#28a745"
+                  style={{ fontSize: '12px' }}
+                  label={{ value: 'P&L', angle: 90, position: 'insideRight' }}
+                />
                 <Tooltip
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '6px' }}
                   labelFormatter={formatDate}
@@ -325,48 +351,18 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   isAnimationActive={false}
                 />
 
-                {/* EMA 9 */}
-                {indicators.showEMA9 && (
-                  <Line
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ema9"
-                    stroke="#8884d8"
-                    strokeWidth={1.5}
-                    dot={false}
-                    name="EMA 9"
-                  />
-                )}
-
-                {/* EMA 21 */}
-                {indicators.showEMA21 && (
-                  <Line
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ema21"
-                    stroke="#82ca9d"
-                    strokeWidth={1.5}
-                    dot={false}
-                    name="EMA 21"
-                  />
-                )}
-
-                {/* RSI */}
-                {indicators.showRSI && (
-                  <>
-                    <Line
-                      yAxisId="rsi"
-                      type="monotone"
-                      dataKey="rsi"
-                      stroke="#ffc658"
-                      strokeWidth={1.5}
-                      dot={false}
-                      name="RSI"
-                    />
-                    <ReferenceLine yAxisId="rsi" y={70} stroke="#dc3545" strokeDasharray="3 3" />
-                    <ReferenceLine yAxisId="rsi" y={30} stroke="#28a745" strokeDasharray="3 3" />
-                  </>
-                )}
+                {/* Running P&L Line */}
+                <Line
+                  yAxisId="pnl"
+                  type="monotone"
+                  dataKey="runningPnL"
+                  stroke="#28a745"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Running P&L"
+                  connectNulls={true}
+                  isAnimationActive={false}
+                />
 
                 {/* Buy markers (green dots) */}
                 <Scatter
@@ -388,31 +384,6 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
               </ComposedChart>
             </ResponsiveContainer>
             </div>
-
-            {/* MACD Chart (separate) */}
-            {indicators.showMACD && (
-              <ResponsiveContainer width="100%" height={200} style={{ marginTop: '20px' }}>
-                <ComposedChart data={priceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
-                  <XAxis
-                    dataKey="timestamp"
-                    tickFormatter={formatDate}
-                    stroke="#666"
-                    style={{ fontSize: '12px' }}
-                  />
-                  <YAxis stroke="#666" style={{ fontSize: '12px' }} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '6px' }}
-                    labelFormatter={formatDate}
-                  />
-                  <Legend />
-                  <ReferenceLine y={0} stroke="#666" />
-                  <Bar dataKey="macdHistogram" fill="#ff7c7c" name="MACD Histogram" />
-                  <Line type="monotone" dataKey="macd" stroke="#2196F3" strokeWidth={2} dot={false} name="MACD" />
-                  <Line type="monotone" dataKey="macdSignal" stroke="#ff9800" strokeWidth={2} dot={false} name="Signal" />
-                </ComposedChart>
-              </ResponsiveContainer>
-            )}
 
             {/* Trade Summary */}
             <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '6px' }}>
