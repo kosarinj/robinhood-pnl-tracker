@@ -1608,6 +1608,193 @@ function App() {
           <span style={{ fontSize: '12px', color: '#666' }}>
             Compares current data against snapshot from 7 days ago
           </span>
+
+          <button
+            className="upload-button"
+            onClick={() => {
+              // Calculate capital efficiency metrics for each symbol
+              const metrics = pnlData
+                .filter(row => !row.isOption && !row.isRollup)
+                .map(row => {
+                  const symbol = row.symbol
+                  const symbolTrades = trades.filter(t => t.symbol === symbol)
+
+                  // Calculate total capital deployed (sum of all buy amounts)
+                  const totalCapitalDeployed = symbolTrades
+                    .filter(t => t.isBuy)
+                    .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+                  // Get total P&L
+                  const totalPnL = row.real?.totalPnL || 0
+                  const realizedPnL = row.real?.realizedPnL || 0
+                  const unrealizedPnL = row.real?.unrealizedPnL || 0
+
+                  // Calculate return percentage
+                  const returnPercent = totalCapitalDeployed > 0
+                    ? (totalPnL / totalCapitalDeployed * 100)
+                    : 0
+
+                  return {
+                    symbol,
+                    totalCapitalDeployed,
+                    totalPnL,
+                    realizedPnL,
+                    unrealizedPnL,
+                    returnPercent,
+                    currentPrice: row.currentPrice || 0,
+                    position: row.real?.position || 0
+                  }
+                })
+                .filter(m => m.totalCapitalDeployed > 0) // Only show symbols with actual capital deployed
+                .sort((a, b) => a.returnPercent - b.returnPercent) // Sort lowest to highest
+
+              // Create HTML for popup
+              const html = `
+                <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Capital Efficiency Metrics</title>
+                  <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      padding: 20px;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      min-height: 100vh;
+                    }
+                    h1 {
+                      color: white;
+                      margin-bottom: 20px;
+                      font-size: 24px;
+                      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    }
+                    .count {
+                      background: rgba(255,255,255,0.2);
+                      padding: 4px 12px;
+                      border-radius: 12px;
+                      font-size: 14px;
+                      margin-left: 10px;
+                    }
+                    .card {
+                      background: white;
+                      border-radius: 12px;
+                      padding: 16px;
+                      margin-bottom: 12px;
+                      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                      transition: transform 0.2s, box-shadow 0.2s;
+                    }
+                    .card:hover {
+                      transform: translateY(-2px);
+                      box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+                    }
+                    .card-header {
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      margin-bottom: 12px;
+                    }
+                    .symbol {
+                      font-size: 20px;
+                      font-weight: bold;
+                      color: #333;
+                    }
+                    .return-badge {
+                      padding: 6px 12px;
+                      border-radius: 20px;
+                      font-weight: bold;
+                      font-size: 16px;
+                    }
+                    .positive { background: #d4edda; color: #155724; }
+                    .negative { background: #f8d7da; color: #721c24; }
+                    .metric-row {
+                      display: flex;
+                      justify-content: space-between;
+                      padding: 8px 0;
+                      border-bottom: 1px solid #f0f0f0;
+                    }
+                    .metric-row:last-child {
+                      border-bottom: none;
+                    }
+                    .metric-label {
+                      color: #666;
+                      font-size: 14px;
+                    }
+                    .metric-value {
+                      color: #333;
+                      font-weight: 600;
+                      font-size: 14px;
+                    }
+                    .close-btn {
+                      position: fixed;
+                      top: 20px;
+                      right: 20px;
+                      background: rgba(255,255,255,0.9);
+                      border: none;
+                      border-radius: 50%;
+                      width: 36px;
+                      height: 36px;
+                      font-size: 24px;
+                      cursor: pointer;
+                      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                      z-index: 1000;
+                    }
+                  </style>
+                </head>
+                <body>
+                  <button class="close-btn" onclick="window.close()">×</button>
+                  <h1>📈 Capital Efficiency Metrics <span class="count">${metrics.length}</span></h1>
+                  ${metrics.map(m => `
+                    <div class="card">
+                      <div class="card-header">
+                        <span class="symbol">${m.symbol}</span>
+                        <span class="return-badge ${m.returnPercent >= 0 ? 'positive' : 'negative'}">
+                          ${m.returnPercent >= 0 ? '+' : ''}${m.returnPercent.toFixed(2)}%
+                        </span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">💰 Capital Deployed</span>
+                        <span class="metric-value">$${m.totalCapitalDeployed.toFixed(2)}</span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">📊 Total P&L</span>
+                        <span class="metric-value" style="color: ${m.totalPnL >= 0 ? '#28a745' : '#dc3545'}">
+                          ${m.totalPnL >= 0 ? '+' : ''}$${m.totalPnL.toFixed(2)}
+                        </span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">✓ Realized P&L</span>
+                        <span class="metric-value" style="color: ${m.realizedPnL >= 0 ? '#28a745' : '#dc3545'}">
+                          ${m.realizedPnL >= 0 ? '+' : ''}$${m.realizedPnL.toFixed(2)}
+                        </span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">⏳ Unrealized P&L</span>
+                        <span class="metric-value" style="color: ${m.unrealizedPnL >= 0 ? '#28a745' : '#dc3545'}">
+                          ${m.unrealizedPnL >= 0 ? '+' : ''}$${m.unrealizedPnL.toFixed(2)}
+                        </span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">📍 Current Price</span>
+                        <span class="metric-value">$${m.currentPrice.toFixed(2)}</span>
+                      </div>
+                      <div class="metric-row">
+                        <span class="metric-label">📦 Position</span>
+                        <span class="metric-value">${m.position.toFixed(2)} shares</span>
+                      </div>
+                    </div>
+                  `).join('')}
+                </body>
+                </html>
+              `
+
+              const newWindow = window.open('', '_blank', 'width=400,height=800')
+              newWindow.document.write(html)
+              newWindow.document.close()
+            }}
+            style={{ marginRight: '10px', marginTop: '10px' }}
+          >
+            📈 Capital Efficiency Metrics
+          </button>
         </div>
       )}
 
