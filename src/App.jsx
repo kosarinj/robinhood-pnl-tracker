@@ -2031,13 +2031,13 @@ function App() {
                         </span>
                       </div>
                       <div class="metric-row">
-                        <span class="metric-label">✓ Realized P&L</span>
+                        <span class="metric-label">✓ Buy Sell Total</span>
                         <span class="metric-value" style="color: ${m.realizedPnL >= 0 ? '#28a745' : '#dc3545'}">
                           ${m.realizedPnL >= 0 ? '+' : ''}$${m.realizedPnL.toFixed(2)}
                         </span>
                       </div>
                       <div class="metric-row">
-                        <span class="metric-label">⏳ Unrealized P&L</span>
+                        <span class="metric-label">⏳ Current Value</span>
                         <span class="metric-value" style="color: ${m.unrealizedPnL >= 0 ? '#28a745' : '#dc3545'}">
                           ${m.unrealizedPnL >= 0 ? '+' : ''}$${m.unrealizedPnL.toFixed(2)}
                         </span>
