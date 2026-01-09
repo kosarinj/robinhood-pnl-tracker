@@ -1249,21 +1249,48 @@ function App() {
                   const recentBuys = row.real?.recentLowestBuys || []
                   const recentSells = row.real?.recentSells || []
                   const eligibleBuys = []
+                  const matchedBuys = [] // Track which buys were matched off
 
-                  // Show all profitable recent buys (no matching logic)
                   for (const buy of recentBuys) {
                     const buyPrice = buy?.price || 0
                     const buyDate = buy?.date
 
                     if (currentPrice > buyPrice && buyPrice > 0) {
-                      eligibleBuys.push({
+                      // Check if there's a sell after this buy that already captured this opportunity
+                      let alreadySold = false
+                      let matchedSell = null
+
+                      for (const sell of recentSells) {
+                        const sellPrice = sell?.price || 0
+                        const sellDate = sell?.date
+
+                        // If there's a sell after this buy at a higher price, opportunity already taken
+                        if (sellDate && buyDate && sellDate > buyDate && sellPrice >= buyPrice) {
+                          alreadySold = true
+                          matchedSell = sell
+                          break
+                        }
+                      }
+
+                      const buyInfo = {
                         price: buyPrice,
                         quantity: buy.quantity || 0,
                         daysAgo: buy.daysAgo || 0,
                         date: buyDate,
                         profit: currentPrice - buyPrice,
                         profitPercent: ((currentPrice - buyPrice) / buyPrice * 100)
-                      })
+                      }
+
+                      // Add to eligible list if opportunity hasn't been taken yet
+                      if (!alreadySold) {
+                        eligibleBuys.push(buyInfo)
+                      } else {
+                        // Track matched buys with their matching sell
+                        matchedBuys.push({
+                          ...buyInfo,
+                          matchedSell: matchedSell
+                        })
+                      }
                     }
                   }
 
@@ -1288,6 +1315,7 @@ function App() {
                     signalStrength: signal?.signalStrength || 'N/A',
                     score,
                     eligibleBuys,
+                    matchedBuys,
                     recentBuys,
                     recentSells
                   }
@@ -1451,7 +1479,7 @@ function App() {
                             onclick="showMatchDetails('${opp.symbol}')"
                             style="background: #667eea; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px;"
                           >
-                            📊 Details
+                            📊 Match Details
                           </button>
                           <span class="signal-badge ${opp.signal.toLowerCase()}">${opp.signal} ${opp.signalStrength}</span>
                         </div>
@@ -1528,7 +1556,7 @@ function App() {
                       const opp = opportunitiesData.find(o => o.symbol === symbol);
                       if (!opp) return;
 
-                      const html = '<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>' + symbol + ' - Transaction Details</title><style>* { margin: 0; padding: 0; box-sizing: border-box; }body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; background: #f5f5f5; }h1 { font-size: 24px; margin-bottom: 16px; color: #333; }h2 { font-size: 18px; margin: 20px 0 12px 0; color: #555; }.section { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }.item { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 14px; }.item:last-child { border-bottom: none; }.profitable { color: #28a745; font-weight: 500; }.underwater { color: #dc3545; }.close-btn { position: fixed; top: 16px; right: 16px; background: #dc3545; color: white; border: none; border-radius: 50%; width: 36px; height: 36px; font-size: 24px; cursor: pointer; }</style></head><body><button class="close-btn" onclick="window.close()">×</button><h1>' + symbol + ' - Transaction Details</h1><div class="section"><h2 class="profitable">✓ Profitable Recent Buys (' + opp.eligibleBuys.length + ')</h2>' + (opp.eligibleBuys.length > 0 ? opp.eligibleBuys.map(buy => '<div class="item profitable">' + buy.quantity.toFixed(2) + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago)<br>→ Profit: +$' + buy.profit.toFixed(2) + ' (+' + buy.profitPercent.toFixed(1) + '%)</div>').join('') : '<div class="item">No profitable buys</div>') + '</div><div class="section"><h2>All Recent Buys (' + opp.recentBuys.length + ')</h2>' + opp.recentBuys.map((buy, i) => {var profit = opp.currentPrice - buy.price; var profitPercent = buy.price > 0 ? (profit / buy.price * 100) : 0; var isProfitable = profit > 0; return '<div class="item ' + (isProfitable ? 'profitable' : 'underwater') + '">#' + (i + 1) + ': ' + (buy.quantity?.toFixed(2) || '0') + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago) → ' + (profit >= 0 ? '+' : '') + '$' + profit.toFixed(2) + ' (' + (profitPercent >= 0 ? '+' : '') + profitPercent.toFixed(1) + '%)</div>';}).join('') + '</div><div class="section"><h2>All Recent Sells (' + opp.recentSells.length + ')</h2>' + opp.recentSells.map((sell, i) => '<div class="item">#' + (i + 1) + ': ' + (sell.quantity?.toFixed(2) || '0') + ' shares @ $' + sell.price.toFixed(2) + ' (' + sell.daysAgo + 'd ago)</div>').join('') + '</div></body></html>';
+                      const html = '<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>' + symbol + ' - Match Details</title><style>* { margin: 0; padding: 0; box-sizing: border-box; }body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; background: #f5f5f5; }h1 { font-size: 24px; margin-bottom: 16px; color: #333; }h2 { font-size: 18px; margin: 20px 0 12px 0; color: #555; }.section { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }.item { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 14px; }.item:last-child { border-bottom: none; }.eligible { color: #28a745; font-weight: 500; }.matched { color: #dc3545; }.close-btn { position: fixed; top: 16px; right: 16px; background: #dc3545; color: white; border: none; border-radius: 50%; width: 36px; height: 36px; font-size: 24px; cursor: pointer; }</style></head><body><button class="close-btn" onclick="window.close()">×</button><h1>' + symbol + ' - Match Details</h1><div class="section"><h2 class="eligible">✓ Eligible Sell Opportunities (' + opp.eligibleBuys.length + ')</h2>' + (opp.eligibleBuys.length > 0 ? opp.eligibleBuys.map(buy => '<div class="item eligible">' + buy.quantity.toFixed(2) + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago)<br>→ Profit: +$' + buy.profit.toFixed(2) + ' (+' + buy.profitPercent.toFixed(1) + '%)</div>').join('') : '<div class="item">No eligible opportunities</div>') + '</div><div class="section"><h2 class="matched">✗ Matched Off (Already Sold) (' + opp.matchedBuys.length + ')</h2>' + (opp.matchedBuys.length > 0 ? opp.matchedBuys.map(buy => '<div class="item matched">' + buy.quantity.toFixed(2) + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago)<br>→ Matched by sell @ $' + buy.matchedSell.price.toFixed(2) + ' on ' + buy.matchedSell.date + '</div>').join('') : '<div class="item">No matched buys</div>') + '</div><div class="section"><h2>All Recent Buys (' + opp.recentBuys.length + ')</h2>' + opp.recentBuys.map((buy, i) => '<div class="item">#' + (i + 1) + ': ' + (buy.quantity?.toFixed(2) || '0') + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago)</div>').join('') + '</div><div class="section"><h2>All Recent Sells (' + opp.recentSells.length + ')</h2>' + opp.recentSells.map((sell, i) => '<div class="item">#' + (i + 1) + ': $' + sell.price.toFixed(2) + ' (' + sell.daysAgo + 'd ago)</div>').join('') + '</div></body></html>';
 
                       const newWindow = window.open('', '_blank', 'width=400,height=800');
                       newWindow.document.write(html);
