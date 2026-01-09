@@ -1294,6 +1294,11 @@ function App() {
                     }
                   }
 
+                  // Calculate highest buy price
+                  const highestBuy = recentBuys.length > 0
+                    ? Math.max(...recentBuys.map(b => b.price || 0))
+                    : 0
+
                   // Score the opportunity (higher = better sale candidate)
                   let score = 0
                   if (signal?.signal === 'SELL') score += 10
@@ -1311,6 +1316,7 @@ function App() {
                     unrealizedPnL,
                     totalPnL,
                     gainPercent,
+                    highestBuy,
                     signal: signal?.signal || 'HOLD',
                     signalStrength: signal?.signalStrength || 'N/A',
                     score,
@@ -1513,6 +1519,12 @@ function App() {
                           <div class="metric-label">Current Value</div>
                           <div class="metric-value">
                             $${(opp.position * opp.currentPrice).toFixed(2)}
+                          </div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Highest Buy</div>
+                          <div class="metric-value ${opp.currentPrice > opp.highestBuy ? 'positive' : 'negative'}">
+                            $${opp.highestBuy > 0 ? opp.highestBuy.toFixed(2) : 'N/A'}
                           </div>
                         </div>
                       </div>
