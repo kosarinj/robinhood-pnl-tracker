@@ -1249,6 +1249,7 @@ function App() {
                   const recentBuys = row.real?.recentLowestBuys || []
                   const recentSells = row.real?.recentSells || []
                   const eligibleBuys = []
+                  const matchedBuys = [] // Track which buys were matched off
 
                   for (const buy of recentBuys) {
                     const buyPrice = buy?.price || 0
@@ -1257,6 +1258,7 @@ function App() {
                     if (currentPrice > buyPrice && buyPrice > 0) {
                       // Check if there's a sell after this buy that already captured this opportunity
                       let alreadySold = false
+                      let matchedSell = null
 
                       for (const sell of recentSells) {
                         const sellPrice = sell?.price || 0
@@ -1265,18 +1267,28 @@ function App() {
                         // If there's a sell after this buy at a higher price, opportunity already taken
                         if (sellDate && buyDate && sellDate > buyDate && sellPrice >= buyPrice) {
                           alreadySold = true
+                          matchedSell = sell
                           break
                         }
                       }
 
+                      const buyInfo = {
+                        price: buyPrice,
+                        quantity: buy.quantity || 0,
+                        daysAgo: buy.daysAgo || 0,
+                        date: buyDate,
+                        profit: currentPrice - buyPrice,
+                        profitPercent: ((currentPrice - buyPrice) / buyPrice * 100)
+                      }
+
                       // Add to eligible list if opportunity hasn't been taken yet
                       if (!alreadySold) {
-                        eligibleBuys.push({
-                          price: buyPrice,
-                          quantity: buy.quantity || 0,
-                          daysAgo: buy.daysAgo || 0,
-                          profit: currentPrice - buyPrice,
-                          profitPercent: ((currentPrice - buyPrice) / buyPrice * 100)
+                        eligibleBuys.push(buyInfo)
+                      } else {
+                        // Track matched buys with their matching sell
+                        matchedBuys.push({
+                          ...buyInfo,
+                          matchedSell: matchedSell
                         })
                       }
                     }
@@ -1303,7 +1315,9 @@ function App() {
                     signalStrength: signal?.signalStrength || 'N/A',
                     score,
                     eligibleBuys,
-                    recentBuys
+                    matchedBuys,
+                    recentBuys,
+                    recentSells
                   }
                 })
                 .filter(opp => {
@@ -1460,7 +1474,15 @@ function App() {
                       ${opp.score > 10 ? `<div class="score">★ ${opp.score}</div>` : ''}
                       <div class="symbol">
                         <span>${opp.symbol}</span>
-                        <span class="signal-badge ${opp.signal.toLowerCase()}">${opp.signal} ${opp.signalStrength}</span>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                          <button
+                            onclick="showMatchDetails('${opp.symbol}')"
+                            style="background: #667eea; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 11px;"
+                          >
+                            📊 Match Details
+                          </button>
+                          <span class="signal-badge ${opp.signal.toLowerCase()}">${opp.signal} ${opp.signalStrength}</span>
+                        </div>
                       </div>
                       <div class="metrics">
                         <div class="metric">
@@ -1526,6 +1548,21 @@ function App() {
                       ` : ''}
                     </div>
                   `).join('')}
+                  <script>
+                    // Store opportunities data for match details
+                    const opportunitiesData = ${JSON.stringify(opportunities)};
+
+                    function showMatchDetails(symbol) {
+                      const opp = opportunitiesData.find(o => o.symbol === symbol);
+                      if (!opp) return;
+
+                      const html = '<html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>' + symbol + ' - Match Details</title><style>* { margin: 0; padding: 0; box-sizing: border-box; }body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; background: #f5f5f5; }h1 { font-size: 24px; margin-bottom: 16px; color: #333; }h2 { font-size: 18px; margin: 20px 0 12px 0; color: #555; }.section { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }.item { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 14px; }.item:last-child { border-bottom: none; }.eligible { color: #28a745; font-weight: 500; }.matched { color: #dc3545; }.close-btn { position: fixed; top: 16px; right: 16px; background: #dc3545; color: white; border: none; border-radius: 50%; width: 36px; height: 36px; font-size: 24px; cursor: pointer; }</style></head><body><button class="close-btn" onclick="window.close()">×</button><h1>' + symbol + ' - Match Details</h1><div class="section"><h2 class="eligible">✓ Eligible Sell Opportunities (' + opp.eligibleBuys.length + ')</h2>' + (opp.eligibleBuys.length > 0 ? opp.eligibleBuys.map(buy => '<div class="item eligible">' + buy.quantity.toFixed(2) + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago)<br>→ Profit: +$' + buy.profit.toFixed(2) + ' (+' + buy.profitPercent.toFixed(1) + '%)</div>').join('') : '<div class="item">No eligible opportunities</div>') + '</div><div class="section"><h2 class="matched">✗ Matched Off (Already Sold) (' + opp.matchedBuys.length + ')</h2>' + (opp.matchedBuys.length > 0 ? opp.matchedBuys.map(buy => '<div class="item matched">' + buy.quantity.toFixed(2) + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago)<br>→ Matched by sell @ $' + buy.matchedSell.price.toFixed(2) + ' on ' + buy.matchedSell.date + '</div>').join('') : '<div class="item">No matched buys</div>') + '</div><div class="section"><h2>All Recent Buys (' + opp.recentBuys.length + ')</h2>' + opp.recentBuys.map((buy, i) => '<div class="item">#' + (i + 1) + ': ' + (buy.quantity?.toFixed(2) || '0') + ' shares @ $' + buy.price.toFixed(2) + ' (' + buy.daysAgo + 'd ago)</div>').join('') + '</div><div class="section"><h2>All Recent Sells (' + opp.recentSells.length + ')</h2>' + opp.recentSells.map((sell, i) => '<div class="item">#' + (i + 1) + ': $' + sell.price.toFixed(2) + ' (' + sell.daysAgo + 'd ago)</div>').join('') + '</div></body></html>';
+
+                      const newWindow = window.open('', '_blank', 'width=400,height=800');
+                      newWindow.document.write(html);
+                      newWindow.document.close();
+                    }
+                  </script>
                 </body>
                 </html>
               `
