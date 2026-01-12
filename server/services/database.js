@@ -14,6 +14,40 @@ db.pragma('journal_mode = WAL')
 
 // Create tables
 db.exec(`
+  -- Table to store users
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    email TEXT,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    last_login INTEGER
+  );
+
+  -- Table to store user sessions
+  CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    session_token TEXT NOT NULL UNIQUE,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    expires_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- Table to cache historical prices
+  CREATE TABLE IF NOT EXISTS historical_prices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    price_date TEXT NOT NULL,
+    open_price REAL,
+    high_price REAL,
+    low_price REAL,
+    close_price REAL,
+    volume INTEGER,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    UNIQUE(symbol, price_date)
+  );
+
   -- Table to store signal snapshots
   CREATE TABLE IF NOT EXISTS signal_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -158,6 +192,17 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_price_benchmarks_symbol_price
     ON price_benchmarks(symbol, price_level, timestamp DESC);
+
+  -- Indexes for users and sessions
+  CREATE INDEX IF NOT EXISTS idx_sessions_token
+    ON sessions(session_token);
+
+  CREATE INDEX IF NOT EXISTS idx_sessions_user_id
+    ON sessions(user_id, expires_at DESC);
+
+  -- Index for historical prices cache
+  CREATE INDEX IF NOT EXISTS idx_historical_prices_symbol_date
+    ON historical_prices(symbol, price_date DESC);
 `)
 
 console.log(`Database initialized at: ${dbPath}`)
@@ -255,6 +300,47 @@ try {
     console.log('Adding total_principal column to csv_uploads table...')
     db.exec('ALTER TABLE csv_uploads ADD COLUMN total_principal REAL DEFAULT 0')
     console.log('✅ Added total_principal column to csv_uploads')
+  }
+} catch (error) {
+  console.error('Migration error:', error)
+}
+
+// Migration: Add user_id columns to existing tables for multi-user support
+try {
+  const tradesInfo = db.pragma('table_info(trades)')
+  const tradesHasUserId = tradesInfo.some(col => col.name === 'user_id')
+
+  if (!tradesHasUserId) {
+    console.log('Adding user_id column to trades table...')
+    db.exec('ALTER TABLE trades ADD COLUMN user_id INTEGER DEFAULT 1')
+    console.log('✅ Added user_id column to trades')
+  }
+
+  const pnlSnapshotsInfo = db.pragma('table_info(pnl_snapshots)')
+  const pnlHasUserId = pnlSnapshotsInfo.some(col => col.name === 'user_id')
+
+  if (!pnlHasUserId) {
+    console.log('Adding user_id column to pnl_snapshots table...')
+    db.exec('ALTER TABLE pnl_snapshots ADD COLUMN user_id INTEGER DEFAULT 1')
+    console.log('✅ Added user_id column to pnl_snapshots')
+  }
+
+  const depositsInfo = db.pragma('table_info(deposits)')
+  const depositsHasUserId = depositsInfo.some(col => col.name === 'user_id')
+
+  if (!depositsHasUserId) {
+    console.log('Adding user_id column to deposits table...')
+    db.exec('ALTER TABLE deposits ADD COLUMN user_id INTEGER DEFAULT 1')
+    console.log('✅ Added user_id column to deposits')
+  }
+
+  const csvUploadsInfo2 = db.pragma('table_info(csv_uploads)')
+  const csvHasUserId = csvUploadsInfo2.some(col => col.name === 'user_id')
+
+  if (!csvHasUserId) {
+    console.log('Adding user_id column to csv_uploads table...')
+    db.exec('ALTER TABLE csv_uploads ADD COLUMN user_id INTEGER DEFAULT 1')
+    console.log('✅ Added user_id column to csv_uploads')
   }
 } catch (error) {
   console.error('Migration error:', error)
