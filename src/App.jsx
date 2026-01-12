@@ -6,14 +6,35 @@ import MarketAnalysis from './components/MarketAnalysis'
 import SignalPerformance from './components/SignalPerformance'
 import ThemeToggle from './components/ThemeToggle'
 import DailyPnLChart from './components/DailyPnLChart'
+import AuthPage from './components/Auth/AuthPage'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
 import { getIntradayData } from './utils/marketData'
 import { generateSignal } from './utils/technicalAnalysis'
 import { socketService } from './services/socketService'
+import { useAuth } from './contexts/AuthContext'
 
 function App() {
+  const { user, loading: authLoading, isAuthenticated } = useAuth()
+
+  // Show auth page if not authenticated
+  if (authLoading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+      <div>Loading...</div>
+    </div>
+  }
+
+  if (!isAuthenticated) {
+    return <AuthPage />
+  }
+
+  // Main app content (only shown when authenticated)
+  return <AuthenticatedApp user={user} />
+}
+
+function AuthenticatedApp({ user }) {
+  const { logout } = useAuth()
   const [trades, setTrades] = useState([])
   const [pnlData, setPnlData] = useState([])
   const [showOpenOnly, setShowOpenOnly] = useState(true)
@@ -1088,7 +1109,27 @@ function App() {
 
   return (
     <div className="app-container">
-      <ThemeToggle />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '14px', fontWeight: '500' }}>👤 {user.username}</span>
+          <button
+            onClick={logout}
+            style={{
+              background: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '500'
+            }}
+          >
+            Logout
+          </button>
+        </div>
+        <ThemeToggle />
+      </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
