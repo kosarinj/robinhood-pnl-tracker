@@ -1196,38 +1196,6 @@ function App() {
         </div>
       </div>
 
-      {/* Debug Panel */}
-      <div style={{
-        background: '#e3f2fd',
-        border: '2px solid #2196f3',
-        borderRadius: '6px',
-        padding: '12px 16px',
-        marginBottom: '16px',
-        fontFamily: 'monospace',
-        fontSize: '12px'
-      }}>
-        <strong>🔍 Auto-Update Debug:</strong><br/>
-        <strong style={{ color: priceUpdateCount > 0 ? 'green' : 'red' }}>
-          Updates Received: {priceUpdateCount}
-        </strong> | {(() => {
-          const today = new Date().toISOString().split('T')[0]
-          const isViewingTodaysSnapshot = isViewingSnapshot && currentSnapshotDate === today
-          const isViewingTodaysUpload = currentUploadDate && currentUploadDate === today
-          const shouldUpdate = (!currentUploadDate || isViewingTodaysUpload) && (!isViewingSnapshot || isViewingTodaysSnapshot)
-          return (
-            <>
-              Snapshot: {isViewingSnapshot ? 'YES' : 'NO'} |
-              Snap Date: "{currentSnapshotDate || 'none'}" |
-              Upload Date: "{currentUploadDate || 'none'}" |
-              Today: "{today}" |
-              Match Upload: {isViewingTodaysUpload ? 'YES' : 'NO'} |
-              Match Snap: {isViewingTodaysSnapshot ? 'YES' : 'NO'} |
-              Should Update: {shouldUpdate ? 'YES ✅' : 'NO ❌'}
-            </>
-          )
-        })()}
-      </div>
-
       {/* Sale Opportunities View */}
       {pnlData.length > 0 && (
         <div style={{ marginBottom: '16px' }}>

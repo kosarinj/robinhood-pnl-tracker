@@ -258,28 +258,6 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           </button>
         </div>
 
-        {/* Debug Info - Always show if we have data */}
-        {priceData.length > 0 && (
-          <div style={{
-            background: '#fffacd',
-            padding: '15px',
-            marginBottom: '15px',
-            borderRadius: '8px',
-            fontSize: '13px',
-            fontFamily: 'monospace',
-            border: '2px solid #ffd700'
-          }}>
-            <strong style={{ fontSize: '14px', color: '#333' }}>🐛 DEBUG INFO:</strong><br/>
-            <div style={{ marginTop: '8px', lineHeight: '1.8' }}>
-              📊 Data Points: <strong>{priceData.length}</strong><br/>
-              🔢 First: timestamp={priceData[0]?.timestamp}, close=${priceData[0]?.close?.toFixed(2)}<br/>
-              🔢 Middle: timestamp={priceData[Math.floor(priceData.length/2)]?.timestamp}, close=${priceData[Math.floor(priceData.length/2)]?.close?.toFixed(2)}<br/>
-              🔢 Last: timestamp={priceData[priceData.length-1]?.timestamp}, close=${priceData[priceData.length-1]?.close?.toFixed(2)}
-            </div>
-          </div>
-        )}
-
-
         {/* Loading/Error states */}
         {loading && (
           <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
