@@ -9,6 +9,8 @@ import { PriceService } from './services/priceService.js'
 import { SignalService } from './services/signalService.js'
 import { PolygonService } from './services/polygonService.js'
 import { databaseService } from './services/database.js'
+import { authService } from './services/auth.js'
+import cookieParser from 'cookie-parser'
 import fs from 'fs'
 
 // Conditionally import Puppeteer-based downloader (only available locally, not on Railway)
@@ -55,6 +57,7 @@ app.use((req, res, next) => {
 })
 app.use(cors(corsOptions))
 app.use(express.json())
+app.use(cookieParser())
 
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() })
@@ -954,6 +957,76 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   })
 })
+
+// Authentication endpoints
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { username, password, email } = req.body
+    const user = await authService.createUser(username, password, email)
+    res.json({ success: true, user })
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message })
+  }
+})
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body
+    const result = await authService.login(username, password)
+
+    // Set session cookie (httpOnly for security)
+    res.cookie('session_token', result.sessionToken, {
+      httpOnly: true,
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      sameSite: 'lax'
+    })
+
+    res.json({ success: true, user: result.user })
+  } catch (error) {
+    res.status(401).json({ success: false, error: error.message })
+  }
+})
+
+app.post('/api/auth/logout', (req, res) => {
+  try {
+    const sessionToken = req.cookies.session_token
+    if (sessionToken) {
+      authService.logout(sessionToken)
+      res.clearCookie('session_token')
+    }
+    res.json({ success: true })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+app.get('/api/auth/me', (req, res) => {
+  try {
+    const sessionToken = req.cookies.session_token
+    const user = authService.verifySession(sessionToken)
+
+    if (user) {
+      res.json({ success: true, user })
+    } else {
+      res.status(401).json({ success: false, error: 'Not authenticated' })
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Middleware to require authentication for protected routes
+const requireAuth = (req, res, next) => {
+  const sessionToken = req.cookies.session_token
+  const user = authService.verifySession(sessionToken)
+
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Authentication required' })
+  }
+
+  req.user = user
+  next()
+}
 
 // Debug endpoint to see what snapshot dates exist
 app.get('/api/debug/snapshot-dates', (req, res) => {
