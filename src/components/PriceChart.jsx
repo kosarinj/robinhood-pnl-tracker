@@ -239,15 +239,22 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           </h2>
           <button
             onClick={onClose}
+            onTouchEnd={(e) => {
+              e.preventDefault()
+              onClose()
+            }}
             style={{
               background: '#dc3545',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
-              padding: '8px 16px',
+              padding: '12px 24px',
               cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500'
+              fontSize: '16px',
+              fontWeight: '500',
+              minWidth: '80px',
+              minHeight: '44px',
+              touchAction: 'manipulation'
             }}
           >
             ✕ Close
