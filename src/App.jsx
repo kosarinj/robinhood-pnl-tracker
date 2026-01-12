@@ -1468,6 +1468,25 @@ function App() {
                     .close-btn:active {
                       background: #c82333;
                     }
+
+                    /* Mobile responsive - single column on small screens */
+                    @media (max-width: 600px) {
+                      .metrics {
+                        grid-template-columns: 1fr;
+                      }
+                      .metric-label {
+                        font-size: 10px;
+                      }
+                      .metric-value {
+                        font-size: 14px;
+                      }
+                      h1 {
+                        font-size: 20px;
+                      }
+                      .symbol {
+                        font-size: 18px;
+                      }
+                    }
                   </style>
                 </head>
                 <body>
