@@ -145,7 +145,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     }
 
     loadData()
-  }, [symbol, trades, useServer, connected])
+  }, [symbol, useServer, connected])
 
   // Recalculate indicators when they change (without refetching data)
   useEffect(() => {
