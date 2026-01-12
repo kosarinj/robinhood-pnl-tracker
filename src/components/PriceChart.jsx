@@ -135,10 +135,6 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         // Delay chart rendering to ensure DOM is ready
         setTimeout(() => {
           setChartReady(true)
-          // Force multiple resize events
-          setTimeout(() => window.dispatchEvent(new Event('resize')), 50)
-          setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
-          setTimeout(() => window.dispatchEvent(new Event('resize')), 300)
         }, 100)
       } catch (err) {
         console.error('Error loading price chart:', err)

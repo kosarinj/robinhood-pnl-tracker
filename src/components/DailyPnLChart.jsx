@@ -361,29 +361,6 @@ function DailyPnLChart({ useServer, connected }) {
 
           {!symbolLoading && !selectedSymbol && (
             <>
-              {/* DEBUG INFO */}
-              <div style={{
-                background: '#fff3cd',
-                border: '1px solid #ffc107',
-                borderRadius: '6px',
-                padding: '12px',
-                marginBottom: '15px',
-                fontSize: '12px',
-                fontFamily: 'monospace',
-                maxHeight: '200px',
-                overflow: 'auto'
-              }}>
-                <strong>🐛 DEBUG:</strong> Chart has {chartData.length} days<br/>
-                <strong>Date Range:</strong> {chartData.length > 0 ? `${chartData[0].date} to ${chartData[chartData.length - 1].date}` : 'No data'}<br/>
-                <strong>All Dates:</strong> {chartData.map(d => d.date).join(', ')}<br/>
-                <strong>Last 3 entries:</strong><br/>
-                {chartData.slice(-3).map((d, i) => (
-                  <div key={i} style={{ marginLeft: '10px', fontSize: '11px' }}>
-                    {d.date}: Total=${d.totalPnL?.toFixed(2) || 'null'}, Daily=${d.dailyPnL?.toFixed(2) || 'null'}
-                  </div>
-                ))}
-              </div>
-
               <div style={{
                 display: 'flex',
                 gap: '20px',

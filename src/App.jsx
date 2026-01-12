@@ -1436,6 +1436,20 @@ function App() {
                     .close-btn:active {
                       background: #c82333;
                     }
+                    .search-box {
+                      width: 100%;
+                      padding: 12px 16px;
+                      margin-bottom: 16px;
+                      border: 2px solid #2196f3;
+                      border-radius: 8px;
+                      font-size: 16px;
+                      box-sizing: border-box;
+                    }
+                    .search-box:focus {
+                      outline: none;
+                      border-color: #667eea;
+                      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+                    }
 
                     /* Mobile responsive - single column on small screens */
                     @media (max-width: 600px) {
@@ -1460,6 +1474,13 @@ function App() {
                 <body>
                   <button class="close-btn" onclick="window.close()">×</button>
                   <h1>Sale Opportunities <span class="count">${opportunities.length}</span></h1>
+                  <input
+                    type="text"
+                    class="search-box"
+                    placeholder="🔍 Search by symbol..."
+                    onkeyup="filterOpportunities(this.value)"
+                  />
+                  <div id="opportunities-container">
                   ${opportunities.map(opp => `
                     <div class="card" style="position: relative;">
                       ${opp.score > 10 ? `<div class="score">★ ${opp.score}</div>` : ''}
@@ -1551,9 +1572,30 @@ function App() {
                       ` : ''}
                     </div>
                   `).join('')}
+                  </div>
                   <script>
                     // Store opportunities data for match details
                     const opportunitiesData = ${JSON.stringify(opportunities)};
+
+                    // Filter opportunities by symbol
+                    function filterOpportunities(searchTerm) {
+                      const cards = document.querySelectorAll('#opportunities-container .card');
+                      const search = searchTerm.toLowerCase().trim();
+                      let visibleCount = 0;
+
+                      cards.forEach(card => {
+                        const symbol = card.querySelector('.symbol span').textContent.toLowerCase();
+                        if (search === '' || symbol.includes(search)) {
+                          card.style.display = '';
+                          visibleCount++;
+                        } else {
+                          card.style.display = 'none';
+                        }
+                      });
+
+                      // Update count
+                      document.querySelector('.count').textContent = visibleCount;
+                    }
 
                     function showMatchDetails(symbol) {
                       const opp = opportunitiesData.find(o => o.symbol === symbol);
