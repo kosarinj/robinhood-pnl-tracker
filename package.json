@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "npm run build && cd server && npm install && node index.js"
+    "start": "cd server && node index.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
