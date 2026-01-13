@@ -291,11 +291,20 @@ export class SupportResistanceService {
 
   /**
    * Detect round number levels (psychological levels)
+   * Only creates levels that were actually within the price range during the lookback period
    */
   detectRoundNumbers(candles, currentPrice) {
     const levels = []
 
-    if (!currentPrice) return levels
+    if (!candles || candles.length === 0 || !currentPrice) return levels
+
+    // Find the actual price range from historical data
+    const highs = candles.map(c => c.high)
+    const lows = candles.map(c => c.low)
+    const rangeHigh = Math.max(...highs)
+    const rangeLow = Math.min(...lows)
+
+    console.log(`  Round numbers: price range in lookback period: $${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}`)
 
     // Find nearest round numbers (multiples of 5, 10, 25, 50, 100)
     const increments = [100, 50, 25, 10, 5, 1]
@@ -304,8 +313,8 @@ export class SupportResistanceService {
       const lower = Math.floor(currentPrice / increment) * increment
       const upper = Math.ceil(currentPrice / increment) * increment
 
-      // Only add if within reasonable range (±20% of current price)
-      if (lower >= currentPrice * 0.8 && lower <= currentPrice * 1.2) {
+      // Only add if within the ACTUAL price range from the lookback period
+      if (lower >= rangeLow && lower <= rangeHigh) {
         levels.push({
           type: lower < currentPrice ? 'support' : 'resistance',
           price: lower,
@@ -315,7 +324,7 @@ export class SupportResistanceService {
         })
       }
 
-      if (upper >= currentPrice * 0.8 && upper <= currentPrice * 1.2 && upper !== lower) {
+      if (upper >= rangeLow && upper <= rangeHigh && upper !== lower) {
         levels.push({
           type: upper < currentPrice ? 'support' : 'resistance',
           price: upper,
