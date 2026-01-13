@@ -592,6 +592,21 @@ function AuthenticatedApp({ user }) {
   }, [trades, deposits, pnlTotals])
 
   // Auto-refresh prices every 1 minute when viewing today's data
+  // Extract stock symbols immediately when trades change (for support/resistance dropdown)
+  useEffect(() => {
+    if (trades.length === 0) {
+      setStockSymbols([])
+      return
+    }
+
+    const allSymbols = [...new Set(trades.map(t => t.symbol))]
+    const stockSymbols = allSymbols.filter(s => {
+      return !s.includes(' ') && !s.includes('Put') && !s.includes('Call')
+    })
+
+    setStockSymbols(stockSymbols)
+  }, [trades])
+
   useEffect(() => {
     if (trades.length === 0) return
 
