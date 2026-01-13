@@ -12,6 +12,9 @@ import { databaseService } from './services/database.js'
 import { authService } from './services/auth.js'
 import cookieParser from 'cookie-parser'
 import fs from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname } from 'path'
+import path from 'path'
 
 // Conditionally import Puppeteer-based downloader (only available locally, not on Railway)
 let downloadRobinhoodReport = null
@@ -58,6 +61,11 @@ app.use((req, res, next) => {
 app.use(cors(corsOptions))
 app.use(express.json())
 app.use(cookieParser())
+
+// Serve static files from the React app (after building with vite build)
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+app.use(express.static(path.join(__dirname, '../dist')))
 
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() })
@@ -1326,6 +1334,12 @@ app.post('/api/robinhood/download', requireAuth, async (req, res) => {
       error: error.message
     })
   }
+})
+
+// Catch-all route to serve index.html for client-side routing
+// This must be AFTER all API routes
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'))
 })
 
 const PORT = process.env.PORT || 3001

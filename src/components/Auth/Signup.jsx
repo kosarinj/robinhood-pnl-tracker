@@ -29,7 +29,9 @@ function Signup({ onSwitchToLogin }) {
       return
     }
 
-    const result = await signup(username, password, email)
+    // Send null instead of empty string for email if not provided
+    const emailValue = email.trim() === '' ? null : email.trim()
+    const result = await signup(username, password, emailValue)
 
     if (!result.success) {
       setError(result.error)
