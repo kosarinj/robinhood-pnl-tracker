@@ -1060,8 +1060,10 @@ function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
 // Background job: Update prices every minute and broadcast to clients
 let recordingCounter = 0
 setInterval(async () => {
+  console.log('🔄 Price update job starting...')
   try {
     const updatedPrices = await priceService.refreshPrices()
+    console.log('✅ refreshPrices completed')
     recordingCounter++
 
     // Every 5 minutes, record prices and signals to database
@@ -1184,6 +1186,7 @@ setInterval(async () => {
     // Save snapshot only if there's an active session viewing the data
     // Don't create snapshots for dates without actual CSV uploads
     try {
+      console.log('📸 Checking for active sessions to save snapshot...')
       const firstSession = Array.from(clientSessions.values()).find(s => s.trades && s.trades.length > 0)
 
       if (firstSession) {
@@ -1195,13 +1198,21 @@ setInterval(async () => {
         const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, firstSession.dividendsAndInterest || [])
 
         databaseService.savePnLSnapshot(todayDate, pnlData, firstSession.userId)
+        console.log('✅ Snapshot saved successfully')
+      } else {
+        console.log('ℹ️  No active sessions - skipping snapshot')
       }
       // No active sessions - don't create snapshots for dates without CSV uploads
     } catch (error) {
-      console.error('Error saving snapshot:', error)
+      console.error('❌ Error saving snapshot:', error.message)
+      console.error('Stack:', error.stack)
     }
+
+    console.log('✅ Price update job completed successfully')
   } catch (error) {
-    console.error('Error updating prices:', error)
+    console.error('❌ FATAL: Error in price update job:', error.message)
+    console.error('Stack:', error.stack)
+    // Log but don't crash - the global handlers will catch it
   }
 }, 60000) // Every 1 minute
 
