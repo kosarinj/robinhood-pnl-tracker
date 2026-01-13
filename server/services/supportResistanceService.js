@@ -451,8 +451,12 @@ export class SupportResistanceService {
           results[symbol] = levels
         }
 
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 200))
+        // Delay to respect free tier rate limits (5 calls/min)
+        // Each symbol uses 2 calls, so wait 30 seconds between symbols to stay well under limit
+        if (symbols.indexOf(symbol) < symbols.length - 1) {
+          console.log(`⏳ Waiting 30s before next symbol (free tier rate limit)...`)
+          await new Promise(resolve => setTimeout(resolve, 30000))
+        }
       } catch (error) {
         console.error(`Error getting levels for ${symbol}:`, error.message)
       }

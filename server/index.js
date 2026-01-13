@@ -103,7 +103,9 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000) // Check every 5 minutes
 
-// Background job: Scan for support/resistance levels every 5 minutes
+// Background job: Scan for support/resistance levels
+// Free tier: 5 API calls/min, 2 calls per symbol = 2 symbols per scan
+// Scan every 15 minutes to stay well under rate limits
 setInterval(async () => {
   try {
     // Skip if no Polygon API key configured
@@ -116,9 +118,11 @@ setInterval(async () => {
       return
     }
 
-    console.log(`🎯 Scanning ${trackedSymbols.size} symbols for support/resistance levels...`)
+    // Free tier rate limit: 5 calls/min, each symbol needs 2 calls (historical + current price)
+    // Scan only 2 symbols at a time to stay under limit
+    const symbols = Array.from(trackedSymbols).slice(0, 2)
+    console.log(`🎯 Scanning ${symbols.length} symbols for support/resistance levels (Free tier mode)...`)
 
-    const symbols = Array.from(trackedSymbols).slice(0, 20) // Limit to 20 symbols to avoid rate limits
     const results = await supportResistanceService.getSupportResistanceForSymbols(symbols)
 
     const allLevels = Object.values(results).flat()
@@ -145,7 +149,7 @@ setInterval(async () => {
     console.error('❌ Error in support/resistance scan:', error.message)
     // Don't let the error crash the process
   }
-}, 5 * 60 * 1000) // Every 5 minutes
+}, 15 * 60 * 1000) // Every 15 minutes (free tier friendly)
 
 // Socket.IO authentication middleware
 io.use((socket, next) => {
@@ -1080,8 +1084,20 @@ setInterval(async () => {
 
     // Fetch 1-week-ago snapshot for Made Up Ground calculation (once for all clients)
     console.log('🔍 Background job: Checking for Made Up Ground data')
-    const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
-    console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
+    let weekAgoDate = null
+    let weekAgoSnapshot = []
+    try {
+      const result = databaseService.getPnLSnapshotFromDaysAgo(7)
+      if (result && result.data) {
+        weekAgoDate = result.date
+        weekAgoSnapshot = result.data
+        console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records from ${weekAgoDate || 'null'}`)
+      } else {
+        console.log(`   No week-ago snapshot available`)
+      }
+    } catch (err) {
+      console.error(`   ❌ Error fetching week-ago snapshot:`, err.message)
+    }
 
     for (const [socketId, session] of clientSessions.entries()) {
       const socket = io.sockets.sockets.get(socketId)
@@ -1108,8 +1124,12 @@ setInterval(async () => {
         // Enrich with Made Up Ground if we have historical data
         console.log(`  🔍 About to check enrichment: weekAgoSnapshot.length = ${weekAgoSnapshot.length}`)
         if (weekAgoSnapshot.length > 0) {
-          console.log(`  ✅ Calling enrichWithMadeUpGround with ${pnlData.length} positions`)
-          pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+          try {
+            console.log(`  ✅ Calling enrichWithMadeUpGround with ${pnlData.length} positions`)
+            pnlData = enrichWithMadeUpGround(pnlData, weekAgoSnapshot)
+          } catch (enrichErr) {
+            console.error(`  ❌ Error enriching with Made Up Ground:`, enrichErr.message)
+          }
         } else {
           console.log(`  ❌ Skipping enrichment: no week-ago data`)
         }
