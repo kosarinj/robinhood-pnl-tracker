@@ -9,6 +9,14 @@ export class SupportResistanceService {
     this.apiKey = process.env.POLYGON_API_KEY
     this.baseUrl = 'https://api.polygon.io'
 
+    // Log API key status at startup
+    if (this.apiKey) {
+      console.log('✅ Polygon API key configured for support/resistance service')
+    } else {
+      console.warn('⚠️  Polygon API key NOT found - support/resistance feature will not work')
+      console.warn('    Set POLYGON_API_KEY environment variable to enable this feature')
+    }
+
     // Configuration for detection algorithms
     this.config = {
       // Lookback period for analysis (days)
@@ -366,15 +374,19 @@ export class SupportResistanceService {
    */
   async getSupportResistanceLevels(symbol) {
     try {
+      console.log(`\n🎯 getSupportResistanceLevels called for ${symbol}`)
+
       // Check if API key is configured
       if (!this.apiKey) {
+        console.error(`❌ No API key found for ${symbol} request`)
         throw new Error('Polygon API key not configured. Please set POLYGON_API_KEY environment variable.')
       }
+      console.log(`✓ API key present`)
 
       // Check cache
       const cached = this.cache.get(symbol)
       if (cached && Date.now() - cached.timestamp < this.config.cacheDuration) {
-        console.log(`📦 Using cached support/resistance for ${symbol}`)
+        console.log(`📦 Using cached support/resistance for ${symbol} (${cached.levels.length} levels)`)
         return cached.levels
       }
 
@@ -436,8 +448,9 @@ export class SupportResistanceService {
 
       return sorted
     } catch (error) {
-      console.error(`Error analyzing support/resistance for ${symbol}:`, error.message)
-      return []
+      console.error(`❌ Error analyzing support/resistance for ${symbol}:`, error.message)
+      console.error(`   Full error:`, error)
+      throw error // Re-throw so caller can handle it
     }
   }
 
