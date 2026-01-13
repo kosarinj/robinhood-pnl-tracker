@@ -21,14 +21,19 @@ import path from 'path'
 process.on('uncaughtException', (error) => {
   console.error('🚨 Uncaught Exception:', error)
   console.error('Stack:', error.stack)
+  console.error('Memory:', process.memoryUsage())
+  console.error('Uptime:', process.uptime(), 'seconds')
   // Don't exit - keep server running
 })
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('🚨 Unhandled Promise Rejection at:', promise)
   console.error('Reason:', reason)
+  console.error('Memory:', process.memoryUsage())
+  console.error('Uptime:', process.uptime(), 'seconds')
   // Don't exit - keep server running
 })
+
 
 // Conditionally import Puppeteer-based downloader (only available locally, not on Railway)
 let downloadRobinhoodReport = null
@@ -72,6 +77,14 @@ app.use((req, res, next) => {
   }
   next()
 })
+
+// Request logging middleware (helps debug Railway health checks)
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString()
+  console.log(`📥 ${timestamp} ${req.method} ${req.path}`)
+  next()
+})
+
 app.use(cors(corsOptions))
 app.use(express.json())
 app.use(cookieParser())
@@ -107,12 +120,21 @@ const clientSessions = new Map()
 // Session cleanup - remove sessions older than 1 hour
 const SESSION_TIMEOUT = 60 * 60 * 1000 // 1 hour
 setInterval(() => {
-  const now = Date.now()
-  for (const [sessionId, session] of clientSessions.entries()) {
-    if (now - session.lastActivity > SESSION_TIMEOUT) {
-      console.log(`Cleaning up inactive session: ${sessionId}`)
-      clientSessions.delete(sessionId)
+  try {
+    console.log('🧹 Session cleanup running...')
+    const now = Date.now()
+    let cleanedCount = 0
+    for (const [sessionId, session] of clientSessions.entries()) {
+      if (now - session.lastActivity > SESSION_TIMEOUT) {
+        console.log(`  Cleaning up inactive session: ${sessionId}`)
+        clientSessions.delete(sessionId)
+        cleanedCount++
+      }
     }
+    console.log(`✅ Session cleanup complete: ${cleanedCount} sessions removed, ${clientSessions.size} remain`)
+  } catch (error) {
+    console.error('❌ Error in session cleanup:', error.message)
+    console.error('Stack:', error.stack)
   }
 }, 5 * 60 * 1000) // Check every 5 minutes
 
@@ -1223,23 +1245,36 @@ console.log('ℹ️  Price update background job is DISABLED - investigating cra
 
 // Daily database cleanup (runs at 3 AM)
 const scheduleCleanup = () => {
-  const now = new Date()
-  const next3AM = new Date(now)
-  next3AM.setHours(3, 0, 0, 0)
+  try {
+    const now = new Date()
+    const next3AM = new Date(now)
+    next3AM.setHours(3, 0, 0, 0)
 
-  if (next3AM <= now) {
-    next3AM.setDate(next3AM.getDate() + 1)
+    if (next3AM <= now) {
+      next3AM.setDate(next3AM.getDate() + 1)
+    }
+
+    const timeUntilCleanup = next3AM.getTime() - now.getTime()
+
+    setTimeout(() => {
+      try {
+        console.log('🧹 Running daily database cleanup...')
+        databaseService.cleanup()
+        console.log('✅ Daily database cleanup complete')
+        scheduleCleanup() // Schedule next cleanup
+      } catch (error) {
+        console.error('❌ Error in daily database cleanup:', error.message)
+        console.error('Stack:', error.stack)
+        // Still schedule next cleanup even if this one failed
+        scheduleCleanup()
+      }
+    }, timeUntilCleanup)
+
+    console.log(`📅 Next database cleanup scheduled for ${next3AM.toLocaleString()}`)
+  } catch (error) {
+    console.error('❌ Error scheduling database cleanup:', error.message)
+    console.error('Stack:', error.stack)
   }
-
-  const timeUntilCleanup = next3AM.getTime() - now.getTime()
-
-  setTimeout(() => {
-    console.log('🧹 Running daily database cleanup...')
-    databaseService.cleanup()
-    scheduleCleanup() // Schedule next cleanup
-  }, timeUntilCleanup)
-
-  console.log(`Next database cleanup scheduled for ${next3AM.toLocaleString()}`)
 }
 scheduleCleanup()
 
@@ -1261,13 +1296,29 @@ app.get('/', (req, res) => {
 })
 
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    clients: clientSessions.size,
-    trackedSymbols: priceService.getTrackedSymbols().length,
-    recordingSymbols: trackedSymbols.size,
-    uptime: process.uptime()
-  })
+  try {
+    const healthData = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      clients: clientSessions.size,
+      trackedSymbols: priceService.getTrackedSymbols().length,
+      recordingSymbols: trackedSymbols.size,
+      uptime: process.uptime(),
+      memory: {
+        used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024)
+      }
+    }
+    console.log(`✅ Health check: ${healthData.status}, uptime: ${Math.round(healthData.uptime)}s, memory: ${healthData.memory.used}MB`)
+    res.json(healthData)
+  } catch (error) {
+    console.error('❌ Error in health endpoint:', error.message)
+    res.status(500).json({
+      status: 'error',
+      error: error.message
+    })
+  }
 })
 
 // Authentication endpoints
@@ -1659,12 +1710,69 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason)
 })
 
+console.log('🔧 Starting HTTP server...')
+console.log(`   PORT: ${PORT}`)
+console.log(`   HOST: ${HOST}`)
+console.log(`   NODE_ENV: ${process.env.NODE_ENV || 'not set'}`)
+console.log(`   POLYGON_API_KEY: ${process.env.POLYGON_API_KEY ? 'set' : 'not set'}`)
+
 httpServer.listen(PORT, HOST, () => {
+  console.log(`✅ Server successfully started!`)
   console.log(`🚀 Server running on ${HOST}:${PORT}`)
   console.log(`📊 WebSocket server ready for connections`)
-  console.log(`💰 Price updates every 1 minute`)
-  console.log(`📈 Signal updates on-demand`)
+  console.log(`💰 Price updates: DISABLED (investigating crashes)`)
+  console.log(`📈 Signal updates: on-demand`)
+  console.log(`🎯 Support/Resistance scan: DISABLED (manual refresh only)`)
+  console.log(`🧹 Session cleanup: every 5 minutes`)
+  console.log(`📅 Database cleanup: scheduled for 3 AM`)
+  console.log('')
+  console.log('Server is ready to accept connections!')
 }).on('error', (error) => {
-  console.error('❌ Server error:', error)
+  console.error('❌ FATAL: Server failed to start:', error.message)
+  console.error('Stack:', error.stack)
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Please choose a different port.`)
+  }
   process.exit(1)
+})
+
+// Handle graceful shutdown (Railway sends SIGTERM before killing)
+process.on('SIGTERM', () => {
+  console.log('⚠️  SIGTERM signal received - Railway is stopping the container')
+  console.log('   Reason: This typically happens due to:')
+  console.log('     1. Manual restart in Railway dashboard')
+  console.log('     2. New deployment')
+  console.log('     3. Memory limit exceeded')
+  console.log('     4. Health check failures')
+  console.log('     5. Inactivity timeout')
+  console.log('   Uptime:', Math.round(process.uptime()), 'seconds')
+  console.log('   Memory:', {
+    heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
+    heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB',
+    rss: Math.round(process.memoryUsage().rss / 1024 / 1024) + 'MB'
+  })
+  console.log('   Active sessions:', clientSessions.size)
+  console.log('   Tracked symbols:', trackedSymbols.size)
+
+  // Give existing requests time to finish
+  console.log('   Closing server gracefully...')
+  httpServer.close(() => {
+    console.log('✅ Server closed gracefully')
+    process.exit(0)
+  })
+
+  // Force close after 10 seconds if graceful shutdown fails
+  setTimeout(() => {
+    console.error('❌ Forced shutdown after timeout')
+    process.exit(1)
+  }, 10000)
+})
+
+process.on('SIGINT', () => {
+  console.log('⚠️  SIGINT signal received (Ctrl+C)')
+  console.log('   Closing server gracefully...')
+  httpServer.close(() => {
+    console.log('✅ Server closed gracefully')
+    process.exit(0)
+  })
 })
