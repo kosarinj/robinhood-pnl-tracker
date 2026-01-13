@@ -10,6 +10,7 @@ import { SignalService } from './services/signalService.js'
 import { PolygonService } from './services/polygonService.js'
 import { databaseService } from './services/database.js'
 import { authService } from './services/auth.js'
+import { level2Service } from './services/level2Service.js'
 import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -101,6 +102,41 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000) // Check every 5 minutes
+
+// Background job: Scan for support/resistance levels every 5 minutes
+setInterval(async () => {
+  try {
+    if (trackedSymbols.size === 0) {
+      return
+    }
+
+    console.log(`🎯 Scanning ${trackedSymbols.size} symbols for support/resistance levels...`)
+
+    const symbols = Array.from(trackedSymbols).slice(0, 20) // Limit to 20 symbols to avoid rate limits
+    const results = await level2Service.getSupportResistanceForSymbols(symbols)
+
+    const allLevels = Object.values(results).flat()
+    if (allLevels.length > 0) {
+      databaseService.saveSupportResistanceLevels(allLevels)
+      console.log(`✅ Found and saved ${allLevels.length} support/resistance levels`)
+
+      // Broadcast significant levels to connected clients
+      const strongLevels = allLevels.filter(level => level.strength >= 70)
+      if (strongLevels.length > 0) {
+        io.emit('support-resistance-alert', {
+          levels: strongLevels,
+          timestamp: Date.now()
+        })
+        console.log(`📢 Broadcast ${strongLevels.length} strong support/resistance levels to clients`)
+      }
+    }
+
+    // Clean up expired levels
+    databaseService.cleanupExpiredLevels()
+  } catch (error) {
+    console.error('Error in support/resistance scan:', error)
+  }
+}, 5 * 60 * 1000) // Every 5 minutes
 
 // Socket.IO authentication middleware
 io.use((socket, next) => {
@@ -839,6 +875,76 @@ io.on('connection', (socket) => {
       })
     }
   })
+
+  // Get support/resistance levels for a symbol
+  socket.on('get-support-resistance', async ({ symbol }) => {
+    console.log(`🎯 Received request for support/resistance levels: ${symbol}`)
+    try {
+      const levels = await level2Service.getSupportResistanceLevels(symbol)
+
+      // Save to database
+      if (levels.length > 0) {
+        databaseService.saveSupportResistanceLevels(levels)
+      }
+
+      socket.emit('support-resistance-result', {
+        success: true,
+        symbol,
+        levels,
+        timestamp: Date.now()
+      })
+    } catch (error) {
+      console.error(`❌ Error getting support/resistance for ${symbol}:`, error)
+      socket.emit('support-resistance-result', {
+        success: false,
+        error: error.message
+      })
+    }
+  })
+
+  // Get support/resistance levels for multiple symbols
+  socket.on('get-support-resistance-multi', async ({ symbols }) => {
+    console.log(`🎯 Received request for support/resistance levels: ${symbols.join(', ')}`)
+    try {
+      const results = await level2Service.getSupportResistanceForSymbols(symbols)
+
+      // Save all levels to database
+      const allLevels = Object.values(results).flat()
+      if (allLevels.length > 0) {
+        databaseService.saveSupportResistanceLevels(allLevels)
+      }
+
+      socket.emit('support-resistance-multi-result', {
+        success: true,
+        results,
+        timestamp: Date.now()
+      })
+    } catch (error) {
+      console.error(`❌ Error getting support/resistance:`, error)
+      socket.emit('support-resistance-multi-result', {
+        success: false,
+        error: error.message
+      })
+    }
+  })
+
+  // Update Level 2 configuration
+  socket.on('update-level2-config', ({ config }) => {
+    console.log(`⚙️  Updating Level 2 configuration`)
+    try {
+      level2Service.updateConfig(config)
+      socket.emit('level2-config-updated', {
+        success: true,
+        config: level2Service.config
+      })
+    } catch (error) {
+      console.error(`❌ Error updating Level 2 config:`, error)
+      socket.emit('level2-config-updated', {
+        success: false,
+        error: error.message
+      })
+    }
+  })
 })
 
 // Helper function to apply split adjustments
@@ -1217,6 +1323,66 @@ app.get('/api/tracked-symbols', (req, res) => {
         symbols: Array.from(trackedSymbols).sort(),
         count: trackedSymbols.size
       }
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Get support/resistance levels for a symbol
+app.get('/api/support-resistance/:symbol', requireAuth, async (req, res) => {
+  try {
+    const { symbol } = req.params
+    const { hoursBack } = req.query
+
+    // Get from database
+    const dbLevels = databaseService.getSupportResistanceLevels(symbol, hoursBack ? parseInt(hoursBack) : 24)
+
+    res.json({
+      success: true,
+      symbol,
+      levels: dbLevels,
+      source: 'database'
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Get all active support/resistance levels
+app.get('/api/support-resistance', requireAuth, (req, res) => {
+  try {
+    const levels = databaseService.getAllActiveLevels()
+    res.json({
+      success: true,
+      levels,
+      count: levels.length
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Get Level 2 configuration
+app.get('/api/level2/config', requireAuth, (req, res) => {
+  try {
+    res.json({
+      success: true,
+      config: level2Service.config
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Update Level 2 configuration
+app.post('/api/level2/config', requireAuth, (req, res) => {
+  try {
+    const { config } = req.body
+    level2Service.updateConfig(config)
+    res.json({
+      success: true,
+      config: level2Service.config
     })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })

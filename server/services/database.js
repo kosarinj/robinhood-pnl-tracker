@@ -48,6 +48,21 @@ db.exec(`
     UNIQUE(symbol, price_date)
   );
 
+  -- Table to store support/resistance levels from Level 2 data
+  CREATE TABLE IF NOT EXISTS support_resistance_levels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    type TEXT NOT NULL,
+    price REAL NOT NULL,
+    size INTEGER NOT NULL,
+    value REAL NOT NULL,
+    volume_percentage REAL,
+    strength INTEGER,
+    distance_from_price REAL,
+    detected_at INTEGER DEFAULT (strftime('%s', 'now')),
+    expires_at INTEGER
+  );
+
   -- Table to store signal snapshots
   CREATE TABLE IF NOT EXISTS signal_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1368,6 +1383,88 @@ export class DatabaseService {
     } catch (error) {
       console.error('Error saving historical prices:', error)
       throw error
+    }
+  }
+
+  // Save support/resistance levels
+  saveSupportResistanceLevels(levels) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO support_resistance_levels
+        (symbol, type, price, size, value, volume_percentage, strength, distance_from_price, detected_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      const transaction = db.transaction((levelsList) => {
+        for (const level of levelsList) {
+          const expiresAt = Math.floor(Date.now() / 1000) + (24 * 60 * 60) // Expire after 24 hours
+          stmt.run(
+            level.symbol,
+            level.type,
+            level.price,
+            level.size,
+            level.value,
+            parseFloat(level.volumePercentage),
+            level.strength,
+            parseFloat(level.distanceFromPrice),
+            Math.floor(level.timestamp / 1000),
+            expiresAt
+          )
+        }
+      })
+
+      transaction(levels)
+      console.log(`✅ Saved ${levels.length} support/resistance levels`)
+    } catch (error) {
+      console.error('Error saving support/resistance levels:', error)
+    }
+  }
+
+  // Get recent support/resistance levels for a symbol
+  getSupportResistanceLevels(symbol, hoursBack = 24) {
+    try {
+      const cutoffTime = Math.floor(Date.now() / 1000) - (hoursBack * 60 * 60)
+      const stmt = db.prepare(`
+        SELECT * FROM support_resistance_levels
+        WHERE symbol = ? AND detected_at > ?
+        ORDER BY detected_at DESC, strength DESC
+      `)
+      return stmt.all(symbol, cutoffTime)
+    } catch (error) {
+      console.error(`Error getting support/resistance levels for ${symbol}:`, error)
+      return []
+    }
+  }
+
+  // Get active support/resistance levels across all symbols
+  getAllActiveLevels() {
+    try {
+      const now = Math.floor(Date.now() / 1000)
+      const stmt = db.prepare(`
+        SELECT * FROM support_resistance_levels
+        WHERE expires_at > ?
+        ORDER BY strength DESC
+        LIMIT 100
+      `)
+      return stmt.all(now)
+    } catch (error) {
+      console.error('Error getting all active levels:', error)
+      return []
+    }
+  }
+
+  // Clean up expired support/resistance levels
+  cleanupExpiredLevels() {
+    try {
+      const now = Math.floor(Date.now() / 1000)
+      const result = db.prepare('DELETE FROM support_resistance_levels WHERE expires_at <= ?').run(now)
+      if (result.changes > 0) {
+        console.log(`🧹 Cleaned up ${result.changes} expired support/resistance levels`)
+      }
+      return result.changes
+    } catch (error) {
+      console.error('Error cleaning up expired levels:', error)
+      return 0
     }
   }
 
