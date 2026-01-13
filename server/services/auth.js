@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import Database from 'better-sqlite3'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import fs from 'fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -13,12 +14,18 @@ try {
   // Try to import the shared database connection
   const { getDatabase } = await import('./database.js')
   db = getDatabase()
-  console.log('✓ Using shared database connection')
+  console.log('✓ Auth service using shared database connection')
+
+  // Log database file location
+  const dbPath = process.env.DATABASE_PATH || join(__dirname, '..', 'trading_data.db')
+  console.log('📁 Database path:', dbPath)
+  console.log('📁 Database exists:', fs.existsSync(dbPath))
 } catch (error) {
   // Fallback to creating own connection if import fails
   console.log('⚠ Creating separate database connection for auth')
   const dbPath = process.env.DATABASE_PATH || join(__dirname, '..', 'trading_data.db')
   db = new Database(dbPath)
+  console.log('📁 Database path:', dbPath)
 }
 
 const SALT_ROUNDS = 10
@@ -62,6 +69,11 @@ export class AuthService {
       const result = stmt.run(username, password_hash, email || null)
 
       console.log(`✅ Created user: ${username} (ID: ${result.lastInsertRowid})`)
+
+      // Verify user was saved
+      const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get()
+      console.log(`📊 Total users in database: ${userCount.count}`)
+
       return {
         id: result.lastInsertRowid,
         username,
@@ -77,11 +89,17 @@ export class AuthService {
   // Login user and create session
   async login(username, password) {
     try {
+      // Check total users first
+      const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get()
+      console.log(`📊 Login attempt for '${username}'. Total users in database: ${userCount.count}`)
+
       // Get user
       const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username)
       if (!user) {
+        console.log(`❌ User '${username}' not found in database`)
         throw new Error('Invalid username or password')
       }
+      console.log(`✓ Found user: ${user.username} (ID: ${user.id})`)
 
       // Verify password
       const valid = await bcrypt.compare(password, user.password_hash)

@@ -4,14 +4,14 @@ class SocketService {
   constructor() {
     this.socket = null
     this.connected = false
-    // Use environment variable if set, otherwise use production URL if not localhost, otherwise localhost
-    const envUrl = import.meta.env.VITE_SERVER_URL
-    const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-    this.serverUrl = envUrl || (isProduction ? 'https://robinhood-pnl-tracker-production-805d.up.railway.app' : 'http://localhost:3001')
+    // On Railway, frontend and backend are served from same server, so use same origin
+    // In development, use localhost:3001 for backend
+    const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    this.serverUrl = isDevelopment ? 'http://localhost:3001' : window.location.origin
     console.log('🔧 Socket Service Config:', {
-      envUrl,
       hostname: window.location.hostname,
-      isProduction,
+      origin: window.location.origin,
+      isDevelopment,
       serverUrl: this.serverUrl
     })
   }
