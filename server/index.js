@@ -1345,9 +1345,21 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001
 const HOST = '0.0.0.0' // Listen on all interfaces for Railway
 
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error)
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason)
+})
+
 httpServer.listen(PORT, HOST, () => {
   console.log(`🚀 Server running on ${HOST}:${PORT}`)
   console.log(`📊 WebSocket server ready for connections`)
   console.log(`💰 Price updates every 1 minute`)
   console.log(`📈 Signal updates on-demand`)
+}).on('error', (error) => {
+  console.error('❌ Server error:', error)
+  process.exit(1)
 })
