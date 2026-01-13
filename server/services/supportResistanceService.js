@@ -366,6 +366,11 @@ export class SupportResistanceService {
    */
   async getSupportResistanceLevels(symbol) {
     try {
+      // Check if API key is configured
+      if (!this.apiKey) {
+        throw new Error('Polygon API key not configured. Please set POLYGON_API_KEY environment variable.')
+      }
+
       // Check cache
       const cached = this.cache.get(symbol)
       if (cached && Date.now() - cached.timestamp < this.config.cacheDuration) {
@@ -378,15 +383,13 @@ export class SupportResistanceService {
       // Fetch historical data
       const candles = await this.getHistoricalData(symbol)
       if (!candles || candles.length < 20) {
-        console.log(`⚠️  Insufficient data for ${symbol}`)
-        return []
+        throw new Error(`Insufficient historical data for ${symbol}. Need at least 20 days of data.`)
       }
 
       // Get current price
       const currentPrice = await this.getCurrentPrice(symbol)
       if (!currentPrice) {
-        console.log(`⚠️  Could not get current price for ${symbol}`)
-        return []
+        throw new Error(`Could not get current price for ${symbol}. Check if symbol is valid.`)
       }
 
       // Run all detection algorithms

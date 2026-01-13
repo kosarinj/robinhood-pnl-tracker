@@ -5,6 +5,7 @@ function SupportResistanceLevels({ socket, symbols }) {
   const { isDark } = useTheme()
   const [levels, setLevels] = useState([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [showConfig, setShowConfig] = useState(false)
@@ -28,6 +29,7 @@ function SupportResistanceLevels({ socket, symbols }) {
     }
 
     setLoading(true)
+    setError(null) // Clear previous errors
     console.log('Emitting get-support-resistance event for:', symbol)
     socket.emit('get-support-resistance', { symbol })
   }
@@ -44,6 +46,7 @@ function SupportResistanceLevels({ socket, symbols }) {
     }
 
     setLoading(true)
+    setError(null) // Clear previous errors
     console.log('Emitting get-support-resistance-multi event for:', symbols)
     socket.emit('get-support-resistance-multi', { symbols })
   }
@@ -63,8 +66,11 @@ function SupportResistanceLevels({ socket, symbols }) {
       if (data.success) {
         console.log('Setting levels:', data.levels)
         setLevels(data.levels)
+        setError(null)
       } else {
         console.error('Request failed:', data.error)
+        setError(data.error || 'Failed to fetch support/resistance levels')
+        setLevels([])
       }
     })
 
@@ -76,8 +82,11 @@ function SupportResistanceLevels({ socket, symbols }) {
         const allLevels = Object.values(data.results).flat()
         console.log('Setting all levels:', allLevels)
         setLevels(allLevels)
+        setError(null)
       } else {
         console.error('Request failed:', data.error)
+        setError(data.error || 'Failed to fetch support/resistance levels')
+        setLevels([])
       }
     })
 
@@ -364,6 +373,26 @@ function SupportResistanceLevels({ socket, symbols }) {
               <option key={symbol} value={symbol}>{symbol}</option>
             ))}
           </select>
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div style={{
+          background: '#fef2f2',
+          border: '1px solid #fca5a5',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '15px',
+          color: '#991b1b'
+        }}>
+          <div style={{ fontWeight: '600', marginBottom: '4px' }}>❌ Error</div>
+          <div style={{ fontSize: '14px' }}>{error}</div>
+          {error.includes('API key') && (
+            <div style={{ fontSize: '13px', marginTop: '8px', color: '#dc2626' }}>
+              💡 Get a free API key at <a href="https://polygon.io" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>polygon.io</a>, then set the POLYGON_API_KEY environment variable in Railway.
+            </div>
+          )}
         </div>
       )}
 
