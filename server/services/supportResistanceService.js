@@ -112,27 +112,72 @@ export class SupportResistanceService {
         return null
       }
 
-      const url = `${this.baseUrl}/v2/last/trade/${symbol}`
-      const response = await axios.get(url, {
-        params: { apiKey: this.apiKey },
-        timeout: 5000
-      })
+      console.log(`💲 Fetching current price for ${symbol}...`)
 
-      if (response.data && response.data.results) {
-        return response.data.results.p
+      // Try method 1: Previous close from aggregates (most reliable for free tier)
+      try {
+        const yesterday = new Date()
+        yesterday.setDate(yesterday.getDate() - 1)
+        const dateStr = yesterday.toISOString().split('T')[0]
+
+        const url = `${this.baseUrl}/v2/aggs/ticker/${symbol}/prev`
+        console.log(`  Trying: ${url}`)
+
+        const response = await axios.get(url, {
+          params: { apiKey: this.apiKey, adjusted: true },
+          timeout: 5000
+        })
+
+        if (response.data && response.data.results && response.data.results.length > 0) {
+          const price = response.data.results[0].c
+          console.log(`  ✓ Got price from previous close: $${price}`)
+          return price
+        }
+      } catch (err) {
+        console.log(`  ✗ Previous close failed: ${err.message}`)
       }
 
-      // Fallback: use latest snapshot
-      const snapshotUrl = `${this.baseUrl}/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`
-      const snapshotResponse = await axios.get(snapshotUrl, {
-        params: { apiKey: this.apiKey },
-        timeout: 5000
-      })
+      // Try method 2: Snapshot (free tier)
+      try {
+        const snapshotUrl = `${this.baseUrl}/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`
+        console.log(`  Trying: ${snapshotUrl}`)
 
-      if (snapshotResponse.data && snapshotResponse.data.ticker) {
-        return snapshotResponse.data.ticker.day?.c || snapshotResponse.data.ticker.lastTrade?.p
+        const snapshotResponse = await axios.get(snapshotUrl, {
+          params: { apiKey: this.apiKey },
+          timeout: 5000
+        })
+
+        if (snapshotResponse.data && snapshotResponse.data.ticker) {
+          const price = snapshotResponse.data.ticker.day?.c || snapshotResponse.data.ticker.prevDay?.c
+          if (price) {
+            console.log(`  ✓ Got price from snapshot: $${price}`)
+            return price
+          }
+        }
+      } catch (err) {
+        console.log(`  ✗ Snapshot failed: ${err.response?.status} - ${err.message}`)
       }
 
+      // Try method 3: Last trade (may require paid plan)
+      try {
+        const url = `${this.baseUrl}/v2/last/trade/${symbol}`
+        console.log(`  Trying: ${url}`)
+
+        const response = await axios.get(url, {
+          params: { apiKey: this.apiKey },
+          timeout: 5000
+        })
+
+        if (response.data && response.data.results) {
+          const price = response.data.results.p
+          console.log(`  ✓ Got price from last trade: $${price}`)
+          return price
+        }
+      } catch (err) {
+        console.log(`  ✗ Last trade failed: ${err.response?.status} - ${err.message}`)
+      }
+
+      console.log(`  ❌ All methods failed for ${symbol}`)
       return null
     } catch (error) {
       console.error(`❌ Error fetching current price for ${symbol}:`, error.message)
