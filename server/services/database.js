@@ -773,25 +773,28 @@ export class DatabaseService {
   }
 
   // Debug: Get raw snapshot data from database
-  getSnapshotsDebugInfo() {
+  getSnapshotsDebugInfo(userId = 1) {
     try {
       const snapshots = db.prepare(`
         SELECT asof_date, symbol, total_pnl, realized_pnl, unrealized_pnl
         FROM pnl_snapshots
+        WHERE user_id = ?
         ORDER BY asof_date DESC, symbol
         LIMIT 50
-      `).all()
+      `).all(userId)
 
       const dates = db.prepare(`
         SELECT DISTINCT asof_date
         FROM pnl_snapshots
+        WHERE user_id = ?
         ORDER BY asof_date DESC
-      `).all()
+      `).all(userId)
 
       const count = db.prepare(`
         SELECT COUNT(*) as count
         FROM pnl_snapshots
-      `).get()
+        WHERE user_id = ?
+      `).get(userId)
 
       return {
         success: true,
@@ -923,14 +926,15 @@ export class DatabaseService {
   }
 
   // Get list of all symbols that have snapshot data
-  getSymbolsWithSnapshots() {
+  getSymbolsWithSnapshots(userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT DISTINCT symbol
         FROM pnl_snapshots
+        WHERE user_id = ?
         ORDER BY symbol ASC
       `)
-      return stmt.all().map(row => row.symbol)
+      return stmt.all(userId).map(row => row.symbol)
     } catch (error) {
       console.error('Error getting symbols with snapshots:', error)
       return []
@@ -1056,13 +1060,13 @@ export class DatabaseService {
   }
 
   // Get total principal for a specific upload date
-  getTotalPrincipal(uploadDate) {
+  getTotalPrincipal(uploadDate, userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT total_principal FROM csv_uploads
-        WHERE upload_date = ?
+        WHERE upload_date = ? AND user_id = ?
       `)
-      const row = stmt.get(uploadDate)
+      const row = stmt.get(uploadDate, userId)
       return row ? row.total_principal : 0
     } catch (error) {
       console.error('Error getting total principal:', error)
@@ -1216,13 +1220,153 @@ export class DatabaseService {
   }
 
   // Clear all P&L snapshots only (keeps trades and uploads)
-  clearAllSnapshots() {
+  clearAllSnapshots(userId = 1) {
     try {
-      const result = db.prepare('DELETE FROM pnl_snapshots').run()
-      console.log(`✅ Cleared all P&L snapshots (${result.changes} records deleted)`)
+      const result = db.prepare('DELETE FROM pnl_snapshots WHERE user_id = ?').run(userId)
+      console.log(`✅ Cleared all P&L snapshots for user ${userId} (${result.changes} records deleted)`)
       return result.changes
     } catch (error) {
       console.error('Error clearing snapshots:', error)
+      throw error
+    }
+  }
+
+  // Get missing days between snapshots for backfill
+  getMissingSnapshotDates(userId = 1) {
+    try {
+      const dates = this.getSnapshotDates(userId)
+      if (dates.length < 2) {
+        return [] // Need at least 2 snapshots to find gaps
+      }
+
+      const firstDate = new Date(dates[0])
+      const lastDate = new Date(dates[dates.length - 1])
+      const existingDatesSet = new Set(dates)
+      const missingDates = []
+
+      // Iterate through all dates between first and last
+      const currentDate = new Date(firstDate)
+      while (currentDate <= lastDate) {
+        const dateStr = currentDate.toISOString().split('T')[0]
+        if (!existingDatesSet.has(dateStr)) {
+          // Skip weekends (Saturday=6, Sunday=0)
+          const dayOfWeek = currentDate.getDay()
+          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+            missingDates.push(dateStr)
+          }
+        }
+        currentDate.setDate(currentDate.getDate() + 1)
+      }
+
+      return missingDates
+    } catch (error) {
+      console.error('Error getting missing snapshot dates:', error)
+      return []
+    }
+  }
+
+  // Get all trades that were active (open) on a specific date
+  getTradesActiveOnDate(targetDate, userId = 1) {
+    try {
+      const stmt = db.prepare(`
+        SELECT * FROM trades
+        WHERE user_id = ? AND trans_date <= ?
+        ORDER BY trans_date ASC
+      `)
+      return stmt.all(userId, targetDate)
+    } catch (error) {
+      console.error(`Error getting trades active on ${targetDate}:`, error)
+      return []
+    }
+  }
+
+  // Save historical price to cache
+  saveHistoricalPrice(symbol, priceDate, openPrice, highPrice, lowPrice, closePrice, volume = null) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO historical_prices (symbol, price_date, open_price, high_price, low_price, close_price, volume)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol, price_date) DO UPDATE SET
+          open_price = excluded.open_price,
+          high_price = excluded.high_price,
+          low_price = excluded.low_price,
+          close_price = excluded.close_price,
+          volume = excluded.volume
+      `)
+      stmt.run(symbol, priceDate, openPrice, highPrice, lowPrice, closePrice, volume)
+    } catch (error) {
+      console.error(`Error saving historical price for ${symbol} on ${priceDate}:`, error)
+    }
+  }
+
+  // Get historical price from cache
+  getHistoricalPrice(symbol, priceDate) {
+    try {
+      const stmt = db.prepare(`
+        SELECT close_price FROM historical_prices
+        WHERE symbol = ? AND price_date = ?
+      `)
+      const row = stmt.get(symbol, priceDate)
+      return row ? row.close_price : null
+    } catch (error) {
+      console.error(`Error getting historical price for ${symbol} on ${priceDate}:`, error)
+      return null
+    }
+  }
+
+  // Get historical prices for multiple symbols on a specific date
+  getHistoricalPricesForDate(symbols, priceDate) {
+    try {
+      const placeholders = symbols.map(() => '?').join(',')
+      const stmt = db.prepare(`
+        SELECT symbol, close_price FROM historical_prices
+        WHERE symbol IN (${placeholders}) AND price_date = ?
+      `)
+      const rows = stmt.all(...symbols, priceDate)
+
+      const prices = {}
+      rows.forEach(row => {
+        prices[row.symbol] = row.close_price
+      })
+      return prices
+    } catch (error) {
+      console.error(`Error getting historical prices for date ${priceDate}:`, error)
+      return {}
+    }
+  }
+
+  // Save multiple historical prices at once (batch insert)
+  saveHistoricalPrices(priceData) {
+    try {
+      const insertStmt = db.prepare(`
+        INSERT INTO historical_prices (symbol, price_date, open_price, high_price, low_price, close_price, volume)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol, price_date) DO UPDATE SET
+          open_price = excluded.open_price,
+          high_price = excluded.high_price,
+          low_price = excluded.low_price,
+          close_price = excluded.close_price,
+          volume = excluded.volume
+      `)
+
+      const transaction = db.transaction((prices) => {
+        for (const price of prices) {
+          insertStmt.run(
+            price.symbol,
+            price.priceDate,
+            price.openPrice || null,
+            price.highPrice || null,
+            price.lowPrice || null,
+            price.closePrice,
+            price.volume || null
+          )
+        }
+      })
+
+      transaction(priceData)
+      console.log(`✅ Saved ${priceData.length} historical prices to cache`)
+    } catch (error) {
+      console.error('Error saving historical prices:', error)
       throw error
     }
   }

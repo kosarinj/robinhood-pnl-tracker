@@ -1,10 +1,11 @@
 import axios from 'axios'
 
 export class PriceService {
-  constructor() {
+  constructor(databaseService = null) {
     this.priceCache = new Map()
     this.trackedSymbols = new Set()
     this.lastUpdate = null
+    this.databaseService = databaseService
   }
 
   // Add symbols to track
@@ -166,6 +167,15 @@ export class PriceService {
   // Get closing price for a specific date
   async getPriceForDate(symbol, dateString) {
     try {
+      // Check database cache first
+      if (this.databaseService) {
+        const cachedPrice = this.databaseService.getHistoricalPrice(symbol, dateString)
+        if (cachedPrice !== null) {
+          console.log(`✓ ${symbol} price for ${dateString} from cache: $${cachedPrice}`)
+          return cachedPrice
+        }
+      }
+
       const targetDate = new Date(dateString)
       targetDate.setHours(0, 0, 0, 0)
 
@@ -212,6 +222,19 @@ export class PriceService {
       const closingPrice = quotes.close[closestIndex]
       const actualDate = new Date(timestamps[closestIndex] * 1000).toISOString().split('T')[0]
 
+      // Save to cache if databaseService is available
+      if (this.databaseService && closingPrice) {
+        this.databaseService.saveHistoricalPrice(
+          symbol,
+          actualDate,
+          quotes.open[closestIndex],
+          quotes.high[closestIndex],
+          quotes.low[closestIndex],
+          closingPrice,
+          quotes.volume[closestIndex]
+        )
+      }
+
       console.log(`✓ ${symbol} closing price on ${actualDate} (target: ${dateString}): $${closingPrice}`)
       return closingPrice || 0
     } catch (error) {
@@ -224,10 +247,33 @@ export class PriceService {
   // Get closing prices for multiple symbols on a specific date
   async getPricesForDate(symbols, dateString) {
     const prices = {}
-    const fetchPromises = symbols.map(async (symbol) => {
-      prices[symbol] = await this.getPriceForDate(symbol, dateString)
-    })
-    await Promise.all(fetchPromises)
+    const symbolsToFetch = []
+
+    // Check cache for all symbols first
+    if (this.databaseService) {
+      const cachedPrices = this.databaseService.getHistoricalPricesForDate(symbols, dateString)
+      Object.assign(prices, cachedPrices)
+
+      // Determine which symbols still need to be fetched
+      symbols.forEach(symbol => {
+        if (prices[symbol] === undefined) {
+          symbolsToFetch.push(symbol)
+        }
+      })
+
+      console.log(`✓ Found ${Object.keys(cachedPrices).length}/${symbols.length} prices in cache for ${dateString}`)
+    } else {
+      symbolsToFetch.push(...symbols)
+    }
+
+    // Fetch missing prices
+    if (symbolsToFetch.length > 0) {
+      const fetchPromises = symbolsToFetch.map(async (symbol) => {
+        prices[symbol] = await this.getPriceForDate(symbol, dateString)
+      })
+      await Promise.all(fetchPromises)
+    }
+
     return prices
   }
 }

@@ -63,7 +63,7 @@ app.use(cookieParser())
 const upload = multer({ storage: multer.memoryStorage() })
 
 // Services
-const priceService = new PriceService()
+const priceService = new PriceService(databaseService)
 
 // Signal service configuration - Use Polygon by default, fallback to Alpha Vantage
 const USE_POLYGON = process.env.USE_POLYGON !== 'false' // Default to true
@@ -94,9 +94,41 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000) // Check every 5 minutes
 
+// Socket.IO authentication middleware
+io.use((socket, next) => {
+  // Get cookies from handshake
+  const cookies = socket.handshake.headers.cookie
+  if (!cookies) {
+    return next(new Error('Authentication required'))
+  }
+
+  // Parse cookies manually (socket.io doesn't use cookie-parser)
+  const cookieObj = {}
+  cookies.split(';').forEach(cookie => {
+    const [key, value] = cookie.trim().split('=')
+    cookieObj[key] = value
+  })
+
+  const sessionToken = cookieObj.session_token
+  if (!sessionToken) {
+    return next(new Error('Authentication required'))
+  }
+
+  // Verify session
+  const user = authService.verifySession(sessionToken)
+  if (!user) {
+    return next(new Error('Invalid or expired session'))
+  }
+
+  // Store user info in socket for later use
+  socket.data.user = user
+  next()
+})
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`)
+  const user = socket.data.user
+  console.log(`Client connected: ${socket.id} (user: ${user.username}, id: ${user.userId})`)
 
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`)
@@ -172,16 +204,16 @@ io.on('connection', (socket) => {
 
       // Save P&L snapshot to database with historical prices
       try {
-        databaseService.savePnLSnapshot(asofDate, pnlData)
-        console.log(`💾 Saved P&L snapshot for ${asofDate} with historical prices`)
+        databaseService.savePnLSnapshot(asofDate, pnlData, user.userId)
+        console.log(`💾 Saved P&L snapshot for ${asofDate} with historical prices (user: ${user.userId})`)
       } catch (error) {
         console.error('Error saving P&L snapshot:', error)
       }
 
       // Save trades and deposits to database
       try {
-        databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal)
-        console.log(`💾 Saved ${trades.length} trades and ${deposits.length} deposits to database for ${asofDate}`)
+        databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal, user.userId)
+        console.log(`💾 Saved ${trades.length} trades and ${deposits.length} deposits to database for ${asofDate} (user: ${user.userId})`)
       } catch (error) {
         console.error('Error saving trades:', error)
       }
@@ -356,9 +388,9 @@ io.on('connection', (socket) => {
 
   // Get available snapshot dates
   socket.on('get-snapshot-dates', async () => {
-    console.log(`📅 Received get-snapshot-dates request`)
+    console.log(`📅 Received get-snapshot-dates request (user: ${user.userId})`)
     try {
-      const dates = databaseService.getSnapshotDates()
+      const dates = databaseService.getSnapshotDates(user.userId)
       socket.emit('snapshot-dates-result', { dates })
     } catch (error) {
       console.error(`❌ Error getting snapshot dates:`, error)
@@ -368,9 +400,9 @@ io.on('connection', (socket) => {
 
   // Load P&L snapshot for a specific date
   socket.on('load-pnl-snapshot', async ({ asofDate }) => {
-    console.log(`📂 Received load-pnl-snapshot request for: ${asofDate}`)
+    console.log(`📂 Received load-pnl-snapshot request for: ${asofDate} (user: ${user.userId})`)
     try {
-      let snapshot = databaseService.getPnLSnapshot(asofDate)
+      let snapshot = databaseService.getPnLSnapshot(asofDate, user.userId)
 
       // Add enrichment-compatible fields to snapshot data (keep all original fields)
       let snapshotWithRealField = snapshot.map(row => ({
@@ -396,7 +428,7 @@ io.on('connection', (socket) => {
       const weekAgoDate = `${weekAgoYear}-${weekAgoMonth}-${weekAgoDay}`
 
       console.log(`   Calculated week ago: ${weekAgoDate}`)
-      const weekAgoSnapshot = databaseService.getPnLSnapshot(weekAgoDate)
+      const weekAgoSnapshot = databaseService.getPnLSnapshot(weekAgoDate, user.userId)
       console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records`)
 
       if (weekAgoSnapshot.length > 0) {
@@ -431,9 +463,9 @@ io.on('connection', (socket) => {
 
   // Get latest saved trades
   socket.on('get-latest-trades', async () => {
-    console.log(`📥 Received get-latest-trades request`)
+    console.log(`📥 Received get-latest-trades request (user: ${user.userId})`)
     try {
-      const { trades, uploadDate } = databaseService.getLatestTrades()
+      const { trades, uploadDate } = databaseService.getLatestTrades(user.userId)
 
       if (trades.length > 0) {
         console.log(`✓ Found ${trades.length} trades from ${uploadDate}`)
@@ -475,7 +507,7 @@ io.on('connection', (socket) => {
         const weekAgoDate = `${weekAgoYear}-${weekAgoMonth}-${weekAgoDay}`
 
         console.log(`   Calculated week ago: ${weekAgoDate}`)
-        const weekAgoSnapshot = databaseService.getPnLSnapshot(weekAgoDate)
+        const weekAgoSnapshot = databaseService.getPnLSnapshot(weekAgoDate, user.userId)
         console.log(`   Week ago snapshot: ${weekAgoSnapshot.length} records from ${weekAgoDate}`)
 
         let enrichedPnlData = pnlDataWithBenchmarks
@@ -487,8 +519,8 @@ io.on('connection', (socket) => {
           console.log(`   ⚠️ Skipping enrichment - no snapshot for ${weekAgoDate}`)
         }
 
-        const deposits = databaseService.getDeposits(uploadDate)
-        const totalPrincipal = databaseService.getTotalPrincipal(uploadDate)
+        const deposits = databaseService.getDeposits(uploadDate, user.userId)
+        const totalPrincipal = databaseService.getTotalPrincipal(uploadDate, user.userId)
 
         socket.emit('latest-trades-result', {
           success: true,
@@ -518,9 +550,9 @@ io.on('connection', (socket) => {
 
   // Get all upload dates
   socket.on('get-upload-dates', async () => {
-    console.log(`📅 Received get-upload-dates request`)
+    console.log(`📅 Received get-upload-dates request (user: ${user.userId})`)
     try {
-      const dates = databaseService.getUploadDates()
+      const dates = databaseService.getUploadDates(user.userId)
       socket.emit('upload-dates-result', { dates })
     } catch (error) {
       console.error(`❌ Error getting upload dates:`, error)
@@ -551,9 +583,9 @@ io.on('connection', (socket) => {
 
   // Load trades for a specific date
   socket.on('load-trades', async ({ uploadDate }) => {
-    console.log(`📂 Received load-trades request for: ${uploadDate}`)
+    console.log(`📂 Received load-trades request for: ${uploadDate} (user: ${user.userId})`)
     try {
-      const trades = databaseService.getTrades(uploadDate)
+      const trades = databaseService.getTrades(uploadDate, user.userId)
 
       // Get unique stock symbols
       const allSymbols = [...new Set(trades.map(t => t.symbol))]
@@ -593,8 +625,8 @@ io.on('connection', (socket) => {
         }
       })
 
-      const deposits = databaseService.getDeposits(uploadDate)
-      const totalPrincipal = databaseService.getTotalPrincipal(uploadDate)
+      const deposits = databaseService.getDeposits(uploadDate, user.userId)
+      const totalPrincipal = databaseService.getTotalPrincipal(uploadDate, user.userId)
 
       // Store session data so client receives auto-updates
       clientSessions.set(socket.id, {
@@ -641,9 +673,9 @@ io.on('connection', (socket) => {
 
   // Delete snapshot for a specific date (manual admin function)
   socket.on('delete-snapshot', ({ date }) => {
-    console.log(`🗑️ Received delete-snapshot request for ${date}`)
+    console.log(`🗑️ Received delete-snapshot request for ${date} (user: ${user.userId})`)
     try {
-      const deletedCount = databaseService.deletePnLSnapshot(date)
+      const deletedCount = databaseService.deletePnLSnapshot(date, user.userId)
       console.log(`✅ Deleted ${deletedCount} snapshot records for ${date}`)
       socket.emit('snapshot-deleted', { success: true, date, deletedCount })
     } catch (error) {
@@ -654,9 +686,9 @@ io.on('connection', (socket) => {
 
   // Clear all P&L snapshots (admin function)
   socket.on('clear-all-snapshots', () => {
-    console.log(`🗑️ Received clear-all-snapshots request`)
+    console.log(`🗑️ Received clear-all-snapshots request (user: ${user.userId})`)
     try {
-      const deletedCount = databaseService.clearAllSnapshots()
+      const deletedCount = databaseService.clearAllSnapshots(user.userId)
       console.log(`✅ Cleared all snapshots (${deletedCount} records)`)
       socket.emit('snapshots-cleared', { success: true, deletedCount })
     } catch (error) {
@@ -667,13 +699,13 @@ io.on('connection', (socket) => {
 
   // Get daily P&L history for charting
   socket.on('get-daily-pnl', () => {
-    console.log(`📊 Received get-daily-pnl request`)
+    console.log(`📊 Received get-daily-pnl request (user: ${user.userId})`)
     try {
-      const dailyPnL = databaseService.getDailyPnLHistory()
+      const dailyPnL = databaseService.getDailyPnLHistory(user.userId)
       console.log(`✅ Sending ${dailyPnL.length} days of P&L history`)
 
       // Debug: Show what dates we have snapshots for
-      const dates = databaseService.getSnapshotDates()
+      const dates = databaseService.getSnapshotDates(user.userId)
       console.log(`📅 Available snapshot dates: ${dates.join(', ')}`)
 
       socket.emit('daily-pnl-result', { success: true, data: dailyPnL })
@@ -685,9 +717,9 @@ io.on('connection', (socket) => {
 
   // Get symbol-specific daily P&L with price
   socket.on('get-symbol-pnl', ({ symbol }) => {
-    console.log(`📊 Received get-symbol-pnl request for ${symbol}`)
+    console.log(`📊 Received get-symbol-pnl request for ${symbol} (user: ${user.userId})`)
     try {
-      const symbolPnL = databaseService.getSymbolDailyPnL(symbol)
+      const symbolPnL = databaseService.getSymbolDailyPnL(symbol, user.userId)
       console.log(`✅ Sending ${symbolPnL.length} days of P&L for ${symbol}`)
       socket.emit('symbol-pnl-result', { success: true, symbol, data: symbolPnL })
     } catch (error) {
@@ -698,14 +730,103 @@ io.on('connection', (socket) => {
 
   // Get list of symbols with snapshot data
   socket.on('get-symbols-list', () => {
-    console.log(`📋 Received get-symbols-list request`)
+    console.log(`📋 Received get-symbols-list request (user: ${user.userId})`)
     try {
-      const symbols = databaseService.getSymbolsWithSnapshots()
+      const symbols = databaseService.getSymbolsWithSnapshots(user.userId)
       console.log(`✅ Sending ${symbols.length} symbols`)
       socket.emit('symbols-list-result', { success: true, data: symbols })
     } catch (error) {
       console.error(`❌ Error getting symbols list:`, error)
       socket.emit('symbols-list-error', { error: error.message })
+    }
+  })
+
+  // Backfill missing daily PNL snapshots from trade history
+  socket.on('backfill-snapshots', async () => {
+    console.log(`🔄 Received backfill-snapshots request (user: ${user.userId})`)
+    try {
+      const missingDates = databaseService.getMissingSnapshotDates(user.userId)
+
+      if (missingDates.length === 0) {
+        console.log('✅ No missing dates to backfill')
+        socket.emit('backfill-complete', {
+          success: true,
+          message: 'No missing dates to backfill',
+          backfilledCount: 0
+        })
+        return
+      }
+
+      console.log(`📅 Found ${missingDates.length} missing dates to backfill`)
+
+      let backfilledCount = 0
+      for (const targetDate of missingDates) {
+        try {
+          // Get all trades that were active on this date
+          const allTrades = databaseService.getTradesActiveOnDate(targetDate, user.userId)
+
+          if (allTrades.length === 0) {
+            console.log(`⚠️  No trades found for ${targetDate}, skipping`)
+            continue
+          }
+
+          // Get unique stock symbols (filter out options)
+          const stockSymbols = [...new Set(
+            allTrades
+              .filter(t => !t.symbol.includes(' ') && !t.symbol.includes('Put') && !t.symbol.includes('Call'))
+              .map(t => t.symbol)
+          )]
+
+          if (stockSymbols.length === 0) {
+            console.log(`⚠️  No stock symbols for ${targetDate}, skipping`)
+            continue
+          }
+
+          // Fetch historical prices for this date
+          console.log(`📈 Fetching prices for ${stockSymbols.length} symbols on ${targetDate}...`)
+          const historicalPrices = await priceService.getPricesForDate(stockSymbols, targetDate)
+
+          // Get deposits for calculating total principal
+          const deposits = databaseService.getDeposits(targetDate, user.userId) || []
+          const totalPrincipal = deposits.reduce((sum, d) => sum + (d.amount || 0), 0)
+
+          // Calculate P&L using historical prices
+          const pnlData = calculatePnL(allTrades, historicalPrices, true, null, targetDate, [])
+
+          // Save this backfilled snapshot
+          databaseService.savePnLSnapshot(targetDate, pnlData, user.userId)
+
+          backfilledCount++
+          console.log(`✓ Backfilled snapshot for ${targetDate} (${backfilledCount}/${missingDates.length})`)
+
+          // Emit progress update
+          socket.emit('backfill-progress', {
+            date: targetDate,
+            current: backfilledCount,
+            total: missingDates.length
+          })
+
+          // Small delay to avoid overwhelming the API
+          await new Promise(resolve => setTimeout(resolve, 500))
+        } catch (error) {
+          console.error(`❌ Error backfilling ${targetDate}:`, error.message)
+          // Continue with next date even if one fails
+        }
+      }
+
+      console.log(`✅ Backfill complete: ${backfilledCount}/${missingDates.length} snapshots created`)
+      socket.emit('backfill-complete', {
+        success: true,
+        message: `Successfully backfilled ${backfilledCount} snapshots`,
+        backfilledCount,
+        total: missingDates.length
+      })
+    } catch (error) {
+      console.error(`❌ Error during backfill:`, error)
+      socket.emit('backfill-complete', {
+        success: false,
+        error: error.message
+      })
     }
   })
 })
@@ -1029,9 +1150,9 @@ const requireAuth = (req, res, next) => {
 }
 
 // Debug endpoint to see what snapshot dates exist
-app.get('/api/debug/snapshot-dates', (req, res) => {
+app.get('/api/debug/snapshot-dates', requireAuth, (req, res) => {
   try {
-    const dates = databaseService.getSnapshotDates()
+    const dates = databaseService.getSnapshotDates(req.user.userId)
     res.json({
       success: true,
       dates: dates,
@@ -1047,9 +1168,9 @@ app.get('/api/debug/snapshot-dates', (req, res) => {
 })
 
 // Debug endpoint to check daily P&L data
-app.get('/api/debug/daily-pnl', (req, res) => {
+app.get('/api/debug/daily-pnl', requireAuth, (req, res) => {
   try {
-    const dailyPnL = databaseService.getDailyPnLHistory()
+    const dailyPnL = databaseService.getDailyPnLHistory(req.user.userId)
     res.json({
       success: true,
       data: dailyPnL,
@@ -1065,9 +1186,9 @@ app.get('/api/debug/daily-pnl', (req, res) => {
 })
 
 // Debug endpoint to check pnl_snapshots table directly
-app.get('/api/debug/snapshots-raw', (req, res) => {
+app.get('/api/debug/snapshots-raw', requireAuth, (req, res) => {
   try {
-    const debugInfo = databaseService.getSnapshotsDebugInfo()
+    const debugInfo = databaseService.getSnapshotsDebugInfo(req.user.userId)
     res.json(debugInfo)
   } catch (error) {
     res.status(500).json({
@@ -1127,10 +1248,10 @@ app.get('/api/prices/:symbol', (req, res) => {
 })
 
 // Delete snapshot for a specific date
-app.delete('/api/snapshot/:date', (req, res) => {
+app.delete('/api/snapshot/:date', requireAuth, (req, res) => {
   try {
     const { date } = req.params
-    const deletedCount = databaseService.deletePnLSnapshot(date)
+    const deletedCount = databaseService.deletePnLSnapshot(date, req.user.userId)
     res.json({ success: true, deletedCount, message: `Deleted ${deletedCount} records for ${date}` })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
@@ -1150,9 +1271,9 @@ app.get('/prices', async (req, res) => {
 })
 
 // Robinhood automated download endpoint
-app.post('/api/robinhood/download', async (req, res) => {
+app.post('/api/robinhood/download', requireAuth, async (req, res) => {
   try {
-    console.log('🤖 Received request to download from Robinhood')
+    console.log(`🤖 Received request to download from Robinhood (user: ${req.user.userId})`)
 
     // Check if downloader is available (only works locally, not on Railway)
     if (!downloadRobinhoodReport) {
