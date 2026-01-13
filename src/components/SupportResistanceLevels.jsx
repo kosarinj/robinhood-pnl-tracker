@@ -18,37 +18,66 @@ function SupportResistanceLevels({ socket, symbols }) {
 
   // Fetch levels for selected symbol
   const fetchLevels = (symbol) => {
-    if (!socket) return
+    console.log('fetchLevels called with symbol:', symbol)
+    console.log('Socket exists?', !!socket)
+    console.log('Socket connected?', socket?.connected)
+
+    if (!socket) {
+      console.error('No socket available!')
+      return
+    }
 
     setLoading(true)
+    console.log('Emitting get-support-resistance event for:', symbol)
     socket.emit('get-support-resistance', { symbol })
   }
 
   // Fetch levels for all portfolio symbols
   const fetchAllLevels = () => {
-    if (!socket || !symbols || symbols.length === 0) return
+    console.log('fetchAllLevels called')
+    console.log('Socket exists?', !!socket)
+    console.log('Symbols:', symbols)
+
+    if (!socket || !symbols || symbols.length === 0) {
+      console.error('Missing socket or symbols:', { socket: !!socket, symbolsCount: symbols?.length })
+      return
+    }
 
     setLoading(true)
+    console.log('Emitting get-support-resistance-multi event for:', symbols)
     socket.emit('get-support-resistance-multi', { symbols })
   }
 
   // Listen for results
   useEffect(() => {
-    if (!socket) return
+    if (!socket) {
+      console.log('No socket in useEffect')
+      return
+    }
+
+    console.log('Setting up socket listeners for support/resistance')
 
     socket.on('support-resistance-result', (data) => {
+      console.log('Received support-resistance-result:', data)
       setLoading(false)
       if (data.success) {
+        console.log('Setting levels:', data.levels)
         setLevels(data.levels)
+      } else {
+        console.error('Request failed:', data.error)
       }
     })
 
     socket.on('support-resistance-multi-result', (data) => {
+      console.log('Received support-resistance-multi-result:', data)
       setLoading(false)
       if (data.success) {
         // Flatten all levels from all symbols
         const allLevels = Object.values(data.results).flat()
+        console.log('Setting all levels:', allLevels)
         setLevels(allLevels)
+      } else {
+        console.error('Request failed:', data.error)
       }
     })
 
@@ -331,7 +360,7 @@ function SupportResistanceLevels({ socket, symbols }) {
             }}
           >
             <option value="">All Symbols ({symbols.length})</option>
-            {symbols.map(symbol => (
+            {[...symbols].sort().map(symbol => (
               <option key={symbol} value={symbol}>{symbol}</option>
             ))}
           </select>
