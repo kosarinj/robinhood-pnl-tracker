@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import Database from 'better-sqlite3'
 import { fileURLToPath } from 'url'
