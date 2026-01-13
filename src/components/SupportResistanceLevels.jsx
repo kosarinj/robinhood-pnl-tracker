@@ -1,0 +1,466 @@
+import React, { useState, useEffect } from 'react'
+import { useTheme } from '../contexts/ThemeContext'
+
+function SupportResistanceLevels({ socket, symbols }) {
+  const { isDark } = useTheme()
+  const [levels, setLevels] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [selectedSymbol, setSelectedSymbol] = useState(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [showConfig, setShowConfig] = useState(false)
+  const [config, setConfig] = useState({
+    lookbackDays: 60,
+    minTouches: 2,
+    priceTolerance: 0.5,
+    minVolumePercentile: 75,
+    maxLevels: 10
+  })
+
+  // Fetch levels for selected symbol
+  const fetchLevels = (symbol) => {
+    if (!socket) return
+
+    setLoading(true)
+    socket.emit('get-support-resistance', { symbol })
+  }
+
+  // Fetch levels for all portfolio symbols
+  const fetchAllLevels = () => {
+    if (!socket || !symbols || symbols.length === 0) return
+
+    setLoading(true)
+    socket.emit('get-support-resistance-multi', { symbols })
+  }
+
+  // Listen for results
+  useEffect(() => {
+    if (!socket) return
+
+    socket.on('support-resistance-result', (data) => {
+      setLoading(false)
+      if (data.success) {
+        setLevels(data.levels)
+      }
+    })
+
+    socket.on('support-resistance-multi-result', (data) => {
+      setLoading(false)
+      if (data.success) {
+        // Flatten all levels from all symbols
+        const allLevels = Object.values(data.results).flat()
+        setLevels(allLevels)
+      }
+    })
+
+    socket.on('support-resistance-alert', (data) => {
+      // Real-time alert for strong levels
+      console.log('🎯 Strong support/resistance detected:', data.levels)
+      // Could show notification here
+    })
+
+    return () => {
+      socket.off('support-resistance-result')
+      socket.off('support-resistance-multi-result')
+      socket.off('support-resistance-alert')
+    }
+  }, [socket])
+
+  // Auto-refresh every 5 minutes
+  useEffect(() => {
+    if (!autoRefresh) return
+
+    const interval = setInterval(() => {
+      if (selectedSymbol) {
+        fetchLevels(selectedSymbol)
+      } else if (symbols && symbols.length > 0) {
+        fetchAllLevels()
+      }
+    }, 5 * 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [autoRefresh, selectedSymbol, symbols])
+
+  // Update config
+  const updateConfig = () => {
+    if (!socket) return
+    socket.emit('update-level2-config', { config })
+  }
+
+  // Get color based on strength
+  const getStrengthColor = (strength) => {
+    if (strength >= 80) return '#22c55e' // Strong green
+    if (strength >= 60) return '#eab308' // Warning yellow
+    return '#94a3b8' // Weak gray
+  }
+
+  // Group levels by symbol
+  const levelsBySymbol = levels.reduce((acc, level) => {
+    if (!acc[level.symbol]) acc[level.symbol] = []
+    acc[level.symbol].push(level)
+    return acc
+  }, {})
+
+  return (
+    <div style={{
+      background: isDark ? '#1e1e1e' : 'white',
+      borderRadius: '12px',
+      padding: '20px',
+      marginTop: '20px',
+      border: isDark ? '1px solid #333' : '1px solid #e5e7eb'
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '20px'
+      }}>
+        <h2 style={{
+          margin: 0,
+          fontSize: '18px',
+          fontWeight: '600',
+          color: isDark ? '#e0e0e0' : '#1f2937'
+        }}>
+          🎯 Support & Resistance Levels
+        </h2>
+
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <label style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '13px',
+            color: isDark ? '#b0b0b0' : '#6b7280'
+          }}>
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+            />
+            Auto-refresh (5m)
+          </label>
+
+          <button
+            onClick={() => setShowConfig(!showConfig)}
+            style={{
+              padding: '6px 12px',
+              background: isDark ? '#333' : '#f3f4f6',
+              color: isDark ? '#e0e0e0' : '#374151',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '13px',
+              cursor: 'pointer'
+            }}
+          >
+            ⚙️ Config
+          </button>
+
+          <button
+            onClick={() => selectedSymbol ? fetchLevels(selectedSymbol) : fetchAllLevels()}
+            disabled={loading}
+            style={{
+              padding: '6px 12px',
+              background: loading ? '#94a3b8' : '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '13px',
+              cursor: loading ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {loading ? '⏳ Loading...' : '🔄 Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {/* Configuration Panel */}
+      {showConfig && (
+        <div style={{
+          background: isDark ? '#2a2a2a' : '#f9fafb',
+          padding: '15px',
+          borderRadius: '8px',
+          marginBottom: '15px'
+        }}>
+          <h3 style={{
+            margin: '0 0 10px 0',
+            fontSize: '14px',
+            fontWeight: '600',
+            color: isDark ? '#e0e0e0' : '#1f2937'
+          }}>
+            Detection Settings
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div>
+              <label style={{
+                fontSize: '12px',
+                color: isDark ? '#b0b0b0' : '#6b7280',
+                display: 'block',
+                marginBottom: '4px'
+              }}>
+                Lookback Days
+              </label>
+              <input
+                type="number"
+                value={config.lookbackDays}
+                onChange={(e) => setConfig({ ...config, lookbackDays: parseInt(e.target.value) })}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  borderRadius: '4px',
+                  border: isDark ? '1px solid #444' : '1px solid #d1d5db',
+                  background: isDark ? '#1e1e1e' : 'white',
+                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  fontSize: '13px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{
+                fontSize: '12px',
+                color: isDark ? '#b0b0b0' : '#6b7280',
+                display: 'block',
+                marginBottom: '4px'
+              }}>
+                Min Touches
+              </label>
+              <input
+                type="number"
+                value={config.minTouches}
+                onChange={(e) => setConfig({ ...config, minTouches: parseInt(e.target.value) })}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  borderRadius: '4px',
+                  border: isDark ? '1px solid #444' : '1px solid #d1d5db',
+                  background: isDark ? '#1e1e1e' : 'white',
+                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  fontSize: '13px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{
+                fontSize: '12px',
+                color: isDark ? '#b0b0b0' : '#6b7280',
+                display: 'block',
+                marginBottom: '4px'
+              }}>
+                Price Tolerance (%)
+              </label>
+              <input
+                type="number"
+                step="0.1"
+                value={config.priceTolerance}
+                onChange={(e) => setConfig({ ...config, priceTolerance: parseFloat(e.target.value) })}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  borderRadius: '4px',
+                  border: isDark ? '1px solid #444' : '1px solid #d1d5db',
+                  background: isDark ? '#1e1e1e' : 'white',
+                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  fontSize: '13px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{
+                fontSize: '12px',
+                color: isDark ? '#b0b0b0' : '#6b7280',
+                display: 'block',
+                marginBottom: '4px'
+              }}>
+                Volume Percentile
+              </label>
+              <input
+                type="number"
+                value={config.minVolumePercentile}
+                onChange={(e) => setConfig({ ...config, minVolumePercentile: parseInt(e.target.value) })}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  borderRadius: '4px',
+                  border: isDark ? '1px solid #444' : '1px solid #d1d5db',
+                  background: isDark ? '#1e1e1e' : 'white',
+                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  fontSize: '13px'
+                }}
+              />
+            </div>
+          </div>
+          <button
+            onClick={updateConfig}
+            style={{
+              marginTop: '10px',
+              padding: '6px 12px',
+              background: '#10b981',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '13px',
+              cursor: 'pointer'
+            }}
+          >
+            Save Configuration
+          </button>
+        </div>
+      )}
+
+      {/* Symbol Filter */}
+      {symbols && symbols.length > 0 && (
+        <div style={{ marginBottom: '15px' }}>
+          <select
+            value={selectedSymbol || ''}
+            onChange={(e) => {
+              const symbol = e.target.value || null
+              setSelectedSymbol(symbol)
+              if (symbol) {
+                fetchLevels(symbol)
+              } else {
+                fetchAllLevels()
+              }
+            }}
+            style={{
+              padding: '8px 12px',
+              borderRadius: '6px',
+              border: isDark ? '1px solid #444' : '1px solid #d1d5db',
+              background: isDark ? '#2a2a2a' : 'white',
+              color: isDark ? '#e0e0e0' : '#1f2937',
+              fontSize: '14px',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="">All Symbols ({symbols.length})</option>
+            {symbols.map(symbol => (
+              <option key={symbol} value={symbol}>{symbol}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Levels Display */}
+      {levels.length === 0 ? (
+        <div style={{
+          textAlign: 'center',
+          padding: '40px',
+          color: isDark ? '#666' : '#9ca3af'
+        }}>
+          {loading ? '⏳ Loading levels...' : '📊 No support/resistance levels detected yet. Click Refresh to scan.'}
+        </div>
+      ) : (
+        <div>
+          {Object.entries(levelsBySymbol).map(([symbol, symbolLevels]) => (
+            <div key={symbol} style={{ marginBottom: '20px' }}>
+              <h3 style={{
+                margin: '0 0 10px 0',
+                fontSize: '16px',
+                fontWeight: '600',
+                color: isDark ? '#e0e0e0' : '#1f2937'
+              }}>
+                {symbol}
+              </h3>
+
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {symbolLevels
+                  .sort((a, b) => b.strength - a.strength)
+                  .map((level, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '12px',
+                        background: isDark ? '#2a2a2a' : '#f9fafb',
+                        borderRadius: '8px',
+                        borderLeft: `4px solid ${level.type === 'support' ? '#22c55e' : '#ef4444'}`
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          fontSize: '14px',
+                          fontWeight: '600',
+                          color: level.type === 'support' ? '#22c55e' : '#ef4444'
+                        }}>
+                          {level.type === 'support' ? '📈 Support' : '📉 Resistance'} @ ${level.price.toFixed(2)}
+                        </div>
+                        <div style={{
+                          fontSize: '12px',
+                          color: isDark ? '#888' : '#6b7280',
+                          marginTop: '4px'
+                        }}>
+                          {level.touches} touches • {level.methods || 'swing_pivot'}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{
+                            fontSize: '11px',
+                            color: isDark ? '#888' : '#6b7280',
+                            marginBottom: '2px'
+                          }}>
+                            Distance
+                          </div>
+                          <div style={{
+                            fontSize: '13px',
+                            fontWeight: '500',
+                            color: isDark ? '#e0e0e0' : '#374151'
+                          }}>
+                            {level.distanceFromPrice > 0 ? '+' : ''}{level.distanceFromPrice}%
+                          </div>
+                        </div>
+
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <div style={{
+                            width: '60px',
+                            height: '6px',
+                            background: isDark ? '#333' : '#e5e7eb',
+                            borderRadius: '3px',
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{
+                              width: `${level.strength}%`,
+                              height: '100%',
+                              background: getStrengthColor(level.strength),
+                              borderRadius: '3px'
+                            }} />
+                          </div>
+                          <span style={{
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            color: getStrengthColor(level.strength),
+                            minWidth: '35px'
+                          }}>
+                            {level.strength}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Legend */}
+      <div style={{
+        marginTop: '15px',
+        padding: '10px',
+        background: isDark ? '#2a2a2a' : '#f9fafb',
+        borderRadius: '6px',
+        fontSize: '12px',
+        color: isDark ? '#888' : '#6b7280'
+      }}>
+        <strong>Strength Score:</strong> <span style={{ color: '#22c55e' }}>80-100 (Strong)</span> • <span style={{ color: '#eab308' }}>60-79 (Moderate)</span> • <span style={{ color: '#94a3b8' }}>0-59 (Weak)</span>
+      </div>
+    </div>
+  )
+}
+
+export default SupportResistanceLevels

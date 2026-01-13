@@ -10,7 +10,7 @@ import { SignalService } from './services/signalService.js'
 import { PolygonService } from './services/polygonService.js'
 import { databaseService } from './services/database.js'
 import { authService } from './services/auth.js'
-import { level2Service } from './services/level2Service.js'
+import { supportResistanceService } from './services/supportResistanceService.js'
 import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -113,7 +113,7 @@ setInterval(async () => {
     console.log(`🎯 Scanning ${trackedSymbols.size} symbols for support/resistance levels...`)
 
     const symbols = Array.from(trackedSymbols).slice(0, 20) // Limit to 20 symbols to avoid rate limits
-    const results = await level2Service.getSupportResistanceForSymbols(symbols)
+    const results = await supportResistanceService.getSupportResistanceForSymbols(symbols)
 
     const allLevels = Object.values(results).flat()
     if (allLevels.length > 0) {
@@ -880,7 +880,7 @@ io.on('connection', (socket) => {
   socket.on('get-support-resistance', async ({ symbol }) => {
     console.log(`🎯 Received request for support/resistance levels: ${symbol}`)
     try {
-      const levels = await level2Service.getSupportResistanceLevels(symbol)
+      const levels = await supportResistanceService.getSupportResistanceLevels(symbol)
 
       // Save to database
       if (levels.length > 0) {
@@ -906,7 +906,7 @@ io.on('connection', (socket) => {
   socket.on('get-support-resistance-multi', async ({ symbols }) => {
     console.log(`🎯 Received request for support/resistance levels: ${symbols.join(', ')}`)
     try {
-      const results = await level2Service.getSupportResistanceForSymbols(symbols)
+      const results = await supportResistanceService.getSupportResistanceForSymbols(symbols)
 
       // Save all levels to database
       const allLevels = Object.values(results).flat()
@@ -928,17 +928,17 @@ io.on('connection', (socket) => {
     }
   })
 
-  // Update Level 2 configuration
+  // Update support/resistance configuration
   socket.on('update-level2-config', ({ config }) => {
-    console.log(`⚙️  Updating Level 2 configuration`)
+    console.log(`⚙️  Updating support/resistance configuration`)
     try {
-      level2Service.updateConfig(config)
+      supportResistanceService.updateConfig(config)
       socket.emit('level2-config-updated', {
         success: true,
-        config: level2Service.config
+        config: supportResistanceService.config
       })
     } catch (error) {
-      console.error(`❌ Error updating Level 2 config:`, error)
+      console.error(`❌ Error updating support/resistance config:`, error)
       socket.emit('level2-config-updated', {
         success: false,
         error: error.message
@@ -1363,26 +1363,26 @@ app.get('/api/support-resistance', requireAuth, (req, res) => {
   }
 })
 
-// Get Level 2 configuration
+// Get support/resistance configuration
 app.get('/api/level2/config', requireAuth, (req, res) => {
   try {
     res.json({
       success: true,
-      config: level2Service.config
+      config: supportResistanceService.config
     })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
 })
 
-// Update Level 2 configuration
+// Update support/resistance configuration
 app.post('/api/level2/config', requireAuth, (req, res) => {
   try {
     const { config } = req.body
-    level2Service.updateConfig(config)
+    supportResistanceService.updateConfig(config)
     res.json({
       success: true,
-      config: level2Service.config
+      config: supportResistanceService.config
     })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })

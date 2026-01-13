@@ -7,6 +7,7 @@ import SignalPerformance from './components/SignalPerformance'
 import ThemeToggle from './components/ThemeToggle'
 import DailyPnLChart from './components/DailyPnLChart'
 import AuthPage from './components/Auth/AuthPage'
+import SupportResistanceLevels from './components/SupportResistanceLevels'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -2223,6 +2224,14 @@ function AuthenticatedApp({ user }) {
 
       {/* Daily P&L Chart */}
       <DailyPnLChart useServer={useServer} connected={connected} />
+
+      {/* Support & Resistance Levels */}
+      {connected && (
+        <SupportResistanceLevels
+          socket={socketService.socket}
+          symbols={stockSymbols}
+        />
+      )}
 
       {/* Lookup Symbol Signal & Market Analysis - Always visible */}
       <div style={{ textAlign: 'center', marginBottom: '20px' }}>
