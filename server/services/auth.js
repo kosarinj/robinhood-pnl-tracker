@@ -7,9 +7,19 @@ import { dirname, join } from 'path'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-// Use the same database
-const dbPath = process.env.DATABASE_PATH || join(__dirname, '..', 'trading_data.db')
-const db = new Database(dbPath)
+// Use the same database connection - import the shared database
+let db
+try {
+  // Try to import the shared database connection
+  const { getDatabase } = await import('./database.js')
+  db = getDatabase()
+  console.log('✓ Using shared database connection')
+} catch (error) {
+  // Fallback to creating own connection if import fails
+  console.log('⚠ Creating separate database connection for auth')
+  const dbPath = process.env.DATABASE_PATH || join(__dirname, '..', 'trading_data.db')
+  db = new Database(dbPath)
+}
 
 const SALT_ROUNDS = 10
 const SESSION_DURATION_DAYS = 30 // 30 days

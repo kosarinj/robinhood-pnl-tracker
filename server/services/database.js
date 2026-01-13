@@ -1378,3 +1378,8 @@ export class DatabaseService {
 }
 
 export const databaseService = new DatabaseService()
+
+// Export the database connection for use by other services (like auth)
+export function getDatabase() {
+  return db
+}
