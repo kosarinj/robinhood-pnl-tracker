@@ -726,14 +726,14 @@ export class DatabaseService {
   }
 
   // Delete P&L snapshot for a specific date
-  deletePnLSnapshot(asofDate) {
+  deletePnLSnapshot(asofDate, userId = 1) {
     try {
       const stmt = db.prepare(`
         DELETE FROM pnl_snapshots
-        WHERE asof_date = ?
+        WHERE asof_date = ? AND user_id = ?
       `)
-      const result = stmt.run(asofDate)
-      console.log(`🗑️ Deleted ${result.changes} snapshot records for ${asofDate}`)
+      const result = stmt.run(asofDate, userId)
+      console.log(`🗑️ Deleted ${result.changes} snapshot records for ${asofDate} (user: ${userId})`)
       return result.changes
     } catch (error) {
       console.error('Error deleting P&L snapshot:', error)
@@ -742,14 +742,14 @@ export class DatabaseService {
   }
 
   // Get P&L snapshot for a specific date
-  getPnLSnapshot(asofDate) {
+  getPnLSnapshot(asofDate, userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT * FROM pnl_snapshots
-        WHERE asof_date = ?
+        WHERE asof_date = ? AND user_id = ?
         ORDER BY symbol
       `)
-      return stmt.all(asofDate)
+      return stmt.all(asofDate, userId)
     } catch (error) {
       console.error('Error getting P&L snapshot:', error)
       return []
@@ -757,14 +757,15 @@ export class DatabaseService {
   }
 
   // Get all available snapshot dates
-  getSnapshotDates() {
+  getSnapshotDates(userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT DISTINCT asof_date
         FROM pnl_snapshots
+        WHERE user_id = ?
         ORDER BY asof_date DESC
       `)
-      return stmt.all().map(row => row.asof_date)
+      return stmt.all(userId).map(row => row.asof_date)
     } catch (error) {
       console.error('Error getting snapshot dates:', error)
       return []
@@ -871,7 +872,7 @@ export class DatabaseService {
   }
 
   // Get daily P&L history for charting (aggregate across all symbols per day)
-  getDailyPnLHistory() {
+  getDailyPnLHistory(userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT
@@ -882,10 +883,11 @@ export class DatabaseService {
           SUM(daily_pnl) as daily_pnl,
           SUM(COALESCE(options_pnl, 0)) as options_pnl
         FROM pnl_snapshots
+        WHERE user_id = ?
         GROUP BY asof_date
         ORDER BY asof_date ASC
       `)
-      const results = stmt.all()
+      const results = stmt.all(userId)
       console.log('🔍 getDailyPnLHistory results:', results.map(r => ({ date: r.asof_date, total: r.total_pnl })))
       return results
     } catch (error) {
@@ -895,7 +897,7 @@ export class DatabaseService {
   }
 
   // Get daily P&L history for a specific symbol with price
-  getSymbolDailyPnL(symbol) {
+  getSymbolDailyPnL(symbol, userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT
@@ -910,10 +912,10 @@ export class DatabaseService {
           position,
           avg_cost
         FROM pnl_snapshots
-        WHERE symbol = ?
+        WHERE symbol = ? AND user_id = ?
         ORDER BY asof_date ASC
       `)
-      return stmt.all(symbol)
+      return stmt.all(symbol, userId)
     } catch (error) {
       console.error('Error getting symbol daily P&L:', error)
       return []
@@ -1069,20 +1071,21 @@ export class DatabaseService {
   }
 
   // Get the latest saved trades
-  getLatestTrades() {
+  getLatestTrades(userId = 1) {
     try {
       const latestUpload = db.prepare(`
         SELECT upload_date FROM csv_uploads
+        WHERE user_id = ?
         ORDER BY upload_date DESC
         LIMIT 1
-      `).get()
+      `).get(userId)
 
       if (!latestUpload) {
         return { trades: [], uploadDate: null }
       }
 
       return {
-        trades: this.getTrades(latestUpload.upload_date),
+        trades: this.getTrades(latestUpload.upload_date, userId),
         uploadDate: latestUpload.upload_date
       }
     } catch (error) {
@@ -1092,15 +1095,16 @@ export class DatabaseService {
   }
 
   // Get latest CSV upload metadata without loading trades
-  getLatestCsvUpload() {
+  getLatestCsvUpload(userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT upload_date, latest_trade_date, trade_count
         FROM csv_uploads
+        WHERE user_id = ?
         ORDER BY upload_date DESC
         LIMIT 1
       `)
-      return stmt.get()
+      return stmt.get(userId)
     } catch (error) {
       console.error('Error getting latest CSV upload:', error)
       return null
@@ -1108,14 +1112,15 @@ export class DatabaseService {
   }
 
   // Get all available upload dates
-  getUploadDates() {
+  getUploadDates(userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT upload_date, latest_trade_date, trade_count
         FROM csv_uploads
+        WHERE user_id = ?
         ORDER BY upload_date DESC
       `)
-      return stmt.all()
+      return stmt.all(userId)
     } catch (error) {
       console.error('Error getting upload dates:', error)
       return []
