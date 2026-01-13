@@ -17,6 +17,19 @@ import { fileURLToPath } from 'url'
 import { dirname } from 'path'
 import path from 'path'
 
+// Global error handlers to prevent server crashes
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error)
+  console.error('Stack:', error.stack)
+  // Don't exit - keep server running
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Promise Rejection at:', promise)
+  console.error('Reason:', reason)
+  // Don't exit - keep server running
+})
+
 // Conditionally import Puppeteer-based downloader (only available locally, not on Railway)
 let downloadRobinhoodReport = null
 try {
@@ -1052,7 +1065,11 @@ setInterval(async () => {
       console.log(`📊 Recording prices and signals for ${trackedSymbols.size} symbols...`)
 
       // Record prices
-      databaseService.recordPrices(updatedPrices)
+      try {
+        databaseService.recordPrices(updatedPrices)
+      } catch (err) {
+        console.error(`❌ Error recording prices:`, err.message)
+      }
 
       // Fetch and record signals for all tracked symbols
       const signalsToRecord = []
@@ -1063,17 +1080,25 @@ setInterval(async () => {
             signalsToRecord.push(signal)
           }
         } catch (err) {
-          console.error(`Error fetching signal for ${symbol}:`, err)
+          console.error(`❌ Error fetching signal for ${symbol}:`, err.message)
         }
       }
 
       if (signalsToRecord.length > 0) {
-        databaseService.recordSignals(signalsToRecord)
-        console.log(`✅ Recorded ${signalsToRecord.length} signals`)
+        try {
+          databaseService.recordSignals(signalsToRecord)
+          console.log(`✅ Recorded ${signalsToRecord.length} signals`)
+        } catch (err) {
+          console.error(`❌ Error recording signals:`, err.message)
+        }
       }
 
       // Analyze signal performance (every 5 minutes)
-      databaseService.analyzeSignalPerformance()
+      try {
+        databaseService.analyzeSignalPerformance()
+      } catch (err) {
+        console.error(`❌ Error analyzing signal performance:`, err.message)
+      }
     }
 
     // Broadcast price updates to all clients
