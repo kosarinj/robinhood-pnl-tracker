@@ -42,6 +42,11 @@ export class SupportResistanceService {
    */
   async getHistoricalData(symbol, days = null) {
     try {
+      if (!this.apiKey) {
+        console.warn('⚠️  Polygon API key not configured')
+        return null
+      }
+
       const lookbackDays = days || this.config.lookbackDays
       const fromDate = new Date()
       fromDate.setDate(fromDate.getDate() - lookbackDays)
@@ -79,7 +84,13 @@ export class SupportResistanceService {
       console.log(`✓ Retrieved ${candles.length} candles for ${symbol}`)
       return candles
     } catch (error) {
-      console.error(`Error fetching historical data for ${symbol}:`, error.message)
+      if (error.response) {
+        console.error(`❌ Polygon API error for ${symbol}: ${error.response.status} - ${error.response.data?.error || error.message}`)
+      } else if (error.code === 'ECONNABORTED') {
+        console.error(`❌ Request timeout for ${symbol}`)
+      } else {
+        console.error(`❌ Error fetching historical data for ${symbol}:`, error.message)
+      }
       return null
     }
   }
@@ -89,6 +100,10 @@ export class SupportResistanceService {
    */
   async getCurrentPrice(symbol) {
     try {
+      if (!this.apiKey) {
+        return null
+      }
+
       const url = `${this.baseUrl}/v2/last/trade/${symbol}`
       const response = await axios.get(url, {
         params: { apiKey: this.apiKey },
@@ -112,7 +127,7 @@ export class SupportResistanceService {
 
       return null
     } catch (error) {
-      console.error(`Error fetching current price for ${symbol}:`, error.message)
+      console.error(`❌ Error fetching current price for ${symbol}:`, error.message)
       return null
     }
   }

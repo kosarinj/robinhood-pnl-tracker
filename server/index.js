@@ -106,6 +106,12 @@ setInterval(() => {
 // Background job: Scan for support/resistance levels every 5 minutes
 setInterval(async () => {
   try {
+    // Skip if no Polygon API key configured
+    if (!process.env.POLYGON_API_KEY) {
+      console.log('⏭️  Skipping support/resistance scan - POLYGON_API_KEY not configured')
+      return
+    }
+
     if (trackedSymbols.size === 0) {
       return
     }
@@ -129,12 +135,15 @@ setInterval(async () => {
         })
         console.log(`📢 Broadcast ${strongLevels.length} strong support/resistance levels to clients`)
       }
+    } else {
+      console.log('ℹ️  No support/resistance levels detected in this scan')
     }
 
     // Clean up expired levels
     databaseService.cleanupExpiredLevels()
   } catch (error) {
-    console.error('Error in support/resistance scan:', error)
+    console.error('❌ Error in support/resistance scan:', error.message)
+    // Don't let the error crash the process
   }
 }, 5 * 60 * 1000) // Every 5 minutes
 
