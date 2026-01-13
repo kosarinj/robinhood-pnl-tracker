@@ -306,6 +306,18 @@ export class SupportResistanceService {
 
     console.log(`  Round numbers: price range in lookback period: $${rangeLow.toFixed(2)} - $${rangeHigh.toFixed(2)}`)
 
+    // Helper to find when price was last near a level
+    const findLastTouch = (targetPrice, tolerance = 0.01) => {
+      for (let i = candles.length - 1; i >= 0; i--) {
+        const candle = candles[i]
+        const priceDiff = Math.abs(candle.close - targetPrice) / targetPrice
+        if (priceDiff <= tolerance || (candle.low <= targetPrice && candle.high >= targetPrice)) {
+          return candle.timestamp
+        }
+      }
+      return candles[candles.length - 1].timestamp // Use most recent if not found
+    }
+
     // Find nearest round numbers (multiples of 5, 10, 25, 50, 100)
     const increments = [100, 50, 25, 10, 5, 1]
 
@@ -318,7 +330,7 @@ export class SupportResistanceService {
         levels.push({
           type: lower < currentPrice ? 'support' : 'resistance',
           price: lower,
-          timestamp: Date.now(),
+          timestamp: findLastTouch(lower),
           volume: 0,
           method: 'round_number'
         })
@@ -328,7 +340,7 @@ export class SupportResistanceService {
         levels.push({
           type: upper < currentPrice ? 'support' : 'resistance',
           price: upper,
-          timestamp: Date.now(),
+          timestamp: findLastTouch(upper),
           volume: 0,
           method: 'round_number'
         })
@@ -393,6 +405,10 @@ export class SupportResistanceService {
     const touches = cluster.length
     const methods = [...new Set(cluster.map(l => l.method))]
 
+    // Use the most recent timestamp from the cluster (when price last touched this level)
+    const timestamps = cluster.map(l => l.timestamp).filter(t => t)
+    const mostRecentTimestamp = timestamps.length > 0 ? Math.max(...timestamps) : Date.now()
+
     // Calculate strength based on:
     // - Number of touches (0-40 points)
     // - Volume (0-30 points)
@@ -419,7 +435,7 @@ export class SupportResistanceService {
       methods: methods.join(', '),
       distanceFromPrice: currentPrice ? parseFloat((((avgPrice - currentPrice) / currentPrice) * 100).toFixed(2)) : 0,
       strength,
-      timestamp: Date.now()
+      timestamp: mostRecentTimestamp
     }
   }
 
