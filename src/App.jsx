@@ -6,7 +6,6 @@ import MarketAnalysis from './components/MarketAnalysis'
 import SignalPerformance from './components/SignalPerformance'
 import ThemeToggle from './components/ThemeToggle'
 import DailyPnLChart from './components/DailyPnLChart'
-import AuthPage from './components/Auth/AuthPage'
 import SupportResistanceLevels from './components/SupportResistanceLevels'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
@@ -14,28 +13,20 @@ import { fetchCurrentPrices } from './utils/yahooFinance'
 import { getIntradayData } from './utils/marketData'
 import { generateSignal } from './utils/technicalAnalysis'
 import { socketService } from './services/socketService'
-import { useAuth } from './contexts/AuthContext'
+
+// Auth disabled - defaulting to jkosarin user
+const DEFAULT_USER = {
+  userId: 1,
+  username: 'jkosarin',
+  email: 'jkosarin@example.com'
+}
 
 function App() {
-  const { user, loading: authLoading, isAuthenticated } = useAuth()
-
-  // Show auth page if not authenticated
-  if (authLoading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-      <div>Loading...</div>
-    </div>
-  }
-
-  if (!isAuthenticated) {
-    return <AuthPage />
-  }
-
-  // Main app content (only shown when authenticated)
-  return <AuthenticatedApp user={user} />
+  // Skip auth - always use default user
+  return <AuthenticatedApp user={DEFAULT_USER} />
 }
 
 function AuthenticatedApp({ user }) {
-  const { logout } = useAuth()
   const [trades, setTrades] = useState([])
   const [pnlData, setPnlData] = useState([])
   const [showOpenOnly, setShowOpenOnly] = useState(true)
@@ -1113,21 +1104,6 @@ function AuthenticatedApp({ user }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '14px', fontWeight: '500' }}>👤 {user.username}</span>
-          <button
-            onClick={logout}
-            style={{
-              background: '#dc3545',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '500'
-            }}
-          >
-            Logout
-          </button>
         </div>
         <ThemeToggle />
       </div>

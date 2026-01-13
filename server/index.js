@@ -192,33 +192,14 @@ setInterval(async () => {
 console.log('ℹ️  Background support/resistance scan is DISABLED - use manual refresh in UI')
 
 // Socket.IO authentication middleware
+// AUTH DISABLED - defaulting to jkosarin user
 io.use((socket, next) => {
-  // Get cookies from handshake
-  const cookies = socket.handshake.headers.cookie
-  if (!cookies) {
-    return next(new Error('Authentication required'))
+  // Skip authentication - default to jkosarin user (ID 1)
+  socket.data.user = {
+    userId: 1,
+    username: 'jkosarin',
+    email: 'jkosarin@example.com'
   }
-
-  // Parse cookies manually (socket.io doesn't use cookie-parser)
-  const cookieObj = {}
-  cookies.split(';').forEach(cookie => {
-    const [key, value] = cookie.trim().split('=')
-    cookieObj[key] = value
-  })
-
-  const sessionToken = cookieObj.session_token
-  if (!sessionToken) {
-    return next(new Error('Authentication required'))
-  }
-
-  // Verify session
-  const user = authService.verifySession(sessionToken)
-  if (!user) {
-    return next(new Error('Invalid or expired session'))
-  }
-
-  // Store user info in socket for later use
-  socket.data.user = user
   next()
 })
 
@@ -1379,15 +1360,14 @@ app.get('/api/auth/me', (req, res) => {
 })
 
 // Middleware to require authentication for protected routes
+// AUTH DISABLED - defaulting to jkosarin user
 const requireAuth = (req, res, next) => {
-  const sessionToken = req.cookies.session_token
-  const user = authService.verifySession(sessionToken)
-
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required' })
+  // Skip authentication - default to jkosarin user (ID 1)
+  req.user = {
+    userId: 1,
+    username: 'jkosarin',
+    email: 'jkosarin@example.com'
   }
-
-  req.user = user
   next()
 }
 
