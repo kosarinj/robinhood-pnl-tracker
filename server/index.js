@@ -1371,6 +1371,68 @@ app.get('/api/debug/daily-pnl', requireAuth, (req, res) => {
   }
 })
 
+// Debug endpoint to list all users (for debugging login issues)
+app.get('/api/debug/users', (req, res) => {
+  try {
+    const users = authService.getAllUsers()
+    res.json({
+      success: true,
+      users: users.map(u => ({
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        created_at: u.created_at,
+        last_login: u.last_login
+      })),
+      count: users.length
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// Password reset endpoint (for debugging - should require email verification in production)
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { username, newPassword } = req.body
+
+    if (!username || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username and new password required'
+      })
+    }
+
+    // For now, allow password reset without verification (debug mode)
+    const bcrypt = await import('bcryptjs')
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+
+    const db = await import('./services/database.js').then(m => m.getDatabase())
+    const result = db.prepare('UPDATE users SET password_hash = ? WHERE username = ?').run(passwordHash, username)
+
+    if (result.changes === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      })
+    }
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully'
+    })
+  } catch (error) {
+    console.error('Error resetting password:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
 // Debug endpoint to check pnl_snapshots table directly
 app.get('/api/debug/snapshots-raw', requireAuth, (req, res) => {
   try {
