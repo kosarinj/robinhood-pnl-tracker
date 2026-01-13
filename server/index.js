@@ -162,6 +162,7 @@ io.on('connection', (socket) => {
 
       // Store session data
       clientSessions.set(socket.id, {
+        userId: user.userId,
         trades,
         deposits,
         totalPrincipal,
@@ -638,6 +639,7 @@ io.on('connection', (socket) => {
 
       // Store session data so client receives auto-updates
       clientSessions.set(socket.id, {
+        userId: user.userId,
         trades,
         deposits,
         totalPrincipal,
@@ -1022,12 +1024,12 @@ setInterval(async () => {
       if (firstSession) {
         // Only save snapshots when someone is actively viewing their portfolio
         const todayDate = new Date().toISOString().split('T')[0]
-        console.log(`📊 Active session detected, updating snapshot for ${todayDate}`)
+        console.log(`📊 Active session detected, updating snapshot for ${todayDate} (user: ${firstSession.userId})`)
         const prices = { ...updatedPrices, ...firstSession.manualPrices }
         const adjustedTrades = applysplits(firstSession.trades, firstSession.splitAdjustments)
         const pnlData = calculatePnL(adjustedTrades, prices, true, null, null, firstSession.dividendsAndInterest || [])
 
-        databaseService.savePnLSnapshot(todayDate, pnlData)
+        databaseService.savePnLSnapshot(todayDate, pnlData, firstSession.userId)
       }
       // No active sessions - don't create snapshots for dates without CSV uploads
     } catch (error) {
