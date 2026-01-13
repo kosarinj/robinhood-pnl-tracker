@@ -1058,7 +1058,9 @@ function enrichWithMadeUpGround(currentPnL, weekAgoSnapshot) {
 }
 
 // Background job: Update prices every minute and broadcast to clients
+// TEMPORARILY DISABLED: Causing SIGTERM crashes - investigating
 let recordingCounter = 0
+/*
 setInterval(async () => {
   console.log('🔄 Price update job starting...')
   try {
@@ -1215,6 +1217,9 @@ setInterval(async () => {
     // Log but don't crash - the global handlers will catch it
   }
 }, 60000) // Every 1 minute
+*/
+
+console.log('ℹ️  Price update background job is DISABLED - investigating crashes')
 
 // Daily database cleanup (runs at 3 AM)
 const scheduleCleanup = () => {
