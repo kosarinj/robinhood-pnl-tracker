@@ -18,6 +18,8 @@ export class AuthService {
   // Create a new user
   async createUser(username, password, email = null) {
     try {
+      console.log('📝 Creating user:', { username, emailProvided: !!email })
+
       // Validate input
       if (!username || username.length < 3) {
         throw new Error('Username must be at least 3 characters')
@@ -26,21 +28,28 @@ export class AuthService {
         throw new Error('Password must be at least 6 characters')
       }
 
+      console.log('✓ Input validation passed')
+
       // Check if username already exists
       const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username)
       if (existing) {
         throw new Error('Username already exists')
       }
 
+      console.log('✓ Username is available')
+
       // Hash password
+      console.log('🔐 Hashing password...')
       const password_hash = await bcrypt.hash(password, SALT_ROUNDS)
+      console.log('✓ Password hashed successfully')
 
       // Insert user
+      console.log('💾 Inserting user into database...')
       const stmt = db.prepare(`
         INSERT INTO users (username, password_hash, email)
         VALUES (?, ?, ?)
       `)
-      const result = stmt.run(username, password_hash, email)
+      const result = stmt.run(username, password_hash, email || null)
 
       console.log(`✅ Created user: ${username} (ID: ${result.lastInsertRowid})`)
       return {
@@ -49,7 +58,8 @@ export class AuthService {
         email
       }
     } catch (error) {
-      console.error('Error creating user:', error)
+      console.error('❌ Error creating user:', error.message)
+      console.error('Stack:', error.stack)
       throw error
     }
   }
