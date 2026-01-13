@@ -342,6 +342,16 @@ try {
     db.exec('ALTER TABLE csv_uploads ADD COLUMN user_id INTEGER DEFAULT 1')
     console.log('✅ Added user_id column to csv_uploads')
   }
+
+  // Create unique indexes for multi-user support
+  // Note: SQLite doesn't support modifying UNIQUE constraints, so we create indexes
+  try {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pnl_snapshots_user_date_symbol ON pnl_snapshots(user_id, asof_date, symbol)')
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_csv_uploads_user_date ON csv_uploads(user_id, upload_date)')
+    console.log('✅ Created unique indexes for multi-user support')
+  } catch (error) {
+    console.log('ℹ️ Unique indexes may already exist')
+  }
 } catch (error) {
   console.error('Migration error:', error)
 }
@@ -363,9 +373,9 @@ const insertSignalPerformance = db.prepare(`
 `)
 
 const upsertPnLSnapshot = db.prepare(`
-  INSERT INTO pnl_snapshots (asof_date, symbol, position, avg_cost, current_price, current_value, realized_pnl, unrealized_pnl, total_pnl, daily_pnl, options_pnl, percentage, lowest_open_buy_price, lowest_open_buy_days_ago, recent_lowest_buy_price, recent_lowest_buy_days_ago, recent_lowest_sell_price, recent_lowest_sell_days_ago)
-  VALUES (@asofDate, @symbol, @position, @avgCost, @currentPrice, @currentValue, @realizedPnl, @unrealizedPnl, @totalPnl, @dailyPnl, @optionsPnl, @percentage, @lowestOpenBuyPrice, @lowestOpenBuyDaysAgo, @recentLowestBuyPrice, @recentLowestBuyDaysAgo, @recentLowestSellPrice, @recentLowestSellDaysAgo)
-  ON CONFLICT(asof_date, symbol) DO UPDATE SET
+  INSERT INTO pnl_snapshots (asof_date, symbol, position, avg_cost, current_price, current_value, realized_pnl, unrealized_pnl, total_pnl, daily_pnl, options_pnl, percentage, lowest_open_buy_price, lowest_open_buy_days_ago, recent_lowest_buy_price, recent_lowest_buy_days_ago, recent_lowest_sell_price, recent_lowest_sell_days_ago, user_id)
+  VALUES (@asofDate, @symbol, @position, @avgCost, @currentPrice, @currentValue, @realizedPnl, @unrealizedPnl, @totalPnl, @dailyPnl, @optionsPnl, @percentage, @lowestOpenBuyPrice, @lowestOpenBuyDaysAgo, @recentLowestBuyPrice, @recentLowestBuyDaysAgo, @recentLowestSellPrice, @recentLowestSellDaysAgo, @userId)
+  ON CONFLICT(asof_date, symbol, user_id) DO UPDATE SET
     position = excluded.position,
     avg_cost = excluded.avg_cost,
     current_price = excluded.current_price,
@@ -386,14 +396,14 @@ const upsertPnLSnapshot = db.prepare(`
 `)
 
 const insertTrade = db.prepare(`
-  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option)
-  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption)
+  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, user_id)
+  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption, @userId)
 `)
 
 const upsertCsvUpload = db.prepare(`
-  INSERT INTO csv_uploads (upload_date, latest_trade_date, trade_count, total_principal)
-  VALUES (@uploadDate, @latestTradeDate, @tradeCount, @totalPrincipal)
-  ON CONFLICT(upload_date) DO UPDATE SET
+  INSERT INTO csv_uploads (upload_date, latest_trade_date, trade_count, total_principal, user_id)
+  VALUES (@uploadDate, @latestTradeDate, @tradeCount, @totalPrincipal, @userId)
+  ON CONFLICT(upload_date, user_id) DO UPDATE SET
     latest_trade_date = excluded.latest_trade_date,
     trade_count = excluded.trade_count,
     total_principal = excluded.total_principal,
@@ -401,8 +411,8 @@ const upsertCsvUpload = db.prepare(`
 `)
 
 const insertDeposit = db.prepare(`
-  INSERT INTO deposits (upload_date, deposit_date, amount, description)
-  VALUES (@uploadDate, @depositDate, @amount, @description)
+  INSERT INTO deposits (upload_date, deposit_date, amount, description, user_id)
+  VALUES (@uploadDate, @depositDate, @amount, @description, @userId)
 `)
 
 export class DatabaseService {
@@ -636,17 +646,17 @@ export class DatabaseService {
   }
 
   // Save P&L snapshot for a specific date
-  savePnLSnapshot(asofDate, pnlData) {
+  savePnLSnapshot(asofDate, pnlData, userId = 1) {
     try {
       // Get previous day's snapshot to calculate daily P&L
       const previousDayStmt = db.prepare(`
         SELECT DISTINCT asof_date
         FROM pnl_snapshots
-        WHERE asof_date < ?
+        WHERE asof_date < ? AND user_id = ?
         ORDER BY asof_date DESC
         LIMIT 1
       `)
-      const previousDay = previousDayStmt.get(asofDate)
+      const previousDay = previousDayStmt.get(asofDate, userId)
       const previousDayDate = previousDay?.asof_date
 
       // Get previous day's P&L for each symbol if it exists
@@ -655,9 +665,9 @@ export class DatabaseService {
         const prevStmt = db.prepare(`
           SELECT symbol, total_pnl
           FROM pnl_snapshots
-          WHERE asof_date = ?
+          WHERE asof_date = ? AND user_id = ?
         `)
-        const prevSnapshots = prevStmt.all(previousDayDate)
+        const prevSnapshots = prevStmt.all(previousDayDate, userId)
         prevSnapshots.forEach(snap => {
           previousPnLMap[snap.symbol] = snap.total_pnl || 0
         })
@@ -696,7 +706,8 @@ export class DatabaseService {
             recentLowestBuyPrice: item.real?.recentLowestBuyPrice || null,
             recentLowestBuyDaysAgo: item.real?.recentLowestBuyDaysAgo || null,
             recentLowestSellPrice: item.real?.recentLowestSellPrice || null,
-            recentLowestSellDaysAgo: item.real?.recentLowestSellDaysAgo || null
+            recentLowestSellDaysAgo: item.real?.recentLowestSellDaysAgo || null,
+            userId
           })
         }
       })
@@ -925,7 +936,7 @@ export class DatabaseService {
   }
 
   // Save trades from CSV upload
-  saveTrades(trades, uploadDate = null, deposits = [], totalPrincipal = 0) {
+  saveTrades(trades, uploadDate = null, deposits = [], totalPrincipal = 0, userId = 1) {
     try {
       // Use provided upload date or generate from latest trade date
       if (!uploadDate && trades.length > 0) {
@@ -938,12 +949,12 @@ export class DatabaseService {
         uploadDate = new Date(latestTrade.date || latestTrade.transDate).toISOString().split('T')[0]
       }
 
-      // Delete existing trades and deposits for this upload date
-      db.prepare('DELETE FROM trades WHERE upload_date = ?').run(uploadDate)
-      db.prepare('DELETE FROM deposits WHERE upload_date = ?').run(uploadDate)
+      // Delete existing trades and deposits for this upload date and user
+      db.prepare('DELETE FROM trades WHERE upload_date = ? AND user_id = ?').run(uploadDate, userId)
+      db.prepare('DELETE FROM deposits WHERE upload_date = ? AND user_id = ?').run(uploadDate, userId)
 
       // Save all trades and deposits in a transaction
-      const saveData = db.transaction((trades, deposits, uploadDate, totalPrincipal) => {
+      const saveData = db.transaction((trades, deposits, uploadDate, totalPrincipal, userId) => {
         for (const trade of trades) {
           const transDate = new Date(trade.date || trade.transDate).toISOString().split('T')[0]
           insertTrade.run({
@@ -956,7 +967,8 @@ export class DatabaseService {
             amount: trade.amount,
             description: trade.description || null,
             isBuy: trade.isBuy ? 1 : 0,
-            isOption: trade.isOption ? 1 : 0
+            isOption: trade.isOption ? 1 : 0,
+            userId
           })
         }
 
@@ -967,7 +979,8 @@ export class DatabaseService {
             uploadDate,
             depositDate,
             amount: deposit.amount,
-            description: deposit.description || null
+            description: deposit.description || null,
+            userId
           })
         }
 
@@ -976,12 +989,13 @@ export class DatabaseService {
           uploadDate,
           latestTradeDate: uploadDate,
           tradeCount: trades.length,
-          totalPrincipal
+          totalPrincipal,
+          userId
         })
       })
 
-      saveData(trades, deposits, uploadDate, totalPrincipal)
-      console.log(`✅ Saved ${trades.length} trades and ${deposits.length} deposits for ${uploadDate} (principal: $${totalPrincipal.toFixed(2)})`)
+      saveData(trades, deposits, uploadDate, totalPrincipal, userId)
+      console.log(`✅ Saved ${trades.length} trades and ${deposits.length} deposits for ${uploadDate} (user: ${userId}, principal: $${totalPrincipal.toFixed(2)})`)
       return uploadDate
     } catch (error) {
       console.error('Error saving trades:', error)
@@ -990,14 +1004,14 @@ export class DatabaseService {
   }
 
   // Get trades for a specific upload date
-  getTrades(uploadDate) {
+  getTrades(uploadDate, userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT * FROM trades
-        WHERE upload_date = ?
+        WHERE upload_date = ? AND user_id = ?
         ORDER BY trans_date DESC, symbol
       `)
-      const rows = stmt.all(uploadDate)
+      const rows = stmt.all(uploadDate, userId)
 
       // Convert back to the expected format
       return rows.map(row => ({
@@ -1019,14 +1033,14 @@ export class DatabaseService {
   }
 
   // Get deposits for a specific upload date
-  getDeposits(uploadDate) {
+  getDeposits(uploadDate, userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT * FROM deposits
-        WHERE upload_date = ?
+        WHERE upload_date = ? AND user_id = ?
         ORDER BY deposit_date ASC
       `)
-      const rows = stmt.all(uploadDate)
+      const rows = stmt.all(uploadDate, userId)
 
       return rows.map(row => ({
         date: row.deposit_date,
