@@ -117,8 +117,10 @@ setInterval(() => {
 }, 5 * 60 * 1000) // Check every 5 minutes
 
 // Background job: Scan for support/resistance levels
+// DISABLED: Causing server crashes - use manual refresh in UI instead
 // Free tier: 5 API calls/min, 2 calls per symbol = 2 symbols per scan
 // Scan every 15 minutes to stay well under rate limits
+/*
 setInterval(async () => {
   try {
     // Skip if no Polygon API key configured
@@ -163,6 +165,9 @@ setInterval(async () => {
     // Don't let the error crash the process
   }
 }, 15 * 60 * 1000) // Every 15 minutes (free tier friendly)
+*/
+
+console.log('ℹ️  Background support/resistance scan is DISABLED - use manual refresh in UI')
 
 // Socket.IO authentication middleware
 io.use((socket, next) => {
