@@ -409,37 +409,128 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   name="Sells"
                 />
 
-                {/* Support/Resistance levels - show only highest resistance and lowest support */}
+                {/* Support/Resistance levels and Weekly High/Low */}
                 {showSupportResistance && (() => {
+                  const linesToShow = []
+
+                  // Get most recent support and resistance levels
                   const supportLevels = supportResistanceLevels.filter(l => l.type === 'support')
                   const resistanceLevels = supportResistanceLevels.filter(l => l.type === 'resistance')
 
-                  const lowestSupport = supportLevels.length > 0
-                    ? supportLevels.sort((a, b) => a.price - b.price)[0]
+                  const mostRecentSupport = supportLevels.length > 0
+                    ? supportLevels.sort((a, b) => b.timestamp - a.timestamp)[0]
                     : null
-                  const highestResistance = resistanceLevels.length > 0
-                    ? resistanceLevels.sort((a, b) => b.price - a.price)[0]
+                  const mostRecentResistance = resistanceLevels.length > 0
+                    ? resistanceLevels.sort((a, b) => b.timestamp - a.timestamp)[0]
                     : null
 
-                  const levelsToShow = [lowestSupport, highestResistance].filter(l => l !== null)
+                  // Calculate weekly high and low from price data
+                  const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000)
+                  const recentData = priceData.filter(d => d.timestamp >= oneWeekAgo)
 
-                  return levelsToShow.map((level, idx) => (
-                    <ReferenceLine
-                      key={`sr-${idx}`}
-                      y={level.price}
-                      yAxisId="price"
-                      stroke={level.type === 'support' ? '#22c55e' : '#ef4444'}
-                      strokeWidth={2}
-                      strokeDasharray="5 5"
-                      label={{
-                        value: `${level.type === 'support' ? '📈 Support' : '📉 Resistance'}: $${level.price.toFixed(2)}`,
-                        position: 'right',
-                        fill: level.type === 'support' ? '#22c55e' : '#ef4444',
-                        fontSize: 12,
-                        fontWeight: 'bold'
-                      }}
-                    />
-                  ))
+                  const weeklyHigh = recentData.length > 0
+                    ? Math.max(...recentData.map(d => d.high))
+                    : null
+                  const weeklyLow = recentData.length > 0
+                    ? Math.min(...recentData.map(d => d.low))
+                    : null
+
+                  // Format date helper
+                  const formatDate = (timestamp) => {
+                    if (!timestamp) return ''
+                    const date = new Date(timestamp)
+                    const diffDays = Math.floor((Date.now() - timestamp) / (1000 * 60 * 60 * 24))
+                    if (diffDays === 0) return 'Today'
+                    if (diffDays === 1) return 'Yesterday'
+                    if (diffDays < 7) return `${diffDays}d ago`
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  }
+
+                  // Add support level
+                  if (mostRecentSupport) {
+                    linesToShow.push(
+                      <ReferenceLine
+                        key="support"
+                        y={mostRecentSupport.price}
+                        yAxisId="price"
+                        stroke="#22c55e"
+                        strokeWidth={2}
+                        strokeDasharray="5 5"
+                        label={{
+                          value: `📈 Support: $${mostRecentSupport.price.toFixed(2)} (${formatDate(mostRecentSupport.timestamp)})`,
+                          position: 'right',
+                          fill: '#22c55e',
+                          fontSize: 11,
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    )
+                  }
+
+                  // Add resistance level
+                  if (mostRecentResistance) {
+                    linesToShow.push(
+                      <ReferenceLine
+                        key="resistance"
+                        y={mostRecentResistance.price}
+                        yAxisId="price"
+                        stroke="#ef4444"
+                        strokeWidth={2}
+                        strokeDasharray="5 5"
+                        label={{
+                          value: `📉 Resistance: $${mostRecentResistance.price.toFixed(2)} (${formatDate(mostRecentResistance.timestamp)})`,
+                          position: 'right',
+                          fill: '#ef4444',
+                          fontSize: 11,
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    )
+                  }
+
+                  // Add weekly high
+                  if (weeklyHigh) {
+                    linesToShow.push(
+                      <ReferenceLine
+                        key="weekly-high"
+                        y={weeklyHigh}
+                        yAxisId="price"
+                        stroke="#3b82f6"
+                        strokeWidth={2}
+                        strokeDasharray="3 3"
+                        label={{
+                          value: `⬆️ Week High: $${weeklyHigh.toFixed(2)}`,
+                          position: 'left',
+                          fill: '#3b82f6',
+                          fontSize: 11,
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    )
+                  }
+
+                  // Add weekly low
+                  if (weeklyLow) {
+                    linesToShow.push(
+                      <ReferenceLine
+                        key="weekly-low"
+                        y={weeklyLow}
+                        yAxisId="price"
+                        stroke="#9333ea"
+                        strokeWidth={2}
+                        strokeDasharray="3 3"
+                        label={{
+                          value: `⬇️ Week Low: $${weeklyLow.toFixed(2)}`,
+                          position: 'left',
+                          fill: '#9333ea',
+                          fontSize: 11,
+                          fontWeight: 'bold'
+                        }}
+                      />
+                    )
+                  }
+
+                  return linesToShow
                 })()}
               </ComposedChart>
             </ResponsiveContainer>
