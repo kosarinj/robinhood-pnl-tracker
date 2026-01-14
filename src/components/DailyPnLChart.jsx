@@ -12,9 +12,10 @@ import {
   ComposedChart
 } from 'recharts'
 import { socketService } from '../services/socketService'
+import { fetchHistoricalPrices } from '../utils/yahooFinance'
 import { useTheme } from '../contexts/ThemeContext'
 
-function DailyPnLChart({ useServer, connected }) {
+function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
   const { isDark } = useTheme()
   const [chartData, setChartData] = useState([])
   const [symbolData, setSymbolData] = useState([])
@@ -24,16 +25,18 @@ function DailyPnLChart({ useServer, connected }) {
   const [symbolLoading, setSymbolLoading] = useState(false)
   const [error, setError] = useState(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [calculationMode, setCalculationMode] = useState('historical') // 'historical' or 'snapshots'
 
   useEffect(() => {
-    if (useServer && connected) {
+    if (calculationMode === 'historical' && trades && trades.length > 0) {
+      calculateHistoricalPnL()
+    } else if (calculationMode === 'snapshots' && useServer && connected) {
       loadDailyPnL()
       loadSymbols()
     } else {
       setLoading(false)
-      setError('Connect to server to view daily P&L history')
     }
-  }, [useServer, connected])
+  }, [calculationMode, trades, currentPrices, useServer, connected])
 
   // Load symbol-specific data when symbol is selected
   useEffect(() => {
@@ -41,6 +44,132 @@ function DailyPnLChart({ useServer, connected }) {
       loadSymbolPnL(selectedSymbol)
     }
   }, [selectedSymbol, useServer, connected])
+
+  const calculateHistoricalPnL = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      console.log('📊 Calculating historical P&L from trades...')
+
+      if (!trades || trades.length === 0) {
+        setError('No trades loaded')
+        setChartData([])
+        setLoading(false)
+        return
+      }
+
+      // Filter to stock trades only
+      const stockTrades = trades.filter(t => !t.symbol.includes(' ') && !t.symbol.includes('Put') && !t.symbol.includes('Call'))
+
+      if (stockTrades.length === 0) {
+        setError('No stock trades found (only options)')
+        setChartData([])
+        setLoading(false)
+        return
+      }
+
+      // Find date range
+      const tradeDates = stockTrades.map(t => new Date(t.date || t.transDate))
+      const earliestDate = new Date(Math.min(...tradeDates))
+      const latestDate = new Date()
+
+      // Get all unique symbols
+      const uniqueSymbols = [...new Set(stockTrades.map(t => t.symbol))]
+      console.log(`  Calculating P&L for ${uniqueSymbols.length} symbols from ${earliestDate.toLocaleDateString()} to ${latestDate.toLocaleDateString()}`)
+
+      // Fetch historical prices for all symbols
+      const historicalPrices = {}
+      for (const symbol of uniqueSymbols) {
+        try {
+          const prices = await fetchHistoricalPrices(symbol, '1y', '1d')
+          historicalPrices[symbol] = prices
+        } catch (err) {
+          console.warn(`Could not fetch historical prices for ${symbol}:`, err.message)
+        }
+      }
+
+      // Generate daily P&L
+      const dailyPnL = []
+      const currentDate = new Date(earliestDate)
+
+      while (currentDate <= latestDate) {
+        const dateStr = currentDate.toISOString().split('T')[0]
+        const candleDate = new Date(currentDate).setHours(0, 0, 0, 0)
+
+        let totalPortfolioPnL = 0
+
+        // For each symbol, calculate P&L on this date
+        for (const symbol of uniqueSymbols) {
+          const symbolTrades = stockTrades.filter(t => t.symbol === symbol)
+
+          // Get trades up to this date
+          const tradesUpToDate = symbolTrades.filter(trade => {
+            const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
+            return tradeDate <= candleDate
+          })
+
+          if (tradesUpToDate.length === 0) continue
+
+          // Calculate cumulative buys, sells, and position
+          const buyAmount = tradesUpToDate
+            .filter(t => t.isBuy)
+            .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+          const sellProceeds = tradesUpToDate
+            .filter(t => !t.isBuy)
+            .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+          const position = tradesUpToDate.reduce((pos, t) =>
+            t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
+
+          // Get price on this date
+          let price = currentPrices?.[symbol] || 0
+          if (historicalPrices[symbol]) {
+            // Find the most recent historical price on or before this date
+            const historicalOnDate = historicalPrices[symbol]
+              .filter(h => {
+                const hDate = new Date(h.date).setHours(0, 0, 0, 0)
+                return hDate <= candleDate
+              })
+              .sort((a, b) => new Date(b.date) - new Date(a.date))[0]
+
+            if (historicalOnDate) {
+              price = historicalOnDate.close
+            }
+          }
+
+          // Running P&L = Sell proceeds + Current position value - Buy cost
+          const positionValue = position * price
+          const symbolPnL = sellProceeds + positionValue - buyAmount
+
+          totalPortfolioPnL += symbolPnL
+        }
+
+        dailyPnL.push({
+          date: dateStr,
+          totalPnL: parseFloat(totalPortfolioPnL.toFixed(2)),
+          realizedPnL: 0, // Can be calculated if needed
+          unrealizedPnL: 0, // Can be calculated if needed
+          dailyPnL: 0 // Will calculate in next step
+        })
+
+        currentDate.setDate(currentDate.getDate() + 1)
+      }
+
+      // Calculate daily changes
+      for (let i = 1; i < dailyPnL.length; i++) {
+        dailyPnL[i].dailyPnL = parseFloat((dailyPnL[i].totalPnL - dailyPnL[i - 1].totalPnL).toFixed(2))
+      }
+
+      console.log(`✅ Calculated ${dailyPnL.length} days of historical P&L`)
+      setChartData(dailyPnL)
+    } catch (err) {
+      console.error('Error calculating historical P&L:', err)
+      setError('Failed to calculate historical P&L: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const loadDailyPnL = async () => {
     try {
@@ -304,7 +433,13 @@ function DailyPnLChart({ useServer, connected }) {
             </select>
           )}
           <button
-            onClick={() => loadDailyPnL()}
+            onClick={() => {
+              if (calculationMode === 'historical') {
+                calculateHistoricalPnL()
+              } else {
+                loadDailyPnL()
+              }
+            }}
             style={{
               background: '#28a745',
               color: 'white',
@@ -319,9 +454,12 @@ function DailyPnLChart({ useServer, connected }) {
             🔄 Refresh
           </button>
           <button
-            onClick={handleClearSnapshots}
+            onClick={() => {
+              const newMode = calculationMode === 'historical' ? 'snapshots' : 'historical'
+              setCalculationMode(newMode)
+            }}
             style={{
-              background: '#dc3545',
+              background: calculationMode === 'historical' ? '#3b82f6' : '#9333ea',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
@@ -331,8 +469,25 @@ function DailyPnLChart({ useServer, connected }) {
               fontWeight: '500'
             }}
           >
-            🗑️ Clear Snapshots
+            {calculationMode === 'historical' ? '📊 Historical' : '📸 Snapshots'}
           </button>
+          {calculationMode === 'snapshots' && (
+            <button
+              onClick={handleClearSnapshots}
+              style={{
+                background: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '6px 12px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: '500'
+              }}
+            >
+              🗑️ Clear Snapshots
+            </button>
+          )}
           <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
@@ -428,7 +583,9 @@ function DailyPnLChart({ useServer, connected }) {
                 marginTop: '10px',
                 fontStyle: 'italic'
               }}>
-                * Chart shows historical portfolio Total P&L and Daily P&L changes from saved snapshots
+                {calculationMode === 'historical'
+                  ? '* Chart shows portfolio Total P&L calculated from all trades in loaded file, day-by-day from first trade to today'
+                  : '* Chart shows historical portfolio Total P&L and Daily P&L changes from saved snapshots'}
               </div>
             </>
           )}

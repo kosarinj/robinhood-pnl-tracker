@@ -2232,7 +2232,12 @@ function AuthenticatedApp({ user }) {
       )}
 
       {/* Daily P&L Chart */}
-      <DailyPnLChart useServer={useServer} connected={connected} />
+      <DailyPnLChart
+        useServer={useServer}
+        connected={connected}
+        trades={trades}
+        currentPrices={currentPrices}
+      />
 
       {/* Support & Resistance Levels */}
       {connected && (
