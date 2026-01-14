@@ -624,10 +624,17 @@ export class SupportResistanceService {
       const candles = await this.getHistoricalData(symbol)
 
       // Minimum candles needed varies by timeframe
-      const minCandles = this.config.timeframe === 'daily' ? 20 : 10
+      // Ideally need leftBars + 1 + rightBars (11) for swing pivot detection
+      // But for newer stocks, we can work with less data
+      const minCandles = this.config.timeframe === 'daily' ? 5 : 10
 
       if (!candles || candles.length < minCandles) {
-        throw new Error(`Insufficient historical data for ${symbol}. Got ${candles?.length || 0} candles, need at least ${minCandles} for ${this.config.timeframe} timeframe.`)
+        throw new Error(`Insufficient historical data for ${symbol}. Got ${candles?.length || 0} candles, need at least ${minCandles}. This stock may be newly listed or have very limited trading history. Try a stock with more history.`)
+      }
+
+      // Warn if data is limited
+      if (candles.length < 11) {
+        console.warn(`⚠️  Limited data for ${symbol} (${candles.length} candles). Results may be less reliable.`)
       }
 
       console.log(`  ✓ Have ${candles.length} candles for analysis`)
