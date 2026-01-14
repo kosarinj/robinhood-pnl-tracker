@@ -15,7 +15,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected }) {
   const [showAlerts, setShowAlerts] = useState(false)
   const [alertsLoading, setAlertsLoading] = useState(false)
   const [config, setConfig] = useState({
-    lookbackDays: 60,
+    lookbackDays: 7,
     timeframe: 'daily',
     minTouches: 2,
     priceTolerance: 0.5,
