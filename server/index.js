@@ -92,7 +92,21 @@ app.use(cookieParser())
 // Serve static files from the React app (after building with vite build)
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-app.use(express.static(path.join(__dirname, '../dist')))
+
+// Set cache control headers to prevent stale content
+app.use(express.static(path.join(__dirname, '../dist'), {
+  setHeaders: (res, filePath) => {
+    // Don't cache HTML files - always get fresh version
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+      res.setHeader('Pragma', 'no-cache')
+      res.setHeader('Expires', '0')
+    } else if (filePath.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$/)) {
+      // Cache static assets for 1 year (Vite adds content hashes to filenames)
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    }
+  }
+}))
 
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() })
@@ -1694,6 +1708,10 @@ app.post('/api/robinhood/download', requireAuth, async (req, res) => {
 // Catch-all route to serve index.html for client-side routing
 // This must be AFTER all API routes
 app.get('*', (req, res) => {
+  // Set no-cache headers for HTML to prevent stale content
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+  res.setHeader('Pragma', 'no-cache')
+  res.setHeader('Expires', '0')
   res.sendFile(path.join(__dirname, '../dist/index.html'))
 })
 
