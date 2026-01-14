@@ -597,14 +597,15 @@ export class SupportResistanceService {
       }
       console.log(`✓ API key present`)
 
-      // Check cache
-      const cached = this.cache.get(symbol)
+      // Check cache (key includes timeframe to separate daily vs intraday data)
+      const cacheKey = `${symbol}-${this.config.timeframe}`
+      const cached = this.cache.get(cacheKey)
       if (cached && Date.now() - cached.timestamp < this.config.cacheDuration) {
-        console.log(`📦 Using cached support/resistance for ${symbol} (${cached.levels.length} levels)`)
+        console.log(`📦 Using cached support/resistance for ${symbol} [${this.config.timeframe}] (${cached.levels.length} levels)`)
         return cached.levels
       }
 
-      console.log(`🎯 Analyzing support/resistance levels for ${symbol}...`)
+      console.log(`🎯 Analyzing support/resistance levels for ${symbol} [${this.config.timeframe}]...`)
 
       // Fetch historical data
       const candles = await this.getHistoricalData(symbol)
@@ -657,13 +658,13 @@ export class SupportResistanceService {
         .sort((a, b) => b.strength - a.strength)
         .slice(0, this.config.maxLevels)
 
-      console.log(`🎯 Found ${sorted.length} significant levels for ${symbol}:`)
+      console.log(`🎯 Found ${sorted.length} significant levels for ${symbol} [${this.config.timeframe}]:`)
       sorted.slice(0, 5).forEach(level => {
         console.log(`   ${level.type.toUpperCase()}: $${level.price} (${level.touches} touches, strength: ${level.strength}/100)`)
       })
 
-      // Cache the result
-      this.cache.set(symbol, {
+      // Cache the result (using timeframe-specific key)
+      this.cache.set(cacheKey, {
         levels: sorted,
         timestamp: Date.now()
       })
@@ -707,7 +708,15 @@ export class SupportResistanceService {
    * Update configuration
    */
   updateConfig(newConfig) {
+    const oldConfig = { ...this.config }
     this.config = { ...this.config, ...newConfig }
+
+    // Clear cache if timeframe changed (daily vs intraday data is different)
+    if (oldConfig.timeframe !== this.config.timeframe) {
+      console.log(`📐 Timeframe changed from ${oldConfig.timeframe} to ${this.config.timeframe} - clearing cache`)
+      this.clearCache()
+    }
+
     console.log('📐 Support/Resistance config updated:', this.config)
   }
 
