@@ -2221,6 +2221,8 @@ function AuthenticatedApp({ user }) {
         <SupportResistanceLevels
           socket={socketService.socket}
           symbols={stockSymbols}
+          trades={trades}
+          connected={connected}
         />
       )}
 

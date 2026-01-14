@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import PriceChart from './PriceChart'
 
-function SupportResistanceLevels({ socket, symbols }) {
+function SupportResistanceLevels({ socket, symbols, trades, connected }) {
   const { isDark } = useTheme()
   const [levels, setLevels] = useState([])
   const [loading, setLoading] = useState(false)
@@ -9,6 +10,7 @@ function SupportResistanceLevels({ socket, symbols }) {
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [showConfig, setShowConfig] = useState(false)
+  const [chartSymbol, setChartSymbol] = useState(null)
   const [config, setConfig] = useState({
     lookbackDays: 60,
     timeframe: 'daily',
@@ -446,14 +448,31 @@ function SupportResistanceLevels({ socket, symbols }) {
         <div>
           {Object.entries(levelsBySymbol).map(([symbol, symbolLevels]) => (
             <div key={symbol} style={{ marginBottom: '20px' }}>
-              <h3 style={{
-                margin: '0 0 10px 0',
-                fontSize: '16px',
-                fontWeight: '600',
-                color: isDark ? '#e0e0e0' : '#1f2937'
-              }}>
-                {symbol}
-              </h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  color: isDark ? '#e0e0e0' : '#1f2937'
+                }}>
+                  {symbol}
+                </h3>
+                <button
+                  onClick={() => setChartSymbol(symbol)}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  📊 View Chart
+                </button>
+              </div>
 
               <div style={{ display: 'grid', gap: '8px' }}>
                 {symbolLevels
@@ -568,6 +587,17 @@ function SupportResistanceLevels({ socket, symbols }) {
       }}>
         <strong>Strength Score:</strong> <span style={{ color: '#22c55e' }}>80-100 (Strong)</span> • <span style={{ color: '#eab308' }}>60-79 (Moderate)</span> • <span style={{ color: '#94a3b8' }}>0-59 (Weak)</span>
       </div>
+
+      {/* Price Chart with Support/Resistance */}
+      {chartSymbol && trades && (
+        <PriceChart
+          symbol={chartSymbol}
+          trades={trades.filter(t => t.symbol === chartSymbol)}
+          onClose={() => setChartSymbol(null)}
+          useServer={true}
+          connected={connected}
+        />
+      )}
     </div>
   )
 }
