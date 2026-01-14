@@ -730,9 +730,9 @@ export class SupportResistanceService {
     const oldConfig = { ...this.config }
     this.config = { ...this.config, ...newConfig }
 
-    // Clear cache if timeframe changed (daily vs intraday data is different)
-    if (oldConfig.timeframe !== this.config.timeframe) {
-      console.log(`📐 Timeframe changed from ${oldConfig.timeframe} to ${this.config.timeframe} - clearing cache`)
+    // Clear cache if timeframe or lookback changed (different data sets)
+    if (oldConfig.timeframe !== this.config.timeframe || oldConfig.lookbackDays !== this.config.lookbackDays) {
+      console.log(`📐 Config changed (timeframe: ${oldConfig.timeframe}->${this.config.timeframe}, lookback: ${oldConfig.lookbackDays}->${this.config.lookbackDays}) - clearing cache`)
       this.clearCache()
     }
 
