@@ -24,6 +24,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [chartReady, setChartReady] = useState(false)
   const [supportResistanceLevels, setSupportResistanceLevels] = useState([])
   const [showSupportResistance, setShowSupportResistance] = useState(true)
+  const [showStockPnL, setShowStockPnL] = useState(true)
+  const [showOptionsPnL, setShowOptionsPnL] = useState(true)
   const [indicators, setIndicators] = useState({
     showEMA9: false,
     showEMA21: false,
@@ -178,36 +180,75 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     if (rawData.length === 0) return
 
     const dataWithIndicators = addIndicators(rawData, indicators)
+
+    // Separate stock and options trades
+    const stockTrades = trades.filter(t => t.symbol === symbol)
+    const optionsTrades = trades.filter(t =>
+      (t.symbol.startsWith(symbol + ' ') || t.underlyingSymbol === symbol) &&
+      (t.symbol.includes(' ') || t.symbol.includes('Put') || t.symbol.includes('Call'))
+    )
+
     const enrichedData = dataWithIndicators.map(candle => {
       const candleDate = new Date(candle.date).setHours(0, 0, 0, 0)
 
-      // Calculate running P&L
-      const tradesUpToDate = trades.filter(trade => {
+      // Calculate Stock P&L
+      const stockTradesUpToDate = stockTrades.filter(trade => {
         const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
         return tradeDate <= candleDate
       })
 
-      const runningBuyAmount = tradesUpToDate
+      const stockBuyAmount = stockTradesUpToDate
         .filter(t => t.isBuy)
         .reduce((sum, t) => sum + (t.price * t.quantity), 0)
 
-      const runningSellAmount = tradesUpToDate
+      const stockSellAmount = stockTradesUpToDate
         .filter(t => !t.isBuy)
         .reduce((sum, t) => sum + (t.price * t.quantity), 0)
 
-      const runningPosition = tradesUpToDate.reduce((pos, t) =>
+      const stockPosition = stockTradesUpToDate.reduce((pos, t) =>
         t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
 
-      const currentPositionValue = runningPosition * candle.close
-      const runningPnL = runningSellAmount + currentPositionValue - runningBuyAmount
+      const stockPositionValue = stockPosition * candle.close
+      const stockPnL = stockSellAmount + stockPositionValue - stockBuyAmount
 
-      // Find trades on this specific date
-      const dayTrades = trades.filter(trade => {
+      // Calculate Options P&L
+      let optionsPnL = 0
+      const uniqueOptionsSymbols = [...new Set(optionsTrades.map(t => t.symbol))]
+
+      for (const optSymbol of uniqueOptionsSymbols) {
+        const optTradesUpToDate = optionsTrades
+          .filter(t => t.symbol === optSymbol)
+          .filter(trade => {
+            const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
+            return tradeDate <= candleDate
+          })
+
+        if (optTradesUpToDate.length === 0) continue
+
+        const optBuyAmount = optTradesUpToDate
+          .filter(t => t.isBuy)
+          .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+        const optSellAmount = optTradesUpToDate
+          .filter(t => !t.isBuy)
+          .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+        const optPosition = optTradesUpToDate.reduce((pos, t) =>
+          t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
+
+        const optPositionValue = optPosition * 0
+        optionsPnL += optSellAmount + optPositionValue - optBuyAmount
+      }
+
+      const totalPnL = stockPnL + optionsPnL
+
+      // Find stock trades on this specific date for markers
+      const dayStockTrades = stockTrades.filter(trade => {
         const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
         return tradeDate === candleDate
       })
-      const buys = dayTrades.filter(t => t.isBuy)
-      const sells = dayTrades.filter(t => !t.isBuy)
+      const buys = dayStockTrades.filter(t => t.isBuy)
+      const sells = dayStockTrades.filter(t => !t.isBuy)
 
       return {
         ...candle,
@@ -215,11 +256,13 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         sellPrice: sells.length > 0 ? sells.reduce((sum, t) => sum + t.price, 0) / sells.length : null,
         buyQuantity: buys.reduce((sum, t) => sum + t.quantity, 0),
         sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0),
-        runningPnL: runningPnL
+        stockPnL: stockPnL,
+        optionsPnL: optionsPnL,
+        runningPnL: totalPnL
       }
     })
     setPriceData(enrichedData)
-  }, [indicators, rawData, trades])
+  }, [indicators, rawData, trades, symbol])
 
   const toggleIndicator = (indicator) => {
     setIndicators(prev => ({
@@ -309,9 +352,10 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         {/* Price Chart */}
         {!loading && !error && priceData.length > 0 && chartReady && (
           <>
-            {/* Support/Resistance Toggle */}
-            {supportResistanceLevels.length > 0 && (
-              <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Toggle Controls */}
+            <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+              {/* Support/Resistance Toggle */}
+              {supportResistanceLevels.length > 0 && (
                 <label style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -327,8 +371,48 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   />
                   Show Support/Resistance Levels ({supportResistanceLevels.length})
                 </label>
-              </div>
-            )}
+              )}
+
+              {/* Stock P&L Toggle */}
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                background: '#f0f0f0',
+                borderRadius: '6px',
+                fontSize: '14px',
+                color: '#666',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={showStockPnL}
+                  onChange={(e) => setShowStockPnL(e.target.checked)}
+                />
+                <span style={{ color: '#3b82f6', fontWeight: '500' }}>●</span> Stock P&L
+              </label>
+
+              {/* Options P&L Toggle */}
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                background: '#f0f0f0',
+                borderRadius: '6px',
+                fontSize: '14px',
+                color: '#666',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={showOptionsPnL}
+                  onChange={(e) => setShowOptionsPnL(e.target.checked)}
+                />
+                <span style={{ color: '#f59e0b', fontWeight: '500' }}>●</span> Options P&L
+              </label>
+            </div>
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
               <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}`}>
               <ComposedChart data={priceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -378,15 +462,45 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   isAnimationActive={false}
                 />
 
-                {/* Running P&L Line */}
+                {/* Stock P&L Line */}
+                {showStockPnL && (
+                  <Line
+                    yAxisId="pnl"
+                    type="monotone"
+                    dataKey="stockPnL"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={false}
+                    name="Stock P&L"
+                    connectNulls={true}
+                    isAnimationActive={false}
+                  />
+                )}
+
+                {/* Options P&L Line */}
+                {showOptionsPnL && (
+                  <Line
+                    yAxisId="pnl"
+                    type="monotone"
+                    dataKey="optionsPnL"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    dot={false}
+                    name="Options P&L"
+                    connectNulls={true}
+                    isAnimationActive={false}
+                  />
+                )}
+
+                {/* Total P&L Line */}
                 <Line
                   yAxisId="pnl"
                   type="monotone"
                   dataKey="runningPnL"
                   stroke="#28a745"
-                  strokeWidth={2}
+                  strokeWidth={3}
                   dot={false}
-                  name="Running P&L"
+                  name="Total P&L"
                   connectNulls={true}
                   isAnimationActive={false}
                 />
