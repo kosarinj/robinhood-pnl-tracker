@@ -11,6 +11,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected }) {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [showConfig, setShowConfig] = useState(false)
   const [chartSymbol, setChartSymbol] = useState(null)
+  const [resistanceAlerts, setResistanceAlerts] = useState([])
+  const [showAlerts, setShowAlerts] = useState(false)
+  const [alertsLoading, setAlertsLoading] = useState(false)
   const [config, setConfig] = useState({
     lookbackDays: 60,
     timeframe: 'daily',
@@ -52,6 +55,17 @@ function SupportResistanceLevels({ socket, symbols, trades, connected }) {
     setError(null) // Clear previous errors
     console.log('Emitting get-support-resistance-multi event for:', symbols)
     socket.emit('get-support-resistance-multi', { symbols })
+  }
+
+  // Check resistance alerts
+  const checkResistanceAlerts = () => {
+    if (!socket || !symbols || symbols.length === 0) {
+      return
+    }
+
+    setAlertsLoading(true)
+    console.log('Checking resistance alerts for:', symbols)
+    socket.emit('check-resistance-alerts', { symbols })
   }
 
   // Listen for results
@@ -99,10 +113,22 @@ function SupportResistanceLevels({ socket, symbols, trades, connected }) {
       // Could show notification here
     })
 
+    socket.on('resistance-alerts-result', (data) => {
+      console.log('Received resistance alerts:', data)
+      setAlertsLoading(false)
+      if (data.success) {
+        setResistanceAlerts(data.alerts)
+        setShowAlerts(true)
+      } else {
+        console.error('Failed to get resistance alerts:', data.error)
+      }
+    })
+
     return () => {
       socket.off('support-resistance-result')
       socket.off('support-resistance-multi-result')
       socket.off('support-resistance-alert')
+      socket.off('resistance-alerts-result')
     }
   }, [socket])
 
@@ -210,6 +236,43 @@ function SupportResistanceLevels({ socket, symbols, trades, connected }) {
             }}
           >
             {loading ? '⏳ Loading...' : '🔄 Refresh'}
+          </button>
+
+          <button
+            onClick={checkResistanceAlerts}
+            disabled={alertsLoading || !symbols || symbols.length === 0}
+            style={{
+              padding: '6px 12px',
+              background: alertsLoading ? '#94a3b8' : '#ef4444',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '13px',
+              cursor: (alertsLoading || !symbols || symbols.length === 0) ? 'not-allowed' : 'pointer',
+              fontWeight: '500',
+              position: 'relative'
+            }}
+          >
+            {alertsLoading ? '⏳' : '🚨'} Resistance Alerts
+            {resistanceAlerts.length > 0 && !alertsLoading && (
+              <span style={{
+                position: 'absolute',
+                top: '-8px',
+                right: '-8px',
+                background: '#22c55e',
+                color: 'white',
+                borderRadius: '50%',
+                width: '20px',
+                height: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+                fontWeight: 'bold'
+              }}>
+                {resistanceAlerts.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -407,6 +470,153 @@ function SupportResistanceLevels({ socket, symbols, trades, connected }) {
               <option key={symbol} value={symbol}>{symbol}</option>
             ))}
           </select>
+        </div>
+      )}
+
+      {/* Resistance Alerts Display */}
+      {showAlerts && resistanceAlerts.length > 0 && (
+        <div style={{
+          background: isDark ? '#2a2a2a' : '#fef2f2',
+          border: `2px solid #ef4444`,
+          borderRadius: '8px',
+          padding: '15px',
+          marginBottom: '15px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{
+              margin: 0,
+              fontSize: '16px',
+              fontWeight: '600',
+              color: '#ef4444'
+            }}>
+              🚨 Resistance Alerts ({resistanceAlerts.length})
+            </h3>
+            <button
+              onClick={() => setShowAlerts(false)}
+              style={{
+                padding: '4px 10px',
+                background: 'transparent',
+                color: isDark ? '#888' : '#6b7280',
+                border: 'none',
+                fontSize: '18px',
+                cursor: 'pointer'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ fontSize: '13px', color: isDark ? '#888' : '#6b7280', marginBottom: '12px' }}>
+            Stocks near or above their highest resistance levels
+          </div>
+          <div style={{ display: 'grid', gap: '8px' }}>
+            {resistanceAlerts.map((alert, idx) => {
+              const statusColor = alert.status === 'broken' ? '#22c55e' : alert.status === 'testing' ? '#eab308' : '#ef4444'
+              const statusText = alert.status === 'broken' ? 'BROKEN ✓' : alert.status === 'testing' ? 'TESTING' : 'APPROACHING'
+
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px',
+                    background: isDark ? '#1e1e1e' : 'white',
+                    borderRadius: '6px',
+                    borderLeft: `4px solid ${statusColor}`
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{
+                      fontSize: '15px',
+                      fontWeight: '600',
+                      color: isDark ? '#e0e0e0' : '#1f2937',
+                      marginBottom: '4px'
+                    }}>
+                      {alert.symbol}
+                      <span style={{
+                        marginLeft: '8px',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        color: statusColor,
+                        background: isDark ? '#2a2a2a' : '#f3f4f6',
+                        padding: '2px 8px',
+                        borderRadius: '4px'
+                      }}>
+                        {statusText}
+                      </span>
+                    </div>
+                    <div style={{
+                      fontSize: '13px',
+                      color: isDark ? '#888' : '#6b7280'
+                    }}>
+                      Current: ${alert.currentPrice.toFixed(2)} • Resistance: ${alert.resistancePrice.toFixed(2)}
+                      {' • '}{alert.percentFromResistance >= 0 ? '+' : ''}{alert.percentFromResistance}%
+                      {' • '}{alert.touches} touches
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <div style={{
+                      width: '60px',
+                      height: '6px',
+                      background: isDark ? '#333' : '#e5e7eb',
+                      borderRadius: '3px',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${alert.resistanceStrength}%`,
+                        height: '100%',
+                        background: alert.resistanceStrength >= 80 ? '#22c55e' : alert.resistanceStrength >= 60 ? '#eab308' : '#94a3b8',
+                        borderRadius: '3px'
+                      }} />
+                    </div>
+                    <span style={{
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: alert.resistanceStrength >= 80 ? '#22c55e' : alert.resistanceStrength >= 60 ? '#eab308' : '#94a3b8',
+                      minWidth: '35px'
+                    }}>
+                      {alert.resistanceStrength}
+                    </span>
+                    <button
+                      onClick={() => setChartSymbol(alert.symbol)}
+                      style={{
+                        padding: '6px 10px',
+                        background: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        marginLeft: '8px'
+                      }}
+                    >
+                      📊 Chart
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {showAlerts && resistanceAlerts.length === 0 && !alertsLoading && (
+        <div style={{
+          background: isDark ? '#2a2a2a' : '#f0fdf4',
+          border: '1px solid #22c55e',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '15px',
+          color: '#166534'
+        }}>
+          <div style={{ fontWeight: '600', marginBottom: '4px' }}>✅ All Clear</div>
+          <div style={{ fontSize: '14px' }}>No stocks are currently near or above resistance levels.</div>
         </div>
       )}
 

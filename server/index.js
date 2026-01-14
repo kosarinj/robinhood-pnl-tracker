@@ -979,6 +979,25 @@ io.on('connection', (socket) => {
       })
     }
   })
+
+  // Check resistance alerts for symbols
+  socket.on('check-resistance-alerts', async ({ symbols }) => {
+    console.log(`🚨 Checking resistance alerts for ${symbols.length} symbols`)
+    try {
+      const alerts = await supportResistanceService.checkResistanceAlerts(symbols)
+      socket.emit('resistance-alerts-result', {
+        success: true,
+        alerts,
+        timestamp: Date.now()
+      })
+    } catch (error) {
+      console.error(`❌ Error checking resistance alerts:`, error)
+      socket.emit('resistance-alerts-result', {
+        success: false,
+        error: error.message
+      })
+    }
+  })
 })
 
 // Helper function to apply split adjustments

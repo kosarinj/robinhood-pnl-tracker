@@ -756,6 +756,60 @@ export class SupportResistanceService {
       this.cache.clear()
     }
   }
+
+  /**
+   * Check if symbols are near or above resistance levels
+   * Returns alerts for stocks approaching/breaking resistance
+   */
+  async checkResistanceAlerts(symbols) {
+    const alerts = []
+
+    for (const symbol of symbols) {
+      try {
+        // Get current price
+        const currentPrice = await this.getCurrentPrice(symbol)
+        if (!currentPrice) continue
+
+        // Get support/resistance levels for this symbol
+        const levels = await this.getSupportResistanceLevels(symbol)
+
+        // Find highest resistance level
+        const resistanceLevels = levels.filter(l => l.type === 'resistance')
+        if (resistanceLevels.length === 0) continue
+
+        // Sort by price to get highest resistance
+        const highestResistance = resistanceLevels.sort((a, b) => b.price - a.price)[0]
+
+        // Calculate distance from highest resistance
+        const percentFromResistance = ((currentPrice - highestResistance.price) / highestResistance.price) * 100
+
+        // Alert if within 2% below resistance or above it
+        if (percentFromResistance >= -2) {
+          let status = 'approaching'
+          if (percentFromResistance >= 0) {
+            status = 'broken'
+          } else if (percentFromResistance >= -0.5) {
+            status = 'testing'
+          }
+
+          alerts.push({
+            symbol,
+            currentPrice,
+            resistancePrice: highestResistance.price,
+            resistanceStrength: highestResistance.strength,
+            percentFromResistance: parseFloat(percentFromResistance.toFixed(2)),
+            status,
+            touches: highestResistance.touches,
+            timestamp: Date.now()
+          })
+        }
+      } catch (error) {
+        console.error(`Error checking resistance alert for ${symbol}:`, error.message)
+      }
+    }
+
+    return alerts.sort((a, b) => b.percentFromResistance - a.percentFromResistance)
+  }
 }
 
 export const supportResistanceService = new SupportResistanceService()
