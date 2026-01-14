@@ -435,15 +435,13 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                     ? Math.min(...recentData.map(d => d.low))
                     : null
 
-                  // Format date helper
+                  // Format date helper - short version
                   const formatDate = (timestamp) => {
                     if (!timestamp) return ''
-                    const date = new Date(timestamp)
                     const diffDays = Math.floor((Date.now() - timestamp) / (1000 * 60 * 60 * 24))
-                    if (diffDays === 0) return 'Today'
-                    if (diffDays === 1) return 'Yesterday'
-                    if (diffDays < 7) return `${diffDays}d ago`
-                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    if (diffDays === 0) return '0d'
+                    if (diffDays === 1) return '1d'
+                    return `${diffDays}d`
                   }
 
                   // Add support level
@@ -457,10 +455,10 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                         strokeWidth={2}
                         strokeDasharray="5 5"
                         label={{
-                          value: `📈 Support: $${mostRecentSupport.price.toFixed(2)} (${formatDate(mostRecentSupport.timestamp)})`,
-                          position: 'right',
+                          value: `📈 ${mostRecentSupport.price.toFixed(2)} (${formatDate(mostRecentSupport.timestamp)})`,
+                          position: 'insideTopLeft',
                           fill: '#22c55e',
-                          fontSize: 11,
+                          fontSize: 10,
                           fontWeight: 'bold'
                         }}
                       />
@@ -478,10 +476,10 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                         strokeWidth={2}
                         strokeDasharray="5 5"
                         label={{
-                          value: `📉 Resistance: $${mostRecentResistance.price.toFixed(2)} (${formatDate(mostRecentResistance.timestamp)})`,
-                          position: 'right',
+                          value: `📉 ${mostRecentResistance.price.toFixed(2)} (${formatDate(mostRecentResistance.timestamp)})`,
+                          position: 'insideBottomLeft',
                           fill: '#ef4444',
-                          fontSize: 11,
+                          fontSize: 10,
                           fontWeight: 'bold'
                         }}
                       />
