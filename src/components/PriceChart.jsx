@@ -175,7 +175,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     }
   }, [symbol, useServer, connected])
 
-  // Recalculate indicators when they change (without refetching data)
+  // Recalculate indicators and P&L when dependencies change
   useEffect(() => {
     if (rawData.length === 0) return
 
@@ -240,7 +240,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         optionsPnL += optSellAmount + optPositionValue - optBuyAmount
       }
 
-      const totalPnL = stockPnL + optionsPnL
+      // Calculate Total P&L based on checkbox selections
+      const totalPnL = (showStockPnL ? stockPnL : 0) + (showOptionsPnL ? optionsPnL : 0)
 
       // Find stock trades on this specific date for markers
       const dayStockTrades = stockTrades.filter(trade => {
@@ -262,7 +263,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
       }
     })
     setPriceData(enrichedData)
-  }, [indicators, rawData, trades, symbol])
+  }, [showStockPnL, showOptionsPnL, indicators, rawData, trades, symbol])
 
   const toggleIndicator = (indicator) => {
     setIndicators(prev => ({
@@ -405,18 +406,19 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 alignItems: 'center',
                 gap: '6px',
                 padding: '4px 10px',
-                background: '#f0f0f0',
+                background: showStockPnL ? '#e3f2fd' : '#f0f0f0',
                 borderRadius: '6px',
                 fontSize: '14px',
                 color: '#666',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                border: showStockPnL ? '1px solid #3b82f6' : '1px solid transparent'
               }}>
                 <input
                   type="checkbox"
                   checked={showStockPnL}
                   onChange={(e) => setShowStockPnL(e.target.checked)}
                 />
-                <span style={{ color: '#3b82f6', fontWeight: '500' }}>●</span> Stock P&L
+                Include Stock P&L
               </label>
 
               {/* Options P&L Toggle */}
@@ -425,18 +427,19 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 alignItems: 'center',
                 gap: '6px',
                 padding: '4px 10px',
-                background: '#f0f0f0',
+                background: showOptionsPnL ? '#fff7ed' : '#f0f0f0',
                 borderRadius: '6px',
                 fontSize: '14px',
                 color: '#666',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                border: showOptionsPnL ? '1px solid #f59e0b' : '1px solid transparent'
               }}>
                 <input
                   type="checkbox"
                   checked={showOptionsPnL}
                   onChange={(e) => setShowOptionsPnL(e.target.checked)}
                 />
-                <span style={{ color: '#f59e0b', fontWeight: '500' }}>●</span> Options P&L
+                Include Options P&L
               </label>
             </div>
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
@@ -488,37 +491,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   isAnimationActive={false}
                 />
 
-                {/* Stock P&L Line */}
-                {showStockPnL && (
-                  <Line
-                    yAxisId="pnl"
-                    type="monotone"
-                    dataKey="stockPnL"
-                    stroke="#3b82f6"
-                    strokeWidth={2}
-                    dot={false}
-                    name="Stock P&L"
-                    connectNulls={true}
-                    isAnimationActive={false}
-                  />
-                )}
-
-                {/* Options P&L Line */}
-                {showOptionsPnL && (
-                  <Line
-                    yAxisId="pnl"
-                    type="monotone"
-                    dataKey="optionsPnL"
-                    stroke="#f59e0b"
-                    strokeWidth={2}
-                    dot={false}
-                    name="Options P&L"
-                    connectNulls={true}
-                    isAnimationActive={false}
-                  />
-                )}
-
-                {/* Total P&L Line */}
+                {/* Total P&L Line - dynamically includes Stock and/or Options based on checkboxes */}
                 <Line
                   yAxisId="pnl"
                   type="monotone"
