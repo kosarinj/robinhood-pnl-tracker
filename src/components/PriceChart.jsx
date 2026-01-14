@@ -22,6 +22,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [chartReady, setChartReady] = useState(false)
+  const [supportResistanceLevels, setSupportResistanceLevels] = useState([])
+  const [showSupportResistance, setShowSupportResistance] = useState(true)
   const [indicators, setIndicators] = useState({
     showEMA9: false,
     showEMA21: false,
@@ -145,6 +147,30 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     }
 
     loadData()
+  }, [symbol, useServer, connected])
+
+  // Fetch support/resistance levels
+  useEffect(() => {
+    if (!useServer || !connected || !socketService.socket) return
+
+    console.log(`Fetching support/resistance levels for ${symbol}...`)
+
+    // Listen for the response
+    const handleLevelsResult = (data) => {
+      if (data.success && data.symbol === symbol) {
+        console.log(`Received ${data.levels.length} support/resistance levels for ${symbol}`)
+        setSupportResistanceLevels(data.levels)
+      }
+    }
+
+    socketService.socket.on('support-resistance-result', handleLevelsResult)
+
+    // Request levels for this symbol
+    socketService.socket.emit('get-support-resistance', { symbol })
+
+    return () => {
+      socketService.socket.off('support-resistance-result', handleLevelsResult)
+    }
   }, [symbol, useServer, connected])
 
   // Recalculate indicators when they change (without refetching data)
@@ -283,6 +309,26 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         {/* Price Chart */}
         {!loading && !error && priceData.length > 0 && chartReady && (
           <>
+            {/* Support/Resistance Toggle */}
+            {supportResistanceLevels.length > 0 && (
+              <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '14px',
+                  color: '#666',
+                  cursor: 'pointer'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={showSupportResistance}
+                    onChange={(e) => setShowSupportResistance(e.target.checked)}
+                  />
+                  Show Support/Resistance Levels ({supportResistanceLevels.length})
+                </label>
+              </div>
+            )}
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
               <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}`}>
               <ComposedChart data={priceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -362,6 +408,24 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   shape="circle"
                   name="Sells"
                 />
+
+                {/* Support/Resistance levels */}
+                {showSupportResistance && supportResistanceLevels.map((level, idx) => (
+                  <ReferenceLine
+                    key={`sr-${idx}`}
+                    y={level.price}
+                    yAxisId="price"
+                    stroke={level.type === 'support' ? '#22c55e' : '#ef4444'}
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    label={{
+                      value: `${level.type === 'support' ? '📈' : '📉'} $${level.price.toFixed(2)} (${level.strength})`,
+                      position: 'right',
+                      fill: level.type === 'support' ? '#22c55e' : '#ef4444',
+                      fontSize: 11
+                    }}
+                  />
+                ))}
               </ComposedChart>
             </ResponsiveContainer>
             </div>
