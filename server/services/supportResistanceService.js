@@ -88,13 +88,21 @@ export class SupportResistanceService {
           isIntraday = false
       }
 
-      const fromDate = new Date()
       const toDate = new Date()
+      const fromDate = new Date()
 
       if (isIntraday) {
-        // For intraday, fetch today's data or last few days
-        const intradayLookback = Math.min(lookbackDays, 5) // Limit intraday to max 5 days
-        fromDate.setDate(fromDate.getDate() - intradayLookback)
+        if (lookbackDays === 1) {
+          // For 1 period intraday: Get only TODAY's session (from market open to now)
+          // Set to today at 9:30 AM ET (market open) or earlier
+          fromDate.setHours(0, 0, 0, 0) // Start of today
+          console.log(`  Using TODAY ONLY for intraday analysis`)
+        } else {
+          // For multiple periods: fetch last N days of intraday data
+          const intradayLookback = Math.min(lookbackDays, 5) // Limit intraday to max 5 days
+          fromDate.setDate(fromDate.getDate() - intradayLookback)
+          console.log(`  Using last ${intradayLookback} days for intraday analysis`)
+        }
       } else {
         fromDate.setDate(fromDate.getDate() - lookbackDays)
       }
