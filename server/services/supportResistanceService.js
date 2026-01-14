@@ -124,7 +124,12 @@ export class SupportResistanceService {
       })
 
       if (!response.data || !response.data.results || response.data.results.length === 0) {
-        console.warn(`No historical data available for ${symbol}`)
+        if (isIntraday) {
+          console.warn(`⚠️  No intraday data for ${symbol} - Polygon free tier only supports daily data`)
+          console.warn(`   To use intraday timeframes (5min, 15min, 1hour), upgrade to Polygon Starter plan ($99/mo)`)
+        } else {
+          console.warn(`No historical data available for ${symbol}`)
+        }
         return null
       }
 

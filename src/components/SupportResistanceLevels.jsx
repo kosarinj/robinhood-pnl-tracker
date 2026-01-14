@@ -252,10 +252,10 @@ function SupportResistanceLevels({ socket, symbols }) {
                   cursor: 'pointer'
                 }}
               >
-                <option value="daily">Daily</option>
-                <option value="1hour">1 Hour (Intraday)</option>
-                <option value="15min">15 Min (Intraday)</option>
-                <option value="5min">5 Min (Intraday)</option>
+                <option value="daily">Daily (Free)</option>
+                <option value="1hour">1 Hour - Requires Starter Plan</option>
+                <option value="15min">15 Min - Requires Starter Plan</option>
+                <option value="5min">5 Min - Requires Starter Plan</option>
               </select>
             </div>
             <div>
@@ -423,6 +423,11 @@ function SupportResistanceLevels({ socket, symbols }) {
           {error.includes('API key') && (
             <div style={{ fontSize: '13px', marginTop: '8px', color: '#dc2626' }}>
               💡 Get a free API key at <a href="https://polygon.io" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>polygon.io</a>, then set the POLYGON_API_KEY environment variable in Railway.
+            </div>
+          )}
+          {(error.includes('0 candles') || error.includes('Insufficient historical data')) && config.timeframe !== 'daily' && (
+            <div style={{ fontSize: '13px', marginTop: '8px', color: '#dc2626' }}>
+              ⚠️ Intraday data (5min, 15min, 1hour) requires <a href="https://polygon.io/pricing" target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline' }}>Polygon Starter plan</a> ($99/mo). Free tier only supports Daily timeframe.
             </div>
           )}
         </div>
