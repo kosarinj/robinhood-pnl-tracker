@@ -248,6 +248,9 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
   const today = new Date()
   today.setHours(0, 0, 0, 0) // Start of today
 
+  // Track highest buy ever
+  let highestBuyEver = null
+
   trades.forEach((trade) => {
     if (trade.isBuy) {
       totalBuyAmount += trade.quantity * trade.price
@@ -265,6 +268,14 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       // Track lowest buy ever (including sold positions)
       if (!lowestBuyEver || trade.price < lowestBuyEver.price) {
         lowestBuyEver = {
+          price: trade.price,
+          date: trade.date || trade.transDate
+        }
+      }
+
+      // Track highest buy ever
+      if (!highestBuyEver || trade.price > highestBuyEver.price) {
+        highestBuyEver = {
           price: trade.price,
           date: trade.date || trade.transDate
         }
@@ -451,7 +462,9 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
     recentLowestSellDaysAgo: recentLowestSellDaysAgo,
     recentLowestBuys: recentBuysWithDays,  // Array of top 3
     recentSells: recentSellsWithDays,  // Array of top 3
-    todaysRealizedProfit: roundToTwo(todaysRealizedProfit)
+    todaysRealizedProfit: roundToTwo(todaysRealizedProfit),
+    highestBuyEver: highestBuyEver ? roundToTwo(highestBuyEver.price) : 0,
+    totalTrades: trades.length
   }
 }
 
