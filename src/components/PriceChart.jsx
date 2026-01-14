@@ -409,23 +409,38 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   name="Sells"
                 />
 
-                {/* Support/Resistance levels */}
-                {showSupportResistance && supportResistanceLevels.map((level, idx) => (
-                  <ReferenceLine
-                    key={`sr-${idx}`}
-                    y={level.price}
-                    yAxisId="price"
-                    stroke={level.type === 'support' ? '#22c55e' : '#ef4444'}
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    label={{
-                      value: `${level.type === 'support' ? '📈' : '📉'} $${level.price.toFixed(2)} (${level.strength})`,
-                      position: 'right',
-                      fill: level.type === 'support' ? '#22c55e' : '#ef4444',
-                      fontSize: 11
-                    }}
-                  />
-                ))}
+                {/* Support/Resistance levels - show only highest resistance and lowest support */}
+                {showSupportResistance && (() => {
+                  const supportLevels = supportResistanceLevels.filter(l => l.type === 'support')
+                  const resistanceLevels = supportResistanceLevels.filter(l => l.type === 'resistance')
+
+                  const lowestSupport = supportLevels.length > 0
+                    ? supportLevels.sort((a, b) => a.price - b.price)[0]
+                    : null
+                  const highestResistance = resistanceLevels.length > 0
+                    ? resistanceLevels.sort((a, b) => b.price - a.price)[0]
+                    : null
+
+                  const levelsToShow = [lowestSupport, highestResistance].filter(l => l !== null)
+
+                  return levelsToShow.map((level, idx) => (
+                    <ReferenceLine
+                      key={`sr-${idx}`}
+                      y={level.price}
+                      yAxisId="price"
+                      stroke={level.type === 'support' ? '#22c55e' : '#ef4444'}
+                      strokeWidth={2}
+                      strokeDasharray="5 5"
+                      label={{
+                        value: `${level.type === 'support' ? '📈 Support' : '📉 Resistance'}: $${level.price.toFixed(2)}`,
+                        position: 'right',
+                        fill: level.type === 'support' ? '#22c55e' : '#ef4444',
+                        fontSize: 12,
+                        fontWeight: 'bold'
+                      }}
+                    />
+                  ))
+                })()}
               </ComposedChart>
             </ResponsiveContainer>
             </div>
