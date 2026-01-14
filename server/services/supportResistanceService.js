@@ -227,6 +227,109 @@ export class SupportResistanceService {
   }
 
   /**
+   * Fetch recent large trades for a symbol
+   */
+  async getLargeTrades(symbol, lookbackMinutes = 60) {
+    try {
+      if (!this.apiKey) {
+        return []
+      }
+
+      const now = Date.now()
+      const fromTimestamp = now - (lookbackMinutes * 60 * 1000)
+
+      const url = `${this.baseUrl}/v3/trades/${symbol}`
+
+      console.log(`📊 Fetching recent large trades for ${symbol}...`)
+
+      const response = await axios.get(url, {
+        params: {
+          apiKey: this.apiKey,
+          timestamp: fromTimestamp,
+          limit: 50000, // Max allowed
+          sort: 'timestamp'
+        },
+        timeout: 10000
+      })
+
+      if (!response.data || !response.data.results || response.data.results.length === 0) {
+        console.log(`  No trade data available for ${symbol}`)
+        return []
+      }
+
+      const trades = response.data.results
+      console.log(`  Retrieved ${trades.length} trades for ${symbol}`)
+
+      // Calculate size threshold (top 10% of trade sizes)
+      const sizes = trades.map(t => t.size).sort((a, b) => b - a)
+      const threshold = Math.max(10000, sizes[Math.floor(sizes.length * 0.1)]) // At least 10k shares
+
+      const largeTrades = trades.filter(t => t.size >= threshold)
+
+      console.log(`  Found ${largeTrades.length} large trades (>=${threshold.toLocaleString()} shares)`)
+
+      return largeTrades.map(trade => ({
+        price: trade.price,
+        size: trade.size,
+        timestamp: trade.participant_timestamp || trade.sip_timestamp,
+        conditions: trade.conditions || []
+      }))
+    } catch (error) {
+      console.error(`❌ Error fetching large trades for ${symbol}:`, error.message)
+      return []
+    }
+  }
+
+  /**
+   * Detect support/resistance from large trade clusters
+   */
+  detectLargeTradeLevels(largeTrades, currentPrice) {
+    const levels = []
+
+    if (!largeTrades || largeTrades.length === 0) return levels
+
+    // Group trades by price (within 0.5% tolerance)
+    const priceGroups = new Map()
+
+    largeTrades.forEach(trade => {
+      let foundGroup = false
+
+      for (const [groupPrice, trades] of priceGroups.entries()) {
+        const priceDiff = Math.abs(trade.price - groupPrice) / groupPrice
+        if (priceDiff <= 0.005) { // 0.5% tolerance
+          trades.push(trade)
+          foundGroup = true
+          break
+        }
+      }
+
+      if (!foundGroup) {
+        priceGroups.set(trade.price, [trade])
+      }
+    })
+
+    // Create levels from significant trade clusters
+    for (const [price, trades] of priceGroups.entries()) {
+      if (trades.length >= 2) { // At least 2 large trades at this level
+        const totalVolume = trades.reduce((sum, t) => sum + t.size, 0)
+        const mostRecentTimestamp = Math.max(...trades.map(t => t.timestamp))
+
+        levels.push({
+          type: price < currentPrice ? 'support' : 'resistance',
+          price: price,
+          timestamp: mostRecentTimestamp,
+          volume: totalVolume,
+          touches: trades.length,
+          method: 'large_trade'
+        })
+      }
+    }
+
+    console.log(`  ✓ Found ${levels.length} levels from large trade clusters`)
+    return levels
+  }
+
+  /**
    * Detect swing pivot points (highs and lows)
    */
   detectSwingPivots(candles) {
@@ -532,6 +635,14 @@ export class SupportResistanceService {
       const roundNumbers = this.detectRoundNumbers(candles, currentPrice)
       allLevels.push(...roundNumbers)
       console.log(`  ✓ Found ${roundNumbers.length} round number levels`)
+
+      // 4. Large trades (only for intraday timeframes)
+      if (this.config.timeframe !== 'daily') {
+        const largeTrades = await this.getLargeTrades(symbol, 240) // Last 4 hours
+        const largeTradeLevels = this.detectLargeTradeLevels(largeTrades, currentPrice)
+        allLevels.push(...largeTradeLevels)
+        console.log(`  ✓ Found ${largeTradeLevels.length} large trade levels`)
+      }
 
       // Cluster nearby levels
       const clustered = this.clusterLevels(allLevels, currentPrice)
