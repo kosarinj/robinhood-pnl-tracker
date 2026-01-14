@@ -52,7 +52,8 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
       console.log('📊 Calculating historical P&L from trades...')
 
       if (!trades || trades.length === 0) {
-        setError('No trades loaded')
+        console.log('No trades available')
+        setError('No trades loaded. Upload a CSV file to see historical P&L.')
         setChartData([])
         setLoading(false)
         return
@@ -62,33 +63,31 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
       const stockTrades = trades.filter(t => !t.symbol.includes(' ') && !t.symbol.includes('Put') && !t.symbol.includes('Call'))
 
       if (stockTrades.length === 0) {
+        console.log('No stock trades found')
         setError('No stock trades found (only options)')
         setChartData([])
         setLoading(false)
         return
       }
 
-      // Find date range
+      // Find date range - limit to last 90 days for performance
       const tradeDates = stockTrades.map(t => new Date(t.date || t.transDate))
-      const earliestDate = new Date(Math.min(...tradeDates))
+      const earliestTrade = new Date(Math.min(...tradeDates))
       const latestDate = new Date()
+      const ninetyDaysAgo = new Date()
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+
+      // Use the later of: earliest trade or 90 days ago
+      const earliestDate = earliestTrade > ninetyDaysAgo ? earliestTrade : ninetyDaysAgo
 
       // Get all unique symbols
       const uniqueSymbols = [...new Set(stockTrades.map(t => t.symbol))]
       console.log(`  Calculating P&L for ${uniqueSymbols.length} symbols from ${earliestDate.toLocaleDateString()} to ${latestDate.toLocaleDateString()}`)
 
-      // Fetch historical prices for all symbols
-      const historicalPrices = {}
-      for (const symbol of uniqueSymbols) {
-        try {
-          const prices = await fetchHistoricalPrices(symbol, '1y', '1d')
-          historicalPrices[symbol] = prices
-        } catch (err) {
-          console.warn(`Could not fetch historical prices for ${symbol}:`, err.message)
-        }
-      }
+      // Use current prices instead of fetching historical (much faster)
+      console.log('  Using current prices for calculation...')
 
-      // Generate daily P&L
+      // Generate daily P&L (using current prices for simplicity/speed)
       const dailyPnL = []
       const currentDate = new Date(earliestDate)
 
@@ -122,21 +121,8 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
           const position = tradesUpToDate.reduce((pos, t) =>
             t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
 
-          // Get price on this date
-          let price = currentPrices?.[symbol] || 0
-          if (historicalPrices[symbol]) {
-            // Find the most recent historical price on or before this date
-            const historicalOnDate = historicalPrices[symbol]
-              .filter(h => {
-                const hDate = new Date(h.date).setHours(0, 0, 0, 0)
-                return hDate <= candleDate
-              })
-              .sort((a, b) => new Date(b.date) - new Date(a.date))[0]
-
-            if (historicalOnDate) {
-              price = historicalOnDate.close
-            }
-          }
+          // Use current price (simplified for speed)
+          const price = currentPrices?.[symbol] || 0
 
           // Running P&L = Sell proceeds + Current position value - Buy cost
           const positionValue = position * price
@@ -148,8 +134,8 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
         dailyPnL.push({
           date: dateStr,
           totalPnL: parseFloat(totalPortfolioPnL.toFixed(2)),
-          realizedPnL: 0, // Can be calculated if needed
-          unrealizedPnL: 0, // Can be calculated if needed
+          realizedPnL: 0,
+          unrealizedPnL: 0,
           dailyPnL: 0 // Will calculate in next step
         })
 
@@ -353,8 +339,15 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
     return null
   }
 
-  if (!useServer || !connected) {
+  // Don't show at all if no trades in historical mode
+  if (calculationMode === 'historical' && (!trades || trades.length === 0)) {
     return null
+  }
+
+  if (!useServer || !connected) {
+    if (calculationMode === 'snapshots') {
+      return null
+    }
   }
 
   if (loading) {
@@ -372,7 +365,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
     )
   }
 
-  if (error) {
+  if (error && calculationMode === 'snapshots') {
     return (
       <div style={{
         padding: '15px',
@@ -584,7 +577,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                 fontStyle: 'italic'
               }}>
                 {calculationMode === 'historical'
-                  ? '* Chart shows portfolio Total P&L calculated from all trades in loaded file, day-by-day from first trade to today'
+                  ? '* Chart shows portfolio Total P&L over last 90 days based on your trades. Uses current prices (not historical) for faster calculation.'
                   : '* Chart shows historical portfolio Total P&L and Daily P&L changes from saved snapshots'}
               </div>
             </>
