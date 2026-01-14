@@ -265,12 +265,14 @@ function SupportResistanceLevels({ socket, symbols }) {
                 display: 'block',
                 marginBottom: '4px'
               }}>
-                Lookback {config.timeframe === 'daily' ? 'Days' : 'Periods'}
+                Lookback {config.timeframe === 'daily' ? 'Days' : 'Days'} {config.timeframe !== 'daily' && '(use 1 for today only)'}
               </label>
               <input
                 type="number"
                 value={config.lookbackDays}
                 onChange={(e) => setConfig({ ...config, lookbackDays: parseInt(e.target.value) })}
+                min="1"
+                max={config.timeframe === 'daily' ? 365 : 5}
                 style={{
                   width: '100%',
                   padding: '6px',
