@@ -26,6 +26,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [showSupportResistance, setShowSupportResistance] = useState(true)
   const [showStockPnL, setShowStockPnL] = useState(true)
   const [showOptionsPnL, setShowOptionsPnL] = useState(true)
+  const [dateRange, setDateRange] = useState('6mo') // '1mo', '3mo', '6mo', '1y', 'max'
   const [indicators, setIndicators] = useState({
     showEMA9: false,
     showEMA21: false,
@@ -44,17 +45,16 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
 
         // Use server if connected, otherwise use CORS proxies
         if (useServer && connected) {
-          console.log('Using server to fetch historical data (no CORS issues)')
-          historical = await socketService.fetchHistoricalData(symbol, '6mo', '1d')
+          console.log(`Using server to fetch historical data (${dateRange}, no CORS issues)`)
+          historical = await socketService.fetchHistoricalData(symbol, dateRange, '1d')
           // Convert date strings back to Date objects
           historical = historical.map(item => ({
             ...item,
             date: new Date(item.date)
           }))
         } else {
-          console.log('Using CORS proxies to fetch historical data')
-          // Fetch 6 months of daily data (Yahoo Finance doesn't support 4-hour directly)
-          historical = await fetchHistoricalPrices(symbol, '6mo', '1d')
+          console.log(`Using CORS proxies to fetch historical data (${dateRange})`)
+          historical = await fetchHistoricalPrices(symbol, dateRange, '1d')
         }
 
         console.log(`Received ${historical.length} data points for ${symbol}`)
@@ -149,7 +149,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     }
 
     loadData()
-  }, [symbol, useServer, connected])
+  }, [symbol, useServer, connected, dateRange])
 
   // Fetch support/resistance levels
   useEffect(() => {
@@ -354,6 +354,32 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           <>
             {/* Toggle Controls */}
             <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+              {/* Date Range Selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label style={{ fontSize: '14px', color: '#666', fontWeight: '500' }}>Range:</label>
+                <select
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value)}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #ccc',
+                    background: 'white',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    color: '#333'
+                  }}
+                >
+                  <option value="1mo">1 Month</option>
+                  <option value="3mo">3 Months</option>
+                  <option value="6mo">6 Months</option>
+                  <option value="1y">1 Year</option>
+                  <option value="2y">2 Years</option>
+                  <option value="5y">5 Years</option>
+                  <option value="max">All Time</option>
+                </select>
+              </div>
+
               {/* Support/Resistance Toggle */}
               {supportResistanceLevels.length > 0 && (
                 <label style={{
@@ -369,7 +395,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                     checked={showSupportResistance}
                     onChange={(e) => setShowSupportResistance(e.target.checked)}
                   />
-                  Show Support/Resistance Levels ({supportResistanceLevels.length})
+                  Support/Resistance ({supportResistanceLevels.length})
                 </label>
               )}
 
