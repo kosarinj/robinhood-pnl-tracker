@@ -670,8 +670,10 @@ function AuthenticatedApp({ user }) {
 
   const handleLoadTrades = async (uploadDate) => {
     if (!uploadDate) {
-      // Clear - could reload latest or just return
+      // Clear - reload latest data or show empty
       setCurrentUploadDate(null)
+      setTrades([])
+      setPnlData([])
       return
     }
 
@@ -720,6 +722,15 @@ function AuthenticatedApp({ user }) {
       setLoading(false)
     }
   }
+
+  // Auto-load most recent data when upload dates first become available
+  useEffect(() => {
+    if (uploadDates.length > 0 && !currentUploadDate && trades.length === 0) {
+      const mostRecent = uploadDates[0].upload_date
+      console.log(`📂 Auto-loading most recent data: ${mostRecent}`)
+      handleLoadTrades(mostRecent)
+    }
+  }, [uploadDates])
 
   const handleLoadSnapshot = async (asofDate) => {
     if (!asofDate) {
@@ -1128,10 +1139,17 @@ function AuthenticatedApp({ user }) {
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           {useServer && connected && uploadDates.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '14px', fontWeight: '500' }}>Saved Data:</label>
+              <label style={{ fontSize: '14px', fontWeight: '500' }}>View:</label>
               <select
-                value={currentUploadDate || ''}
-                onChange={(e) => handleLoadTrades(e.target.value || null)}
+                value={currentUploadDate || 'live'}
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (value === 'live') {
+                    handleLoadTrades(null)
+                  } else {
+                    handleLoadTrades(value)
+                  }
+                }}
                 style={{
                   padding: '8px 12px',
                   borderRadius: '6px',
@@ -1141,10 +1159,10 @@ function AuthenticatedApp({ user }) {
                   background: currentUploadDate ? '#d4edda' : 'white'
                 }}
               >
-                <option value="">Select Date...</option>
+                <option value="live">🔴 Live View (Upload New Data)</option>
                 {uploadDates.map(item => (
                   <option key={item.upload_date} value={item.upload_date}>
-                    {item.upload_date} ({item.trade_count} trades)
+                    📁 {item.upload_date} ({item.trade_count} trades)
                   </option>
                 ))}
               </select>
