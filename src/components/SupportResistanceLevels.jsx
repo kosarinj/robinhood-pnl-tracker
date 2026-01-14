@@ -11,6 +11,7 @@ function SupportResistanceLevels({ socket, symbols }) {
   const [showConfig, setShowConfig] = useState(false)
   const [config, setConfig] = useState({
     lookbackDays: 60,
+    timeframe: 'daily',
     minTouches: 2,
     priceTolerance: 0.5,
     minVolumePercentile: 75,
@@ -235,7 +236,36 @@ function SupportResistanceLevels({ socket, symbols }) {
                 display: 'block',
                 marginBottom: '4px'
               }}>
-                Lookback Days
+                Timeframe
+              </label>
+              <select
+                value={config.timeframe}
+                onChange={(e) => setConfig({ ...config, timeframe: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  borderRadius: '4px',
+                  border: isDark ? '1px solid #444' : '1px solid #d1d5db',
+                  background: isDark ? '#1e1e1e' : 'white',
+                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="daily">Daily</option>
+                <option value="1hour">1 Hour (Intraday)</option>
+                <option value="15min">15 Min (Intraday)</option>
+                <option value="5min">5 Min (Intraday)</option>
+              </select>
+            </div>
+            <div>
+              <label style={{
+                fontSize: '12px',
+                color: isDark ? '#b0b0b0' : '#6b7280',
+                display: 'block',
+                marginBottom: '4px'
+              }}>
+                Lookback {config.timeframe === 'daily' ? 'Days' : 'Periods'}
               </label>
               <input
                 type="number"

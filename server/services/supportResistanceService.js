@@ -22,6 +22,9 @@ export class SupportResistanceService {
       // Lookback period for analysis (days)
       lookbackDays: 60,
 
+      // Timeframe: 'daily', '1hour', '15min', '5min'
+      timeframe: 'daily',
+
       // Minimum number of touches to confirm a level
       minTouches: 2,
 
@@ -56,14 +59,52 @@ export class SupportResistanceService {
       }
 
       const lookbackDays = days || this.config.lookbackDays
-      const fromDate = new Date()
-      fromDate.setDate(fromDate.getDate() - lookbackDays)
+      const timeframe = this.config.timeframe
 
+      // Map timeframe to Polygon API parameters
+      let multiplier, timespan
+      let isIntraday = false
+
+      switch (timeframe) {
+        case '5min':
+          multiplier = 5
+          timespan = 'minute'
+          isIntraday = true
+          break
+        case '15min':
+          multiplier = 15
+          timespan = 'minute'
+          isIntraday = true
+          break
+        case '1hour':
+          multiplier = 1
+          timespan = 'hour'
+          isIntraday = true
+          break
+        case 'daily':
+        default:
+          multiplier = 1
+          timespan = 'day'
+          isIntraday = false
+      }
+
+      const fromDate = new Date()
       const toDate = new Date()
 
-      const url = `${this.baseUrl}/v2/aggs/ticker/${symbol}/range/1/day/${fromDate.toISOString().split('T')[0]}/${toDate.toISOString().split('T')[0]}`
+      if (isIntraday) {
+        // For intraday, fetch today's data or last few days
+        const intradayLookback = Math.min(lookbackDays, 5) // Limit intraday to max 5 days
+        fromDate.setDate(fromDate.getDate() - intradayLookback)
+      } else {
+        fromDate.setDate(fromDate.getDate() - lookbackDays)
+      }
 
-      console.log(`📊 Fetching ${lookbackDays} days of historical data for ${symbol}...`)
+      const fromStr = fromDate.toISOString().split('T')[0]
+      const toStr = toDate.toISOString().split('T')[0]
+
+      const url = `${this.baseUrl}/v2/aggs/ticker/${symbol}/range/${multiplier}/${timespan}/${fromStr}/${toStr}`
+
+      console.log(`📊 Fetching ${isIntraday ? 'intraday' : 'daily'} data for ${symbol} (${timeframe})...`)
 
       const response = await axios.get(url, {
         params: {
@@ -89,7 +130,7 @@ export class SupportResistanceService {
         vwap: bar.vw
       }))
 
-      console.log(`✓ Retrieved ${candles.length} candles for ${symbol}`)
+      console.log(`✓ Retrieved ${candles.length} ${timeframe} candles for ${symbol}`)
       return candles
     } catch (error) {
       if (error.response) {
