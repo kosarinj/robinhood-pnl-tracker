@@ -609,9 +609,15 @@ export class SupportResistanceService {
 
       // Fetch historical data
       const candles = await this.getHistoricalData(symbol)
-      if (!candles || candles.length < 20) {
-        throw new Error(`Insufficient historical data for ${symbol}. Need at least 20 days of data.`)
+
+      // Minimum candles needed varies by timeframe
+      const minCandles = this.config.timeframe === 'daily' ? 20 : 10
+
+      if (!candles || candles.length < minCandles) {
+        throw new Error(`Insufficient historical data for ${symbol}. Got ${candles?.length || 0} candles, need at least ${minCandles} for ${this.config.timeframe} timeframe.`)
       }
+
+      console.log(`  ✓ Have ${candles.length} candles for analysis`)
 
       // Get current price
       const currentPrice = await this.getCurrentPrice(symbol)
