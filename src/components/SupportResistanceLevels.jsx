@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import PriceChart from './PriceChart'
 
-function SupportResistanceLevels({ socket, symbols, trades, connected }) {
+function SupportResistanceLevels({ socket, symbols, trades, connected, currentPrices }) {
   const { isDark } = useTheme()
   const [levels, setLevels] = useState([])
   const [loading, setLoading] = useState(false)
@@ -65,7 +65,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected }) {
 
     setAlertsLoading(true)
     console.log('Checking resistance alerts for:', symbols)
-    socket.emit('check-resistance-alerts', { symbols })
+    console.log('Using current prices:', currentPrices)
+    socket.emit('check-resistance-alerts', { symbols, currentPrices: currentPrices || {} })
   }
 
   // Listen for results

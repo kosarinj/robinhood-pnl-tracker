@@ -761,13 +761,16 @@ export class SupportResistanceService {
    * Check if symbols are near or above resistance levels
    * Returns alerts for stocks approaching/breaking resistance
    */
-  async checkResistanceAlerts(symbols) {
+  async checkResistanceAlerts(symbols, currentPrices = {}) {
     const alerts = []
 
     for (const symbol of symbols) {
       try {
-        // Get current price
-        const currentPrice = await this.getCurrentPrice(symbol)
+        // Use provided current price if available, otherwise fetch from API
+        let currentPrice = currentPrices[symbol]
+        if (!currentPrice) {
+          currentPrice = await this.getCurrentPrice(symbol)
+        }
         if (!currentPrice) continue
 
         // Get support/resistance levels for this symbol

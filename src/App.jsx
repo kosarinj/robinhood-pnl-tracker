@@ -2246,6 +2246,7 @@ function AuthenticatedApp({ user }) {
           symbols={stockSymbols}
           trades={trades}
           connected={connected}
+          currentPrices={currentPrices}
         />
       )}
 

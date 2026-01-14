@@ -981,10 +981,10 @@ io.on('connection', (socket) => {
   })
 
   // Check resistance alerts for symbols
-  socket.on('check-resistance-alerts', async ({ symbols }) => {
+  socket.on('check-resistance-alerts', async ({ symbols, currentPrices }) => {
     console.log(`🚨 Checking resistance alerts for ${symbols.length} symbols`)
     try {
-      const alerts = await supportResistanceService.checkResistanceAlerts(symbols)
+      const alerts = await supportResistanceService.checkResistanceAlerts(symbols, currentPrices || {})
       socket.emit('resistance-alerts-result', {
         success: true,
         alerts,
