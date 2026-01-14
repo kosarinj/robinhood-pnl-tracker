@@ -76,47 +76,81 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
         // Calculate running P&L and add buy/sell markers from trades
         console.log(`Processing ${trades.length} trades for ${symbol}:`, trades.slice(0, 3))
 
-        // Calculate running P&L for each date
-        let runningBuyAmount = 0
-        let runningSellAmount = 0
-        let runningPosition = 0
+        // Separate stock and options trades
+        const stockTrades = trades.filter(t => t.symbol === symbol)
+        const optionsTrades = trades.filter(t =>
+          (t.symbol.startsWith(symbol + ' ') || t.underlyingSymbol === symbol) &&
+          (t.symbol.includes(' ') || t.symbol.includes('Put') || t.symbol.includes('Call'))
+        )
+
+        console.log(`Found ${stockTrades.length} stock trades and ${optionsTrades.length} options trades for ${symbol}`)
 
         const enrichedData = dataWithIndicators.map(candle => {
           const candleDate = new Date(candle.date).setHours(0, 0, 0, 0)
 
-          // Find trades on or before this date
-          const tradesUpToDate = trades.filter(trade => {
+          // Calculate Stock P&L
+          const stockTradesUpToDate = stockTrades.filter(trade => {
             const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
             return tradeDate <= candleDate
           })
 
-          // Calculate cumulative buys, sells, and position
-          runningBuyAmount = tradesUpToDate
+          const stockBuyAmount = stockTradesUpToDate
             .filter(t => t.isBuy)
             .reduce((sum, t) => sum + (t.price * t.quantity), 0)
 
-          runningSellAmount = tradesUpToDate
+          const stockSellAmount = stockTradesUpToDate
             .filter(t => !t.isBuy)
             .reduce((sum, t) => sum + (t.price * t.quantity), 0)
 
-          runningPosition = tradesUpToDate.reduce((pos, t) =>
+          const stockPosition = stockTradesUpToDate.reduce((pos, t) =>
             t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
 
-          // Running P&L = Sell proceeds + Current position value - Buy cost
-          const currentPositionValue = runningPosition * candle.close
-          const runningPnL = runningSellAmount + currentPositionValue - runningBuyAmount
+          const stockPositionValue = stockPosition * candle.close
+          const stockPnL = stockSellAmount + stockPositionValue - stockBuyAmount
 
-          // Find trades on this specific date for markers
-          const dayTrades = trades.filter(trade => {
+          // Calculate Options P&L
+          let optionsPnL = 0
+          const uniqueOptionsSymbols = [...new Set(optionsTrades.map(t => t.symbol))]
+
+          for (const optSymbol of uniqueOptionsSymbols) {
+            const optTradesUpToDate = optionsTrades
+              .filter(t => t.symbol === optSymbol)
+              .filter(trade => {
+                const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
+                return tradeDate <= candleDate
+              })
+
+            if (optTradesUpToDate.length === 0) continue
+
+            const optBuyAmount = optTradesUpToDate
+              .filter(t => t.isBuy)
+              .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+            const optSellAmount = optTradesUpToDate
+              .filter(t => !t.isBuy)
+              .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+            const optPosition = optTradesUpToDate.reduce((pos, t) =>
+              t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
+
+            const optPositionValue = optPosition * 0 // Options expired or closed
+            optionsPnL += optSellAmount + optPositionValue - optBuyAmount
+          }
+
+          // Calculate Total P&L based on checkbox selections (initially both are true)
+          const totalPnL = (showStockPnL ? stockPnL : 0) + (showOptionsPnL ? optionsPnL : 0)
+
+          // Find stock trades on this specific date for markers
+          const dayStockTrades = stockTrades.filter(trade => {
             const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
             return tradeDate === candleDate
           })
 
-          const buys = dayTrades.filter(t => t.isBuy)
-          const sells = dayTrades.filter(t => !t.isBuy)
+          const buys = dayStockTrades.filter(t => t.isBuy)
+          const sells = dayStockTrades.filter(t => !t.isBuy)
 
           if (buys.length > 0 || sells.length > 0) {
-            console.log(`Found trades on ${candle.date}: ${buys.length} buys, ${sells.length} sells, Running P&L: $${runningPnL.toFixed(2)}`)
+            console.log(`Found trades on ${candle.date}: ${buys.length} buys, ${sells.length} sells, Stock P&L: $${stockPnL.toFixed(2)}, Options P&L: $${optionsPnL.toFixed(2)}, Total P&L: $${totalPnL.toFixed(2)}`)
           }
 
           return {
@@ -125,7 +159,9 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
             sellPrice: sells.length > 0 ? sells.reduce((sum, t) => sum + t.price, 0) / sells.length : null,
             buyQuantity: buys.reduce((sum, t) => sum + t.quantity, 0),
             sellQuantity: sells.reduce((sum, t) => sum + t.quantity, 0),
-            runningPnL: runningPnL
+            stockPnL: stockPnL,
+            optionsPnL: optionsPnL,
+            runningPnL: totalPnL
           }
         })
 
@@ -443,7 +479,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
               </label>
             </div>
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
-              <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}`}>
+              <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}-${showStockPnL}-${showOptionsPnL}`}>
               <ComposedChart data={priceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis
