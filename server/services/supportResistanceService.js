@@ -679,9 +679,9 @@ export class SupportResistanceService {
         level.symbol = symbol
       })
 
-      // Sort by strength and limit
+      // Sort by timestamp (most recent first) and limit
       const sorted = clustered
-        .sort((a, b) => b.strength - a.strength)
+        .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, this.config.maxLevels)
 
       console.log(`🎯 Found ${sorted.length} significant levels for ${symbol} [${this.config.timeframe}]:`)
