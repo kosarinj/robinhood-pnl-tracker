@@ -1264,13 +1264,9 @@ function AuthenticatedApp({ user }) {
                   const avgCost = row.real?.avgCostBasis || 0
                   const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
 
-                  // Find related options P&L for this stock
-                  const relatedOptions = pnlData.filter(optRow =>
-                    optRow.isOption &&
-                    (optRow.symbol.startsWith(row.symbol + ' ') || optRow.underlyingSymbol === row.symbol)
-                  )
-                  const optionsTotalPnL = relatedOptions.reduce((sum, opt) => sum + (opt.real?.totalPnL || 0), 0)
-                  const optionsUnrealizedPnL = relatedOptions.reduce((sum, opt) => sum + (opt.real?.unrealizedPnL || 0), 0)
+                  // Use options P&L from grid (already calculated correctly)
+                  const optionsTotalPnL = row.optionsPnL || 0
+                  const optionsUnrealizedPnL = 0 // Not separately tracked for unrealized
 
                   // Combined P&L (stock + options)
                   const combinedTotalPnL = totalPnL + optionsTotalPnL

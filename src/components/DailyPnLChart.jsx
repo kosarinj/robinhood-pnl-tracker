@@ -26,6 +26,8 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
   const [error, setError] = useState(null)
   const [collapsed, setCollapsed] = useState(false)
   const [calculationMode, setCalculationMode] = useState('historical') // 'historical' or 'snapshots'
+  const [showStockPnL, setShowStockPnL] = useState(true)
+  const [showOptionsPnL, setShowOptionsPnL] = useState(true)
 
   useEffect(() => {
     if (calculationMode === 'historical' && trades && trades.length > 0) {
@@ -59,19 +61,21 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
         return
       }
 
-      // Filter to stock trades only
+      // Separate stock and options trades
       const stockTrades = trades.filter(t => !t.symbol.includes(' ') && !t.symbol.includes('Put') && !t.symbol.includes('Call'))
+      const optionsTrades = trades.filter(t => t.symbol.includes(' ') || t.symbol.includes('Put') || t.symbol.includes('Call'))
 
-      if (stockTrades.length === 0) {
-        console.log('No stock trades found')
-        setError('No stock trades found (only options)')
+      if (stockTrades.length === 0 && optionsTrades.length === 0) {
+        console.log('No trades found')
+        setError('No trades found')
         setChartData([])
         setLoading(false)
         return
       }
 
       // Find date range - limit to last 90 days for performance
-      const tradeDates = stockTrades.map(t => new Date(t.date || t.transDate))
+      const allTradeDates = trades.map(t => new Date(t.date || t.transDate))
+      const tradeDates = allTradeDates
       const earliestTrade = new Date(Math.min(...tradeDates))
       const latestDate = new Date()
       const ninetyDaysAgo = new Date()
@@ -80,9 +84,10 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
       // Use the later of: earliest trade or 90 days ago
       const earliestDate = earliestTrade > ninetyDaysAgo ? earliestTrade : ninetyDaysAgo
 
-      // Get all unique symbols
-      const uniqueSymbols = [...new Set(stockTrades.map(t => t.symbol))]
-      console.log(`  Calculating P&L for ${uniqueSymbols.length} symbols from ${earliestDate.toLocaleDateString()} to ${latestDate.toLocaleDateString()}`)
+      // Get all unique symbols for stocks and options
+      const uniqueStockSymbols = [...new Set(stockTrades.map(t => t.symbol))]
+      const uniqueOptionsSymbols = [...new Set(optionsTrades.map(t => t.symbol))]
+      console.log(`  Calculating P&L for ${uniqueStockSymbols.length} stocks and ${uniqueOptionsSymbols.length} options from ${earliestDate.toLocaleDateString()} to ${latestDate.toLocaleDateString()}`)
 
       // Use current prices instead of fetching historical (much faster)
       console.log('  Using current prices for calculation...')
@@ -95,10 +100,11 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
         const dateStr = currentDate.toISOString().split('T')[0]
         const candleDate = new Date(currentDate).setHours(0, 0, 0, 0)
 
-        let totalPortfolioPnL = 0
+        let stockPnL = 0
+        let optionsPnL = 0
 
-        // For each symbol, calculate P&L on this date
-        for (const symbol of uniqueSymbols) {
+        // Calculate Stock P&L
+        for (const symbol of uniqueStockSymbols) {
           const symbolTrades = stockTrades.filter(t => t.symbol === symbol)
 
           // Get trades up to this date
@@ -128,12 +134,48 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
           const positionValue = position * price
           const symbolPnL = sellProceeds + positionValue - buyAmount
 
-          totalPortfolioPnL += symbolPnL
+          stockPnL += symbolPnL
+        }
+
+        // Calculate Options P&L
+        for (const symbol of uniqueOptionsSymbols) {
+          const symbolTrades = optionsTrades.filter(t => t.symbol === symbol)
+
+          // Get trades up to this date
+          const tradesUpToDate = symbolTrades.filter(trade => {
+            const tradeDate = new Date(trade.date || trade.transDate).setHours(0, 0, 0, 0)
+            return tradeDate <= candleDate
+          })
+
+          if (tradesUpToDate.length === 0) continue
+
+          // Calculate cumulative buys, sells, and position
+          const buyAmount = tradesUpToDate
+            .filter(t => t.isBuy)
+            .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+          const sellProceeds = tradesUpToDate
+            .filter(t => !t.isBuy)
+            .reduce((sum, t) => sum + (t.price * t.quantity), 0)
+
+          const position = tradesUpToDate.reduce((pos, t) =>
+            t.isBuy ? pos + t.quantity : pos - t.quantity, 0)
+
+          // Use current price (simplified for speed)
+          const price = currentPrices?.[symbol] || 0
+
+          // Running P&L = Sell proceeds + Current position value - Buy cost
+          const positionValue = position * price
+          const symbolPnL = sellProceeds + positionValue - buyAmount
+
+          optionsPnL += symbolPnL
         }
 
         dailyPnL.push({
           date: dateStr,
-          totalPnL: parseFloat(totalPortfolioPnL.toFixed(2)),
+          stockPnL: parseFloat(stockPnL.toFixed(2)),
+          optionsPnL: parseFloat(optionsPnL.toFixed(2)),
+          totalPnL: parseFloat((stockPnL + optionsPnL).toFixed(2)),
           realizedPnL: 0,
           unrealizedPnL: 0,
           dailyPnL: 0 // Will calculate in next step
@@ -514,7 +556,9 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                 gap: '20px',
                 marginBottom: '15px',
                 fontSize: '14px',
-                color: isDark ? '#b0b0b0' : '#666'
+                color: isDark ? '#b0b0b0' : '#666',
+                flexWrap: 'wrap',
+                alignItems: 'center'
               }}>
                 <div>
                   <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Days tracked:</span>{' '}
@@ -528,6 +572,48 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                     {formatCurrency(chartData[chartData.length - 1]?.totalPnL || 0)}
                   </strong>
                 </div>
+                {calculationMode === 'historical' && (
+                  <>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '4px 10px',
+                      background: isDark ? '#2a2a2a' : '#f0f0f0',
+                      borderRadius: '6px'
+                    }}>
+                      <input
+                        type="checkbox"
+                        id="show-stock-pnl"
+                        checked={showStockPnL}
+                        onChange={(e) => setShowStockPnL(e.target.checked)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <label htmlFor="show-stock-pnl" style={{ cursor: 'pointer', userSelect: 'none' }}>
+                        <span style={{ color: '#3b82f6', fontWeight: '500' }}>●</span> Stock P&L
+                      </label>
+                    </div>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '4px 10px',
+                      background: isDark ? '#2a2a2a' : '#f0f0f0',
+                      borderRadius: '6px'
+                    }}>
+                      <input
+                        type="checkbox"
+                        id="show-options-pnl"
+                        checked={showOptionsPnL}
+                        onChange={(e) => setShowOptionsPnL(e.target.checked)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <label htmlFor="show-options-pnl" style={{ cursor: 'pointer', userSelect: 'none' }}>
+                        <span style={{ color: '#f59e0b', fontWeight: '500' }}>●</span> Options P&L
+                      </label>
+                    </div>
+                  </>
+                )}
               </div>
 
               <ResponsiveContainer width="100%" height={300}>
@@ -547,6 +633,30 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                   <Tooltip content={<CustomTooltip />} />
                   <Legend />
                   <ReferenceLine y={0} stroke="#999" strokeDasharray="3 3" />
+                  {calculationMode === 'historical' && showStockPnL && (
+                    <Line
+                      type="monotone"
+                      dataKey="stockPnL"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={{ fill: '#3b82f6', r: 2 }}
+                      name="Stock P&L"
+                      connectNulls={true}
+                      isAnimationActive={false}
+                    />
+                  )}
+                  {calculationMode === 'historical' && showOptionsPnL && (
+                    <Line
+                      type="monotone"
+                      dataKey="optionsPnL"
+                      stroke="#f59e0b"
+                      strokeWidth={2}
+                      dot={{ fill: '#f59e0b', r: 2 }}
+                      name="Options P&L"
+                      connectNulls={true}
+                      isAnimationActive={false}
+                    />
+                  )}
                   <Line
                     type="monotone"
                     dataKey="totalPnL"
@@ -557,16 +667,18 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                     connectNulls={true}
                     isAnimationActive={false}
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="dailyPnL"
-                    stroke="#f59e0b"
-                    strokeWidth={2}
-                    dot={{ fill: '#f59e0b', r: 2 }}
-                    name="Daily P&L"
-                    connectNulls={true}
-                    isAnimationActive={false}
-                  />
+                  {calculationMode !== 'historical' && (
+                    <Line
+                      type="monotone"
+                      dataKey="dailyPnL"
+                      stroke="#f59e0b"
+                      strokeWidth={2}
+                      dot={{ fill: '#f59e0b', r: 2 }}
+                      name="Daily P&L"
+                      connectNulls={true}
+                      isAnimationActive={false}
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
 
@@ -577,7 +689,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                 fontStyle: 'italic'
               }}>
                 {calculationMode === 'historical'
-                  ? '* Chart shows portfolio Total P&L over last 90 days based on your trades. Uses current prices (not historical) for faster calculation.'
+                  ? '* Chart shows Stock P&L and Options P&L separately over last 90 days. Toggle checkboxes to show/hide each. Uses current prices (not historical) for faster calculation.'
                   : '* Chart shows historical portfolio Total P&L and Daily P&L changes from saved snapshots'}
               </div>
             </>
