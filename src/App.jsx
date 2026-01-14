@@ -1264,6 +1264,18 @@ function AuthenticatedApp({ user }) {
                   const avgCost = row.real?.avgCostBasis || 0
                   const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
 
+                  // Find related options P&L for this stock
+                  const relatedOptions = pnlData.filter(optRow =>
+                    optRow.isOption &&
+                    (optRow.symbol.startsWith(row.symbol + ' ') || optRow.underlyingSymbol === row.symbol)
+                  )
+                  const optionsTotalPnL = relatedOptions.reduce((sum, opt) => sum + (opt.real?.totalPnL || 0), 0)
+                  const optionsUnrealizedPnL = relatedOptions.reduce((sum, opt) => sum + (opt.real?.unrealizedPnL || 0), 0)
+
+                  // Combined P&L (stock + options)
+                  const combinedTotalPnL = totalPnL + optionsTotalPnL
+                  const combinedUnrealizedPnL = unrealizedPnL + optionsUnrealizedPnL
+
                   // Get sell opportunities from recent buys
                   const recentBuys = row.real?.recentLowestBuys || []
                   const recentSells = row.real?.recentSells || []
@@ -1319,10 +1331,10 @@ function AuthenticatedApp({ user }) {
                   let score = 0
                   if (signal?.signal === 'SELL') score += 10
                   if (eligibleBuys.length > 0) score += 8
-                  if (unrealizedPnL > 0) score += 5
+                  if (combinedUnrealizedPnL > 0) score += 5
                   if (gainPercent > 20) score += 3
                   if (gainPercent > 50) score += 5
-                  if (totalPnL > 1000) score += 2
+                  if (combinedTotalPnL > 1000) score += 2
 
                   return {
                     symbol: row.symbol,
@@ -1331,6 +1343,10 @@ function AuthenticatedApp({ user }) {
                     avgCost,
                     unrealizedPnL,
                     totalPnL,
+                    optionsTotalPnL,
+                    optionsUnrealizedPnL,
+                    combinedTotalPnL,
+                    combinedUnrealizedPnL,
                     gainPercent,
                     highestBuy: highestBuyEver,
                     totalTrades,
@@ -1567,9 +1583,21 @@ function AuthenticatedApp({ user }) {
                           </div>
                         </div>
                         <div class="metric">
-                          <div class="metric-label">Total P&L</div>
+                          <div class="metric-label">Stock P&L</div>
                           <div class="metric-value ${opp.totalPnL >= 0 ? 'positive' : 'negative'}">
                             ${opp.totalPnL >= 0 ? '+' : ''}$${opp.totalPnL.toFixed(2)}
+                          </div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Options P&L</div>
+                          <div class="metric-value ${opp.optionsTotalPnL >= 0 ? 'positive' : 'negative'}">
+                            ${opp.optionsTotalPnL >= 0 ? '+' : ''}$${opp.optionsTotalPnL.toFixed(2)}
+                          </div>
+                        </div>
+                        <div class="metric">
+                          <div class="metric-label">Total P&L (Combined)</div>
+                          <div class="metric-value ${opp.combinedTotalPnL >= 0 ? 'positive' : 'negative'}" style="font-weight: 700; font-size: 16px;">
+                            ${opp.combinedTotalPnL >= 0 ? '+' : ''}$${opp.combinedTotalPnL.toFixed(2)}
                           </div>
                         </div>
                         <div class="metric">
