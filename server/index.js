@@ -11,6 +11,7 @@ import { PolygonService } from './services/polygonService.js'
 import { databaseService } from './services/database.js'
 import { authService } from './services/auth.js'
 import { supportResistanceService } from './services/supportResistanceService.js'
+import { emaAlertService } from './services/emaAlertService.js'
 import cookieParser from 'cookie-parser'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -1012,6 +1013,25 @@ io.on('connection', (socket) => {
       })
     }
   })
+
+  // Check EMA crossovers for symbols
+  socket.on('check-ema-crossovers', async ({ symbols }) => {
+    console.log(`📊 Checking EMA crossovers for ${symbols.length} symbols`)
+    try {
+      const alerts = await emaAlertService.checkEMACrossovers(symbols)
+      socket.emit('ema-crossovers-result', {
+        success: true,
+        alerts,
+        timestamp: Date.now()
+      })
+    } catch (error) {
+      console.error(`❌ Error checking EMA crossovers:`, error)
+      socket.emit('ema-crossovers-result', {
+        success: false,
+        error: error.message
+      })
+    }
+  })
 })
 
 // Helper function to apply split adjustments
@@ -1560,6 +1580,28 @@ app.get('/api/support-resistance', requireAuth, (req, res) => {
       count: levels.length
     })
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Check for EMA crossovers across symbols
+app.post('/api/ema-crossovers', requireAuth, async (req, res) => {
+  try {
+    const { symbols } = req.body
+
+    if (!symbols || !Array.isArray(symbols)) {
+      return res.status(400).json({ success: false, error: 'symbols array required' })
+    }
+
+    const alerts = await emaAlertService.checkEMACrossovers(symbols)
+
+    res.json({
+      success: true,
+      alerts,
+      count: alerts.length
+    })
+  } catch (error) {
+    console.error('Error checking EMA crossovers:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 })

@@ -14,6 +14,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
   const [resistanceAlerts, setResistanceAlerts] = useState([])
   const [showAlerts, setShowAlerts] = useState(false)
   const [alertsLoading, setAlertsLoading] = useState(false)
+  const [emaAlerts, setEmaAlerts] = useState([])
+  const [showEmaAlerts, setShowEmaAlerts] = useState(false)
+  const [emaAlertsLoading, setEmaAlertsLoading] = useState(false)
   const [config, setConfig] = useState({
     lookbackDays: 7,
     timeframe: 'daily',
@@ -67,6 +70,17 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
     console.log('Checking resistance alerts for:', symbols)
     console.log('Using current prices:', currentPrices)
     socket.emit('check-resistance-alerts', { symbols, currentPrices: currentPrices || {} })
+  }
+
+  // Check EMA crossovers
+  const checkEMACrossovers = () => {
+    if (!socket || !symbols || symbols.length === 0) {
+      return
+    }
+
+    setEmaAlertsLoading(true)
+    console.log('Checking EMA crossovers for:', symbols)
+    socket.emit('check-ema-crossovers', { symbols })
   }
 
   // Listen for results
@@ -125,11 +139,23 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
       }
     })
 
+    socket.on('ema-crossovers-result', (data) => {
+      console.log('Received EMA crossover alerts:', data)
+      setEmaAlertsLoading(false)
+      if (data.success) {
+        setEmaAlerts(data.alerts)
+        setShowEmaAlerts(true)
+      } else {
+        console.error('Failed to get EMA crossover alerts:', data.error)
+      }
+    })
+
     return () => {
       socket.off('support-resistance-result')
       socket.off('support-resistance-multi-result')
       socket.off('support-resistance-alert')
       socket.off('resistance-alerts-result')
+      socket.off('ema-crossovers-result')
     }
   }, [socket])
 
@@ -272,6 +298,43 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                 fontWeight: 'bold'
               }}>
                 {resistanceAlerts.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={checkEMACrossovers}
+            disabled={emaAlertsLoading || !symbols || symbols.length === 0}
+            style={{
+              padding: '6px 12px',
+              background: emaAlertsLoading ? '#94a3b8' : '#8b5cf6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '13px',
+              cursor: (emaAlertsLoading || !symbols || symbols.length === 0) ? 'not-allowed' : 'pointer',
+              fontWeight: '500',
+              position: 'relative'
+            }}
+          >
+            {emaAlertsLoading ? '⏳' : '📊'} EMA Crossovers
+            {emaAlerts.length > 0 && !emaAlertsLoading && (
+              <span style={{
+                position: 'absolute',
+                top: '-8px',
+                right: '-8px',
+                background: '#22c55e',
+                color: 'white',
+                borderRadius: '50%',
+                width: '20px',
+                height: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '11px',
+                fontWeight: 'bold'
+              }}>
+                {emaAlerts.length}
               </span>
             )}
           </button>
@@ -618,6 +681,142 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
         }}>
           <div style={{ fontWeight: '600', marginBottom: '4px' }}>✅ All Clear</div>
           <div style={{ fontSize: '14px' }}>No stocks are currently near or above resistance levels.</div>
+        </div>
+      )}
+
+      {/* EMA Crossover Alerts Display */}
+      {showEmaAlerts && emaAlerts.length > 0 && (
+        <div style={{
+          background: isDark ? '#2a2a2a' : '#f5f3ff',
+          border: '2px solid #8b5cf6',
+          borderRadius: '8px',
+          padding: '15px',
+          marginBottom: '15px'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{
+              margin: 0,
+              fontSize: '16px',
+              fontWeight: '600',
+              color: '#8b5cf6'
+            }}>
+              📊 EMA Crossover Alerts ({emaAlerts.length})
+            </h3>
+            <button
+              onClick={() => setShowEmaAlerts(false)}
+              style={{
+                padding: '4px 10px',
+                background: 'transparent',
+                color: isDark ? '#888' : '#6b7280',
+                border: 'none',
+                fontSize: '18px',
+                cursor: 'pointer'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{
+            fontSize: '14px',
+            color: isDark ? '#b0b0b0' : '#6b7280',
+            marginBottom: '12px'
+          }}>
+            EMA 9 and EMA 21 crossovers detected
+          </div>
+          <div style={{ display: 'grid', gap: '8px' }}>
+            {emaAlerts.map((alert, idx) => {
+              const isBullish = alert.type === 'golden_cross'
+              const signalColor = isBullish ? '#22c55e' : '#ef4444'
+              const signalText = isBullish ? '🟢 GOLDEN CROSS' : '🔴 DEATH CROSS'
+              const bgColor = isBullish
+                ? (isDark ? '#1a3a2a' : '#f0fdf4')
+                : (isDark ? '#3a1a1a' : '#fef2f2')
+
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px',
+                    background: bgColor,
+                    border: `1px solid ${signalColor}`,
+                    borderRadius: '6px'
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                      <span style={{
+                        fontWeight: '700',
+                        fontSize: '15px',
+                        color: isDark ? '#e0e0e0' : '#1f2937'
+                      }}>
+                        {alert.symbol}
+                      </span>
+                      <span style={{
+                        padding: '2px 8px',
+                        background: signalColor,
+                        color: 'white',
+                        borderRadius: '4px',
+                        fontSize: '11px',
+                        fontWeight: '700'
+                      }}>
+                        {signalText}
+                      </span>
+                      <span style={{
+                        fontSize: '13px',
+                        color: isDark ? '#b0b0b0' : '#6b7280'
+                      }}>
+                        ${alert.currentPrice}
+                      </span>
+                    </div>
+                    <div style={{
+                      fontSize: '13px',
+                      color: isDark ? '#b0b0b0' : '#6b7280'
+                    }}>
+                      EMA 9: ${alert.ema9} | EMA 21: ${alert.ema21} | Diff: {alert.percentDiff > 0 ? '+' : ''}{alert.percentDiff}%
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}>
+                    <button
+                      onClick={() => setChartSymbol(alert.symbol)}
+                      style={{
+                        padding: '6px 10px',
+                        background: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        fontWeight: '500'
+                      }}
+                    >
+                      📊 Chart
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {showEmaAlerts && emaAlerts.length === 0 && !emaAlertsLoading && (
+        <div style={{
+          background: isDark ? '#2a2a2a' : '#f0fdf4',
+          border: '1px solid #22c55e',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '15px',
+          color: '#166534'
+        }}>
+          <div style={{ fontWeight: '600', marginBottom: '4px' }}>✅ No EMA Crossovers</div>
+          <div style={{ fontSize: '14px' }}>No EMA 9/21 crossovers detected in your portfolio.</div>
         </div>
       )}
 
