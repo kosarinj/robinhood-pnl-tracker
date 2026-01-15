@@ -1941,7 +1941,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       {chartSymbol && (
         <PriceChart
           symbol={chartSymbol}
-          trades={trades.filter(t => t.symbol === chartSymbol)}
+          trades={trades}
           onClose={() => setChartSymbol(null)}
           useServer={useServer}
           connected={connected}

@@ -803,7 +803,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
       {chartSymbol && trades && (
         <PriceChart
           symbol={chartSymbol}
-          trades={trades.filter(t => t.symbol === chartSymbol)}
+          trades={trades}
           onClose={() => setChartSymbol(null)}
           useServer={true}
           connected={connected}
