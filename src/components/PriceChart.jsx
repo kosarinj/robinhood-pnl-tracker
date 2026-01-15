@@ -28,8 +28,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [showOptionsPnL, setShowOptionsPnL] = useState(true)
   const [dateRange, setDateRange] = useState('6mo') // '1mo', '3mo', '6mo', '1y', 'max'
   const [indicators, setIndicators] = useState({
-    showEMA9: false,
-    showEMA21: false,
+    showEMA9: true,
+    showEMA21: true,
     showRSI: false,
     showMACD: false
   })
@@ -482,15 +482,26 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
               <label style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '8px',
                 fontSize: '14px',
                 color: '#666',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                padding: '8px',
+                borderRadius: '4px',
+                userSelect: 'none',
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation'
               }}>
                 <input
                   type="checkbox"
                   checked={indicators.showEMA9}
                   onChange={() => toggleIndicator('showEMA9')}
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    cursor: 'pointer',
+                    flexShrink: 0
+                  }}
                 />
                 EMA 9
               </label>
@@ -499,15 +510,26 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
               <label style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '8px',
                 fontSize: '14px',
                 color: '#666',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                padding: '8px',
+                borderRadius: '4px',
+                userSelect: 'none',
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation'
               }}>
                 <input
                   type="checkbox"
                   checked={indicators.showEMA21}
                   onChange={() => toggleIndicator('showEMA21')}
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    cursor: 'pointer',
+                    flexShrink: 0
+                  }}
                 />
                 EMA 21
               </label>
