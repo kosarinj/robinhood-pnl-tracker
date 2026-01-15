@@ -7,6 +7,7 @@ import SignalPerformance from './components/SignalPerformance'
 import ThemeToggle from './components/ThemeToggle'
 import DailyPnLChart from './components/DailyPnLChart'
 import SupportResistanceLevels from './components/SupportResistanceLevels'
+import PriceChart from './components/PriceChart'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -141,6 +142,9 @@ function AuthenticatedApp({ user }) {
   const [riskAllocations, setRiskAllocations] = useState({})
   const [totalRiskBudget, setTotalRiskBudget] = useState(10000) // Default $10k risk budget
   const [stockSymbols, setStockSymbols] = useState([]) // Stock symbols (excluding options)
+  const [searchChartSymbol, setSearchChartSymbol] = useState('') // Symbol to search for chart
+  const [showSearchChart, setShowSearchChart] = useState(false) // Whether to show chart search input
+  const [displayChartSymbol, setDisplayChartSymbol] = useState(null) // Symbol to display in chart
 
   // Helper function to get dynamic color for Daily PNL
   const getDailyPnLColor = (value) => {
@@ -1244,8 +1248,92 @@ function AuthenticatedApp({ user }) {
           >
             {loading ? '⏳ Downloading...' : '🤖 Download from Robinhood (Local Only)'}
           </button>
+          {!showSearchChart ? (
+            <button
+              className="upload-button"
+              onClick={() => setShowSearchChart(true)}
+              style={{ marginLeft: '10px' }}
+              title="Search for any symbol and view its chart"
+            >
+              📊 Chart
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginLeft: '10px' }}>
+              <input
+                type="text"
+                value={searchChartSymbol}
+                onChange={(e) => setSearchChartSymbol(e.target.value.toUpperCase())}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && searchChartSymbol.trim()) {
+                    setDisplayChartSymbol(searchChartSymbol.trim())
+                    setSearchChartSymbol('')
+                    setShowSearchChart(false)
+                  }
+                }}
+                placeholder="Enter symbol (e.g., TSLA)"
+                autoFocus
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #ccc',
+                  fontSize: '14px',
+                  width: '150px'
+                }}
+              />
+              <button
+                onClick={() => {
+                  if (searchChartSymbol.trim()) {
+                    setDisplayChartSymbol(searchChartSymbol.trim())
+                    setSearchChartSymbol('')
+                    setShowSearchChart(false)
+                  }
+                }}
+                disabled={!searchChartSymbol.trim()}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: searchChartSymbol.trim() ? '#3b82f6' : '#94a3b8',
+                  color: 'white',
+                  fontSize: '13px',
+                  cursor: searchChartSymbol.trim() ? 'pointer' : 'not-allowed',
+                  fontWeight: '500'
+                }}
+              >
+                View
+              </button>
+              <button
+                onClick={() => {
+                  setShowSearchChart(false)
+                  setSearchChartSymbol('')
+                }}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#6b7280',
+                  color: 'white',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Chart Search Modal */}
+      {displayChartSymbol && (
+        <PriceChart
+          symbol={displayChartSymbol}
+          trades={trades}
+          onClose={() => setDisplayChartSymbol(null)}
+          useServer={useServer}
+          connected={connected}
+        />
+      )}
 
       {/* Sale Opportunities View */}
       {pnlData.length > 0 && (
