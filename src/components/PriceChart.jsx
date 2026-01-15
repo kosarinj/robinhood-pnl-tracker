@@ -477,6 +477,40 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 />
                 Include Options P&L
               </label>
+
+              {/* EMA 9 Toggle */}
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '14px',
+                color: '#666',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={indicators.showEMA9}
+                  onChange={() => toggleIndicator('showEMA9')}
+                />
+                EMA 9
+              </label>
+
+              {/* EMA 21 Toggle */}
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '14px',
+                color: '#666',
+                cursor: 'pointer'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={indicators.showEMA21}
+                  onChange={() => toggleIndicator('showEMA21')}
+                />
+                EMA 21
+              </label>
             </div>
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
               <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}-${showStockPnL}-${showOptionsPnL}`}>
@@ -526,6 +560,38 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   connectNulls={true}
                   isAnimationActive={false}
                 />
+
+                {/* EMA 9 Line */}
+                {indicators.showEMA9 && (
+                  <Line
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ema9"
+                    stroke="#ff9800"
+                    strokeWidth={1.5}
+                    dot={false}
+                    name="EMA 9"
+                    connectNulls={true}
+                    isAnimationActive={false}
+                    strokeDasharray="3 3"
+                  />
+                )}
+
+                {/* EMA 21 Line */}
+                {indicators.showEMA21 && (
+                  <Line
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ema21"
+                    stroke="#9c27b0"
+                    strokeWidth={1.5}
+                    dot={false}
+                    name="EMA 21"
+                    connectNulls={true}
+                    isAnimationActive={false}
+                    strokeDasharray="5 5"
+                  />
+                )}
 
                 {/* Total P&L Line - dynamically includes Stock and/or Options based on checkboxes */}
                 <Line
