@@ -30,7 +30,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [indicators, setIndicators] = useState({
     showEMA9: true,
     showEMA21: true,
-    showRSI: false,
+    showRSI: true,
     showMACD: false
   })
 
