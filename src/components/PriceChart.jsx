@@ -533,6 +533,36 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 />
                 EMA 21
               </label>
+
+              {/* RSI Toggle */}
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '14px',
+                color: '#666',
+                cursor: 'pointer',
+                padding: '8px',
+                borderRadius: '4px',
+                userSelect: 'none',
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation',
+                background: indicators.showRSI ? '#fce7f3' : 'transparent',
+                border: indicators.showRSI ? '1px solid #ec4899' : '1px solid transparent'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={indicators.showRSI}
+                  onChange={() => toggleIndicator('showRSI')}
+                  style={{
+                    width: '18px',
+                    height: '18px',
+                    cursor: 'pointer',
+                    flexShrink: 0
+                  }}
+                />
+                RSI (14)
+              </label>
             </div>
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
               <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}-${showStockPnL}-${showOptionsPnL}`}>
@@ -770,6 +800,74 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
               </ComposedChart>
             </ResponsiveContainer>
             </div>
+
+            {/* RSI Chart Panel */}
+            {indicators.showRSI && (
+              <div style={{ width: '100%', height: '150px', background: '#fafafa', border: '1px solid #ddd', borderTop: 'none', marginTop: '-1px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={priceData} margin={{ top: 10, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                    <XAxis
+                      dataKey="timestamp"
+                      domain={['auto', 'auto']}
+                      type="number"
+                      tickFormatter={formatDate}
+                      stroke="#666"
+                      style={{ fontSize: '10px' }}
+                      height={20}
+                    />
+                    <YAxis
+                      domain={[0, 100]}
+                      ticks={[0, 30, 50, 70, 100]}
+                      stroke="#666"
+                      style={{ fontSize: '10px' }}
+                      width={40}
+                      label={{ value: 'RSI', angle: -90, position: 'insideLeft', fontSize: 11 }}
+                    />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '6px' }}
+                      labelFormatter={formatDate}
+                      formatter={(value) => value !== null ? value.toFixed(1) : 'N/A'}
+                    />
+
+                    {/* Overbought zone (70-100) */}
+                    <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1} />
+                    <ReferenceLine y={30} stroke="#22c55e" strokeDasharray="3 3" strokeWidth={1} />
+                    <ReferenceLine y={50} stroke="#9ca3af" strokeDasharray="2 2" strokeWidth={1} />
+
+                    {/* RSI Line */}
+                    <Line
+                      type="monotone"
+                      dataKey="rsi"
+                      stroke="#ec4899"
+                      strokeWidth={2}
+                      dot={false}
+                      name="RSI (14)"
+                      connectNulls={true}
+                      isAnimationActive={false}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* RSI Legend when enabled */}
+            {indicators.showRSI && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                gap: '20px',
+                padding: '8px',
+                background: '#f8f9fa',
+                borderRadius: '0 0 6px 6px',
+                fontSize: '12px',
+                color: '#666'
+              }}>
+                <span><span style={{ color: '#ef4444', fontWeight: 'bold' }}>---</span> Overbought (70+)</span>
+                <span><span style={{ color: '#22c55e', fontWeight: 'bold' }}>---</span> Oversold (30-)</span>
+                <span><span style={{ color: '#ec4899', fontWeight: 'bold' }}>—</span> RSI (14)</span>
+              </div>
+            )}
 
             {/* Trade Summary */}
             <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '6px' }}>
