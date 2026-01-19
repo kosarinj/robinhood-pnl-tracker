@@ -1,9 +1,10 @@
 import axios from 'axios'
-import { calculateEMA } from './technicalAnalysis.js'
+import { calculateEMA, calculateRSI } from './technicalAnalysis.js'
 
 /**
- * EMA Alert Service - Detects EMA 9/21 crossovers
+ * Technical Alert Service - Detects EMA 9/21 crossovers and RSI overbought/oversold
  * Alerts when EMA 9 crosses above (Golden Cross) or below (Death Cross) EMA 21
+ * Also alerts when RSI enters overbought (>70) or oversold (<30) territory
  */
 export class EMAAlertService {
   constructor() {
@@ -136,23 +137,88 @@ export class EMAAlertService {
   }
 
   /**
-   * Check for EMA crossovers across multiple symbols
-   * Returns array of alerts for symbols with recent crossovers
+   * Detect RSI overbought/oversold conditions for a symbol
+   * Returns null if RSI is neutral (30-70), or an object with RSI alert details
+   */
+  detectRSIAlert(symbol, candles) {
+    if (!candles || candles.length < 15) {
+      return null
+    }
+
+    // Get closing prices
+    const prices = candles.map(c => c.close)
+
+    // Calculate current RSI
+    const rsi = calculateRSI(prices, 14)
+
+    if (rsi === null) {
+      return null
+    }
+
+    // Only alert for overbought (>70) or oversold (<30)
+    let alertType = null
+    let signal = null
+    let message = null
+
+    if (rsi >= 70) {
+      alertType = 'overbought'
+      signal = 'SELL'
+      if (rsi >= 80) {
+        message = `🔴 ${symbol}: RSI ${rsi.toFixed(0)} - Extremely Overbought (Strong sell signal)`
+      } else {
+        message = `🟠 ${symbol}: RSI ${rsi.toFixed(0)} - Overbought (Consider selling)`
+      }
+    } else if (rsi <= 30) {
+      alertType = 'oversold'
+      signal = 'BUY'
+      if (rsi <= 20) {
+        message = `🟢 ${symbol}: RSI ${rsi.toFixed(0)} - Extremely Oversold (Strong buy signal)`
+      } else {
+        message = `🟡 ${symbol}: RSI ${rsi.toFixed(0)} - Oversold (Consider buying)`
+      }
+    }
+
+    if (!alertType) {
+      return null
+    }
+
+    const currentPrice = candles[candles.length - 1].close
+
+    return {
+      symbol,
+      type: `rsi_${alertType}`,
+      signal,
+      currentPrice: parseFloat(currentPrice.toFixed(2)),
+      rsi: parseFloat(rsi.toFixed(2)),
+      timestamp: Date.now(),
+      message
+    }
+  }
+
+  /**
+   * Check for EMA crossovers and RSI alerts across multiple symbols
+   * Returns array of alerts for symbols with recent crossovers or RSI extremes
    */
   async checkEMACrossovers(symbols) {
     const alerts = []
 
-    console.log(`🔍 Checking EMA crossovers for ${symbols.length} symbols...`)
+    console.log(`🔍 Checking EMA crossovers and RSI alerts for ${symbols.length} symbols...`)
 
     for (const symbol of symbols) {
       try {
         // Check cache first
-        const cacheKey = `ema-${symbol}`
-        const cached = this.cache.get(cacheKey)
-        if (cached && Date.now() - cached.timestamp < this.cacheDuration) {
-          if (cached.alert) {
-            alerts.push(cached.alert)
-          }
+        const emaCacheKey = `ema-${symbol}`
+        const rsiCacheKey = `rsi-${symbol}`
+        const emaCached = this.cache.get(emaCacheKey)
+        const rsiCached = this.cache.get(rsiCacheKey)
+
+        const now = Date.now()
+        const emaValid = emaCached && now - emaCached.timestamp < this.cacheDuration
+        const rsiValid = rsiCached && now - rsiCached.timestamp < this.cacheDuration
+
+        if (emaValid && rsiValid) {
+          if (emaCached.alert) alerts.push(emaCached.alert)
+          if (rsiCached.alert) alerts.push(rsiCached.alert)
           continue
         }
 
@@ -163,29 +229,39 @@ export class EMAAlertService {
           continue
         }
 
-        // Detect crossover
+        // Detect EMA crossover
         const crossover = this.detectEMACrossover(symbol, candles)
-
-        // Cache the result
-        this.cache.set(cacheKey, {
+        this.cache.set(emaCacheKey, {
           alert: crossover,
           timestamp: Date.now()
         })
-
         if (crossover) {
           alerts.push(crossover)
           console.log(`  ✓ ${crossover.message}`)
+        }
+
+        // Detect RSI alert
+        const rsiAlert = this.detectRSIAlert(symbol, candles)
+        this.cache.set(rsiCacheKey, {
+          alert: rsiAlert,
+          timestamp: Date.now()
+        })
+        if (rsiAlert) {
+          alerts.push(rsiAlert)
+          console.log(`  ✓ ${rsiAlert.message}`)
         }
 
         // Delay to respect API rate limits
         await new Promise(resolve => setTimeout(resolve, 1000))
 
       } catch (error) {
-        console.error(`Error checking EMA crossover for ${symbol}:`, error.message)
+        console.error(`Error checking alerts for ${symbol}:`, error.message)
       }
     }
 
-    console.log(`📊 Found ${alerts.length} EMA crossover alerts`)
+    const emaAlerts = alerts.filter(a => a.type.includes('cross'))
+    const rsiAlerts = alerts.filter(a => a.type.includes('rsi'))
+    console.log(`📊 Found ${emaAlerts.length} EMA crossover alerts and ${rsiAlerts.length} RSI alerts`)
     return alerts
   }
 

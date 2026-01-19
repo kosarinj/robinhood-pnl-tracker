@@ -317,7 +317,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
               position: 'relative'
             }}
           >
-            {emaAlertsLoading ? '⏳' : '📊'} EMA Crossovers
+            {emaAlertsLoading ? '⏳' : '📊'} Technical Alerts
             {emaAlerts.length > 0 && !emaAlertsLoading && (
               <span style={{
                 position: 'absolute',
@@ -684,7 +684,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
         </div>
       )}
 
-      {/* EMA Crossover Alerts Display */}
+      {/* Technical Alerts Display (EMA Crossovers + RSI) */}
       {showEmaAlerts && emaAlerts.length > 0 && (
         <div style={{
           background: isDark ? '#2a2a2a' : '#f5f3ff',
@@ -700,7 +700,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
               fontWeight: '600',
               color: '#8b5cf6'
             }}>
-              📊 EMA Crossover Alerts ({emaAlerts.length})
+              📊 Technical Alerts ({emaAlerts.length})
             </h3>
             <button
               onClick={() => setShowEmaAlerts(false)}
@@ -721,13 +721,21 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             color: isDark ? '#b0b0b0' : '#6b7280',
             marginBottom: '12px'
           }}>
-            EMA 9 and EMA 21 crossovers detected
+            EMA 9/21 crossovers and RSI overbought/oversold signals
           </div>
           <div style={{ display: 'grid', gap: '8px' }}>
             {emaAlerts.map((alert, idx) => {
-              const isBullish = alert.type === 'golden_cross'
+              const isEMACross = alert.type === 'golden_cross' || alert.type === 'death_cross'
+              const isRSI = alert.type === 'rsi_overbought' || alert.type === 'rsi_oversold'
+              const isBullish = alert.type === 'golden_cross' || alert.type === 'rsi_oversold'
               const signalColor = isBullish ? '#22c55e' : '#ef4444'
-              const signalText = isBullish ? '🟢 GOLDEN CROSS' : '🔴 DEATH CROSS'
+
+              let signalText = ''
+              if (alert.type === 'golden_cross') signalText = '🟢 GOLDEN CROSS'
+              else if (alert.type === 'death_cross') signalText = '🔴 DEATH CROSS'
+              else if (alert.type === 'rsi_oversold') signalText = alert.rsi <= 20 ? '🟢 EXTREMELY OVERSOLD' : '🟡 OVERSOLD'
+              else if (alert.type === 'rsi_overbought') signalText = alert.rsi >= 80 ? '🔴 EXTREMELY OVERBOUGHT' : '🟠 OVERBOUGHT'
+
               const bgColor = isBullish
                 ? (isDark ? '#1a3a2a' : '#f0fdf4')
                 : (isDark ? '#3a1a1a' : '#fef2f2')
@@ -775,7 +783,12 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                       fontSize: '13px',
                       color: isDark ? '#b0b0b0' : '#6b7280'
                     }}>
-                      EMA 9: ${alert.ema9} | EMA 21: ${alert.ema21} | Diff: {alert.percentDiff > 0 ? '+' : ''}{alert.percentDiff}%
+                      {isEMACross && (
+                        <>EMA 9: ${alert.ema9} | EMA 21: ${alert.ema21} | Diff: {alert.percentDiff > 0 ? '+' : ''}{alert.percentDiff}%</>
+                      )}
+                      {isRSI && (
+                        <>RSI (14): {alert.rsi} | {alert.rsi <= 30 ? 'Potential bounce opportunity' : 'Potential pullback ahead'}</>
+                      )}
                     </div>
                   </div>
                   <div style={{
@@ -815,8 +828,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
           marginBottom: '15px',
           color: '#166534'
         }}>
-          <div style={{ fontWeight: '600', marginBottom: '4px' }}>✅ No EMA Crossovers</div>
-          <div style={{ fontSize: '14px' }}>No EMA 9/21 crossovers detected in your portfolio.</div>
+          <div style={{ fontWeight: '600', marginBottom: '4px' }}>✅ No Technical Alerts</div>
+          <div style={{ fontSize: '14px' }}>No EMA crossovers or RSI extremes detected in your portfolio.</div>
         </div>
       )}
 
