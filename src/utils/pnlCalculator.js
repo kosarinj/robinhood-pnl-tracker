@@ -253,10 +253,10 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
   const day = String(today.getDate()).padStart(2, '0')
   const todayStr = `${year}-${month}-${day}`
 
-  // Track day trading PNL (trades opened and closed TODAY only)
-  let dayTradingPnL = 0
-  const todaysBuys = [] // Track buys made today for day trading calculation
-  const dayTradeDebug = [] // Debug info for day trading
+  // Track day trading PNL - simple sum of today's sells minus today's buys
+  let todaysBuyTotal = 0
+  let todaysSellTotal = 0
+  const dayTradeDebug = [`TODAY=${todayStr}`] // Debug info for day trading
 
   // Track highest buy ever
   let highestBuyEver = null
@@ -278,13 +278,10 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       const tradeDateStr = (trade.date || trade.transDate || '').split('T')[0].split(' ')[0]
 
       // Track today's buys for day trading calculation (must be TODAY)
-      dayTradeDebug.push(`BUY: date="${trade.date || trade.transDate}" -> "${tradeDateStr}" vs today="${todayStr}" match=${tradeDateStr === todayStr}`)
       if (tradeDateStr === todayStr) {
-        todaysBuys.push({
-          quantity: trade.quantity,
-          price: trade.price,
-          remainingQty: trade.quantity
-        })
+        const buyAmount = trade.quantity * trade.price
+        todaysBuyTotal += buyAmount
+        dayTradeDebug.push(`BUY: ${trade.quantity}@$${trade.price}=$${buyAmount.toFixed(2)}`)
       }
 
       // Track lowest buy ever (including sold positions)
@@ -333,20 +330,11 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       let remainingSellQty = trade.quantity
       const sellPrice = trade.price
 
-      dayTradeDebug.push(`SELL: date="${trade.date || trade.transDate}" -> "${sellDateStr}" vs today="${todayStr}" match=${isTodaysSellForDayTrading} buysToday=${todaysBuys.length}`)
-      // Calculate day trading PNL (sells TODAY that match buys from TODAY only)
-      if (isTodaysSellForDayTrading && todaysBuys.length > 0) {
-        let dayTradeQty = remainingSellQty
-        for (const todayBuy of todaysBuys) {
-          if (dayTradeQty <= 0) break
-          if (todayBuy.remainingQty > 0) {
-            const matchQty = Math.min(todayBuy.remainingQty, dayTradeQty)
-            const profit = (sellPrice - todayBuy.price) * matchQty
-            dayTradingPnL += profit
-            todayBuy.remainingQty -= matchQty
-            dayTradeQty -= matchQty
-          }
-        }
+      // Track today's sells for day trading calculation
+      if (isTodaysSellForDayTrading) {
+        const sellAmount = trade.quantity * sellPrice
+        todaysSellTotal += sellAmount
+        dayTradeDebug.push(`SELL: ${trade.quantity}@$${sellPrice}=$${sellAmount.toFixed(2)}`)
       }
 
       while (remainingSellQty > 0 && buyQueue.length > 0) {
@@ -504,8 +492,8 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
     recentLowestBuys: recentBuysWithDays,  // Array of top 3
     recentSells: recentSellsWithDays,  // Array of top 3
     todaysRealizedProfit: roundToTwo(todaysRealizedProfit),
-    dayTradingPnL: roundToTwo(dayTradingPnL),
-    dayTradeDebug: dayTradeDebug.slice(0, 5), // First 5 debug entries
+    dayTradingPnL: roundToTwo(todaysSellTotal - todaysBuyTotal),
+    dayTradeDebug: dayTradeDebug, // All debug entries for today's trades
     highestBuyEver: highestBuyEver ? roundToTwo(highestBuyEver.price) : 0,
     totalTrades: trades.length
   }
