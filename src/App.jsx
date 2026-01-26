@@ -68,6 +68,7 @@ function AuthenticatedApp({ user }) {
       'total',
       'buySellTotal',
       'dailyPnL',
+      'dayTradingPnL',
       'madeUpGround',
       'optionsPnL',
       'percentage'
@@ -103,6 +104,16 @@ function AuthenticatedApp({ user }) {
         } else {
           savedOrder.unshift('recentLowestSell')
         }
+      }
+    }
+
+    if (!savedOrder.includes('dayTradingPnL')) {
+      // Insert dayTradingPnL after dailyPnL
+      const dailyPnLIndex = savedOrder.indexOf('dailyPnL')
+      if (dailyPnLIndex !== -1) {
+        savedOrder.splice(dailyPnLIndex + 1, 0, 'dayTradingPnL')
+      } else {
+        savedOrder.push('dayTradingPnL')
       }
     }
 
@@ -3005,6 +3016,7 @@ function AuthenticatedApp({ user }) {
                   total: 'Total P&L',
                   buySellTotal: 'Buy/Sell Total',
                   dailyPnL: 'Daily P&L',
+                  dayTradingPnL: 'Day Trade P&L',
                   madeUpGround: 'Made Up Ground',
                   optionsPnL: 'Options P&L',
                   percentage: 'Percentage %'

@@ -656,6 +656,37 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
         )
       }
     },
+    dayTradingPnL: {
+      header: () => (
+        <th onClick={() => handleSort('real.dayTradingPnL')} className="sortable" style={{ minWidth: '120px' }}>
+          Day Trade P&L{getSortIcon('real.dayTradingPnL')}
+        </th>
+      ),
+      cell: (row) => {
+        const dayTradeValue = row.real?.dayTradingPnL || 0
+        return (
+          <td style={{
+            backgroundColor: dayTradeValue !== 0 ? (dayTradeValue > 0 ? '#d4edda' : '#f8d7da') : 'transparent',
+            color: dayTradeValue > 0 ? '#155724' : dayTradeValue < 0 ? '#721c24' : '#666',
+            fontWeight: dayTradeValue !== 0 ? 'bold' : 'normal'
+          }}>
+            {formatCurrency(dayTradeValue)}
+          </td>
+        )
+      },
+      footer: () => {
+        const total = data.reduce((sum, row) => sum + (row.real?.dayTradingPnL || 0), 0)
+        return (
+          <td style={{
+            backgroundColor: total !== 0 ? (total > 0 ? '#d4edda' : '#f8d7da') : 'transparent',
+            color: total > 0 ? '#155724' : total < 0 ? '#721c24' : '#666',
+            fontWeight: 'bold'
+          }}>
+            <strong>{formatCurrency(total)}</strong>
+          </td>
+        )
+      }
+    },
     madeUpGround: {
       header: () => (
         <th onClick={() => handleSort('madeUpGround')} className="sortable" style={{ minWidth: '130px' }}>

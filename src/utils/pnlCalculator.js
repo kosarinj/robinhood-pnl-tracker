@@ -248,6 +248,10 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
   const today = new Date()
   today.setHours(0, 0, 0, 0) // Start of today
 
+  // Track day trading PNL (trades opened and closed on the same day)
+  let dayTradingPnL = 0
+  const todaysBuys = [] // Track buys made today for day trading calculation
+
   // Track highest buy ever
   let highestBuyEver = null
 
@@ -264,6 +268,15 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
 
       const tradeDate = new Date(trade.date || trade.transDate)
       tradeDate.setHours(0, 0, 0, 0)
+
+      // Track today's buys for day trading calculation
+      if (tradeDate.getTime() === today.getTime()) {
+        todaysBuys.push({
+          quantity: trade.quantity,
+          price: trade.price,
+          remainingQty: trade.quantity
+        })
+      }
 
       // Track lowest buy ever (including sold positions)
       if (!lowestBuyEver || trade.price < lowestBuyEver.price) {
@@ -307,6 +320,21 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       // Remove sold shares from buy queue (FIFO) and track today's profit
       let remainingSellQty = trade.quantity
       const sellPrice = trade.price
+
+      // Calculate day trading PNL (sells today that match buys from today)
+      if (isTodaysSell) {
+        let dayTradeQty = remainingSellQty
+        for (const todayBuy of todaysBuys) {
+          if (dayTradeQty <= 0) break
+          if (todayBuy.remainingQty > 0) {
+            const matchQty = Math.min(todayBuy.remainingQty, dayTradeQty)
+            const profit = (sellPrice - todayBuy.price) * matchQty
+            dayTradingPnL += profit
+            todayBuy.remainingQty -= matchQty
+            dayTradeQty -= matchQty
+          }
+        }
+      }
 
       while (remainingSellQty > 0 && buyQueue.length > 0) {
         const oldestBuy = buyQueue[0]
@@ -463,6 +491,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
     recentLowestBuys: recentBuysWithDays,  // Array of top 3
     recentSells: recentSellsWithDays,  // Array of top 3
     todaysRealizedProfit: roundToTwo(todaysRealizedProfit),
+    dayTradingPnL: roundToTwo(dayTradingPnL),
     highestBuyEver: highestBuyEver ? roundToTwo(highestBuyEver.price) : 0,
     totalTrades: trades.length
   }
