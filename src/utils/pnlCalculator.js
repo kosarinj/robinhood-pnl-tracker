@@ -253,9 +253,11 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
   const day = String(today.getDate()).padStart(2, '0')
   const todayStr = `${year}-${month}-${day}`
 
-  // Track day trading PNL - simple sum of today's sells minus today's buys
+  // Track day trading PNL - sum of today's sells minus today's buys, balanced by quantity
   let todaysBuyTotal = 0
   let todaysSellTotal = 0
+  let todaysBuyQty = 0
+  let todaysSellQty = 0
   const dayTradeDebug = [`TODAY=${todayStr}`] // Debug info for day trading
 
   // Track highest buy ever
@@ -281,6 +283,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       if (tradeDateStr === todayStr) {
         const buyAmount = trade.quantity * trade.price
         todaysBuyTotal += buyAmount
+        todaysBuyQty += trade.quantity
         dayTradeDebug.push(`BUY: ${trade.quantity}@$${trade.price}=$${buyAmount.toFixed(2)}`)
       }
 
@@ -334,6 +337,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       if (isTodaysSellForDayTrading) {
         const sellAmount = trade.quantity * sellPrice
         todaysSellTotal += sellAmount
+        todaysSellQty += trade.quantity
         dayTradeDebug.push(`SELL: ${trade.quantity}@$${sellPrice}=$${sellAmount.toFixed(2)}`)
       }
 
@@ -492,8 +496,22 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
     recentLowestBuys: recentBuysWithDays,  // Array of top 3
     recentSells: recentSellsWithDays,  // Array of top 3
     todaysRealizedProfit: roundToTwo(todaysRealizedProfit),
-    dayTradingPnL: roundToTwo(todaysSellTotal - todaysBuyTotal),
-    dayTradeDebug: dayTradeDebug, // All debug entries for today's trades
+    dayTradingPnL: (() => {
+      let adjustedBuyTotal = todaysBuyTotal
+      let adjustedSellTotal = todaysSellTotal
+      if (todaysBuyQty > todaysSellQty) {
+        // More buys than sells - still holding shares, add artificial sells at current price
+        const excessQty = todaysBuyQty - todaysSellQty
+        adjustedSellTotal += excessQty * currentPrice
+      } else if (todaysSellQty > todaysBuyQty) {
+        // More sells than buys - sold shares from previous days, add artificial buys at current price to zero them out
+        const excessQty = todaysSellQty - todaysBuyQty
+        adjustedBuyTotal += excessQty * currentPrice
+      }
+      return roundToTwo(adjustedSellTotal - adjustedBuyTotal)
+    })(),
+    dayTradeHeldShares: todaysBuyQty > todaysSellQty ? roundToTwo(todaysBuyQty - todaysSellQty) : 0,
+    dayTradeDebug: dayTradeDebug
     highestBuyEver: highestBuyEver ? roundToTwo(highestBuyEver.price) : 0,
     totalTrades: trades.length
   }

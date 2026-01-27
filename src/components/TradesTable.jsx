@@ -664,17 +664,24 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       ),
       cell: (row) => {
         const dayTradeValue = row.real?.dayTradingPnL || 0
+        const heldShares = row.real?.dayTradeHeldShares || 0
         const debugInfo = row.real?.dayTradeDebug || []
+        const hasHeldShares = heldShares > 0
         return (
           <td style={{
-            backgroundColor: dayTradeValue !== 0 ? (dayTradeValue > 0 ? '#d4edda' : '#f8d7da') : 'transparent',
+            backgroundColor: dayTradeValue !== 0
+              ? hasHeldShares
+                ? (dayTradeValue > 0 ? '#fff3cd' : '#f8d7da')
+                : (dayTradeValue > 0 ? '#d4edda' : '#f8d7da')
+              : 'transparent',
             color: dayTradeValue > 0 ? '#155724' : dayTradeValue < 0 ? '#721c24' : '#666',
-            fontWeight: dayTradeValue !== 0 ? 'bold' : 'normal'
+            fontWeight: dayTradeValue !== 0 ? 'bold' : 'normal',
+            borderLeft: hasHeldShares ? '3px solid #ffc107' : 'none'
           }} title={debugInfo.join('\n')}>
             {formatCurrency(dayTradeValue)}
-            {debugInfo.length > 0 && (
-              <div style={{ fontSize: '9px', color: '#999', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {debugInfo[0]}
+            {hasHeldShares && (
+              <div style={{ fontSize: '10px', color: '#856404' }}>
+                holding {heldShares} shares
               </div>
             )}
           </td>
