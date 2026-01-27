@@ -511,7 +511,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       return roundToTwo(adjustedSellTotal - adjustedBuyTotal)
     })(),
     dayTradeHeldShares: todaysBuyQty > todaysSellQty ? roundToTwo(todaysBuyQty - todaysSellQty) : 0,
-    dayTradeDebug: dayTradeDebug
+    dayTradeDebug: dayTradeDebug,
     highestBuyEver: highestBuyEver ? roundToTwo(highestBuyEver.price) : 0,
     totalTrades: trades.length
   }
