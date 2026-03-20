@@ -1505,52 +1505,74 @@ export class DatabaseService {
   }
 
   // Get weekly stock P&L for specific symbols
-  // Uses price × position: (current_price - last_friday_close) × shares held
+  // Prefers (current_price - last_friday_price) × position when a prior snapshot exists,
+  // otherwise falls back to SUM(daily_pnl) for the week.
   getWeeklyStockPnLForSymbols(symbols, weekStart, userId = 1) {
     try {
       if (!symbols.length) return {}
       const placeholders = symbols.map(() => '?').join(',')
 
-      // Last Friday = day before Monday (weekStart)
       const lastFriday = (() => {
         const d = new Date(weekStart + 'T12:00:00')
         d.setDate(d.getDate() - 1)
         return d.toISOString().slice(0, 10)
       })()
 
-      // Most recent snapshot at or before last Friday (start-of-week price)
+      // Most recent snapshot BEFORE this Monday (last Friday's close)
       const startStmt = db.prepare(`
-        SELECT symbol, current_price, position
-        FROM pnl_snapshots
-        WHERE symbol IN (${placeholders}) AND asof_date <= ? AND user_id = ?
-        GROUP BY symbol
-        HAVING asof_date = MAX(asof_date)
+        SELECT s.symbol, s.current_price, s.position
+        FROM pnl_snapshots s
+        INNER JOIN (
+          SELECT symbol, MAX(asof_date) as max_date
+          FROM pnl_snapshots
+          WHERE symbol IN (${placeholders}) AND asof_date <= ? AND user_id = ?
+          GROUP BY symbol
+        ) latest ON s.symbol = latest.symbol AND s.asof_date = latest.max_date
+        WHERE s.user_id = ?
       `)
-      const startRows = startStmt.all(...symbols, lastFriday, userId)
+      const startRows = startStmt.all(...symbols, lastFriday, userId, userId)
 
-      // Most recent snapshot this week (current price + position)
+      // Most recent snapshot this week
       const endStmt = db.prepare(`
-        SELECT symbol, current_price, position
+        SELECT s.symbol, s.current_price, s.position
+        FROM pnl_snapshots s
+        INNER JOIN (
+          SELECT symbol, MAX(asof_date) as max_date
+          FROM pnl_snapshots
+          WHERE symbol IN (${placeholders}) AND asof_date >= ? AND user_id = ?
+          GROUP BY symbol
+        ) latest ON s.symbol = latest.symbol AND s.asof_date = latest.max_date
+        WHERE s.user_id = ?
+      `)
+      const endRows = endStmt.all(...symbols, weekStart, userId, userId)
+
+      // Fallback: sum daily_pnl for the week (used when no prior snapshot exists)
+      const fallbackStmt = db.prepare(`
+        SELECT symbol, SUM(daily_pnl) as weekly_pnl
         FROM pnl_snapshots
         WHERE symbol IN (${placeholders}) AND asof_date >= ? AND user_id = ?
         GROUP BY symbol
-        HAVING asof_date = MAX(asof_date)
       `)
-      const endRows = endStmt.all(...symbols, weekStart, userId)
+      const fallbackRows = fallbackStmt.all(...symbols, weekStart, userId)
 
       const startMap = {}
       startRows.forEach(r => { startMap[r.symbol] = r })
       const endMap = {}
       endRows.forEach(r => { endMap[r.symbol] = r })
+      const fallbackMap = {}
+      fallbackRows.forEach(r => { fallbackMap[r.symbol] = r.weekly_pnl })
 
       const result = {}
       symbols.forEach(sym => {
         const start = startMap[sym]
         const end = endMap[sym]
-        if (end && start && start.current_price && end.current_price && end.position) {
+        if (start && end && start.current_price && end.current_price && end.position) {
+          // Price-based: accurate when uploads span weeks
           result[sym] = Math.round((end.current_price - start.current_price) * end.position * 100) / 100
+        } else if (fallbackMap[sym] !== undefined) {
+          // Fallback: daily_pnl sum (may include more than just this week if infrequent uploads)
+          result[sym] = Math.round(fallbackMap[sym] * 100) / 100
         }
-        // If no start-of-week snapshot exists, omit (don't show misleading data)
       })
       return result
     } catch (error) {
