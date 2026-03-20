@@ -67,7 +67,8 @@ const io = new Server(httpServer, {
     credentials: false,
     allowedHeaders: ['*']
   },
-  allowEIO3: true
+  allowEIO3: true,
+  maxHttpBufferSize: 10e6  // 10MB — default 1MB is too small for large CSVs
 })
 
 // Middleware - add CORS before other middleware
