@@ -1826,12 +1826,21 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
         byWeek[weekKey].byUnderlyingTrades[underlying] = []
       }
       byWeek[weekKey].byUnderlying[underlying] += cashFlow
+
+      // Classify trade as closing (realized) or opening (unrealized/at-risk)
+      const tc = (t.trans_code || '').toUpperCase()
+      const isClosing = tc === 'STC' || tc === 'BTC' || tc === 'OEXP' || tc === 'OASGN' || tc === 'OEXC'
+      if (!byWeek[weekKey].realizedByUnderlying) byWeek[weekKey].realizedByUnderlying = {}
+      if (!byWeek[weekKey].realizedByUnderlying[underlying]) byWeek[weekKey].realizedByUnderlying[underlying] = 0
+      if (isClosing) byWeek[weekKey].realizedByUnderlying[underlying] += cashFlow
+
       byWeek[weekKey].byUnderlyingTrades[underlying].push({
         date: t.trans_date,
         description: t.symbol,
         action: t.is_buy ? 'Buy' : 'Sell',
         transCode: t.trans_code,
-        cashFlow: Math.round(cashFlow * 100) / 100
+        cashFlow: Math.round(cashFlow * 100) / 100,
+        isClosing
       })
     })
 
@@ -1855,6 +1864,8 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
     const currentWeekPnL = currentWeek ? Math.round(currentWeek.totalDelta * 100) / 100 : 0
     const currentWeekByUnderlying = currentWeek ? currentWeek.byUnderlying : {}
     const currentWeekTradesByUnderlying = currentWeek ? currentWeek.byUnderlyingTrades : {}
+    const currentWeekRealizedByUnderlying = currentWeek ? (currentWeek.realizedByUnderlying || {}) : {}
+    const currentWeekRealizedTotal = Math.round(Object.values(currentWeekRealizedByUnderlying).reduce((s, v) => s + v, 0) * 100) / 100
 
     // Fetch weekly stock P&L for the same underlying symbols
     const thisWeekSymbols = Object.keys(currentWeekByUnderlying)
@@ -1862,7 +1873,7 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
       ? databaseService.getWeeklyStockPnLForSymbols(thisWeekSymbols, mondayStr, req.user.userId)
       : {}
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
