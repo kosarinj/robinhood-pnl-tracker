@@ -31,6 +31,7 @@ export default function OptionsPnLPanel() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [activeQuick, setActiveQuick] = useState('all')
+  const [expandedTicker, setExpandedTicker] = useState(null)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -155,29 +156,64 @@ export default function OptionsPnLPanel() {
               {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
                 const stockPnl = data.weeklyStockPnL?.[ticker]
                 const combined = stockPnl !== undefined ? optPnl + stockPnl : null
+                const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
+                const isExpanded = expandedTicker === ticker
                 return (
-                  <div key={ticker} style={{
-                    padding: '8px 12px', borderRadius: '8px',
-                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                    border: `1px solid ${border}`,
-                    fontSize: '12px', minWidth: '100px'
-                  }}>
-                    <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      <div style={{ color: optPnl >= 0 ? green : red }}>
-                        Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}
+                  <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                    <div
+                      onClick={() => setExpandedTicker(isExpanded ? null : ticker)}
+                      style={{
+                        padding: '8px 12px', borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+                        background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                        border: `1px solid ${border}`,
+                        fontSize: '12px', cursor: 'pointer',
+                        borderBottom: isExpanded ? 'none' : `1px solid ${border}`
+                      }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                        <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>
                       </div>
-                      {stockPnl !== undefined && (
-                        <div style={{ color: stockPnl >= 0 ? green : red }}>
-                          Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ color: optPnl >= 0 ? green : red }}>
+                          Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}
                         </div>
-                      )}
-                      {combined !== null && (
-                        <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
-                          Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
-                        </div>
-                      )}
+                        {stockPnl !== undefined && (
+                          <div style={{ color: stockPnl >= 0 ? green : red }}>
+                            Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                          </div>
+                        )}
+                        {combined !== null && (
+                          <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                            Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
+                          </div>
+                        )}
+                      </div>
                     </div>
+                    {isExpanded && (
+                      <div style={{
+                        border: `1px solid ${border}`, borderTop: 'none',
+                        borderRadius: '0 0 8px 8px',
+                        background: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)',
+                        fontSize: '11px'
+                      }}>
+                        {trades.map((t, i) => (
+                          <div key={i} style={{
+                            padding: '5px 10px',
+                            borderBottom: i < trades.length - 1 ? `1px solid ${border}` : 'none',
+                            display: 'flex', justifyContent: 'space-between', gap: '8px'
+                          }}>
+                            <div style={{ color: textMid, flex: 1, minWidth: 0 }}>
+                              <div style={{ color: text, fontWeight: '600' }}>{t.transCode || t.action}</div>
+                              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.description}</div>
+                              <div>{t.date}</div>
+                            </div>
+                            <div style={{ color: t.cashFlow >= 0 ? green : red, fontWeight: '700', whiteSpace: 'nowrap' }}>
+                              {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )
               })}

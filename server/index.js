@@ -1816,15 +1816,23 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
       const weekKey = getWeekStart(t.trans_date)
 
       if (!byWeek[weekKey]) {
-        byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, byUnderlying: {}, days: new Set() }
+        byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, byUnderlying: {}, byUnderlyingTrades: {}, days: new Set() }
       }
       byWeek[weekKey].totalDelta += cashFlow
       byWeek[weekKey].days.add(t.trans_date)
 
       if (!byWeek[weekKey].byUnderlying[underlying]) {
         byWeek[weekKey].byUnderlying[underlying] = 0
+        byWeek[weekKey].byUnderlyingTrades[underlying] = []
       }
       byWeek[weekKey].byUnderlying[underlying] += cashFlow
+      byWeek[weekKey].byUnderlyingTrades[underlying].push({
+        date: t.trans_date,
+        description: t.symbol,
+        action: t.is_buy ? 'Buy' : 'Sell',
+        transCode: t.trans_code,
+        cashFlow: Math.round(cashFlow * 100) / 100
+      })
     })
 
     const weeks = Object.values(byWeek)
@@ -1846,6 +1854,7 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
     const currentWeek = byWeek[mondayStr]
     const currentWeekPnL = currentWeek ? Math.round(currentWeek.totalDelta * 100) / 100 : 0
     const currentWeekByUnderlying = currentWeek ? currentWeek.byUnderlying : {}
+    const currentWeekTradesByUnderlying = currentWeek ? currentWeek.byUnderlyingTrades : {}
 
     // Fetch weekly stock P&L for the same underlying symbols
     const thisWeekSymbols = Object.keys(currentWeekByUnderlying)
@@ -1853,7 +1862,7 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
       ? databaseService.getWeeklyStockPnLForSymbols(thisWeekSymbols, mondayStr, req.user.userId)
       : {}
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekByUnderlying, weeklyStockPnL, weekStart: mondayStr })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
