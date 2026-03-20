@@ -1487,13 +1487,14 @@ export class DatabaseService {
     }
   }
 
-  // Get all option trades for cash-flow-based P&L calculation
+  // Get all option trades for cash-flow-based P&L calculation (deduplicated)
   getOptionTrades(userId = 1) {
     try {
       const stmt = db.prepare(`
         SELECT trans_date, symbol, description, is_buy, amount, trans_code
         FROM trades
         WHERE is_option = 1 AND user_id = ?
+        GROUP BY trans_date, symbol, is_buy, amount
         ORDER BY trans_date ASC
       `)
       return stmt.all(userId)
