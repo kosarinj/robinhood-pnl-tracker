@@ -1780,50 +1780,59 @@ app.post('/api/robinhood/download', requireAuth, async (req, res) => {
 // GET /api/options-pnl/history — weekly and date-range options P&L
 app.get('/api/options-pnl/history', requireAuth, (req, res) => {
   try {
-    const history = databaseService.getDailyOptionsPnLHistory(req.user.userId)
+    const trades = databaseService.getOptionTrades(req.user.userId)
 
-    // Compute daily deltas (options_pnl is cumulative, delta = today - yesterday)
-    const withDeltas = history.map((day, i) => {
-      const prevTotal = i > 0 ? history[i - 1].options_pnl_total : day.options_pnl_total
-      return {
-        ...day,
-        options_pnl_delta: i === 0 ? 0 : day.options_pnl_total - prevTotal
-      }
-    })
+    // Cash-flow P&L per trade:
+    //   sell (STO/STC/OEXP) = +amount (premium received or position closed)
+    //   buy  (BTO/BTC)      = -amount (premium paid)
+    const getWeekStart = (dateStr) => {
+      const d = new Date(dateStr + 'T12:00:00')
+      const dow = d.getDay()
+      const mon = new Date(d)
+      mon.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1))
+      return mon.toISOString().slice(0, 10)
+    }
 
-    // Group by week (Monday-based ISO weeks)
+    // Group trades by week, and within each week by underlying ticker
     const byWeek = {}
-    withDeltas.forEach(day => {
-      const date = new Date(day.asof_date + 'T12:00:00')
-      const dow = date.getDay()
-      const monday = new Date(date)
-      monday.setDate(date.getDate() - (dow === 0 ? 6 : dow - 1))
-      const weekKey = monday.toISOString().slice(0, 10)
+    trades.forEach(t => {
+      const cashFlow = t.is_buy ? -t.amount : t.amount
+      const underlying = (t.symbol || t.description || '').split(' ')[0].toUpperCase()
+      const weekKey = getWeekStart(t.trans_date)
+
       if (!byWeek[weekKey]) {
-        byWeek[weekKey] = { weekStart: weekKey, days: [], totalDelta: 0, endTotal: 0 }
+        byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, byUnderlying: {}, days: new Set() }
       }
-      byWeek[weekKey].days.push(day)
-      byWeek[weekKey].totalDelta += (day.options_pnl_delta || 0)
-      byWeek[weekKey].endTotal = day.options_pnl_total
+      byWeek[weekKey].totalDelta += cashFlow
+      byWeek[weekKey].days.add(t.trans_date)
+
+      if (!byWeek[weekKey].byUnderlying[underlying]) {
+        byWeek[weekKey].byUnderlying[underlying] = 0
+      }
+      byWeek[weekKey].byUnderlying[underlying] += cashFlow
     })
-    const weeks = Object.values(byWeek).sort((a, b) => b.weekStart.localeCompare(a.weekStart))
 
-    // Current week P&L: today's total minus last Friday's total
+    const weeks = Object.values(byWeek)
+      .map(w => ({
+        ...w,
+        days: Array.from(w.days),
+        totalDelta: Math.round(w.totalDelta * 100) / 100,
+        byUnderlying: Object.fromEntries(
+          Object.entries(w.byUnderlying)
+            .map(([k, v]) => [k, Math.round(v * 100) / 100])
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+        )
+      }))
+      .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+
+    // Current week
     const now = new Date()
-    const dow = now.getDay()
-    const monday = new Date(now)
-    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1))
-    const mondayStr = monday.toISOString().slice(0, 10)
-    const lastFriday = new Date(monday)
-    lastFriday.setDate(monday.getDate() - 1)
-    const lastFridayStr = lastFriday.toISOString().slice(0, 10)
+    const mondayStr = getWeekStart(now.toISOString().slice(0, 10))
+    const currentWeek = byWeek[mondayStr]
+    const currentWeekPnL = currentWeek ? Math.round(currentWeek.totalDelta * 100) / 100 : 0
+    const currentWeekByUnderlying = currentWeek ? currentWeek.byUnderlying : {}
 
-    const snapshotBeforeWeek = [...history].filter(d => d.asof_date <= lastFridayStr).pop()
-    const weekStartTotal = snapshotBeforeWeek ? snapshotBeforeWeek.options_pnl_total : 0
-    const todayTotal = history.length > 0 ? history[history.length - 1].options_pnl_total : 0
-    const currentWeekPnL = todayTotal - weekStartTotal
-
-    res.json({ success: true, history: withDeltas, weeks, currentWeekPnL, weekStart: mondayStr })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekByUnderlying, weekStart: mondayStr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

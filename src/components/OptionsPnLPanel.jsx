@@ -111,42 +111,56 @@ export default function OptionsPnLPanel() {
     transition: 'all 0.15s'
   })
 
+  const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
+
   return (
     <div style={{ color: text }}>
       {/* This Week Hero Card */}
       <div style={{
         ...cardStyle,
-        borderLeft: `4px solid ${data?.currentWeekPnL >= 0 ? green : red}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '16px'
+        borderLeft: `4px solid ${(data?.currentWeekPnL || 0) >= 0 ? green : red}`,
       }}>
-        <div>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>
-            This Week — Options P&amp;L
-          </div>
-          <div style={{ fontSize: '2rem', fontWeight: '800', color: data?.currentWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
-            {loading ? '…' : fmt(data?.currentWeekPnL || 0)}
-          </div>
-          <div style={{ fontSize: '13px', color: textMid, marginTop: '6px' }}>
-            {data?.weekStart ? `Since ${fmtDate(data.weekStart)} (Mon)` : 'Cumulative from start of week'}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>All-Time Total</div>
-            <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>
-              {fmt(data?.history?.length ? data.history[data.history.length - 1].options_pnl_total : 0)}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>
+              This Week — Options P&amp;L
+            </div>
+            <div style={{ fontSize: '2rem', fontWeight: '800', color: (data?.currentWeekPnL || 0) >= 0 ? green : red, lineHeight: 1 }}>
+              {loading ? '…' : fmt(data?.currentWeekPnL || 0)}
+            </div>
+            <div style={{ fontSize: '13px', color: textMid, marginTop: '6px' }}>
+              {data?.weekStart ? `Since ${fmtDate(data.weekStart)} (Mon) · cash flow basis` : ''}
             </div>
           </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>Weeks Tracked</div>
-            <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>{data?.weeks?.length || 0}</div>
+          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>All-Time Total</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>{fmt(allTimeTotal)}</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>Weeks Tracked</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>{data?.weeks?.length || 0}</div>
+            </div>
+            <button onClick={fetchData} style={{ ...btnStyle(false), padding: '8px 16px' }}>&#8635; Refresh</button>
           </div>
         </div>
-        <button onClick={fetchData} style={{ ...btnStyle(false), padding: '8px 16px' }}>&#8635; Refresh</button>
+
+        {/* Per-underlying breakdown for current week */}
+        {data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+            {Object.entries(data.currentWeekByUnderlying).map(([ticker, pnl]) => (
+              <div key={ticker} style={{
+                padding: '4px 10px', borderRadius: '6px',
+                background: pnl >= 0 ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                border: `1px solid ${pnl >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                fontSize: '12px', fontWeight: '600'
+              }}>
+                <span style={{ color: textMid }}>{ticker} </span>
+                <span style={{ color: pnl >= 0 ? green : red }}>{pnl >= 0 ? '+' : ''}{fmt(pnl)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Date Range Filter */}

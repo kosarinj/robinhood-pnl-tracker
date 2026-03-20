@@ -1487,6 +1487,22 @@ export class DatabaseService {
     }
   }
 
+  // Get all option trades for cash-flow-based P&L calculation
+  getOptionTrades(userId = 1) {
+    try {
+      const stmt = db.prepare(`
+        SELECT trans_date, symbol, description, is_buy, amount, trans_code
+        FROM trades
+        WHERE is_option = 1 AND user_id = ?
+        ORDER BY trans_date ASC
+      `)
+      return stmt.all(userId)
+    } catch (error) {
+      console.error('Error getting option trades:', error)
+      return []
+    }
+  }
+
   // Close database connection
   close() {
     db.close()
