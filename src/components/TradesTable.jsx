@@ -19,6 +19,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const [whatIfMethod, setWhatIfMethod] = useState('real')
   const [editingRisk, setEditingRisk] = useState(null)
   const [riskInput, setRiskInput] = useState('')
+  const [premiumData, setPremiumData] = useState({}) // { [parentSymbol]: { quotes: {}, loading: false, error: null } }
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -175,6 +176,21 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   const toggleExpand = (symbol) => {
     setExpandedSymbol(expandedSymbol === symbol ? null : symbol)
+  }
+
+  const fetchPremiums = async (parentSymbol, options) => {
+    const openOptions = options.filter(opt => Math.abs(opt.real?.position || 0) > 0.001)
+    if (!openOptions.length) return
+
+    setPremiumData(prev => ({ ...prev, [parentSymbol]: { loading: true, quotes: {}, error: null } }))
+    try {
+      const symbols = openOptions.map(o => o.symbol).join(',')
+      const res = await fetch(`/api/option-quotes?symbols=${encodeURIComponent(symbols)}`, { credentials: 'include' })
+      const json = await res.json()
+      setPremiumData(prev => ({ ...prev, [parentSymbol]: { loading: false, quotes: json.quotes || {}, error: null } }))
+    } catch (e) {
+      setPremiumData(prev => ({ ...prev, [parentSymbol]: { loading: false, quotes: {}, error: e.message } }))
+    }
   }
 
   const startEditingPrice = (symbol, currentPrice) => {
@@ -1220,7 +1236,20 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                     {row.isRollup ? (
                       // Display individual options for rolled-up parent instruments
                       <>
-                        <h4 style={{ color: '#667eea', marginBottom: '15px' }}>{row.symbol} - Options Breakdown</h4>
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
+                          <h4 style={{ color: '#667eea', margin: 0 }}>{row.symbol} - Options Breakdown</h4>
+                          <button
+                            onClick={() => fetchPremiums(row.symbol, row.options || [])}
+                            disabled={premiumData[row.symbol]?.loading}
+                            style={{
+                              marginLeft: '12px', padding: '4px 12px', borderRadius: '6px',
+                              border: '1px solid #f59e0b', background: 'transparent', color: '#f59e0b',
+                              cursor: 'pointer', fontSize: '12px', fontWeight: '600'
+                            }}
+                          >
+                            {premiumData[row.symbol]?.loading ? 'Fetching\u2026' : '\u26a1 Live Premiums'}
+                          </button>
+                        </div>
                         <div style={{ maxHeight: '600px', overflowY: 'auto', overflowX: 'auto', width: '100%', background: 'var(--surface)' }}>
                           <table className="detail-table" style={{ minWidth: '800px', background: 'var(--surface)', width: '100%' }}>
                             <thead>
@@ -1252,6 +1281,15 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                                     <th>LIFO Total</th>
                                   </>
                                 )}
+                                <th style={{ padding: '8px', fontSize: '0.8em', color: '#667eea', background: 'var(--surface)' }}>
+                                  Bid/Ask
+                                </th>
+                                <th style={{ padding: '8px', fontSize: '0.8em', color: '#667eea', background: 'var(--surface)' }}>
+                                  Intrinsic
+                                </th>
+                                <th style={{ padding: '8px', fontSize: '0.8em', color: '#f59e0b', background: 'var(--surface)' }}>
+                                  Premium Left ✨
+                                </th>
                               </tr>
                             </thead>
                             <tbody style={{ background: 'var(--surface)' }}>
@@ -1304,6 +1342,26 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                                       </td>
                                     </>
                                   )}
+                                  {(() => {
+                                    const pData = premiumData[row.symbol]
+                                    const q = pData?.quotes?.[option.symbol]
+                                    const isOpen = Math.abs(option.real?.position || 0) > 0.001
+                                    if (!isOpen) return <><td colSpan={3} style={{ background: 'var(--surface)', fontSize: '0.8em', color: '#94a3b8', textAlign: 'center' }}>Closed</td></>
+                                    if (!pData || (!pData.loading && !q)) return <><td colSpan={3} style={{ background: 'var(--surface)' }}></td></>
+                                    if (pData.loading) return <><td colSpan={3} style={{ background: 'var(--surface)', fontSize: '0.8em', color: '#94a3b8', textAlign: 'center' }}>Loading\u2026</td></>
+                                    if (q?.error) return <><td colSpan={3} style={{ background: 'var(--surface)', fontSize: '0.8em', color: '#ef4444' }}>{q.error}</td></>
+                                    return <>
+                                      <td style={{ background: 'var(--surface)', fontSize: '0.85em', color: '#94a3b8' }}>
+                                        ${q.bid?.toFixed(2)} / ${q.ask?.toFixed(2)}
+                                      </td>
+                                      <td style={{ background: 'var(--surface)', fontSize: '0.85em', color: q.itm ? '#f59e0b' : '#94a3b8' }}>
+                                        ${q.intrinsic?.toFixed(2)} {q.itm ? '(ITM)' : '(OTM)'}
+                                      </td>
+                                      <td style={{ background: 'var(--surface)', fontWeight: '700', fontSize: '0.9em', color: '#f59e0b' }}>
+                                        ${q.extrinsic?.toFixed(2)}
+                                      </td>
+                                    </>
+                                  })()}
                                 </tr>
                               ))}
                             </tbody>

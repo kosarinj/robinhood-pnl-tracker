@@ -1468,6 +1468,25 @@ export class DatabaseService {
     }
   }
 
+  getDailyOptionsPnLHistory(userId = 1) {
+    try {
+      const stmt = db.prepare(`
+        SELECT
+          asof_date,
+          SUM(COALESCE(options_pnl, 0)) as options_pnl_total,
+          SUM(daily_pnl) as stock_daily_pnl
+        FROM pnl_snapshots
+        WHERE user_id = ?
+        GROUP BY asof_date
+        ORDER BY asof_date ASC
+      `)
+      return stmt.all(userId)
+    } catch (error) {
+      console.error('Error getting daily options P&L history:', error)
+      return []
+    }
+  }
+
   // Close database connection
   close() {
     db.close()

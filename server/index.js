@@ -17,6 +17,8 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
 import path from 'path'
+import axios from 'axios'
+import { parseOptionDescription, toPolygonTicker, calcPremiumLeft } from './utils/optionUtils.js'
 
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
@@ -288,23 +290,7 @@ io.on('connection', (socket) => {
       const asofDate = `${year}-${month}-${day}`
       console.log('🔍 Final asofDate:', asofDate)
 
-      // Get historical prices for the asof_date (closing prices from that day)
-      console.log(`📅 Fetching historical prices for ${asofDate}...`)
-      const historicalPrices = await priceService.getPricesForDate(stockSymbols, asofDate)
-      console.log(`✓ Fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
-
-      // Calculate P&L using historical prices from the asof_date
-      const pnlData = calculatePnL(trades, historicalPrices, true, null, asofDate, [])
-
-      // Save P&L snapshot to database with historical prices
-      try {
-        databaseService.savePnLSnapshot(asofDate, pnlData, user.userId)
-        console.log(`💾 Saved P&L snapshot for ${asofDate} with historical prices (user: ${user.userId})`)
-      } catch (error) {
-        console.error('Error saving P&L snapshot:', error)
-      }
-
-      // Save trades and deposits to database
+      // Save trades and deposits to database immediately (don't wait for prices)
       try {
         databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal, user.userId)
         console.log(`💾 Saved ${trades.length} trades and ${deposits.length} deposits to database for ${asofDate} (user: ${user.userId})`)
@@ -312,54 +298,97 @@ io.on('connection', (socket) => {
         console.error('Error saving trades:', error)
       }
 
-      // Save price benchmarks for P&L comparison
-      try {
-        const benchmarks = pnlData.map(position => ({
-          symbol: position.symbol,
-          price_level: position.currentPrice,
-          total_pnl: position.real?.totalPnL || 0,
-          position: position.avgCost?.position || 0,
-          avg_cost: position.avgCost?.avgCostBasis || 0,
-          realized_pnl: position.real?.realizedPnL || 0,
-          unrealized_pnl: position.real?.unrealizedPnL || 0
-        }))
-        databaseService.savePriceBenchmarks(benchmarks, asofDate)
-      } catch (error) {
-        console.error('Error saving price benchmarks:', error)
-      }
+      // Use any cached prices we already have; emit csv-processed immediately
+      const cachedPrices = priceService.getCurrentPrices()
+      const initialPrices = {}
+      stockSymbols.forEach(sym => { initialPrices[sym] = cachedPrices[sym] || 0 })
 
-      // Get price benchmarks for each position
-      let pnlDataWithBenchmarks = pnlData.map(position => {
-        const benchmarks = databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
-        return {
-          ...position,
-          benchmarks
-        }
-      })
+      const initialPnl = calculatePnL(trades, initialPrices, true, null, asofDate, [])
 
-      // Enrich with Made Up Ground
+      // Add benchmarks and made-up-ground enrichment for initial emit
+      let initialPnlWithBenchmarks = initialPnl.map(position => ({
+        ...position,
+        benchmarks: databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
+      }))
       const { date: weekAgoDate, data: weekAgoSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
       if (weekAgoSnapshot.length > 0) {
-        pnlDataWithBenchmarks = enrichWithMadeUpGround(pnlDataWithBenchmarks, weekAgoSnapshot)
+        initialPnlWithBenchmarks = enrichWithMadeUpGround(initialPnlWithBenchmarks, weekAgoSnapshot)
       }
 
-      // Send initial data with historical prices (not current prices)
-      // This ensures the uploaded file shows prices from the upload date
+      // Emit immediately so the UI unblocks
       socket.emit('csv-processed', {
         success: true,
         data: {
           trades,
-          pnlData: pnlDataWithBenchmarks,  // Use historical P&L data with benchmarks
+          pnlData: initialPnlWithBenchmarks,
           totalPrincipal,
           deposits,
-          currentPrices: historicalPrices,  // Use historical prices
+          currentPrices: initialPrices,
           asofDate,
-          uploadDate: asofDate,  // Add uploadDate to indicate viewing historical data
-          madeUpGroundDate: weekAgoDate
+          uploadDate: asofDate,
+          madeUpGroundDate: weekAgoDate,
+          pricesLoading: stockSymbols.length > 0  // signal to UI that prices are still loading
         }
       })
 
-      console.log(`CSV processed for client ${socket.id}: ${trades.length} trades, ${stockSymbols.length} symbols`)
+      console.log(`CSV processed for client ${socket.id}: ${trades.length} trades, ${stockSymbols.length} symbols (prices loading in background)`)
+
+      // Fetch historical prices in the background — won't block the upload
+      if (stockSymbols.length > 0) {
+        console.log(`📅 Fetching historical prices for ${asofDate} in background...`)
+        priceService.getPricesForDate(stockSymbols, asofDate).then(historicalPrices => {
+          console.log(`✓ Background: fetched historical prices for ${Object.keys(historicalPrices).length} symbols`)
+
+          // Recalculate P&L with real historical prices
+          const pnlData = calculatePnL(trades, historicalPrices, true, null, asofDate, [])
+
+          // Save P&L snapshot to database
+          try {
+            databaseService.savePnLSnapshot(asofDate, pnlData, user.userId)
+            console.log(`💾 Saved P&L snapshot for ${asofDate} (user: ${user.userId})`)
+          } catch (err) {
+            console.error('Error saving P&L snapshot:', err)
+          }
+
+          // Save price benchmarks
+          try {
+            const benchmarks = pnlData.map(position => ({
+              symbol: position.symbol,
+              price_level: position.currentPrice,
+              total_pnl: position.real?.totalPnL || 0,
+              position: position.avgCost?.position || 0,
+              avg_cost: position.avgCost?.avgCostBasis || 0,
+              realized_pnl: position.real?.realizedPnL || 0,
+              unrealized_pnl: position.real?.unrealizedPnL || 0
+            }))
+            databaseService.savePriceBenchmarks(benchmarks, asofDate)
+          } catch (err) {
+            console.error('Error saving price benchmarks:', err)
+          }
+
+          // Enrich and emit prices-updated so the UI can refresh
+          let pnlDataWithBenchmarks = pnlData.map(position => ({
+            ...position,
+            benchmarks: databaseService.getPriceBenchmarks(position.symbol, position.currentPrice, 0.05)
+          }))
+          const { date: wkDate, data: wkSnapshot } = databaseService.getPnLSnapshotFromDaysAgo(7)
+          if (wkSnapshot.length > 0) {
+            pnlDataWithBenchmarks = enrichWithMadeUpGround(pnlDataWithBenchmarks, wkSnapshot)
+          }
+
+          if (socket.connected) {
+            socket.emit('prices-updated', {
+              pnlData: pnlDataWithBenchmarks,
+              currentPrices: historicalPrices,
+              asofDate,
+              madeUpGroundDate: wkDate
+            })
+          }
+        }).catch(err => {
+          console.error('Background price fetch failed:', err)
+        })
+      }
+
     } catch (error) {
       console.error('Error processing CSV:', error)
       socket.emit('csv-processed', {
@@ -1745,6 +1774,157 @@ app.post('/api/robinhood/download', requireAuth, async (req, res) => {
       error: error.message
     })
   }
+})
+
+// GET /api/options-pnl/history — weekly and date-range options P&L
+app.get('/api/options-pnl/history', requireAuth, (req, res) => {
+  try {
+    const history = databaseService.getDailyOptionsPnLHistory(req.user.userId)
+
+    // Compute daily deltas (options_pnl is cumulative, delta = today - yesterday)
+    const withDeltas = history.map((day, i) => {
+      const prevTotal = i > 0 ? history[i - 1].options_pnl_total : day.options_pnl_total
+      return {
+        ...day,
+        options_pnl_delta: i === 0 ? 0 : day.options_pnl_total - prevTotal
+      }
+    })
+
+    // Group by week (Monday-based ISO weeks)
+    const byWeek = {}
+    withDeltas.forEach(day => {
+      const date = new Date(day.asof_date + 'T12:00:00')
+      const dow = date.getDay()
+      const monday = new Date(date)
+      monday.setDate(date.getDate() - (dow === 0 ? 6 : dow - 1))
+      const weekKey = monday.toISOString().slice(0, 10)
+      if (!byWeek[weekKey]) {
+        byWeek[weekKey] = { weekStart: weekKey, days: [], totalDelta: 0, endTotal: 0 }
+      }
+      byWeek[weekKey].days.push(day)
+      byWeek[weekKey].totalDelta += (day.options_pnl_delta || 0)
+      byWeek[weekKey].endTotal = day.options_pnl_total
+    })
+    const weeks = Object.values(byWeek).sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+
+    // Current week P&L: today's total minus last Friday's total
+    const now = new Date()
+    const dow = now.getDay()
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1))
+    const mondayStr = monday.toISOString().slice(0, 10)
+    const lastFriday = new Date(monday)
+    lastFriday.setDate(monday.getDate() - 1)
+    const lastFridayStr = lastFriday.toISOString().slice(0, 10)
+
+    const snapshotBeforeWeek = [...history].filter(d => d.asof_date <= lastFridayStr).pop()
+    const weekStartTotal = snapshotBeforeWeek ? snapshotBeforeWeek.options_pnl_total : 0
+    const todayTotal = history.length > 0 ? history[history.length - 1].options_pnl_total : 0
+    const currentWeekPnL = todayTotal - weekStartTotal
+
+    res.json({ success: true, history: withDeltas, weeks, currentWeekPnL, weekStart: mondayStr })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// GET /api/strategy-split — daily P&L split: stocks with options vs pure stocks
+app.get('/api/strategy-split', requireAuth, (req, res) => {
+  try {
+    // Get today's and yesterday's snapshots
+    const today = new Date().toISOString().slice(0, 10)
+    const todaySnap = databaseService.getPnLSnapshot(today, req.user.userId)
+
+    // Get symbols that have options (options_pnl != 0 in any snapshot)
+    const symbolsWithOptions = new Set(
+      todaySnap.filter(r => Math.abs(r.options_pnl || 0) > 0).map(r => r.symbol)
+    )
+
+    const withOptions = todaySnap.filter(r => symbolsWithOptions.has(r.symbol))
+    const pureStocks = todaySnap.filter(r => !symbolsWithOptions.has(r.symbol))
+
+    const sum = (arr, field) => arr.reduce((s, r) => s + (r[field] || 0), 0)
+
+    res.json({
+      success: true,
+      withOptions: {
+        count: withOptions.length,
+        dailyPnL: sum(withOptions, 'daily_pnl'),
+        optionsPnL: sum(withOptions, 'options_pnl'),
+        totalPnL: sum(withOptions, 'total_pnl'),
+        symbols: withOptions.map(r => r.symbol)
+      },
+      pureStocks: {
+        count: pureStocks.length,
+        dailyPnL: sum(pureStocks, 'daily_pnl'),
+        totalPnL: sum(pureStocks, 'total_pnl'),
+        symbols: pureStocks.map(r => r.symbol)
+      }
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// GET /api/option-quotes — fetch live option prices from Polygon and calculate premium left
+app.get('/api/option-quotes', requireAuth, async (req, res) => {
+  const { symbols } = req.query
+  if (!symbols) return res.json({ success: true, quotes: {} })
+
+  const symbolList = symbols.split(',').filter(Boolean)
+  const quotes = {}
+  const currentPricesMap = priceService.getCurrentPrices()
+
+  for (const desc of symbolList) {
+    try {
+      const polygonTicker = toPolygonTicker(desc)
+      const parsed = parseOptionDescription(desc)
+      if (!polygonTicker || !parsed) {
+        quotes[desc] = { error: 'Could not parse option description' }
+        continue
+      }
+
+      const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+      const response = await axios.get(url, {
+        params: { apiKey: process.env.POLYGON_API_KEY || 'YOUR_API_KEY_HERE' },
+        timeout: 8000
+      })
+
+      const snap = response.data?.results
+      if (!snap) {
+        quotes[desc] = { error: 'No data from Polygon', polygonTicker }
+        continue
+      }
+
+      // Option price: prefer mid of bid/ask, fall back to last trade or day close
+      const bid = snap.last_quote?.bid || 0
+      const ask = snap.last_quote?.ask || 0
+      const mid = bid && ask ? (bid + ask) / 2 : (snap.day?.close || snap.last_trade?.price || 0)
+      const optionPrice = mid
+
+      const stockPrice = currentPricesMap[parsed.ticker] || 0
+      const premium = calcPremiumLeft(optionPrice, stockPrice, parsed.strike, parsed.type)
+
+      quotes[desc] = {
+        polygonTicker,
+        ticker: parsed.ticker,
+        strike: parsed.strike,
+        type: parsed.type,
+        optionPrice,
+        bid,
+        ask,
+        ...premium,
+        greeks: snap.greeks || null,
+        impliedVolatility: snap.implied_volatility || null,
+        openInterest: snap.open_interest || null,
+        stockPrice
+      }
+    } catch (e) {
+      quotes[desc] = { error: e.response?.status === 403 ? 'API key does not have options access' : e.message }
+    }
+  }
+
+  res.json({ success: true, quotes })
 })
 
 // Catch-all route to serve index.html for client-side routing

@@ -95,6 +95,17 @@ class SocketService {
     })
   }
 
+  // Listen for background prices-updated event (after CSV upload completes price fetch)
+  onPricesUpdated(callback) {
+    if (!this.socket) return
+    this.socket.on('prices-updated', callback)
+  }
+
+  offPricesUpdated(callback) {
+    if (!this.socket) return
+    this.socket.off('prices-updated', callback)
+  }
+
   // Update manual price
   updateManualPrice(symbol, price) {
     if (!this.socket || !this.connected) {

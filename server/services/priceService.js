@@ -81,9 +81,7 @@ export class PriceService {
     const prices = {}
 
     try {
-      // Use the same CORS proxy as the client
-      const corsProxy = 'https://corsproxy.io/?'
-
+      // Server-side: direct request to Yahoo Finance, no CORS proxy needed
       // Process symbols in batches to avoid overwhelming the API
       const batchSize = 10
       for (let i = 0; i < symbols.length; i += batchSize) {
@@ -92,8 +90,8 @@ export class PriceService {
         await Promise.all(
           batch.map(async (symbol) => {
             try {
-              const url = `${corsProxy}https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1m`
-              const response = await axios.get(url, { timeout: 10000 })
+              const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1m`
+              const response = await axios.get(url, { timeout: 5000 })
 
               const result = response.data?.chart?.result?.[0]
               if (result && result.meta && result.meta.regularMarketPrice) {
@@ -189,20 +187,20 @@ export class PriceService {
       const period2 = Math.floor(endDate.getTime() / 1000)
 
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
-      const response = await axios.get(url, { timeout: 15000 })
+      const response = await axios.get(url, { timeout: 6000 })
 
       const result = response.data?.chart?.result?.[0]
       if (!result) {
-        console.warn(`No historical data for ${symbol} on ${dateString}, using current price`)
-        return await this.getPrice(symbol)
+        console.warn(`No historical data for ${symbol} on ${dateString} — returning 0`)
+        return 0
       }
 
       const timestamps = result.timestamp || []
       const quotes = result.indicators?.quote?.[0]
 
       if (!quotes || timestamps.length === 0) {
-        console.warn(`No quotes for ${symbol} on ${dateString}, using current price`)
-        return await this.getPrice(symbol)
+        console.warn(`No quotes for ${symbol} on ${dateString} — returning 0`)
+        return 0
       }
 
       // Find the closest date to our target
@@ -266,12 +264,17 @@ export class PriceService {
       symbolsToFetch.push(...symbols)
     }
 
-    // Fetch missing prices
+    // Fetch missing prices with a 25-second overall timeout
+    // so a slow Yahoo Finance response never hangs the CSV upload
     if (symbolsToFetch.length > 0) {
       const fetchPromises = symbolsToFetch.map(async (symbol) => {
         prices[symbol] = await this.getPriceForDate(symbol, dateString)
       })
-      await Promise.all(fetchPromises)
+      const timeout = new Promise(resolve => setTimeout(() => {
+        console.warn(`⏱ Price fetch timed out after 25s — proceeding with ${Object.keys(prices).length}/${symbols.length} prices`)
+        resolve()
+      }, 25000))
+      await Promise.race([Promise.all(fetchPromises), timeout])
     }
 
     return prices

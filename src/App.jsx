@@ -8,6 +8,8 @@ import ThemeToggle from './components/ThemeToggle'
 import DailyPnLChart from './components/DailyPnLChart'
 import SupportResistanceLevels from './components/SupportResistanceLevels'
 import PriceChart from './components/PriceChart'
+import OptionsPnLPanel from './components/OptionsPnLPanel'
+import StrategyPnLSplit from './components/StrategyPnLSplit'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -264,6 +266,14 @@ function AuthenticatedApp({ user }) {
       }
     })
 
+    // Listen for background prices-updated (after CSV upload price fetch completes)
+    const handlePricesUpdated = (data) => {
+      console.log('📦 Background prices-updated received')
+      setCurrentPrices(data.currentPrices)
+      setPnlData(data.pnlData)
+    }
+    socketService.onPricesUpdated(handlePricesUpdated)
+
     // Listen for P&L updates
     socketService.onPnLUpdate((data) => {
       console.log('💰 Received P&L update from server')
@@ -285,6 +295,7 @@ function AuthenticatedApp({ user }) {
 
     // Cleanup on unmount
     return () => {
+      socketService.offPricesUpdated(handlePricesUpdated)
       socketService.disconnect()
     }
   }, [useServer, currentUploadDate, isViewingSnapshot, currentSnapshotDate])
@@ -2362,6 +2373,9 @@ function AuthenticatedApp({ user }) {
         currentPrices={currentPrices}
       />
 
+      {/* Options P&L Weekly Panel */}
+      <OptionsPnLPanel />
+
       {/* Support & Resistance Levels */}
       {connected && (
         <SupportResistanceLevels
@@ -2683,6 +2697,10 @@ function AuthenticatedApp({ user }) {
                 </>
               )}
             </div>
+          )}
+
+          {pnlData.length > 0 && (
+            <StrategyPnLSplit pnlData={pnlData} />
           )}
 
           <TradesTable

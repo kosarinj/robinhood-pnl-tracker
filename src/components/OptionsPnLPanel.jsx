@@ -1,0 +1,245 @@
+import React, { useState, useEffect } from 'react'
+import { useTheme } from '../contexts/ThemeContext'
+
+const fmt = (n) => {
+  if (n === null || n === undefined || isNaN(n)) return '$0.00'
+  const abs = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return n < 0 ? `-$${abs}` : `$${abs}`
+}
+
+const fmtDate = (s) => {
+  if (!s) return ''
+  const d = new Date(s + 'T12:00:00')
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+const getMondayOfWeek = (dateStr) => {
+  const d = new Date(dateStr + 'T12:00:00')
+  const day = d.getDay()
+  const monday = new Date(d)
+  monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+  const fri = new Date(monday)
+  fri.setDate(monday.getDate() + 4)
+  return { monday: monday.toISOString().slice(0, 10), friday: fri.toISOString().slice(0, 10) }
+}
+
+export default function OptionsPnLPanel() {
+  const { isDark } = useTheme()
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [activeQuick, setActiveQuick] = useState('all')
+
+  const surface = isDark ? '#1e2130' : '#ffffff'
+  const border = isDark ? '#2d3748' : '#e2e8f0'
+  const text = isDark ? '#e2e8f0' : '#1a202c'
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+  const green = '#22c55e'
+  const red = '#ef4444'
+
+  const fetchData = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/options-pnl/history', { credentials: 'include' })
+      const json = await res.json()
+      if (json.success) setData(json)
+      else setError(json.error)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchData() }, [])
+
+  const setQuick = (range) => {
+    setActiveQuick(range)
+    const now = new Date()
+    const y = now.getFullYear()
+    const m = String(now.getMonth() + 1).padStart(2, '0')
+    if (range === 'month') {
+      const lastDay = new Date(y, now.getMonth() + 1, 0).getDate()
+      setFromDate(`${y}-${m}-01`)
+      setToDate(`${y}-${m}-${lastDay}`)
+    } else if (range === 'last-month') {
+      const lm = now.getMonth() === 0 ? 12 : now.getMonth()
+      const ly = now.getMonth() === 0 ? y - 1 : y
+      const lmStr = String(lm).padStart(2, '0')
+      const lastDay = new Date(ly, lm, 0).getDate()
+      setFromDate(`${ly}-${lmStr}-01`)
+      setToDate(`${ly}-${lmStr}-${lastDay}`)
+    } else if (range === 'year') {
+      setFromDate(`${y}-01-01`)
+      setToDate(`${y}-12-31`)
+    } else {
+      setFromDate('')
+      setToDate('')
+    }
+  }
+
+  const filteredWeeks = data?.weeks?.filter(w => {
+    if (fromDate && w.weekStart < fromDate) return false
+    if (toDate && w.weekStart > toDate) return false
+    return true
+  }) || []
+
+  const rangeTotal = filteredWeeks.reduce((s, w) => s + w.totalDelta, 0)
+  const positiveWeeks = filteredWeeks.filter(w => w.totalDelta > 0).length
+  const negativeWeeks = filteredWeeks.filter(w => w.totalDelta < 0).length
+
+  const cardStyle = {
+    background: surface,
+    border: `1px solid ${border}`,
+    borderRadius: '12px',
+    padding: '20px 24px',
+    marginBottom: '16px',
+  }
+
+  const btnStyle = (active) => ({
+    padding: '5px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${active ? '#667eea' : border}`,
+    background: active ? '#667eea' : 'transparent',
+    color: active ? '#fff' : textMid,
+    cursor: 'pointer',
+    fontSize: '12px',
+    fontWeight: '600',
+    transition: 'all 0.15s'
+  })
+
+  return (
+    <div style={{ color: text }}>
+      {/* This Week Hero Card */}
+      <div style={{
+        ...cardStyle,
+        borderLeft: `4px solid ${data?.currentWeekPnL >= 0 ? green : red}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '16px'
+      }}>
+        <div>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>
+            This Week — Options P&amp;L
+          </div>
+          <div style={{ fontSize: '2rem', fontWeight: '800', color: data?.currentWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
+            {loading ? '…' : fmt(data?.currentWeekPnL || 0)}
+          </div>
+          <div style={{ fontSize: '13px', color: textMid, marginTop: '6px' }}>
+            {data?.weekStart ? `Since ${fmtDate(data.weekStart)} (Mon)` : 'Cumulative from start of week'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>All-Time Total</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>
+              {fmt(data?.history?.length ? data.history[data.history.length - 1].options_pnl_total : 0)}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>Weeks Tracked</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>{data?.weeks?.length || 0}</div>
+          </div>
+        </div>
+        <button onClick={fetchData} style={{ ...btnStyle(false), padding: '8px 16px' }}>&#8635; Refresh</button>
+      </div>
+
+      {/* Date Range Filter */}
+      <div style={{ ...cardStyle, padding: '14px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', color: textMid, fontWeight: '600' }}>Range:</span>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {[['month','This Month'],['last-month','Last Month'],['year','This Year'],['all','All Time']].map(([key, label]) => (
+              <button key={key} style={btnStyle(activeQuick === key)} onClick={() => setQuick(key)}>{label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '8px' }}>
+            <input type="date" value={fromDate} onChange={e => { setFromDate(e.target.value); setActiveQuick('custom') }}
+              style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '13px' }} />
+            <span style={{ color: textMid }}>&#8594;</span>
+            <input type="date" value={toDate} onChange={e => { setToDate(e.target.value); setActiveQuick('custom') }}
+              style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '13px' }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Summary stats for range */}
+      {filteredWeeks.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+          {[
+            { label: 'Range Total', value: fmt(rangeTotal), color: rangeTotal >= 0 ? green : red },
+            { label: 'Weeks Shown', value: filteredWeeks.length, color: text },
+            { label: 'Winning Weeks', value: positiveWeeks, color: green },
+            { label: 'Losing Weeks', value: negativeWeeks, color: red },
+          ].map(({ label, value, color }) => (
+            <div key={label} style={{ ...cardStyle, padding: '14px 18px', marginBottom: 0 }}>
+              <div style={{ fontSize: '11px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>{label}</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: '700', color }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Weekly Table */}
+      <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: '700', fontSize: '14px' }}>Weekly Breakdown</span>
+          <span style={{ fontSize: '12px', color: textMid }}>{filteredWeeks.length} week{filteredWeeks.length !== 1 ? 's' : ''}</span>
+        </div>
+        {loading && <div style={{ padding: '40px', textAlign: 'center', color: textMid }}>Loading…</div>}
+        {error && <div style={{ padding: '20px', color: red }}>{error}</div>}
+        {!loading && !error && filteredWeeks.length === 0 && (
+          <div style={{ padding: '40px', textAlign: 'center', color: textMid }}>No data for selected range</div>
+        )}
+        {!loading && filteredWeeks.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ background: isDark ? '#252b3b' : '#f8fafc' }}>
+                  {['Week Of', 'Trading Days', 'Options P&L', 'Running Total'].map(h => (
+                    <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700',
+                      textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, borderBottom: `1px solid ${border}` }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredWeeks.map((week, i) => {
+                  const { monday, friday } = getMondayOfWeek(week.weekStart)
+                  const isPos = week.totalDelta >= 0
+                  return (
+                    <tr key={week.weekStart} style={{ borderBottom: `1px solid ${border}`, background: i % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)') }}>
+                      <td style={{ padding: '10px 16px', color: text }}>
+                        <span style={{ fontWeight: '600' }}>{fmtDate(monday)}</span>
+                        <span style={{ color: textMid, marginLeft: '6px', fontSize: '12px' }}>&#8211; {fmtDate(friday)}</span>
+                      </td>
+                      <td style={{ padding: '10px 16px', color: textMid }}>{week.days.length}</td>
+                      <td style={{ padding: '10px 16px', fontWeight: '700', color: isPos ? green : red }}>
+                        {isPos ? '+' : ''}{fmt(week.totalDelta)}
+                      </td>
+                      <td style={{ padding: '10px 16px', color: text }}>{fmt(week.endTotal)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: isDark ? '#252b3b' : '#f8fafc', borderTop: `2px solid ${border}` }}>
+                  <td style={{ padding: '10px 16px', fontWeight: '700', color: text }}>Total</td>
+                  <td style={{ padding: '10px 16px', color: textMid }}>{filteredWeeks.reduce((s, w) => s + w.days.length, 0)} days</td>
+                  <td style={{ padding: '10px 16px', fontWeight: '700', color: rangeTotal >= 0 ? green : red }}>
+                    {rangeTotal >= 0 ? '+' : ''}{fmt(rangeTotal)}
+                  </td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
