@@ -47,8 +47,10 @@ export const parseTrades = (file) => {
 
             // Determine if buy or sell
             // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
+            // OEXP = Option Expiration (expires worthless), OASGN = Assignment, OEXC = Exercise
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
             const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
+            const isExpiry = transCode === 'OEXP' || transCode === 'OASGN' || transCode === 'OEXC'
 
             // Parse date - use Process Date (when trade settled) instead of Activity Date
             const dateStr = row['Process Date'] || row['Activity Date'] || row['Date'] || row['Trade Date']
@@ -62,6 +64,7 @@ export const parseTrades = (file) => {
               description,
               isOption,
               isBuy,
+              isExpiry,
               quantity: Math.abs(quantity),
               price: Math.abs(price),
               amount: Math.abs(amount),
@@ -78,6 +81,8 @@ export const parseTrades = (file) => {
               if (tc === 'CDIV' || tc === 'MDIV' || tc === 'INT' || tc === 'MINT') {
                 return false
               }
+              // Include expiry/assignment/exercise even when price = 0 (they close option positions)
+              if (t.isExpiry) return t.symbol && t.quantity > 0
               return t.symbol && t.quantity > 0 && t.price > 0
             })
             .sort((a, b) => a.date - b.date)

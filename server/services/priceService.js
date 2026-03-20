@@ -1,5 +1,11 @@
 import axios from 'axios'
 
+const YF_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+}
+
 export class PriceService {
   constructor(databaseService = null) {
     this.priceCache = new Map()
@@ -76,44 +82,52 @@ export class PriceService {
     return prices
   }
 
-  // Fetch prices from Yahoo Finance
+  // Fetch prices from Yahoo Finance using bulk quote endpoint (fewer requests = less rate limiting)
   async fetchPrices(symbols) {
     const prices = {}
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Accept-Language': 'en-US,en;q=0.9',
+    }
 
     try {
-      // Server-side: direct request to Yahoo Finance, no CORS proxy needed
-      // Process symbols in batches to avoid overwhelming the API
-      const batchSize = 10
+      // Use bulk quote endpoint — fetch up to 50 symbols per request instead of 1 per request
+      const batchSize = 50
       for (let i = 0; i < symbols.length; i += batchSize) {
         const batch = symbols.slice(i, i + batchSize)
+        const symbolList = batch.join(',')
 
-        await Promise.all(
-          batch.map(async (symbol) => {
-            try {
-              const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=1m`
-              const response = await axios.get(url, { timeout: 5000 })
+        try {
+          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbolList}&fields=regularMarketPrice`
+          const response = await axios.get(url, { timeout: 10000, headers })
 
-              const result = response.data?.chart?.result?.[0]
-              if (result && result.meta && result.meta.regularMarketPrice) {
-                const price = result.meta.regularMarketPrice
-                prices[symbol] = price
-                this.priceCache.set(symbol, price)
-              } else {
-                console.warn(`No price data for ${symbol}`)
-                prices[symbol] = 0
-                this.priceCache.set(symbol, 0)
-              }
-            } catch (error) {
-              console.error(`Error fetching price for ${symbol}:`, error.message)
+          const quotes = response.data?.quoteResponse?.result || []
+          quotes.forEach(q => {
+            if (q.regularMarketPrice) {
+              prices[q.symbol] = q.regularMarketPrice
+              this.priceCache.set(q.symbol, q.regularMarketPrice)
+            }
+          })
+
+          // Mark any symbols that didn't come back as 0
+          batch.forEach(symbol => {
+            if (prices[symbol] === undefined) {
+              console.warn(`No price data for ${symbol}`)
               prices[symbol] = 0
               this.priceCache.set(symbol, 0)
             }
           })
-        )
+        } catch (error) {
+          console.error(`Error fetching bulk prices (batch ${i / batchSize + 1}):`, error.message)
+          batch.forEach(symbol => {
+            prices[symbol] = 0
+            this.priceCache.set(symbol, 0)
+          })
+        }
 
-        // Small delay between batches
         if (i + batchSize < symbols.length) {
-          await new Promise(resolve => setTimeout(resolve, 500))
+          await new Promise(resolve => setTimeout(resolve, 1000))
         }
       }
     } catch (error) {
@@ -129,8 +143,8 @@ export class PriceService {
       console.log(`Fetching historical data for ${symbol} (${range}, ${interval})`)
 
       // Yahoo Finance API URL - no CORS issues on server
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`
-      const response = await axios.get(url, { timeout: 15000 })
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=${interval}`
+      const response = await axios.get(url, { timeout: 15000, headers: YF_HEADERS })
 
       const result = response.data?.chart?.result?.[0]
       if (!result) {
@@ -186,8 +200,8 @@ export class PriceService {
       const period1 = Math.floor(startDate.getTime() / 1000)
       const period2 = Math.floor(endDate.getTime() / 1000)
 
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
-      const response = await axios.get(url, { timeout: 6000 })
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
+      const response = await axios.get(url, { timeout: 6000, headers: YF_HEADERS })
 
       const result = response.data?.chart?.result?.[0]
       if (!result) {
