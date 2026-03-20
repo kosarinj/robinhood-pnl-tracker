@@ -1504,22 +1504,54 @@ export class DatabaseService {
     }
   }
 
-  // Get weekly stock P&L for specific symbols (sum of daily_pnl from snapshots)
-  getWeeklyStockPnLForSymbols(symbols, weekStart, weekEnd, userId = 1) {
+  // Get weekly stock P&L for specific symbols
+  // Uses price × position: (current_price - last_friday_close) × shares held
+  getWeeklyStockPnLForSymbols(symbols, weekStart, userId = 1) {
     try {
       if (!symbols.length) return {}
       const placeholders = symbols.map(() => '?').join(',')
-      const stmt = db.prepare(`
-        SELECT symbol, SUM(daily_pnl) as weekly_pnl
+
+      // Last Friday = day before Monday (weekStart)
+      const lastFriday = (() => {
+        const d = new Date(weekStart + 'T12:00:00')
+        d.setDate(d.getDate() - 1)
+        return d.toISOString().slice(0, 10)
+      })()
+
+      // Most recent snapshot at or before last Friday (start-of-week price)
+      const startStmt = db.prepare(`
+        SELECT symbol, current_price, position
         FROM pnl_snapshots
-        WHERE symbol IN (${placeholders})
-          AND asof_date >= ? AND asof_date <= ?
-          AND user_id = ?
+        WHERE symbol IN (${placeholders}) AND asof_date <= ? AND user_id = ?
         GROUP BY symbol
+        HAVING asof_date = MAX(asof_date)
       `)
-      const rows = stmt.all(...symbols, weekStart, weekEnd, userId)
+      const startRows = startStmt.all(...symbols, lastFriday, userId)
+
+      // Most recent snapshot this week (current price + position)
+      const endStmt = db.prepare(`
+        SELECT symbol, current_price, position
+        FROM pnl_snapshots
+        WHERE symbol IN (${placeholders}) AND asof_date >= ? AND user_id = ?
+        GROUP BY symbol
+        HAVING asof_date = MAX(asof_date)
+      `)
+      const endRows = endStmt.all(...symbols, weekStart, userId)
+
+      const startMap = {}
+      startRows.forEach(r => { startMap[r.symbol] = r })
+      const endMap = {}
+      endRows.forEach(r => { endMap[r.symbol] = r })
+
       const result = {}
-      rows.forEach(r => { result[r.symbol] = Math.round(r.weekly_pnl * 100) / 100 })
+      symbols.forEach(sym => {
+        const start = startMap[sym]
+        const end = endMap[sym]
+        if (end && start && start.current_price && end.current_price && end.position) {
+          result[sym] = Math.round((end.current_price - start.current_price) * end.position * 100) / 100
+        }
+        // If no start-of-week snapshot exists, omit (don't show misleading data)
+      })
       return result
     } catch (error) {
       console.error('Error getting weekly stock P&L:', error)
