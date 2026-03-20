@@ -203,9 +203,8 @@ export default function OptionsPnLPanel() {
                             display: 'flex', justifyContent: 'space-between', gap: '8px'
                           }}>
                             <div style={{ color: textMid, flex: 1, minWidth: 0 }}>
-                              <div style={{ color: text, fontWeight: '600' }}>{t.transCode || t.action}</div>
-                              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.description}</div>
-                              <div>{t.date}</div>
+                              <div style={{ color: text, fontWeight: '600' }}>{t.transCode || t.action} · {t.date}</div>
+                              <div style={{ wordBreak: 'break-word', lineHeight: '1.4' }}>{t.description}</div>
                             </div>
                             <div style={{ color: t.cashFlow >= 0 ? green : red, fontWeight: '700', whiteSpace: 'nowrap' }}>
                               {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
