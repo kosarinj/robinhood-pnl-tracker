@@ -1505,74 +1505,47 @@ export class DatabaseService {
   }
 
   // Get weekly stock P&L for specific symbols
-  // Prefers (current_price - last_friday_price) × position when a prior snapshot exists,
-  // otherwise falls back to SUM(daily_pnl) for the week.
+  // Uses (current_price - prev_price) × position where prev_price is the last snapshot before this week.
+  // Falls back to daily_pnl sum if no prior snapshot exists.
   getWeeklyStockPnLForSymbols(symbols, weekStart, userId = 1) {
     try {
       if (!symbols.length) return {}
       const placeholders = symbols.map(() => '?').join(',')
 
-      const lastFriday = (() => {
-        const d = new Date(weekStart + 'T12:00:00')
-        d.setDate(d.getDate() - 1)
-        return d.toISOString().slice(0, 10)
-      })()
+      const d = new Date(weekStart + 'T12:00:00')
+      d.setDate(d.getDate() - 1)
+      const lastFriday = d.toISOString().slice(0, 10)
 
-      // Most recent snapshot BEFORE this Monday (last Friday's close)
-      const startStmt = db.prepare(`
-        SELECT s.symbol, s.current_price, s.position
-        FROM pnl_snapshots s
-        INNER JOIN (
-          SELECT symbol, MAX(asof_date) as max_date
-          FROM pnl_snapshots
-          WHERE symbol IN (${placeholders}) AND asof_date <= ? AND user_id = ?
-          GROUP BY symbol
-        ) latest ON s.symbol = latest.symbol AND s.asof_date = latest.max_date
-        WHERE s.user_id = ?
-      `)
-      const startRows = startStmt.all(...symbols, lastFriday, userId, userId)
-
-      // Most recent snapshot this week
-      const endStmt = db.prepare(`
-        SELECT s.symbol, s.current_price, s.position
-        FROM pnl_snapshots s
-        INNER JOIN (
-          SELECT symbol, MAX(asof_date) as max_date
-          FROM pnl_snapshots
-          WHERE symbol IN (${placeholders}) AND asof_date >= ? AND user_id = ?
-          GROUP BY symbol
-        ) latest ON s.symbol = latest.symbol AND s.asof_date = latest.max_date
-        WHERE s.user_id = ?
-      `)
-      const endRows = endStmt.all(...symbols, weekStart, userId, userId)
-
-      // Fallback: sum daily_pnl for the week (used when no prior snapshot exists)
-      const fallbackStmt = db.prepare(`
-        SELECT symbol, SUM(daily_pnl) as weekly_pnl
+      // All snapshots for these symbols — we'll find max dates in JS to avoid complex SQL
+      const allStmt = db.prepare(`
+        SELECT symbol, asof_date, current_price, position, daily_pnl
         FROM pnl_snapshots
-        WHERE symbol IN (${placeholders}) AND asof_date >= ? AND user_id = ?
-        GROUP BY symbol
+        WHERE symbol IN (${placeholders}) AND user_id = ?
+        ORDER BY asof_date ASC
       `)
-      const fallbackRows = fallbackStmt.all(...symbols, weekStart, userId)
+      const allRows = allStmt.all(...symbols, userId)
 
-      const startMap = {}
-      startRows.forEach(r => { startMap[r.symbol] = r })
-      const endMap = {}
-      endRows.forEach(r => { endMap[r.symbol] = r })
-      const fallbackMap = {}
-      fallbackRows.forEach(r => { fallbackMap[r.symbol] = r.weekly_pnl })
+      // Group by symbol
+      const bySymbol = {}
+      allRows.forEach(r => {
+        if (!bySymbol[r.symbol]) bySymbol[r.symbol] = []
+        bySymbol[r.symbol].push(r)
+      })
 
       const result = {}
       symbols.forEach(sym => {
-        const start = startMap[sym]
-        const end = endMap[sym]
-        if (start && end && start.current_price && end.current_price && end.position) {
-          // Price-based: accurate when uploads span weeks
-          result[sym] = Math.round((end.current_price - start.current_price) * end.position * 100) / 100
-        } else if (fallbackMap[sym] !== undefined) {
-          // Fallback: daily_pnl sum (may include more than just this week if infrequent uploads)
-          result[sym] = Math.round(fallbackMap[sym] * 100) / 100
+        const rows = bySymbol[sym] || []
+        const beforeWeek = rows.filter(r => r.asof_date <= lastFriday)
+        const thisWeek = rows.filter(r => r.asof_date >= weekStart)
+
+        const startRow = beforeWeek[beforeWeek.length - 1]  // most recent before Monday
+        const endRow = thisWeek[thisWeek.length - 1]        // most recent this week
+
+        if (startRow && endRow && startRow.current_price && endRow.current_price && endRow.position) {
+          // Only show when we have a real prior-week price to compare against
+          result[sym] = Math.round((endRow.current_price - startRow.current_price) * endRow.position * 100) / 100
         }
+        // No prior snapshot = omit stock value (can't compute accurate weekly move)
       })
       return result
     } catch (error) {
