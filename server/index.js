@@ -1808,12 +1808,19 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
       return mon.toISOString().slice(0, 10)
     }
 
-    // Group trades by week, and within each week by underlying ticker
+    // Group trades by expiry week (not trade date) so 3/20 expiry → week of 3/16,
+    // and 3/27 expiry → week of 3/23, regardless of when the trade was placed.
     const byWeek = {}
     trades.forEach(t => {
       const cashFlow = t.is_buy ? -t.amount : t.amount
       const underlying = (t.symbol || t.description || '').split(' ')[0].toUpperCase()
-      const weekKey = getWeekStart(t.trans_date)
+
+      // Parse expiry date from description; fall back to trade date if unparseable
+      const parsed = parseOptionDescription(t.symbol || '')
+      const expiryDateStr = parsed
+        ? `${parsed.year}-${parsed.month}-${parsed.day}`
+        : t.trans_date
+      const weekKey = getWeekStart(expiryDateStr)
 
       if (!byWeek[weekKey]) {
         byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, byUnderlying: {}, byUnderlyingTrades: {}, days: new Set() }
