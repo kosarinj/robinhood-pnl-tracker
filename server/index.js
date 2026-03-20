@@ -1454,6 +1454,21 @@ const requireAuth = (req, res, next) => {
   next()
 }
 
+// Debug endpoint to check option trades in database
+app.get('/api/debug/option-trades', requireAuth, (req, res) => {
+  try {
+    const all = databaseService.getOptionTrades(req.user.userId)
+    const byWeek = {}
+    all.forEach(t => {
+      const week = t.trans_date.slice(0, 7)
+      byWeek[week] = (byWeek[week] || 0) + 1
+    })
+    res.json({ total: all.length, byMonth: byWeek, sample: all.slice(-5) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // Debug endpoint to see what snapshot dates exist
 app.get('/api/debug/snapshot-dates', requireAuth, (req, res) => {
   try {
