@@ -1843,11 +1843,18 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
     // Current week
     const now = new Date()
     const mondayStr = getWeekStart(now.toISOString().slice(0, 10))
+    const fridayStr = (() => { const d = new Date(mondayStr + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
     const currentWeek = byWeek[mondayStr]
     const currentWeekPnL = currentWeek ? Math.round(currentWeek.totalDelta * 100) / 100 : 0
     const currentWeekByUnderlying = currentWeek ? currentWeek.byUnderlying : {}
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekByUnderlying, weekStart: mondayStr })
+    // Fetch weekly stock P&L for the same underlying symbols
+    const thisWeekSymbols = Object.keys(currentWeekByUnderlying)
+    const weeklyStockPnL = thisWeekSymbols.length > 0
+      ? databaseService.getWeeklyStockPnLForSymbols(thisWeekSymbols, mondayStr, fridayStr, req.user.userId)
+      : {}
+
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekByUnderlying, weeklyStockPnL, weekStart: mondayStr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

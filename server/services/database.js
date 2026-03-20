@@ -1504,6 +1504,29 @@ export class DatabaseService {
     }
   }
 
+  // Get weekly stock P&L for specific symbols (sum of daily_pnl from snapshots)
+  getWeeklyStockPnLForSymbols(symbols, weekStart, weekEnd, userId = 1) {
+    try {
+      if (!symbols.length) return {}
+      const placeholders = symbols.map(() => '?').join(',')
+      const stmt = db.prepare(`
+        SELECT symbol, SUM(daily_pnl) as weekly_pnl
+        FROM pnl_snapshots
+        WHERE symbol IN (${placeholders})
+          AND asof_date >= ? AND asof_date <= ?
+          AND user_id = ?
+        GROUP BY symbol
+      `)
+      const rows = stmt.all(...symbols, weekStart, weekEnd, userId)
+      const result = {}
+      rows.forEach(r => { result[r.symbol] = Math.round(r.weekly_pnl * 100) / 100 })
+      return result
+    } catch (error) {
+      console.error('Error getting weekly stock P&L:', error)
+      return {}
+    }
+  }
+
   // Close database connection
   close() {
     db.close()

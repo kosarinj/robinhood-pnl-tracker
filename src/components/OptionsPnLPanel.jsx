@@ -147,18 +147,41 @@ export default function OptionsPnLPanel() {
 
         {/* Per-underlying breakdown for current week */}
         {data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', paddingTop: '12px', borderTop: `1px solid ${border}` }}>
-            {Object.entries(data.currentWeekByUnderlying).map(([ticker, pnl]) => (
-              <div key={ticker} style={{
-                padding: '4px 10px', borderRadius: '6px',
-                background: pnl >= 0 ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-                border: `1px solid ${pnl >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
-                fontSize: '12px', fontWeight: '600'
-              }}>
-                <span style={{ color: textMid }}>{ticker} </span>
-                <span style={{ color: pnl >= 0 ? green : red }}>{pnl >= 0 ? '+' : ''}{fmt(pnl)}</span>
-              </div>
-            ))}
+          <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '8px' }}>
+              This Week by Underlying
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
+                const stockPnl = data.weeklyStockPnL?.[ticker]
+                const combined = stockPnl !== undefined ? optPnl + stockPnl : null
+                return (
+                  <div key={ticker} style={{
+                    padding: '8px 12px', borderRadius: '8px',
+                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                    border: `1px solid ${border}`,
+                    fontSize: '12px', minWidth: '100px'
+                  }}>
+                    <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <div style={{ color: optPnl >= 0 ? green : red }}>
+                        Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}
+                      </div>
+                      {stockPnl !== undefined && (
+                        <div style={{ color: stockPnl >= 0 ? green : red }}>
+                          Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                        </div>
+                      )}
+                      {combined !== null && (
+                        <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                          Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>
