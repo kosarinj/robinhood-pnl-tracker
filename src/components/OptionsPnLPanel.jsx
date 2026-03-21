@@ -82,11 +82,17 @@ export default function OptionsPnLPanel() {
     }
   }
 
-  const filteredWeeks = data?.weeks?.filter(w => {
-    if (fromDate && w.weekStart < fromDate) return false
-    if (toDate && w.weekStart > toDate) return false
-    return true
-  }) || []
+  // Sort ascending for running total, then reverse for display
+  const sortedAsc = [...(data?.weeks || [])].sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+  let running = 0
+  const weeksWithRunning = sortedAsc.map(w => { running += w.totalDelta; return { ...w, runningTotal: Math.round(running * 100) / 100 } })
+  const filteredWeeks = weeksWithRunning
+    .filter(w => {
+      if (fromDate && w.weekStart < fromDate) return false
+      if (toDate && w.weekStart > toDate) return false
+      return true
+    })
+    .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
 
   const rangeTotal = filteredWeeks.reduce((s, w) => s + w.totalDelta, 0)
   const positiveWeeks = filteredWeeks.filter(w => w.totalDelta > 0).length
@@ -293,7 +299,7 @@ export default function OptionsPnLPanel() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: isDark ? '#252b3b' : '#f8fafc' }}>
-                  {['Week Of', 'Trading Days', 'Options P&L', 'Running Total'].map(h => (
+                  {['Week Of', 'Trades', 'Options P&L', 'Realized', 'Running Total'].map(h => (
                     <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700',
                       textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, borderBottom: `1px solid ${border}` }}>{h}</th>
                   ))}
@@ -309,11 +315,14 @@ export default function OptionsPnLPanel() {
                         <span style={{ fontWeight: '600' }}>{fmtDate(monday)}</span>
                         <span style={{ color: textMid, marginLeft: '6px', fontSize: '12px' }}>&#8211; {fmtDate(friday)}</span>
                       </td>
-                      <td style={{ padding: '10px 16px', color: textMid }}>{week.days.length}</td>
+                      <td style={{ padding: '10px 16px', color: textMid }}>{week.tradeCount || week.days?.length || 0}</td>
                       <td style={{ padding: '10px 16px', fontWeight: '700', color: isPos ? green : red }}>
                         {isPos ? '+' : ''}{fmt(week.totalDelta)}
                       </td>
-                      <td style={{ padding: '10px 16px', color: text }}>{fmt(week.endTotal)}</td>
+                      <td style={{ padding: '10px 16px', color: (week.realizedDelta || 0) >= 0 ? green : red }}>
+                        {(week.realizedDelta || 0) >= 0 ? '+' : ''}{fmt(week.realizedDelta || 0)}
+                      </td>
+                      <td style={{ padding: '10px 16px', color: text }}>{fmt(week.runningTotal)}</td>
                     </tr>
                   )
                 })}

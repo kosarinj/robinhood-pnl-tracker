@@ -1808,105 +1808,68 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
       return mon.toISOString().slice(0, 10)
     }
 
-    // Group trades by expiry week (not trade date) so 3/20 expiry → week of 3/16,
-    // and 3/27 expiry → week of 3/23, regardless of when the trade was placed.
+    const now = new Date()
+    const mondayStr = getWeekStart(now.toISOString().slice(0, 10))
+    const fridayStr = (() => { const d = new Date(mondayStr + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
+
+    // Single pass: group by expiry week for both history table and hero card
     const byWeek = {}
     trades.forEach(t => {
       const cashFlow = t.is_buy ? -t.amount : t.amount
       const underlying = (t.symbol || t.description || '').split(' ')[0].toUpperCase()
+      const tc = (t.trans_code || '').toUpperCase()
+      const isClosing = tc === 'STC' || tc === 'BTC' || tc === 'OEXP' || tc === 'OASGN' || tc === 'OEXC'
 
-      // Parse expiry date from description; fall back to trade date if unparseable
+      // Use expiry date for week grouping; fall back to trade date
       const parsed = parseOptionDescription(t.symbol || '')
-      const expiryDateStr = parsed
-        ? `${parsed.year}-${parsed.month}-${parsed.day}`
-        : t.trans_date
+      const expiryDateStr = parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : t.trans_date
       const weekKey = getWeekStart(expiryDateStr)
 
       if (!byWeek[weekKey]) {
-        byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, byUnderlying: {}, byUnderlyingTrades: {}, days: new Set() }
+        byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, realizedDelta: 0, tradeCount: 0, byUnderlying: {}, realizedByUnderlying: {}, tradesByUnderlying: {} }
       }
-      byWeek[weekKey].totalDelta += cashFlow
-      byWeek[weekKey].days.add(t.trans_date)
+      const wk = byWeek[weekKey]
+      wk.totalDelta += cashFlow
+      wk.tradeCount++
+      if (isClosing) wk.realizedDelta += cashFlow
 
-      if (!byWeek[weekKey].byUnderlying[underlying]) {
-        byWeek[weekKey].byUnderlying[underlying] = 0
-        byWeek[weekKey].byUnderlyingTrades[underlying] = []
+      if (!wk.byUnderlying[underlying]) {
+        wk.byUnderlying[underlying] = 0
+        wk.realizedByUnderlying[underlying] = 0
+        wk.tradesByUnderlying[underlying] = []
       }
-      byWeek[weekKey].byUnderlying[underlying] += cashFlow
-
-      // Classify trade as closing (realized) or opening (unrealized/at-risk)
-      const tc = (t.trans_code || '').toUpperCase()
-      const isClosing = tc === 'STC' || tc === 'BTC' || tc === 'OEXP' || tc === 'OASGN' || tc === 'OEXC'
-      if (!byWeek[weekKey].realizedByUnderlying) byWeek[weekKey].realizedByUnderlying = {}
-      if (!byWeek[weekKey].realizedByUnderlying[underlying]) byWeek[weekKey].realizedByUnderlying[underlying] = 0
-      if (isClosing) byWeek[weekKey].realizedByUnderlying[underlying] += cashFlow
-
-      byWeek[weekKey].byUnderlyingTrades[underlying].push({
-        date: t.trans_date,
-        description: t.symbol,
-        action: t.is_buy ? 'Buy' : 'Sell',
-        transCode: t.trans_code,
-        cashFlow: Math.round(cashFlow * 100) / 100,
-        isClosing
+      wk.byUnderlying[underlying] += cashFlow
+      if (isClosing) wk.realizedByUnderlying[underlying] += cashFlow
+      wk.tradesByUnderlying[underlying].push({
+        date: t.trans_date, description: t.symbol,
+        transCode: t.trans_code, cashFlow: Math.round(cashFlow * 100) / 100, isClosing
       })
     })
 
+    // History table (no trade detail — keep payload small)
     const weeks = Object.values(byWeek)
       .map(w => ({
-        ...w,
-        days: Array.from(w.days),
+        weekStart: w.weekStart,
         totalDelta: Math.round(w.totalDelta * 100) / 100,
+        realizedDelta: Math.round(w.realizedDelta * 100) / 100,
+        tradeCount: w.tradeCount,
         byUnderlying: Object.fromEntries(
-          Object.entries(w.byUnderlying)
-            .map(([k, v]) => [k, Math.round(v * 100) / 100])
-            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+          Object.entries(w.byUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
         )
       }))
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
 
-    // History table: grouped by expiry week (already in byWeek above)
-    const now = new Date()
-    const mondayStr = getWeekStart(now.toISOString().slice(0, 10))
-
-    // Hero card: grouped by TRADE DATE this week (not expiry) — shows what actually happened this week
-    const heroByUnderlying = {}
-    const heroRealizedByUnderlying = {}
-    const heroTradesByUnderlying = {}
-    let heroPnL = 0
-    trades.forEach(t => {
-      if (t.trans_date < mondayStr) return  // only this week's actual trades
-      const cashFlow = t.is_buy ? -t.amount : t.amount
-      const underlying = (t.symbol || t.description || '').split(' ')[0].toUpperCase()
-      const tc = (t.trans_code || '').toUpperCase()
-      const isClosing = tc === 'STC' || tc === 'BTC' || tc === 'OEXP' || tc === 'OASGN' || tc === 'OEXC'
-
-      heroPnL += cashFlow
-      if (!heroByUnderlying[underlying]) {
-        heroByUnderlying[underlying] = 0
-        heroRealizedByUnderlying[underlying] = 0
-        heroTradesByUnderlying[underlying] = []
-      }
-      heroByUnderlying[underlying] += cashFlow
-      if (isClosing) heroRealizedByUnderlying[underlying] += cashFlow
-      heroTradesByUnderlying[underlying].push({
-        date: t.trans_date,
-        description: t.symbol,
-        action: t.is_buy ? 'Buy' : 'Sell',
-        transCode: t.trans_code,
-        cashFlow: Math.round(cashFlow * 100) / 100,
-        isClosing
-      })
-    })
-
-    const currentWeekPnL = Math.round(heroPnL * 100) / 100
+    // Hero card: current expiry week only
+    const cw = byWeek[mondayStr] || { totalDelta: 0, realizedDelta: 0, byUnderlying: {}, realizedByUnderlying: {}, tradesByUnderlying: {} }
+    const currentWeekPnL = Math.round(cw.totalDelta * 100) / 100
+    const currentWeekRealizedTotal = Math.round(cw.realizedDelta * 100) / 100
     const currentWeekByUnderlying = Object.fromEntries(
-      Object.entries(heroByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+      Object.entries(cw.byUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
     )
-    const currentWeekTradesByUnderlying = heroTradesByUnderlying
     const currentWeekRealizedByUnderlying = Object.fromEntries(
-      Object.entries(heroRealizedByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
+      Object.entries(cw.realizedByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
     )
-    const currentWeekRealizedTotal = Math.round(Object.values(currentWeekRealizedByUnderlying).reduce((s, v) => s + v, 0) * 100) / 100
+    const currentWeekTradesByUnderlying = cw.tradesByUnderlying
 
     // Fetch weekly stock P&L for the same underlying symbols
     const thisWeekSymbols = Object.keys(currentWeekByUnderlying)
