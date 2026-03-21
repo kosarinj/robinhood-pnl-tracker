@@ -119,47 +119,51 @@ export default function OptionsPnLPanel() {
   })
 
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
+  const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + v, 0)
+  const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL
 
   return (
     <div style={{ color: text }}>
-      {data?.debug && (
-        <pre style={{ background: '#111', color: '#0f0', padding: '10px', fontSize: '11px', marginBottom: '12px', borderRadius: '6px', overflowX: 'auto' }}>
-          {JSON.stringify(data.debug, null, 2)}
-        </pre>
-      )}
-      {/* This Week Hero Card */}
+      {/* This Week Hero Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+        {/* Options P&L */}
+        <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${(data?.currentWeekPnL || 0) >= 0 ? green : red}` }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
+          <div style={{ fontSize: '2rem', fontWeight: '800', color: (data?.currentWeekPnL || 0) >= 0 ? green : red, lineHeight: 1 }}>
+            {loading ? '…' : fmt(data?.currentWeekPnL || 0)}
+          </div>
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>
+            Realized: <span style={{ color: (data?.currentWeekRealizedTotal || 0) >= 0 ? green : red, fontWeight: '600' }}>{fmt(data?.currentWeekRealizedTotal || 0)}</span>
+          </div>
+        </div>
+        {/* Stock P&L */}
+        <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${totalStockPnL >= 0 ? green : red}` }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Stock</div>
+          <div style={{ fontSize: '2rem', fontWeight: '800', color: totalStockPnL >= 0 ? green : red, lineHeight: 1 }}>
+            {loading ? '…' : fmt(totalStockPnL)}
+          </div>
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Fri–Fri close · {Object.keys(data?.weeklyStockPnL || {}).length} positions</div>
+        </div>
+        {/* Net Total */}
+        <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${netWeekPnL >= 0 ? green : red}` }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Net</div>
+          <div style={{ fontSize: '2rem', fontWeight: '800', color: netWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
+            {loading ? '…' : fmt(netWeekPnL)}
+          </div>
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + Stock · <span style={{ color: text }}>{fmt(allTimeTotal)} all-time options</span></div>
+        </div>
+      </div>
+
+      {/* Per-underlying breakdown + refresh */}
       <div style={{
         ...cardStyle,
         borderLeft: `4px solid ${(data?.currentWeekPnL || 0) >= 0 ? green : red}`,
       }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
-          <div>
-            <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>
-              This Week — Options P&amp;L
-            </div>
-            <div style={{ fontSize: '2rem', fontWeight: '800', color: (data?.currentWeekPnL || 0) >= 0 ? green : red, lineHeight: 1 }}>
-              {loading ? '…' : fmt(data?.currentWeekPnL || 0)}
-            </div>
-            <div style={{ fontSize: '13px', color: textMid, marginTop: '6px' }}>
-              {data?.weekStart ? `Since ${fmtDate(data.weekStart)} (Mon) · cash flow basis` : ''}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>Realized This Week</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: '700', color: (data?.currentWeekRealizedTotal || 0) >= 0 ? green : red }}>
-                {fmt(data?.currentWeekRealizedTotal || 0)}
-              </div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>All-Time Total</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>{fmt(allTimeTotal)}</div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '11px', color: textMid, marginBottom: '4px' }}>Weeks Tracked</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: '700', color: text }}>{data?.weeks?.length || 0}</div>
-            </div>
-            <button onClick={fetchData} style={{ ...btnStyle(false), padding: '8px 16px' }}>&#8635; Refresh</button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: textMid }}>{data?.weekStart ? `Week of ${fmtDate(data.weekStart)}` : ''}</span>
+            <button onClick={fetchData} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
           </div>
         </div>
 

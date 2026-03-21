@@ -1888,7 +1888,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     // Fetch weekly stock P&L: (currentPrice - lastFridayClose) × position
     const thisWeekSymbols = Object.keys(currentWeekByUnderlying)
     let weeklyStockPnL = {}
-    let debug = { mondayStr, thisWeekSymbols, byWeekKeys: Object.keys(byWeek) }
     if (thisWeekSymbols.length > 0) {
       const lastFridayStr = (() => {
         const d = new Date(mondayStr + 'T12:00:00')
@@ -1914,10 +1913,9 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         }
       })
 
-      debug = { ...debug, lastFridayStr, dbPositions: positions, lastFridayPrices, currentPrices, weeklyStockPnL }
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr, debug })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
