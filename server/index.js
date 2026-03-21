@@ -1793,7 +1793,7 @@ app.post('/api/robinhood/download', requireAuth, async (req, res) => {
 })
 
 // GET /api/options-pnl/history — weekly and date-range options P&L
-app.get('/api/options-pnl/history', requireAuth, (req, res) => {
+app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
   try {
     const trades = databaseService.getOptionTrades(req.user.userId)
 
@@ -1812,38 +1812,52 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
     const mondayStr = getWeekStart(now.toISOString().slice(0, 10))
     const fridayStr = (() => { const d = new Date(mondayStr + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
 
-    // Single pass: group by expiry week for both history table and hero card
-    const byWeek = {}
+    // First pass: group by contract (full description = unique contract identifier).
+    // "Realized" = net flow for contracts that have a closing trade (both legs counted).
+    // "Open" = net flow for contracts with only opening trades (premium still at risk).
+    const contractGroups = {}
     trades.forEach(t => {
       const cashFlow = t.is_buy ? -t.amount : t.amount
-      const underlying = (t.symbol || t.description || '').split(' ')[0].toUpperCase()
+      const underlying = (t.symbol || '').split(' ')[0].toUpperCase()
       const tc = (t.trans_code || '').toUpperCase()
-      const isClosing = tc === 'STC' || tc === 'BTC' || tc === 'OEXP' || tc === 'OASGN' || tc === 'OEXC'
+      const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
 
-      // Use expiry date for week grouping; fall back to trade date
       const parsed = parseOptionDescription(t.symbol || '')
       const expiryDateStr = parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : t.trans_date
       const weekKey = getWeekStart(expiryDateStr)
 
+      const contractKey = (t.symbol || '') + '|' + weekKey
+      if (!contractGroups[contractKey]) {
+        contractGroups[contractKey] = { underlying, weekKey, netFlow: 0, hasClosing: false, tradeDetails: [] }
+      }
+      const cg = contractGroups[contractKey]
+      cg.netFlow += cashFlow
+      if (isClosing) cg.hasClosing = true
+      cg.tradeDetails.push({
+        date: t.trans_date, description: t.symbol,
+        transCode: t.trans_code, cashFlow: Math.round(cashFlow * 100) / 100, isClosing
+      })
+    })
+
+    // Second pass: roll contracts into byWeek buckets
+    const byWeek = {}
+    Object.values(contractGroups).forEach(({ underlying, weekKey, netFlow, hasClosing, tradeDetails }) => {
       if (!byWeek[weekKey]) {
         byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, realizedDelta: 0, tradeCount: 0, byUnderlying: {}, realizedByUnderlying: {}, tradesByUnderlying: {} }
       }
       const wk = byWeek[weekKey]
-      wk.totalDelta += cashFlow
-      wk.tradeCount++
-      if (isClosing) wk.realizedDelta += cashFlow
+      wk.totalDelta += netFlow
+      wk.tradeCount += tradeDetails.length
+      if (hasClosing) wk.realizedDelta += netFlow
 
       if (!wk.byUnderlying[underlying]) {
         wk.byUnderlying[underlying] = 0
         wk.realizedByUnderlying[underlying] = 0
         wk.tradesByUnderlying[underlying] = []
       }
-      wk.byUnderlying[underlying] += cashFlow
-      if (isClosing) wk.realizedByUnderlying[underlying] += cashFlow
-      wk.tradesByUnderlying[underlying].push({
-        date: t.trans_date, description: t.symbol,
-        transCode: t.trans_code, cashFlow: Math.round(cashFlow * 100) / 100, isClosing
-      })
+      wk.byUnderlying[underlying] += netFlow
+      if (hasClosing) wk.realizedByUnderlying[underlying] += netFlow
+      wk.tradesByUnderlying[underlying].push(...tradeDetails)
     })
 
     // History table (no trade detail — keep payload small)
