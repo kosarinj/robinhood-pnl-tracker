@@ -1896,17 +1896,22 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       })()
 
       const positions = databaseService.getPositionsForSymbols(thisWeekSymbols, req.user.userId)
+      console.log(`[stockPnL] symbols=${JSON.stringify(thisWeekSymbols)} lastFriday=${lastFridayStr}`)
+      console.log(`[stockPnL] positions=${JSON.stringify(positions)}`)
 
       // Fetch last Friday close and current price in parallel
       const [lastFridayPrices, currentPrices] = await Promise.all([
         priceService.getPricesForDate(thisWeekSymbols, lastFridayStr),
         priceService.getPrices(thisWeekSymbols)
       ])
+      console.log(`[stockPnL] lastFridayPrices=${JSON.stringify(lastFridayPrices)}`)
+      console.log(`[stockPnL] currentPrices=${JSON.stringify(currentPrices)}`)
 
       thisWeekSymbols.forEach(sym => {
         const pos = positions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
+        console.log(`[stockPnL] ${sym}: pos=${pos} lastClose=${lastClose} curPrice=${curPrice}`)
         if (pos && lastClose && curPrice) {
           weeklyStockPnL[sym] = Math.round((curPrice - lastClose) * pos * 100) / 100
         }
