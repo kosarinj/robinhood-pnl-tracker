@@ -1898,10 +1898,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
 
       const positions = databaseService.getPositionsForSymbols(thisWeekSymbols, req.user.userId)
 
-      // Fetch last Friday close and current price in parallel
+      // Fetch last Friday close and most recent close (handles weekends/after-hours)
+      const todayStr = now.toISOString().slice(0, 10)
       const [lastFridayPrices, currentPrices] = await Promise.all([
         priceService.getPricesForDate(thisWeekSymbols, lastFridayStr),
-        priceService.getPrices(thisWeekSymbols)
+        priceService.getPricesForDate(thisWeekSymbols, todayStr)
       ])
 
       thisWeekSymbols.forEach(sym => {
