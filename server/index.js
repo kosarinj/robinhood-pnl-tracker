@@ -1887,6 +1887,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
 
     // Fetch weekly stock P&L: (currentPrice - lastFridayClose) × position
     const thisWeekSymbols = Object.keys(currentWeekByUnderlying)
+    console.log(`[stockPnL] mondayStr=${mondayStr} thisWeekSymbols=${JSON.stringify(thisWeekSymbols)} byWeekKeys=${JSON.stringify(Object.keys(byWeek))}`)
     let weeklyStockPnL = {}
     if (thisWeekSymbols.length > 0) {
       const lastFridayStr = (() => {
