@@ -330,10 +330,11 @@ export default function OptionsPnLPanel() {
               <tfoot>
                 <tr style={{ background: isDark ? '#252b3b' : '#f8fafc', borderTop: `2px solid ${border}` }}>
                   <td style={{ padding: '10px 16px', fontWeight: '700', color: text }}>Total</td>
-                  <td style={{ padding: '10px 16px', color: textMid }}>{filteredWeeks.reduce((s, w) => s + w.days.length, 0)} days</td>
+                  <td style={{ padding: '10px 16px', color: textMid }}>{filteredWeeks.reduce((s, w) => s + (w.tradeCount || 0), 0)} trades</td>
                   <td style={{ padding: '10px 16px', fontWeight: '700', color: rangeTotal >= 0 ? green : red }}>
                     {rangeTotal >= 0 ? '+' : ''}{fmt(rangeTotal)}
                   </td>
+                  <td></td>
                   <td></td>
                 </tr>
               </tfoot>
