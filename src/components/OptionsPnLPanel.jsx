@@ -122,6 +122,11 @@ export default function OptionsPnLPanel() {
 
   return (
     <div style={{ color: text }}>
+      {data?.debug && (
+        <pre style={{ background: '#111', color: '#0f0', padding: '10px', fontSize: '11px', marginBottom: '12px', borderRadius: '6px', overflowX: 'auto' }}>
+          {JSON.stringify(data.debug, null, 2)}
+        </pre>
+      )}
       {/* This Week Hero Card */}
       <div style={{
         ...cardStyle,

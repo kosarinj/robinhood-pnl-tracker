@@ -1919,7 +1919,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       })
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr })
+    const debug = { mondayStr, thisWeekSymbols, positions: weeklyStockPnL, byWeekKeys: Object.keys(byWeek) }
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr, debug })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
