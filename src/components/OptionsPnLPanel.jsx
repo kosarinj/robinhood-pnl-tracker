@@ -154,7 +154,7 @@ export default function OptionsPnLPanel() {
           {Object.keys(data?.otherStockPnLBySymbol || {}).length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
               {Object.entries(data.otherStockPnLBySymbol)
-                .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+                .sort((a, b) => a[0].localeCompare(b[0]))
                 .map(([sym, pnl]) => (
                   <div key={sym} style={{
                     padding: '4px 8px', borderRadius: '6px', fontSize: '12px',

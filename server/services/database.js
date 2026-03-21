@@ -1504,24 +1504,19 @@ export class DatabaseService {
     }
   }
 
-  // Get current positions for specific symbols (used for Friday-close stock P&L)
+  // Get positions for specific symbols computed from trades
   getPositionsForSymbols(symbols, userId = 1) {
     try {
       if (!symbols.length) return {}
       const placeholders = symbols.map(() => '?').join(',')
-      // Get the most recent snapshot per symbol to find current position
       const stmt = db.prepare(`
-        SELECT p.symbol, p.position
-        FROM pnl_snapshots p
-        INNER JOIN (
-          SELECT symbol, MAX(asof_date) AS max_date
-          FROM pnl_snapshots
-          WHERE symbol IN (${placeholders}) AND user_id = ?
-          GROUP BY symbol
-        ) latest ON p.symbol = latest.symbol AND p.asof_date = latest.max_date
-        WHERE p.user_id = ?
+        SELECT symbol, SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS position
+        FROM trades
+        WHERE is_option = 0 AND symbol IN (${placeholders}) AND user_id = ?
+        GROUP BY symbol
+        HAVING position > 0
       `)
-      const rows = stmt.all(...symbols, userId, userId)
+      const rows = stmt.all(...symbols, userId)
       const result = {}
       rows.forEach(r => { result[r.symbol] = r.position })
       return result
@@ -1531,21 +1526,17 @@ export class DatabaseService {
     }
   }
 
-  // Get all stock positions (most recent snapshot per symbol)
+  // Get all stock positions computed from trades (net shares = buys - sells)
   getAllPositions(userId = 1) {
     try {
       const stmt = db.prepare(`
-        SELECT p.symbol, p.position
-        FROM pnl_snapshots p
-        INNER JOIN (
-          SELECT symbol, MAX(asof_date) AS max_date
-          FROM pnl_snapshots
-          WHERE user_id = ?
-          GROUP BY symbol
-        ) latest ON p.symbol = latest.symbol AND p.asof_date = latest.max_date
-        WHERE p.user_id = ? AND p.position > 0
+        SELECT symbol, SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS position
+        FROM trades
+        WHERE is_option = 0 AND user_id = ?
+        GROUP BY symbol
+        HAVING position > 0
       `)
-      const rows = stmt.all(userId, userId)
+      const rows = stmt.all(userId)
       const result = {}
       rows.forEach(r => { result[r.symbol] = r.position })
       return result
