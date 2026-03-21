@@ -1917,18 +1917,21 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         }
       })
 
+      const otherStockPnLBySymbol = {}
       otherSymbols.forEach(sym => {
         const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
-          otherStockPnL += (curPrice - lastClose) * pos
+          const pnl = Math.round((curPrice - lastClose) * pos * 100) / 100
+          otherStockPnLBySymbol[sym] = pnl
+          otherStockPnL += pnl
         }
       })
       otherStockPnL = Math.round(otherStockPnL * 100) / 100
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockCount: otherSymbols.length, weekStart: mondayStr })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol: otherStockPnLBySymbol || {}, otherStockCount: otherSymbols.length, weekStart: mondayStr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

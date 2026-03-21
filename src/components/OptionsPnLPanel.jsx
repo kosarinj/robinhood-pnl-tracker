@@ -147,11 +147,28 @@ export default function OptionsPnLPanel() {
         </div>
         {/* Other Stocks */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${otherStockPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Other Stocks</div>
-          <div style={{ fontSize: '2rem', fontWeight: '800', color: otherStockPnL >= 0 ? green : red, lineHeight: 1 }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '8px' }}>This Week — Other Stocks</div>
+          <div style={{ fontSize: '2rem', fontWeight: '800', color: otherStockPnL >= 0 ? green : red, lineHeight: 1, marginBottom: '10px' }}>
             {loading ? '…' : fmt(otherStockPnL)}
           </div>
-          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Fri–Fri close · {data?.otherStockCount || 0} positions</div>
+          {Object.keys(data?.otherStockPnLBySymbol || {}).length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {Object.entries(data.otherStockPnLBySymbol)
+                .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+                .map(([sym, pnl]) => (
+                  <div key={sym} style={{
+                    padding: '4px 8px', borderRadius: '6px', fontSize: '12px',
+                    background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                    border: `1px solid ${border}`
+                  }}>
+                    <span style={{ fontWeight: '700', color: text }}>{sym}</span>
+                    <span style={{ color: pnl >= 0 ? green : red, marginLeft: '6px' }}>
+                      {pnl >= 0 ? '+' : ''}{fmt(pnl)}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
         {/* Net Total */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${netWeekPnL >= 0 ? green : red}` }}>
