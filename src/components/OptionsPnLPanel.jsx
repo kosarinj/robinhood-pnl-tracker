@@ -119,7 +119,7 @@ export default function OptionsPnLPanel() {
   })
 
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
-  const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + v, 0)
+  const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL
 
@@ -155,18 +155,22 @@ export default function OptionsPnLPanel() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
               {Object.entries(data.otherStockPnLBySymbol)
                 .sort((a, b) => a[0].localeCompare(b[0]))
-                .map(([sym, pnl]) => (
-                  <div key={sym} style={{
-                    padding: '4px 8px', borderRadius: '6px', fontSize: '12px',
-                    background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                    border: `1px solid ${border}`
-                  }}>
-                    <span style={{ fontWeight: '700', color: text }}>{sym}</span>
-                    <span style={{ color: pnl >= 0 ? green : red, marginLeft: '6px' }}>
-                      {pnl >= 0 ? '+' : ''}{fmt(pnl)}
-                    </span>
-                  </div>
-                ))}
+                .map(([sym, entry]) => {
+                  const pnl = entry?.pnl ?? entry
+                  const tooltip = entry?.fromPrice ? `${entry.fromDate}: $${entry.fromPrice.toFixed(2)} → ${entry.toDate}: $${entry.toPrice.toFixed(2)}` : undefined
+                  return (
+                    <div key={sym} title={tooltip} style={{
+                      padding: '4px 8px', borderRadius: '6px', fontSize: '12px',
+                      background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                      border: `1px solid ${border}`, cursor: tooltip ? 'help' : 'default'
+                    }}>
+                      <span style={{ fontWeight: '700', color: text }}>{sym}</span>
+                      <span style={{ color: pnl >= 0 ? green : red, marginLeft: '6px' }}>
+                        {pnl >= 0 ? '+' : ''}{fmt(pnl)}
+                      </span>
+                    </div>
+                  )
+                })}
             </div>
           )}
         </div>
@@ -201,7 +205,9 @@ export default function OptionsPnLPanel() {
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
-                const stockPnl = data.weeklyStockPnL?.[ticker]
+                const stockEntry = data.weeklyStockPnL?.[ticker]
+                const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
+                const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
                 const combined = stockPnl !== undefined ? optPnl + stockPnl : null
                 const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
                 const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
@@ -231,7 +237,7 @@ export default function OptionsPnLPanel() {
                           </div>
                         )}
                         {stockPnl !== undefined && (
-                          <div style={{ color: stockPnl >= 0 ? green : red }}>
+                          <div title={stockTooltip} style={{ color: stockPnl >= 0 ? green : red, cursor: stockTooltip ? 'help' : 'default' }}>
                             Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
                           </div>
                         )}

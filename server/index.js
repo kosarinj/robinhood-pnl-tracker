@@ -1914,7 +1914,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
-          weeklyStockPnL[sym] = Math.round((curPrice - lastClose) * pos * 100) / 100
+          weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr }
         }
       })
 
@@ -1924,7 +1924,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
           const pnl = Math.round((curPrice - lastClose) * pos * 100) / 100
-          otherStockPnLBySymbol[sym] = pnl
+          otherStockPnLBySymbol[sym] = { pnl, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr }
           otherStockPnL += pnl
         }
       })
