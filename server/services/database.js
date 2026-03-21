@@ -1504,52 +1504,25 @@ export class DatabaseService {
     }
   }
 
-  // Get weekly stock P&L for specific symbols
-  // Uses (current_price - prev_price) × position where prev_price is the last snapshot before this week.
-  // Falls back to daily_pnl sum if no prior snapshot exists.
-  getWeeklyStockPnLForSymbols(symbols, weekStart, userId = 1) {
+  // Get current positions for specific symbols (used for Friday-close stock P&L)
+  getPositionsForSymbols(symbols, userId = 1) {
     try {
       if (!symbols.length) return {}
       const placeholders = symbols.map(() => '?').join(',')
-
-      const d = new Date(weekStart + 'T12:00:00')
-      d.setDate(d.getDate() - 1)
-      const lastFriday = d.toISOString().slice(0, 10)
-
-      // All snapshots for these symbols — we'll find max dates in JS to avoid complex SQL
-      const allStmt = db.prepare(`
-        SELECT symbol, asof_date, current_price, position, daily_pnl
+      // Get the most recent snapshot per symbol to find current position
+      const stmt = db.prepare(`
+        SELECT symbol, position
         FROM pnl_snapshots
         WHERE symbol IN (${placeholders}) AND user_id = ?
-        ORDER BY asof_date ASC
+        GROUP BY symbol
+        HAVING asof_date = MAX(asof_date)
       `)
-      const allRows = allStmt.all(...symbols, userId)
-
-      // Group by symbol
-      const bySymbol = {}
-      allRows.forEach(r => {
-        if (!bySymbol[r.symbol]) bySymbol[r.symbol] = []
-        bySymbol[r.symbol].push(r)
-      })
-
+      const rows = stmt.all(...symbols, userId)
       const result = {}
-      symbols.forEach(sym => {
-        const rows = bySymbol[sym] || []
-        const beforeWeek = rows.filter(r => r.asof_date <= lastFriday)
-        const thisWeek = rows.filter(r => r.asof_date >= weekStart)
-
-        const startRow = beforeWeek[beforeWeek.length - 1]  // most recent before Monday
-        const endRow = thisWeek[thisWeek.length - 1]        // most recent this week
-
-        if (startRow && endRow && startRow.current_price && endRow.current_price && endRow.position) {
-          // Only show when we have a real prior-week price to compare against
-          result[sym] = Math.round((endRow.current_price - startRow.current_price) * endRow.position * 100) / 100
-        }
-        // No prior snapshot = omit stock value (can't compute accurate weekly move)
-      })
+      rows.forEach(r => { result[r.symbol] = r.position })
       return result
     } catch (error) {
-      console.error('Error getting weekly stock P&L:', error)
+      console.error('Error getting positions:', error)
       return {}
     }
   }

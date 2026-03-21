@@ -1871,11 +1871,33 @@ app.get('/api/options-pnl/history', requireAuth, (req, res) => {
     )
     const currentWeekTradesByUnderlying = cw.tradesByUnderlying
 
-    // Fetch weekly stock P&L for the same underlying symbols
+    // Fetch weekly stock P&L: (currentPrice - lastFridayClose) × position
     const thisWeekSymbols = Object.keys(currentWeekByUnderlying)
-    const weeklyStockPnL = thisWeekSymbols.length > 0
-      ? databaseService.getWeeklyStockPnLForSymbols(thisWeekSymbols, mondayStr, req.user.userId)
-      : {}
+    let weeklyStockPnL = {}
+    if (thisWeekSymbols.length > 0) {
+      const lastFridayStr = (() => {
+        const d = new Date(mondayStr + 'T12:00:00')
+        d.setDate(d.getDate() - 3) // Monday - 3 = last Friday
+        return d.toISOString().slice(0, 10)
+      })()
+
+      const positions = databaseService.getPositionsForSymbols(thisWeekSymbols, req.user.userId)
+
+      // Fetch last Friday close and current price in parallel
+      const [lastFridayPrices, currentPrices] = await Promise.all([
+        priceService.getPricesForDate(thisWeekSymbols, lastFridayStr),
+        priceService.getPrices(thisWeekSymbols)
+      ])
+
+      thisWeekSymbols.forEach(sym => {
+        const pos = positions[sym]
+        const lastClose = lastFridayPrices[sym]
+        const curPrice = currentPrices[sym]
+        if (pos && lastClose && curPrice) {
+          weeklyStockPnL[sym] = Math.round((curPrice - lastClose) * pos * 100) / 100
+        }
+      })
+    }
 
     res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, weekStart: mondayStr })
   } catch (error) {
