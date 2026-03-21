@@ -1511,13 +1511,17 @@ export class DatabaseService {
       const placeholders = symbols.map(() => '?').join(',')
       // Get the most recent snapshot per symbol to find current position
       const stmt = db.prepare(`
-        SELECT symbol, position
-        FROM pnl_snapshots
-        WHERE symbol IN (${placeholders}) AND user_id = ?
-        GROUP BY symbol
-        HAVING asof_date = MAX(asof_date)
+        SELECT p.symbol, p.position
+        FROM pnl_snapshots p
+        INNER JOIN (
+          SELECT symbol, MAX(asof_date) AS max_date
+          FROM pnl_snapshots
+          WHERE symbol IN (${placeholders}) AND user_id = ?
+          GROUP BY symbol
+        ) latest ON p.symbol = latest.symbol AND p.asof_date = latest.max_date
+        WHERE p.user_id = ?
       `)
-      const rows = stmt.all(...symbols, userId)
+      const rows = stmt.all(...symbols, userId, userId)
       const result = {}
       rows.forEach(r => { result[r.symbol] = r.position })
       return result
