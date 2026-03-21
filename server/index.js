@@ -1896,6 +1896,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
 
     let weeklyStockPnL = {}
     let otherStockPnL = 0
+    let otherStockPnLBySymbol = {}
 
     // All positions — used for both options-linked and other stocks
     const allPositions = databaseService.getAllPositions(req.user.userId)
@@ -1917,7 +1918,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         }
       })
 
-      const otherStockPnLBySymbol = {}
       otherSymbols.forEach(sym => {
         const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
@@ -1931,7 +1931,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       otherStockPnL = Math.round(otherStockPnL * 100) / 100
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol: otherStockPnLBySymbol || {}, otherStockCount: otherSymbols.length, weekStart: mondayStr })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
