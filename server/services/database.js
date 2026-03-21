@@ -1531,6 +1531,30 @@ export class DatabaseService {
     }
   }
 
+  // Get all stock positions (most recent snapshot per symbol)
+  getAllPositions(userId = 1) {
+    try {
+      const stmt = db.prepare(`
+        SELECT p.symbol, p.position
+        FROM pnl_snapshots p
+        INNER JOIN (
+          SELECT symbol, MAX(asof_date) AS max_date
+          FROM pnl_snapshots
+          WHERE user_id = ?
+          GROUP BY symbol
+        ) latest ON p.symbol = latest.symbol AND p.asof_date = latest.max_date
+        WHERE p.user_id = ? AND p.position > 0
+      `)
+      const rows = stmt.all(userId, userId)
+      const result = {}
+      rows.forEach(r => { result[r.symbol] = r.position })
+      return result
+    } catch (error) {
+      console.error('Error getting all positions:', error)
+      return {}
+    }
+  }
+
   // Close database connection
   close() {
     db.close()

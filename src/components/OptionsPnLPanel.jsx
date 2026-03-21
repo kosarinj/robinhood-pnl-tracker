@@ -120,7 +120,8 @@ export default function OptionsPnLPanel() {
 
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + v, 0)
-  const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL
+  const otherStockPnL = data?.otherStockPnL || 0
+  const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL
 
   return (
     <div style={{ color: text }}>
@@ -144,13 +145,21 @@ export default function OptionsPnLPanel() {
           </div>
           <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Fri–Fri close · {Object.keys(data?.weeklyStockPnL || {}).length} positions</div>
         </div>
+        {/* Other Stocks */}
+        <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${otherStockPnL >= 0 ? green : red}` }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Other Stocks</div>
+          <div style={{ fontSize: '2rem', fontWeight: '800', color: otherStockPnL >= 0 ? green : red, lineHeight: 1 }}>
+            {loading ? '…' : fmt(otherStockPnL)}
+          </div>
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Fri–Fri close · {data?.otherStockCount || 0} positions</div>
+        </div>
         {/* Net Total */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${netWeekPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Net</div>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Net Total</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: netWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(netWeekPnL)}
           </div>
-          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + Stock · <span style={{ color: text }}>{fmt(allTimeTotal)} all-time options</span></div>
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + all stocks</div>
         </div>
       </div>
 
