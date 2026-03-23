@@ -1931,17 +1931,34 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       otherStockPnL = Math.round(otherStockPnL * 100) / 100
     }
 
-    // Open option positions with live mark prices
+    // Open option positions with live mark prices from Polygon
     let openOptionPositions = []
     try {
       const openOpts = databaseService.getOpenOptionPositions(req.user.userId)
       if (openOpts.length > 0) {
-        const yahooSymbols = openOpts.map(p => toYahooOptionTicker(p.symbol)).filter(Boolean)
-        const markPrices = await priceService.fetchPrices(yahooSymbols)
+        // Fetch bid/ask midpoint from Polygon for each open contract
+        const polygonKey = process.env.POLYGON_API_KEY || 'YOUR_API_KEY_HERE'
+        const markPrices = {}
+        for (const pos of openOpts) {
+          const polygonTicker = toPolygonTicker(pos.symbol)
+          const parsed = parseOptionDescription(pos.symbol)
+          if (!polygonTicker || !parsed) continue
+          try {
+            const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+            const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 8000 })
+            const snap = resp.data?.results
+            if (snap) {
+              const bid = snap.last_quote?.bid || 0
+              const ask = snap.last_quote?.ask || 0
+              markPrices[pos.symbol] = bid && ask ? (bid + ask) / 2 : (snap.day?.close || snap.last_trade?.price || 0)
+            }
+          } catch (e) {
+            console.warn(`Polygon mark price failed for ${pos.symbol}:`, e.message)
+          }
+        }
 
         openOpts.forEach(pos => {
-          const yahooSym = toYahooOptionTicker(pos.symbol)
-          const mark = markPrices[yahooSym] || 0
+          const mark = markPrices[pos.symbol] || 0
           const parsed = parseOptionDescription(pos.symbol)
 
           const isLong = pos.net_long > 0
@@ -1955,7 +1972,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
 
           openOptionPositions.push({
             symbol: pos.symbol,
-            yahooSymbol: yahooSym,
             ticker: parsed?.ticker || '',
             expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : '',
             strike: parsed?.strike || 0,
