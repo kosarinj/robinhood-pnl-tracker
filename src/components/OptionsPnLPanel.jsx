@@ -149,6 +149,11 @@ export default function OptionsPnLPanel() {
   const hasPrices = openPositions.some(p => p.unrealizedPnl != null)
   const totalUnrealizedPnl = openPositions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
   const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL + (hasPrices ? totalUnrealizedPnl : 0)
+  // Unrealized P&L grouped by underlying ticker
+  const unrealizedByTicker = openPositions.reduce((m, p) => {
+    if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
+    return m
+  }, {})
 
   return (
     <div style={{ color: text }}>
@@ -225,7 +230,7 @@ export default function OptionsPnLPanel() {
           <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: textMid }}>{data?.weekStart ? `Week of ${fmtDate(data.weekStart)}` : ''}</span>
-            <button onClick={fetchData} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
+            <button onClick={() => { fetchData(); fetchLivePositions() }} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
           </div>
         </div>
 
@@ -240,7 +245,10 @@ export default function OptionsPnLPanel() {
                 const stockEntry = data.weeklyStockPnL?.[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
                 const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
-                const combined = stockPnl !== undefined ? optPnl + stockPnl : null
+                const unrealizedPnl = unrealizedByTicker[ticker]
+                const combined = stockPnl !== undefined || unrealizedPnl !== undefined
+                  ? optPnl + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
+                  : null
                 const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
                 const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
                 const isExpanded = expandedTicker === ticker
@@ -271,6 +279,11 @@ export default function OptionsPnLPanel() {
                         {stockPnl !== undefined && (
                           <div title={stockTooltip} style={{ color: stockPnl >= 0 ? green : red, cursor: stockTooltip ? 'help' : 'default' }}>
                             Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                          </div>
+                        )}
+                        {unrealizedPnl !== undefined && (
+                          <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
+                            Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
                           </div>
                         )}
                         {combined !== null && (
