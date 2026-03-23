@@ -32,6 +32,9 @@ export default function OptionsPnLPanel() {
   const [toDate, setToDate] = useState('')
   const [activeQuick, setActiveQuick] = useState('all')
   const [expandedTicker, setExpandedTicker] = useState(null)
+  const [livePositions, setLivePositions] = useState(null)
+  const [posLoading, setPosLoading] = useState(false)
+  const [posError, setPosError] = useState(null)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -55,7 +58,25 @@ export default function OptionsPnLPanel() {
     }
   }
 
-  useEffect(() => { fetchData() }, [])
+  const fetchLivePositions = async () => {
+    setPosLoading(true)
+    setPosError(null)
+    try {
+      const res = await fetch('/api/options-pnl/open-positions', { credentials: 'include' })
+      const json = await res.json()
+      if (json.success) setLivePositions(json)
+      else setPosError(json.error)
+    } catch (e) {
+      setPosError(e.message)
+    } finally {
+      setPosLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchData()
+    fetchLivePositions()
+  }, [])
 
   const setQuick = (range) => {
     setActiveQuick(range)
@@ -122,8 +143,9 @@ export default function OptionsPnLPanel() {
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL
-  const openPositions = data?.openOptionPositions || []
-  const totalUnrealizedPnl = openPositions.reduce((s, p) => s + p.unrealizedPnl, 0)
+  // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
+  const openPositions = livePositions?.positions || data?.openOptionPositions || []
+  const totalUnrealizedPnl = openPositions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
 
   return (
     <div style={{ color: text }}>
@@ -389,34 +411,63 @@ export default function OptionsPnLPanel() {
       {/* Open Option Positions */}
       <div style={{ ...cardStyle, marginTop: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Option Positions</div>
-          {openPositions.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Option Positions</div>
+            <button
+              onClick={fetchLivePositions}
+              disabled={posLoading}
+              style={{ ...btnStyle(false), padding: '4px 10px', opacity: posLoading ? 0.6 : 1 }}
+            >
+              {posLoading ? '…' : '↻ Refresh Prices'}
+            </button>
+            {livePositions?.fetchedAt && (
+              <span style={{ fontSize: '11px', color: textMid }}>
+                {new Date(livePositions.fetchedAt).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+          {openPositions.length > 0 && livePositions && totalUnrealizedPnl !== 0 && (
             <div style={{ fontWeight: '800', fontSize: '1.1rem', color: totalUnrealizedPnl >= 0 ? green : red }}>
               {fmt(totalUnrealizedPnl)} unrealized
             </div>
           )}
         </div>
+        {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>{posError}</div>}
         {openPositions.length === 0 ? (
           <div style={{ fontSize: '13px', color: textMid }}>No open positions detected — upload your latest CSV to see open contracts.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {openPositions.map((pos, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: isDark ? '#161926' : '#f8fafc', borderRadius: '8px', border: `1px solid ${border}` }}>
-                <div>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: text }}>
-                    {pos.ticker} {pos.strike} {pos.optionType?.toUpperCase()}&nbsp;
-                    <span style={{ fontSize: '12px', fontWeight: '500', color: pos.isLong ? green : '#f59e0b' }}>{pos.isLong ? 'LONG' : 'SHORT'}</span>
+            {openPositions.map((pos, i) => {
+              const hasPrice = pos.markPrice > 0
+              const pnlColor = pos.unrealizedPnl == null ? textMid : (pos.unrealizedPnl >= 0 ? green : red)
+              return (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: isDark ? '#161926' : '#f8fafc', borderRadius: '8px', border: `1px solid ${border}` }}>
+                  <div>
+                    <div style={{ fontWeight: '700', fontSize: '14px', color: text }}>
+                      {pos.ticker} ${pos.strike} {pos.optionType?.toUpperCase()}&nbsp;
+                      <span style={{ fontSize: '12px', fontWeight: '500', color: pos.isLong ? green : '#f59e0b' }}>{pos.isLong ? 'LONG' : 'SHORT'}</span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: textMid, marginTop: '2px' }}>
+                      Exp {pos.expiry} · {pos.openContracts} contract{pos.openContracts !== 1 ? 's' : ''} · avg cost {fmt(pos.avgCostPerContract)}/contract
+                      {pos.stockPrice ? <span style={{ marginLeft: '8px', color: text }}>{pos.ticker} @ {fmt(pos.stockPrice)}</span> : null}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '12px', color: textMid, marginTop: '2px' }}>
-                    Exp {pos.expiry} · {pos.openContracts} contract{pos.openContracts !== 1 ? 's' : ''} · cost {fmt(pos.avgCostPerContract)}/contract
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: '700', fontSize: '14px', color: pnlColor }}>
+                      {pos.unrealizedPnl == null ? '—' : fmt(pos.unrealizedPnl)}
+                    </div>
+                    <div style={{ fontSize: '12px', color: textMid }}>
+                      mark {hasPrice ? fmt(pos.markPrice) : (posLoading ? '…' : 'N/A')}
+                    </div>
                   </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: pos.unrealizedPnl >= 0 ? green : red }}>{fmt(pos.unrealizedPnl)}</div>
-                  <div style={{ fontSize: '12px', color: textMid }}>mark {pos.markPrice > 0 ? fmt(pos.markPrice) : 'N/A'}</div>
-                </div>
-              </div>
-            ))}
+              )
+            })}
+          </div>
+        )}
+        {livePositions?.expiredFiltered > 0 && (
+          <div style={{ fontSize: '11px', color: textMid, marginTop: '8px' }}>
+            {livePositions.expiredFiltered} expired contract{livePositions.expiredFiltered !== 1 ? 's' : ''} hidden — re-upload CSV to reconcile
           </div>
         )}
       </div>

@@ -1485,6 +1485,109 @@ app.get('/api/debug/polygon-options', requireAuth, async (req, res) => {
   }
 })
 
+// Dedicated lightweight endpoint: open option positions with live mark prices
+app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    const openOpts = databaseService.getOpenOptionPositions(req.user.userId)
+
+    // Filter out positions where option has already expired
+    const activeOpts = openOpts.filter(pos => {
+      const parsed = parseOptionDescription(pos.symbol)
+      if (!parsed) return false
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      return expiry >= today
+    })
+
+    console.log(`Open option positions: ${openOpts.length} total, ${activeOpts.length} non-expired`)
+
+    // Collect unique underlying tickers for stock price fetch
+    const underlyingTickers = [...new Set(activeOpts.map(pos => {
+      const p = parseOptionDescription(pos.symbol)
+      return p?.ticker
+    }).filter(Boolean))]
+
+    // Fetch underlying stock prices in bulk via Yahoo Finance
+    const stockPrices = underlyingTickers.length > 0
+      ? await priceService.getPrices(underlyingTickers)
+      : {}
+
+    // Fetch Polygon mark prices for each open contract
+    const markPrices = {}
+    if (polygonKey) {
+      for (const pos of activeOpts) {
+        const polygonTicker = toPolygonTicker(pos.symbol)
+        const parsed = parseOptionDescription(pos.symbol)
+        if (!polygonTicker || !parsed) continue
+        try {
+          const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+          const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 8000 })
+          const snap = resp.data?.results
+          if (snap) {
+            const mid = snap.last_quote?.midpoint
+            const bid = snap.last_quote?.bid || 0
+            const ask = snap.last_quote?.ask || 0
+            const mark = mid || (bid && ask ? (bid + ask) / 2 : 0) || snap.day?.close || snap.last_trade?.price || 0
+            markPrices[pos.symbol] = mark
+            console.log(`Polygon ${pos.symbol}: bid=${bid} ask=${ask} mid=${mid} day.close=${snap.day?.close} → mark=${mark}`)
+          } else {
+            console.warn(`Polygon ${pos.symbol}: no results in response — status=${resp.data?.status}`)
+          }
+        } catch (e) {
+          console.warn(`Polygon mark price failed for ${pos.symbol}:`, e.response?.status, e.message)
+        }
+      }
+    } else {
+      console.warn('POLYGON_API_KEY not set — skipping options mark prices')
+    }
+
+    const positions = []
+    activeOpts.forEach(pos => {
+      const mark = markPrices[pos.symbol] || 0
+      const parsed = parseOptionDescription(pos.symbol)
+      if (!parsed) return
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      const isLong = pos.net_long > 0
+      const openContracts = isLong ? pos.net_long : pos.net_short
+      const totalCostBasis = isLong ? pos.total_paid : pos.total_received
+      const avgCostPerContract = openContracts > 0 ? Math.abs(totalCostBasis) / (isLong ? pos.bto_contracts : pos.sto_contracts) : 0
+      const currentValue = mark * 100 * openContracts
+      const unrealizedPnl = isLong
+        ? currentValue - (avgCostPerContract * openContracts)
+        : (avgCostPerContract * openContracts) - currentValue
+
+      positions.push({
+        symbol: pos.symbol,
+        ticker: parsed.ticker,
+        expiry,
+        strike: parsed.strike,
+        optionType: parsed.type,
+        openContracts,
+        isLong,
+        avgCostPerContract: Math.round(avgCostPerContract * 100) / 100,
+        markPrice: mark,
+        currentValue: Math.round(currentValue * 100) / 100,
+        unrealizedPnl: mark > 0 ? Math.round(unrealizedPnl * 100) / 100 : null,
+        stockPrice: stockPrices[parsed.ticker] || null
+      })
+    })
+
+    positions.sort((a, b) => a.expiry.localeCompare(b.expiry))
+
+    res.json({
+      success: true,
+      positions,
+      fetchedAt: new Date().toISOString(),
+      expiredFiltered: openOpts.length - activeOpts.length,
+      polygonEnabled: !!polygonKey
+    })
+  } catch (e) {
+    console.error('Error in /api/options-pnl/open-positions:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Debug endpoint to check option trades in database
 app.get('/api/debug/option-trades', requireAuth, (req, res) => {
   try {
@@ -1962,63 +2065,44 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       otherStockPnL = Math.round(otherStockPnL * 100) / 100
     }
 
-    // Open option positions with live mark prices from Polygon
+    // Open option positions — delegate to the dedicated endpoint logic (lightweight, no Polygon here)
     let openOptionPositions = []
     try {
+      const today = new Date().toISOString().slice(0, 10)
       const openOpts = databaseService.getOpenOptionPositions(req.user.userId)
-      if (openOpts.length > 0) {
-        // Fetch bid/ask midpoint from Polygon for each open contract
-        const polygonKey = process.env.POLYGON_API_KEY || 'YOUR_API_KEY_HERE'
-        const markPrices = {}
-        for (const pos of openOpts) {
-          const polygonTicker = toPolygonTicker(pos.symbol)
-          const parsed = parseOptionDescription(pos.symbol)
-          if (!polygonTicker || !parsed) continue
-          try {
-            const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
-            const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 8000 })
-            const snap = resp.data?.results
-            if (snap) {
-              const bid = snap.last_quote?.bid || 0
-              const ask = snap.last_quote?.ask || 0
-              markPrices[pos.symbol] = bid && ask ? (bid + ask) / 2 : (snap.day?.close || snap.last_trade?.price || 0)
-            }
-          } catch (e) {
-            console.warn(`Polygon mark price failed for ${pos.symbol}:`, e.message)
-          }
-        }
+      // Filter out expired options
+      const activeOpts = openOpts.filter(pos => {
+        const parsed = parseOptionDescription(pos.symbol)
+        if (!parsed) return false
+        const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+        return expiry >= today
+      })
 
-        openOpts.forEach(pos => {
-          const mark = markPrices[pos.symbol] || 0
-          const parsed = parseOptionDescription(pos.symbol)
+      activeOpts.forEach(pos => {
+        const parsed = parseOptionDescription(pos.symbol)
+        if (!parsed) return
+        const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+        const isLong = pos.net_long > 0
+        const openContracts = isLong ? pos.net_long : pos.net_short
+        const totalCostBasis = isLong ? pos.total_paid : pos.total_received
+        const avgCostPerContract = openContracts > 0 ? Math.abs(totalCostBasis) / (isLong ? pos.bto_contracts : pos.sto_contracts) : 0
 
-          const isLong = pos.net_long > 0
-          const openContracts = isLong ? pos.net_long : pos.net_short
-          const totalCostBasis = isLong ? pos.total_paid : pos.total_received
-          const avgCostPerContract = openContracts > 0 ? totalCostBasis / (isLong ? pos.bto_contracts : pos.sto_contracts) : 0
-          const currentValue = mark * 100 * openContracts
-          const unrealizedPnl = isLong
-            ? currentValue - (avgCostPerContract * openContracts)
-            : (avgCostPerContract * openContracts) - currentValue
-
-          openOptionPositions.push({
-            symbol: pos.symbol,
-            ticker: parsed?.ticker || '',
-            expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : '',
-            strike: parsed?.strike || 0,
-            optionType: parsed?.type || '',
-            openContracts,
-            isLong,
-            avgCostPerContract: Math.round(avgCostPerContract * 100) / 100,
-            markPrice: mark,
-            currentValue: Math.round(currentValue * 100) / 100,
-            unrealizedPnl: Math.round(unrealizedPnl * 100) / 100
-          })
+        openOptionPositions.push({
+          symbol: pos.symbol,
+          ticker: parsed.ticker,
+          expiry,
+          strike: parsed.strike,
+          optionType: parsed.type,
+          openContracts,
+          isLong,
+          avgCostPerContract: Math.round(avgCostPerContract * 100) / 100,
+          markPrice: 0,
+          currentValue: 0,
+          unrealizedPnl: null
         })
+      })
 
-        // Sort by expiry date
-        openOptionPositions.sort((a, b) => a.expiry.localeCompare(b.expiry))
-      }
+      openOptionPositions.sort((a, b) => a.expiry.localeCompare(b.expiry))
     } catch (e) {
       console.error('Error fetching open option positions:', e.message)
     }
