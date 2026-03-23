@@ -66,7 +66,8 @@ export default function OptionsPnLPanel() {
       const text = await res.text()
       let json
       try { json = JSON.parse(text) } catch { setPosError(`Bad response (${res.status}): ${text.slice(0, 200)}`); return }
-      if (json.success) setLivePositions(json)
+      if (json.success && json.positions?.length > 0) setLivePositions(json)
+      else if (json.success && json.positions?.length === 0) { /* keep old positions if new fetch returns empty */ }
       else setPosError(json.error || 'Unknown error')
     } catch (e) {
       setPosError(e.message)
@@ -239,7 +240,7 @@ export default function OptionsPnLPanel() {
           <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: textMid }}>{data?.weekStart ? `Week of ${fmtDate(data.weekStart)}` : ''}</span>
-            <button onClick={fetchData} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
+            <button onClick={() => { fetchData(); fetchLivePositions() }} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
           </div>
         </div>
 
