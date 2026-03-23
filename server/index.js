@@ -1454,6 +1454,37 @@ const requireAuth = (req, res, next) => {
   next()
 }
 
+// Debug endpoint to test Polygon connection and open option positions
+app.get('/api/debug/polygon-options', requireAuth, async (req, res) => {
+  try {
+    const polygonKey = process.env.POLYGON_API_KEY || 'YOUR_API_KEY_HERE'
+    const keyPreview = polygonKey.slice(0, 6) + '...'
+    const openOpts = databaseService.getOpenOptionPositions(req.user.userId)
+
+    const results = []
+    for (const pos of openOpts) {
+      const polygonTicker = toPolygonTicker(pos.symbol)
+      const parsed = parseOptionDescription(pos.symbol)
+      let polygonResult = null
+      let error = null
+      if (polygonTicker && parsed) {
+        try {
+          const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+          const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 8000 })
+          polygonResult = resp.data
+        } catch (e) {
+          error = e.message
+        }
+      }
+      results.push({ symbol: pos.symbol, polygonTicker, net_long: pos.net_long, net_short: pos.net_short, polygonResult, error })
+    }
+
+    res.json({ success: true, keyPreview, openPositionCount: openOpts.length, results })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Debug endpoint to check option trades in database
 app.get('/api/debug/option-trades', requireAuth, (req, res) => {
   try {
