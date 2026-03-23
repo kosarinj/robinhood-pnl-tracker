@@ -500,6 +500,11 @@ export default function OptionsPnLPanel() {
                     <div style={{ fontSize: '12px', color: textMid }}>
                       mark {hasPrice ? fmt(pos.markPrice) : (posLoading ? '…' : 'N/A')}
                     </div>
+                    {pos.remainingPremium != null && (
+                      <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '2px' }}>
+                        rem. premium {fmt(pos.remainingPremium)}
+                      </div>
+                    )}
                   </div>
                 </div>
               )

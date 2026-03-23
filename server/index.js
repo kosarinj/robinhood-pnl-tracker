@@ -1508,9 +1508,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
       return p?.ticker
     }).filter(Boolean))]
 
-    // Fetch underlying stock prices fresh from Yahoo Finance (bypass cache)
+    // Get underlying stock prices (use cache from main route if available, else fetch)
     const stockPrices = underlyingTickers.length > 0
-      ? await priceService.fetchPrices(underlyingTickers)
+      ? await priceService.getPrices(underlyingTickers)
       : {}
 
     // Fetch Polygon mark prices for each open contract
@@ -1557,6 +1557,17 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         ? currentValue - (avgCostPerContract * openContracts)
         : (avgCostPerContract * openContracts) - currentValue
 
+      const stockPrice = stockPrices[parsed.ticker] > 0 ? stockPrices[parsed.ticker] : null
+
+      // Remaining premium (extrinsic value) for sold calls/puts
+      let remainingPremium = null
+      if (!isLong && mark > 0) {
+        const intrinsic = parsed.type === 'call'
+          ? Math.max(0, (stockPrice || 0) - parsed.strike)
+          : Math.max(0, parsed.strike - (stockPrice || 0))
+        remainingPremium = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
+      }
+
       positions.push({
         symbol: pos.symbol,
         ticker: parsed.ticker,
@@ -1569,7 +1580,8 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         markPrice: mark,
         currentValue: Math.round(currentValue * 100) / 100,
         unrealizedPnl: mark > 0 ? Math.round(unrealizedPnl * 100) / 100 : null,
-        stockPrice: stockPrices[parsed.ticker] || null
+        stockPrice,
+        remainingPremium
       })
     })
 
