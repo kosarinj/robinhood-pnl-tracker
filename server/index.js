@@ -1559,13 +1559,20 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
       const stockPrice = stockPrices[parsed.ticker] > 0 ? stockPrices[parsed.ticker] : null
 
-      // Remaining premium (extrinsic value) for sold calls/puts
+      // Remaining premium (extrinsic value) for short calls and long puts
       let remainingPremium = null
-      if (!isLong && mark > 0) {
-        const intrinsic = parsed.type === 'call'
-          ? Math.max(0, (stockPrice || 0) - parsed.strike)
-          : Math.max(0, parsed.strike - (stockPrice || 0))
-        remainingPremium = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
+      let remainingPremiumLabel = null
+      if (mark > 0) {
+        const s = stockPrice || 0
+        if (!isLong && parsed.type === 'call') {
+          const intrinsic = Math.max(0, s - parsed.strike)
+          remainingPremium = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
+          remainingPremiumLabel = 'Rem Short Call Premium'
+        } else if (isLong && parsed.type === 'put') {
+          const intrinsic = Math.max(0, parsed.strike - s)
+          remainingPremium = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
+          remainingPremiumLabel = 'Rem Long Put Premium'
+        }
       }
 
       positions.push({
@@ -1581,7 +1588,8 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         currentValue: Math.round(currentValue * 100) / 100,
         unrealizedPnl: mark > 0 ? Math.round(unrealizedPnl * 100) / 100 : null,
         stockPrice,
-        remainingPremium
+        remainingPremium,
+        remainingPremiumLabel
       })
     })
 

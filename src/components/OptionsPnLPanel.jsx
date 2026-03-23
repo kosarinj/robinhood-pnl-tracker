@@ -154,6 +154,15 @@ export default function OptionsPnLPanel() {
     if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
     return m
   }, {})
+  // Remaining premium grouped by ticker — track short calls and long puts separately
+  const remPremByTicker = openPositions.reduce((m, p) => {
+    if (p.remainingPremium != null) {
+      if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null }
+      if (!p.isLong && p.optionType === 'call') m[p.ticker].shortCall = (m[p.ticker].shortCall || 0) + p.remainingPremium
+      if (p.isLong && p.optionType === 'put') m[p.ticker].longPut = (m[p.ticker].longPut || 0) + p.remainingPremium
+    }
+    return m
+  }, {})
 
   return (
     <div style={{ color: text }}>
@@ -244,28 +253,34 @@ export default function OptionsPnLPanel() {
               {/* Tickers with open positions but no current-week trades */}
               {Object.entries(unrealizedByTicker)
                 .filter(([ticker]) => !data.currentWeekByUnderlying[ticker])
-                .map(([ticker, unrealizedPnl]) => (
-                  <div key={`open-${ticker}`} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
-                    <div style={{
-                      padding: '8px 12px', borderRadius: '8px',
-                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                      border: `1px solid ${border}`, fontSize: '12px'
-                    }}>
-                      <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
-                          Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                .map(([ticker, unrealizedPnl]) => {
+                  const rp = remPremByTicker[ticker]
+                  return (
+                    <div key={`open-${ticker}`} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                      <div style={{
+                        padding: '8px 12px', borderRadius: '8px',
+                        background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                        border: `1px solid ${border}`, fontSize: '12px'
+                      }}>
+                        <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
+                            Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                          </div>
+                          {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
+                          {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               }
               {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
                 const stockEntry = data.weeklyStockPnL?.[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
                 const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
                 const unrealizedPnl = unrealizedByTicker[ticker]
+                const rp = remPremByTicker[ticker]
                 const combined = stockPnl !== undefined || unrealizedPnl !== undefined
                   ? optPnl + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
                   : null
@@ -306,6 +321,8 @@ export default function OptionsPnLPanel() {
                             Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
                           </div>
                         )}
+                        {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
+                        {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
                         {combined !== null && (
                           <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
                             Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
@@ -502,7 +519,7 @@ export default function OptionsPnLPanel() {
                     </div>
                     {pos.remainingPremium != null && (
                       <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '2px' }}>
-                        rem. premium {fmt(pos.remainingPremium)}
+                        {pos.remainingPremiumLabel || 'Rem. Premium'}: {fmt(pos.remainingPremium)}
                       </div>
                     )}
                   </div>
