@@ -263,9 +263,10 @@ export class PriceService {
   async getPricesForDate(symbols, dateString) {
     const prices = {}
     const symbolsToFetch = []
+    const isToday = dateString === new Date().toISOString().slice(0, 10)
 
-    // Check cache for all symbols first
-    if (this.databaseService) {
+    // Skip DB cache for today — always fetch live price
+    if (this.databaseService && !isToday) {
       const cachedPrices = this.databaseService.getHistoricalPricesForDate(symbols, dateString)
       Object.assign(prices, cachedPrices)
 
