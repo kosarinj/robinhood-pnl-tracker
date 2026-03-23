@@ -119,11 +119,11 @@ export default function OptionsPnLPanel() {
   })
 
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
-  const openPositions = data?.openOptionPositions || []
-  const totalUnrealizedPnl = openPositions.reduce((s, p) => s + p.unrealizedPnl, 0)
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL
+  const openPositions = data?.openOptionPositions || []
+  const totalUnrealizedPnl = openPositions.reduce((s, p) => s + p.unrealizedPnl, 0)
 
   return (
     <div style={{ color: text }}>
@@ -184,43 +184,6 @@ export default function OptionsPnLPanel() {
           </div>
           <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + all stocks</div>
         </div>
-      </div>
-
-      {/* Open Positions Card */}
-      <div style={{ ...cardStyle, marginBottom: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Option Positions</div>
-          {openPositions.length > 0 && (
-            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: totalUnrealizedPnl >= 0 ? green : red }}>
-              {fmt(totalUnrealizedPnl)} unrealized
-            </div>
-          )}
-        </div>
-        {openPositions.length === 0 ? (
-          <div style={{ fontSize: '13px', color: textMid }}>
-            No open positions detected in your uploaded CSV. Upload your latest CSV to see open contracts.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {openPositions.map((pos, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: isDark ? '#161926' : '#f8fafc', borderRadius: '8px', border: `1px solid ${border}` }}>
-                <div>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: text }}>
-                    {pos.ticker} {pos.strike} {pos.optionType?.toUpperCase()} &nbsp;
-                    <span style={{ fontSize: '12px', fontWeight: '500', color: pos.isLong ? green : '#f59e0b' }}>{pos.isLong ? 'LONG' : 'SHORT'}</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: textMid, marginTop: '2px' }}>
-                    Exp {pos.expiry} · {pos.openContracts} contract{pos.openContracts !== 1 ? 's' : ''} · cost {fmt(pos.avgCostPerContract)}/contract
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: pos.unrealizedPnl >= 0 ? green : red }}>{fmt(pos.unrealizedPnl)}</div>
-                  <div style={{ fontSize: '12px', color: textMid }}>mark {pos.markPrice > 0 ? fmt(pos.markPrice) : 'N/A'}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Per-underlying breakdown + refresh */}
@@ -419,6 +382,41 @@ export default function OptionsPnLPanel() {
                 </tr>
               </tfoot>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* Open Option Positions */}
+      <div style={{ ...cardStyle, marginTop: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Option Positions</div>
+          {openPositions.length > 0 && (
+            <div style={{ fontWeight: '800', fontSize: '1.1rem', color: totalUnrealizedPnl >= 0 ? green : red }}>
+              {fmt(totalUnrealizedPnl)} unrealized
+            </div>
+          )}
+        </div>
+        {openPositions.length === 0 ? (
+          <div style={{ fontSize: '13px', color: textMid }}>No open positions detected — upload your latest CSV to see open contracts.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {openPositions.map((pos, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: isDark ? '#161926' : '#f8fafc', borderRadius: '8px', border: `1px solid ${border}` }}>
+                <div>
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: text }}>
+                    {pos.ticker} {pos.strike} {pos.optionType?.toUpperCase()}&nbsp;
+                    <span style={{ fontSize: '12px', fontWeight: '500', color: pos.isLong ? green : '#f59e0b' }}>{pos.isLong ? 'LONG' : 'SHORT'}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: textMid, marginTop: '2px' }}>
+                    Exp {pos.expiry} · {pos.openContracts} contract{pos.openContracts !== 1 ? 's' : ''} · cost {fmt(pos.avgCostPerContract)}/contract
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: pos.unrealizedPnl >= 0 ? green : red }}>{fmt(pos.unrealizedPnl)}</div>
+                  <div style={{ fontSize: '12px', color: textMid }}>mark {pos.markPrice > 0 ? fmt(pos.markPrice) : 'N/A'}</div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
