@@ -187,14 +187,20 @@ export default function OptionsPnLPanel() {
       </div>
 
       {/* Open Positions Card */}
-      {openPositions.length > 0 && (
-        <div style={{ ...cardStyle, marginBottom: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Positions</div>
+      <div style={{ ...cardStyle, marginBottom: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Option Positions</div>
+          {openPositions.length > 0 && (
             <div style={{ fontWeight: '800', fontSize: '1.1rem', color: totalUnrealizedPnl >= 0 ? green : red }}>
               {fmt(totalUnrealizedPnl)} unrealized
             </div>
+          )}
+        </div>
+        {openPositions.length === 0 ? (
+          <div style={{ fontSize: '13px', color: textMid }}>
+            No open positions detected in your uploaded CSV. Upload your latest CSV to see open contracts.
           </div>
+        ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {openPositions.map((pos, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: isDark ? '#161926' : '#f8fafc', borderRadius: '8px', border: `1px solid ${border}` }}>
@@ -214,8 +220,8 @@ export default function OptionsPnLPanel() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Per-underlying breakdown + refresh */}
       <div style={{
