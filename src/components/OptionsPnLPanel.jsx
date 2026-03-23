@@ -63,9 +63,11 @@ export default function OptionsPnLPanel() {
     setPosError(null)
     try {
       const res = await fetch('/api/options-pnl/open-positions', { credentials: 'include' })
-      const json = await res.json()
+      const text = await res.text()
+      let json
+      try { json = JSON.parse(text) } catch { setPosError(`Bad response (${res.status}): ${text.slice(0, 200)}`); return }
       if (json.success) setLivePositions(json)
-      else setPosError(json.error)
+      else setPosError(json.error || 'Unknown error')
     } catch (e) {
       setPosError(e.message)
     } finally {
