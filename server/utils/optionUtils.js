@@ -30,6 +30,19 @@ export function toPolygonTicker(description) {
 }
 
 /**
+ * Convert to Yahoo Finance option ticker format.
+ * e.g. "PLTR 01/17/2025 Call $155.00" → "PLTR250117C00155000"
+ */
+export function toYahooOptionTicker(description) {
+  const p = parseOptionDescription(description)
+  if (!p) return null
+  const yy = p.year.slice(2)
+  const typeChar = p.type === 'call' ? 'C' : 'P'
+  const strikePadded = String(Math.round(p.strike * 1000)).padStart(8, '0')
+  return `${p.ticker}${yy}${p.month}${p.day}${typeChar}${strikePadded}`
+}
+
+/**
  * Calculate premium left (extrinsic value) for an option.
  */
 export function calcPremiumLeft(optionPrice, stockPrice, strike, type) {

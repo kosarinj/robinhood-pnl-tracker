@@ -99,14 +99,17 @@ export class PriceService {
         const symbolList = batch.join(',')
 
         try {
-          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbolList}&fields=regularMarketPrice`
+          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbolList}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`
           const response = await axios.get(url, { timeout: 10000, headers })
 
           const quotes = response.data?.quoteResponse?.result || []
           quotes.forEach(q => {
-            if (q.regularMarketPrice) {
-              prices[q.symbol] = q.regularMarketPrice
-              this.priceCache.set(q.symbol, q.regularMarketPrice)
+            let price = q.regularMarketPrice
+            if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
+            else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
+            if (price) {
+              prices[q.symbol] = price
+              this.priceCache.set(q.symbol, price)
             }
           })
 

@@ -40,7 +40,9 @@ export const parseTrades = (file) => {
 
             // For options: use the Amount field directly (already correct contract value)
             // Set quantity=1 and price=amount so that quantity*price=amount in calculations
+            let contracts = 1
             if (isOption) {
+              contracts = Math.abs(quantity) || 1
               quantity = 1
               price = amount
             }
@@ -65,6 +67,7 @@ export const parseTrades = (file) => {
               isOption,
               isBuy,
               isExpiry,
+              contracts,
               quantity: Math.abs(quantity),
               price: Math.abs(price),
               amount: Math.abs(amount),

@@ -239,6 +239,14 @@ try {
     `)
     console.log('✅ Added is_option column and updated existing trades')
   }
+
+  // Migration: Add contracts column to trades table if it doesn't exist
+  const hasContracts = tableInfo.some(col => col.name === 'contracts')
+  if (!hasContracts) {
+    db.exec('ALTER TABLE trades ADD COLUMN contracts INTEGER DEFAULT 1')
+    db.exec(`UPDATE trades SET contracts = 1 WHERE contracts IS NULL`)
+    console.log('✅ Added contracts column to trades table')
+  }
 } catch (error) {
   console.error('Migration error:', error)
 }
@@ -411,8 +419,8 @@ const upsertPnLSnapshot = db.prepare(`
 `)
 
 const insertTrade = db.prepare(`
-  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, user_id)
-  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption, @userId)
+  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, contracts, user_id)
+  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption, @contracts, @userId)
 `)
 
 const upsertCsvUpload = db.prepare(`
@@ -989,6 +997,7 @@ export class DatabaseService {
             description: trade.description || null,
             isBuy: trade.isBuy ? 1 : 0,
             isOption: trade.isOption ? 1 : 0,
+            contracts: trade.contracts || 1,
             userId
           })
         }
@@ -1544,6 +1553,36 @@ export class DatabaseService {
       console.error('Error getting all positions:', error)
       return {}
     }
+  }
+
+  getOpenOptionPositions(userId = 1) {
+    const rows = db.prepare(`
+      SELECT
+        symbol,
+        SUM(CASE WHEN trans_code = 'BTO' THEN COALESCE(contracts, 1) ELSE 0 END) as bto_contracts,
+        SUM(CASE WHEN trans_code = 'STO' THEN COALESCE(contracts, 1) ELSE 0 END) as sto_contracts,
+        SUM(CASE WHEN trans_code IN ('STC', 'OEXP', 'OASGN', 'OEXC') THEN COALESCE(contracts, 1) ELSE 0 END) as ltc_contracts,
+        SUM(CASE WHEN trans_code = 'BTC' THEN COALESCE(contracts, 1) ELSE 0 END) as btc_contracts,
+        SUM(CASE WHEN trans_code = 'BTO' THEN amount ELSE 0 END) as total_paid,
+        SUM(CASE WHEN trans_code = 'STO' THEN amount ELSE 0 END) as total_received,
+        MAX(trans_date) as last_trade_date
+      FROM trades
+      WHERE is_option = 1 AND user_id = ?
+      GROUP BY symbol
+    `).all(userId)
+
+    return rows
+      .map(r => ({
+        symbol: r.symbol,
+        net_long: (r.bto_contracts || 0) - (r.ltc_contracts || 0),
+        net_short: (r.sto_contracts || 0) - (r.btc_contracts || 0),
+        bto_contracts: r.bto_contracts || 0,
+        sto_contracts: r.sto_contracts || 0,
+        total_paid: r.total_paid || 0,
+        total_received: r.total_received || 0,
+        last_trade_date: r.last_trade_date
+      }))
+      .filter(r => r.net_long > 0 || r.net_short > 0)
   }
 
   // Close database connection

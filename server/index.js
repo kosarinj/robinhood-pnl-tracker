@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url'
 import { dirname } from 'path'
 import path from 'path'
 import axios from 'axios'
-import { parseOptionDescription, toPolygonTicker, calcPremiumLeft } from './utils/optionUtils.js'
+import { parseOptionDescription, toPolygonTicker, calcPremiumLeft, toYahooOptionTicker } from './utils/optionUtils.js'
 
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
@@ -1931,7 +1931,52 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       otherStockPnL = Math.round(otherStockPnL * 100) / 100
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr })
+    // Open option positions with live mark prices
+    let openOptionPositions = []
+    try {
+      const openOpts = databaseService.getOpenOptionPositions(req.user.userId)
+      if (openOpts.length > 0) {
+        const yahooSymbols = openOpts.map(p => toYahooOptionTicker(p.symbol)).filter(Boolean)
+        const markPrices = await priceService.fetchPrices(yahooSymbols)
+
+        openOpts.forEach(pos => {
+          const yahooSym = toYahooOptionTicker(pos.symbol)
+          const mark = markPrices[yahooSym] || 0
+          const parsed = parseOptionDescription(pos.symbol)
+
+          const isLong = pos.net_long > 0
+          const openContracts = isLong ? pos.net_long : pos.net_short
+          const totalCostBasis = isLong ? pos.total_paid : pos.total_received
+          const avgCostPerContract = openContracts > 0 ? totalCostBasis / (isLong ? pos.bto_contracts : pos.sto_contracts) : 0
+          const currentValue = mark * 100 * openContracts
+          const unrealizedPnl = isLong
+            ? currentValue - (avgCostPerContract * openContracts)
+            : (avgCostPerContract * openContracts) - currentValue
+
+          openOptionPositions.push({
+            symbol: pos.symbol,
+            yahooSymbol: yahooSym,
+            ticker: parsed?.ticker || '',
+            expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : '',
+            strike: parsed?.strike || 0,
+            optionType: parsed?.type || '',
+            openContracts,
+            isLong,
+            avgCostPerContract: Math.round(avgCostPerContract * 100) / 100,
+            markPrice: mark,
+            currentValue: Math.round(currentValue * 100) / 100,
+            unrealizedPnl: Math.round(unrealizedPnl * 100) / 100
+          })
+        })
+
+        // Sort by expiry date
+        openOptionPositions.sort((a, b) => a.expiry.localeCompare(b.expiry))
+      }
+    } catch (e) {
+      console.error('Error fetching open option positions:', e.message)
+    }
+
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
