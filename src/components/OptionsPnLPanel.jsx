@@ -282,11 +282,14 @@ export default function OptionsPnLPanel() {
                 const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
                 const unrealizedPnl = unrealizedByTicker[ticker]
                 const rp = remPremByTicker[ticker]
-                const combined = stockPnl !== undefined || unrealizedPnl !== undefined
-                  ? optPnl + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
-                  : null
                 const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
                 const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
+                // When unrealized is available, Net = realized + unrealized + stock
+                // (avoids double-counting BTO cost which is already inside unrealizedPnl)
+                // When no unrealized, Net = options cash flows + stock (existing behavior)
+                const combined = stockPnl !== undefined || unrealizedPnl !== undefined
+                  ? (unrealizedPnl !== undefined ? (realizedPnl ?? 0) : optPnl) + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
+                  : null
                 const isExpanded = expandedTicker === ticker
                 return (
                   <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
