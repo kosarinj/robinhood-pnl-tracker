@@ -241,6 +241,26 @@ export default function OptionsPnLPanel() {
               This Week by Underlying
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {/* Tickers with open positions but no current-week trades */}
+              {Object.entries(unrealizedByTicker)
+                .filter(([ticker]) => !data.currentWeekByUnderlying[ticker])
+                .map(([ticker, unrealizedPnl]) => (
+                  <div key={`open-${ticker}`} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                    <div style={{
+                      padding: '8px 12px', borderRadius: '8px',
+                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                      border: `1px solid ${border}`, fontSize: '12px'
+                    }}>
+                      <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
+                          Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              }
               {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
                 const stockEntry = data.weeklyStockPnL?.[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
