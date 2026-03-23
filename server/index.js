@@ -1513,8 +1513,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
       ? await priceService.getPrices(underlyingTickers)
       : {}
 
-    // Fetch Polygon mark prices for each open contract
+    // Fetch Polygon mark prices + underlying stock prices for each open contract
     const markPrices = {}
+    const polygonStockPrices = {}  // stock prices from Polygon option snapshot
     if (polygonKey) {
       for (const pos of activeOpts) {
         const polygonTicker = toPolygonTicker(pos.symbol)
@@ -1530,9 +1531,12 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
             const ask = snap.last_quote?.ask || 0
             const mark = mid || (bid && ask ? (bid + ask) / 2 : 0) || snap.day?.close || snap.last_trade?.price || 0
             markPrices[pos.symbol] = mark
-            console.log(`Polygon ${pos.symbol}: bid=${bid} ask=${ask} mid=${mid} day.close=${snap.day?.close} → mark=${mark}`)
+            // Grab underlying stock price from the snapshot — no extra API call needed
+            const underlyingPrice = snap.underlying_asset?.price
+            if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
+            console.log(`Polygon ${pos.symbol}: mark=${mark} underlying=${underlyingPrice}`)
           } else {
-            console.warn(`Polygon ${pos.symbol}: no results in response — status=${resp.data?.status}`)
+            console.warn(`Polygon ${pos.symbol}: no results — status=${resp.data?.status}`)
           }
         } catch (e) {
           console.warn(`Polygon mark price failed for ${pos.symbol}:`, e.response?.status, e.message)
@@ -1557,21 +1561,23 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         ? currentValue - (avgCostPerContract * openContracts)
         : (avgCostPerContract * openContracts) - currentValue
 
-      const stockPrice = stockPrices[parsed.ticker] > 0 ? stockPrices[parsed.ticker] : null
+      // Prefer Polygon underlying price (from snapshot), fall back to Yahoo Finance cache
+      const stockPrice = (polygonStockPrices[parsed.ticker] > 0 ? polygonStockPrices[parsed.ticker] : null)
+        ?? (stockPrices[parsed.ticker] > 0 ? stockPrices[parsed.ticker] : null)
 
       // Remaining premium (extrinsic value) for short calls and long puts
+      // Only calculate when we have a real stock price — otherwise intrinsic is unknown
       let remainingPremium = null
       let remainingPremiumLabel = null
-      if (mark > 0) {
-        const s = stockPrice || 0
+      if (mark > 0 && stockPrice) {
         if (!isLong && parsed.type === 'call') {
-          const intrinsic = Math.max(0, s - parsed.strike)
-          remainingPremium = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
-          remainingPremiumLabel = 'Rem Short Call Premium'
+          const intrinsic = Math.max(0, stockPrice - parsed.strike)
+          const extrinsic = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
+          if (extrinsic > 0) { remainingPremium = extrinsic; remainingPremiumLabel = 'Rem Short Call Premium' }
         } else if (isLong && parsed.type === 'put') {
-          const intrinsic = Math.max(0, parsed.strike - s)
-          remainingPremium = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
-          remainingPremiumLabel = 'Rem Long Put Premium'
+          const intrinsic = Math.max(0, parsed.strike - stockPrice)
+          const extrinsic = Math.round(Math.max(0, mark - intrinsic) * 100) / 100
+          if (extrinsic > 0) { remainingPremium = extrinsic; remainingPremiumLabel = 'Rem Long Put Premium' }
         }
       }
 
