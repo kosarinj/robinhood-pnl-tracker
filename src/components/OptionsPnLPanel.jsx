@@ -428,21 +428,13 @@ export default function OptionsPnLPanel() {
               </span>
             )}
           </div>
-          {openPositions.length > 0 && livePositions && totalUnrealizedPnl !== 0 && (
+          {openPositions.length > 0 && livePositions?.positions?.some(p => p.unrealizedPnl != null) && (
             <div style={{ fontWeight: '800', fontSize: '1.1rem', color: totalUnrealizedPnl >= 0 ? green : red }}>
               {fmt(totalUnrealizedPnl)} unrealized
             </div>
           )}
         </div>
         {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>Error: {posError}</div>}
-
-        {/* Diagnostic output — shows server response */}
-        {livePositions && (
-          <div style={{ fontSize: '11px', color: textMid, background: isDark ? '#0d0f1a' : '#f1f5f9', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-            {JSON.stringify({ polygonEnabled: livePositions.polygonEnabled, positionCount: livePositions.positions?.length, expiredFiltered: livePositions.expiredFiltered, positions: livePositions.positions?.map(p => ({ symbol: p.symbol, mark: p.markPrice, stock: p.stockPrice, unrealized: p.unrealizedPnl })) }, null, 2)}
-          </div>
-        )}
-
         {openPositions.length === 0 ? (
           <div style={{ fontSize: '13px', color: textMid }}>No open positions detected — upload your latest CSV to see open contracts.</div>
         ) : (

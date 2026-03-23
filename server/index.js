@@ -1508,9 +1508,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
       return p?.ticker
     }).filter(Boolean))]
 
-    // Fetch underlying stock prices in bulk via Yahoo Finance
+    // Fetch underlying stock prices fresh from Yahoo Finance (bypass cache)
     const stockPrices = underlyingTickers.length > 0
-      ? await priceService.getPrices(underlyingTickers)
+      ? await priceService.fetchPrices(underlyingTickers)
       : {}
 
     // Fetch Polygon mark prices for each open contract
