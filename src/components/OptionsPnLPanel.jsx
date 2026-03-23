@@ -144,10 +144,11 @@ export default function OptionsPnLPanel() {
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
-  const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
+  const hasPrices = openPositions.some(p => p.unrealizedPnl != null)
   const totalUnrealizedPnl = openPositions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
+  const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL + (hasPrices ? totalUnrealizedPnl : 0)
 
   return (
     <div style={{ color: text }}>
@@ -206,7 +207,12 @@ export default function OptionsPnLPanel() {
           <div style={{ fontSize: '2rem', fontWeight: '800', color: netWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(netWeekPnL)}
           </div>
-          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + all stocks</div>
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + all stocks{hasPrices ? ' + unrealized' : ''}</div>
+          {hasPrices && (
+            <div style={{ fontSize: '12px', color: totalUnrealizedPnl >= 0 ? green : red, marginTop: '2px' }}>
+              Open positions: {fmt(totalUnrealizedPnl)} unrealized
+            </div>
+          )}
         </div>
       </div>
 
