@@ -1542,6 +1542,26 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
           console.warn(`Polygon mark price failed for ${pos.symbol}:`, e.response?.status, e.message)
         }
       }
+      // For any tickers still missing a stock price, fetch via Polygon prev close
+      const missingTickers = [...new Set(activeOpts.map(pos => {
+        const p = parseOptionDescription(pos.symbol)
+        return p?.ticker
+      }).filter(t => t && !polygonStockPrices[t]))]
+
+      for (const ticker of missingTickers) {
+        try {
+          const r = await axios.get(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}`, {
+            params: { apiKey: polygonKey }, timeout: 5000
+          })
+          const price = r.data?.ticker?.day?.c || r.data?.ticker?.prevDay?.c || 0
+          if (price > 0) {
+            polygonStockPrices[ticker] = price
+            console.log(`Polygon stock fallback ${ticker}: $${price}`)
+          }
+        } catch (e) {
+          console.warn(`Polygon stock price fallback failed for ${ticker}:`, e.message)
+        }
+      }
     } else {
       console.warn('POLYGON_API_KEY not set — skipping options mark prices')
     }
