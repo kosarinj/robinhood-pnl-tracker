@@ -239,7 +239,7 @@ export default function OptionsPnLPanel() {
           <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: textMid }}>{data?.weekStart ? `Week of ${fmtDate(data.weekStart)}` : ''}</span>
-            <button onClick={() => { fetchData(); fetchLivePositions() }} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
+            <button onClick={fetchData} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
           </div>
         </div>
 
