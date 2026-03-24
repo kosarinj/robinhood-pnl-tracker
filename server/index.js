@@ -1622,9 +1622,13 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
     positions.sort((a, b) => a.expiry.localeCompare(b.expiry))
 
+    // Merge all stock prices collected (Polygon snapshot + Yahoo fallback)
+    const allStockPrices = { ...stockPrices, ...polygonStockPrices }
+
     res.json({
       success: true,
       positions,
+      stockPrices: allStockPrices,
       fetchedAt: new Date().toISOString(),
       expiredFiltered: openOpts.length - activeOpts.length,
       polygonEnabled: !!polygonKey

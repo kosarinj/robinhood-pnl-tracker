@@ -155,11 +155,11 @@ export default function OptionsPnLPanel() {
     if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
     return m
   }, {})
-  // Stock price by ticker (from Polygon snapshot on open positions)
-  const stockPriceByTicker = openPositions.reduce((m, p) => {
-    if (p.stockPrice && !m[p.ticker]) m[p.ticker] = p.stockPrice
-    return m
-  }, {})
+  // Stock price by ticker — prefer livePositions.stockPrices (Polygon), fall back to per-position stockPrice
+  const stockPriceByTicker = {
+    ...openPositions.reduce((m, p) => { if (p.stockPrice && !m[p.ticker]) m[p.ticker] = p.stockPrice; return m }, {}),
+    ...(livePositions?.stockPrices || {})
+  }
   // Remaining premium grouped by ticker — track short calls and long puts separately
   const remPremByTicker = openPositions.reduce((m, p) => {
     if (p.remainingPremium != null) {
@@ -308,7 +308,7 @@ export default function OptionsPnLPanel() {
                   ? (unrealizedPnl !== undefined ? (realizedPnl ?? 0) : optPnl) + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
                   : null
                 const isExpanded = expandedTicker === ticker
-                const sp = stockPriceByTicker[ticker]
+                const sp = stockPriceByTicker[ticker] || stockEntry?.toPrice
                 return (
                   <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                     <div
