@@ -1623,8 +1623,12 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
     positions.sort((a, b) => a.expiry.localeCompare(b.expiry))
 
-    // Merge all stock prices collected (Polygon snapshot + Yahoo fallback)
-    const allStockPrices = { ...stockPrices, ...polygonStockPrices }
+    // Merge: start with Polygon snapshot prices, let fresh Yahoo Finance prices win when non-zero
+    const allStockPrices = { ...polygonStockPrices }
+    Object.entries(stockPrices).forEach(([ticker, price]) => {
+      if (price > 0) allStockPrices[ticker] = price
+    })
+    console.log('Stock prices for By Underlying:', JSON.stringify(allStockPrices))
 
     res.json({
       success: true,
