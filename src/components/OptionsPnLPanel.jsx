@@ -155,6 +155,11 @@ export default function OptionsPnLPanel() {
     if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
     return m
   }, {})
+  // Stock price by ticker (from Polygon snapshot on open positions)
+  const stockPriceByTicker = openPositions.reduce((m, p) => {
+    if (p.stockPrice && !m[p.ticker]) m[p.ticker] = p.stockPrice
+    return m
+  }, {})
   // Remaining premium grouped by ticker — track short calls and long puts separately
   const remPremByTicker = openPositions.reduce((m, p) => {
     if (p.remainingPremium != null) {
@@ -264,6 +269,7 @@ export default function OptionsPnLPanel() {
                 .filter(([ticker]) => !data.currentWeekByUnderlying[ticker])
                 .map(([ticker, unrealizedPnl]) => {
                   const rp = remPremByTicker[ticker]
+                  const sp = stockPriceByTicker[ticker]
                   return (
                     <div key={`open-${ticker}`} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                       <div style={{
@@ -271,7 +277,10 @@ export default function OptionsPnLPanel() {
                         background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
                         border: `1px solid ${border}`, fontSize: '12px'
                       }}>
-                        <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                          {sp && <span style={{ fontSize: '11px', color: textMid }}>{fmt(sp)}</span>}
+                        </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
                             Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
@@ -299,6 +308,7 @@ export default function OptionsPnLPanel() {
                   ? (unrealizedPnl !== undefined ? (realizedPnl ?? 0) : optPnl) + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
                   : null
                 const isExpanded = expandedTicker === ticker
+                const sp = stockPriceByTicker[ticker]
                 return (
                   <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                     <div
@@ -311,7 +321,7 @@ export default function OptionsPnLPanel() {
                         borderBottom: isExpanded ? 'none' : `1px solid ${border}`
                       }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                        <span style={{ fontWeight: '700', color: text }}>{ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}</span>
                         <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
