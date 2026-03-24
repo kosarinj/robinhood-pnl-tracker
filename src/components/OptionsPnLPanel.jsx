@@ -365,7 +365,7 @@ export default function OptionsPnLPanel() {
                                   <div style={{ color: t.realizedPnl >= 0 ? green : red, fontWeight: '700' }}>
                                     {t.realizedPnl >= 0 ? '+' : ''}{fmt(t.realizedPnl)}
                                   </div>
-                                  <div style={{ fontSize: '10px', color: textMid }}>
+                                  <div style={{ fontSize: '10px', color: textMid, marginTop: '3px' }}>
                                     proceeds {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
                                   </div>
                                 </>
