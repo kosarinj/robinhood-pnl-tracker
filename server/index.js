@@ -1995,7 +1995,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     // Global LIFO pass: compute realized P&L per closing trade across all time
     // Writes _realizedPnl directly onto each trade object so contractGroups pass can read it
     const lifoStacks = {} // symbol → { long: [], short: [] }
-    const sortedTrades = [...trades].sort((a, b) => a.trans_date.localeCompare(b.trans_date) || ((a.id || 0) - (b.id || 0)))
+    const sortedTrades = [...trades].sort((a, b) =>
+      a.trans_date.localeCompare(b.trans_date) ||
+      ((a.id || 0) - (b.id || 0)) ||
+      (a.is_buy ? 0 : 1) - (b.is_buy ? 0 : 1)  // buys before sells on same date
+    )
     sortedTrades.forEach(t => {
       const tc = (t.trans_code || '').toUpperCase()
       // Normalize symbol to handle month/day padding differences (e.g. "3/27" vs "03/27")
