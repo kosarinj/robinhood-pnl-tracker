@@ -2025,8 +2025,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
           top.remainingContracts -= matched
           if (top.remainingContracts === 0) stack.pop()
         }
-        const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
-        t._realizedPnl = Math.round((tc === 'BTC' ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
+        // If contractsLeft > 0, we couldn't find the BTO (not in DB) — don't show P&L
+        if (contractsLeft === 0) {
+          const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
+          t._realizedPnl = Math.round((tc === 'BTC' ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
+        }
       }
     })
 
