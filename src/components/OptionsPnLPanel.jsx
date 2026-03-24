@@ -149,7 +149,10 @@ export default function OptionsPnLPanel() {
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
   const hasPrices = openPositions.some(p => p.unrealizedPnl != null)
   const totalUnrealizedPnl = openPositions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
-  const netWeekPnL = (data?.currentWeekPnL || 0) + totalStockPnL + otherStockPnL + (hasPrices ? totalUnrealizedPnl : 0)
+  const optionsWeekPnL = hasPrices
+    ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
+    : (data?.currentWeekPnL || 0)
+  const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
   // Unrealized P&L grouped by underlying ticker
   const unrealizedByTicker = openPositions.reduce((m, p) => {
     if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
@@ -175,23 +178,16 @@ export default function OptionsPnLPanel() {
       {/* This Week Hero Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         {/* Options P&L */}
-        {(() => {
-          const optionsDisplay = hasPrices
-            ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
-            : (data?.currentWeekPnL || 0)
-          return (
-            <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${optionsDisplay >= 0 ? green : red}` }}>
-              <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
-              <div style={{ fontSize: '2rem', fontWeight: '800', color: optionsDisplay >= 0 ? green : red, lineHeight: 1 }}>
-                {loading ? '…' : fmt(optionsDisplay)}
-              </div>
-              <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>
-                Realized: <span style={{ color: (data?.currentWeekRealizedTotal || 0) >= 0 ? green : red, fontWeight: '600' }}>{fmt(data?.currentWeekRealizedTotal || 0)}</span>
-                {hasPrices && <span style={{ marginLeft: '8px' }}>· Unrealized: <span style={{ color: totalUnrealizedPnl >= 0 ? green : red, fontWeight: '600' }}>{fmt(totalUnrealizedPnl)}</span></span>}
-              </div>
-            </div>
-          )
-        })()}
+        <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${optionsWeekPnL >= 0 ? green : red}` }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
+          <div style={{ fontSize: '2rem', fontWeight: '800', color: optionsWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
+            {loading ? '…' : fmt(optionsWeekPnL)}
+          </div>
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>
+            Realized: <span style={{ color: (data?.currentWeekRealizedTotal || 0) >= 0 ? green : red, fontWeight: '600' }}>{fmt(data?.currentWeekRealizedTotal || 0)}</span>
+            {hasPrices && <span style={{ marginLeft: '8px' }}>· Unrealized: <span style={{ color: totalUnrealizedPnl >= 0 ? green : red, fontWeight: '600' }}>{fmt(totalUnrealizedPnl)}</span></span>}
+          </div>
+        </div>
         {/* Stock P&L */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${totalStockPnL >= 0 ? green : red}` }}>
           <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Stock</div>
@@ -236,12 +232,7 @@ export default function OptionsPnLPanel() {
           <div style={{ fontSize: '2rem', fontWeight: '800', color: netWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(netWeekPnL)}
           </div>
-          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + all stocks{hasPrices ? ' + unrealized' : ''}</div>
-          {hasPrices && (
-            <div style={{ fontSize: '12px', color: totalUnrealizedPnl >= 0 ? green : red, marginTop: '2px' }}>
-              Open positions: {fmt(totalUnrealizedPnl)} unrealized
-            </div>
-          )}
+          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>Options + Stock + Other Stocks</div>
         </div>
       </div>
 
