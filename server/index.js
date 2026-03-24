@@ -1998,7 +1998,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     const sortedTrades = [...trades].sort((a, b) => a.trans_date.localeCompare(b.trans_date) || ((a.id || 0) - (b.id || 0)))
     sortedTrades.forEach(t => {
       const tc = (t.trans_code || '').toUpperCase()
-      const sym = t.symbol || ''
+      // Normalize symbol to handle month/day padding differences (e.g. "3/27" vs "03/27")
+      const _p = parseOptionDescription(t.symbol || '')
+      const sym = _p
+        ? `${_p.ticker}|${_p.year}${_p.month}${_p.day}|${_p.type}|${_p.strike}`
+        : (t.symbol || '')
       const contracts = Math.abs(t.contracts || 1)
       const amount = Math.abs(t.amount)
       const pricePerContract = contracts > 0 ? amount / contracts : amount
