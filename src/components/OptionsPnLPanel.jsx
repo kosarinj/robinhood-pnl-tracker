@@ -220,6 +220,7 @@ export default function OptionsPnLPanel() {
                       border: `1px solid ${border}`, cursor: tooltip ? 'help' : 'default'
                     }}>
                       <span style={{ fontWeight: '700', color: text }}>{sym}</span>
+                      {entry?.toPrice && <span style={{ color: textMid, marginLeft: '5px', fontSize: '11px' }}>{fmt(entry.toPrice)}</span>}
                       <span style={{ color: pnl >= 0 ? green : red, marginLeft: '6px' }}>
                         {pnl >= 0 ? '+' : ''}{fmt(pnl)}
                       </span>
