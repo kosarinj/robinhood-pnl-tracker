@@ -1502,15 +1502,16 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
     console.log(`Open option positions: ${openOpts.length} total, ${activeOpts.length} non-expired`)
 
-    // Collect unique underlying tickers for stock price fetch
-    const underlyingTickers = [...new Set(activeOpts.map(pos => {
-      const p = parseOptionDescription(pos.symbol)
-      return p?.ticker
-    }).filter(Boolean))]
+    // Collect tickers from active open positions AND all option trades (for closed-option tickers in By Underlying)
+    const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
+    const allUnderlyingTickers = [...new Set([
+      ...activeOpts.map(pos => parseOptionDescription(pos.symbol)?.ticker),
+      ...allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker)
+    ].filter(Boolean))]
 
-    // Get underlying stock prices (use cache from main route if available, else fetch)
-    const stockPrices = underlyingTickers.length > 0
-      ? await priceService.getPrices(underlyingTickers)
+    // Force-refresh Yahoo Finance prices (bypass cache) so Refresh button always gets live data
+    const stockPrices = allUnderlyingTickers.length > 0
+      ? await priceService.fetchPrices(allUnderlyingTickers)
       : {}
 
     // Fetch Polygon mark prices + underlying stock prices for each open contract
