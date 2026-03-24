@@ -1992,6 +1992,49 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     const mondayStr = getWeekStart(now.toISOString().slice(0, 10))
     const fridayStr = (() => { const d = new Date(mondayStr + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
 
+    // Global LIFO pass: compute realized P&L per closing trade across all time
+    // Each entry keyed by trade index; value = realized P&L for that closing trade
+    const lifoRealizedByIndex = {}
+    const lifoStacks = {} // symbol → [{pricePerContract, remainingContracts}]
+
+    const sortedTrades = [...trades].sort((a, b) => a.trans_date.localeCompare(b.trans_date) || (a.id - b.id))
+    sortedTrades.forEach((t, idx) => {
+      const tc = (t.trans_code || '').toUpperCase()
+      const sym = t.symbol || ''
+      const contracts = Math.abs(t.contracts || 1)
+      const amount = Math.abs(t.amount)
+      const pricePerContract = contracts > 0 ? amount / contracts : amount
+      if (!lifoStacks[sym]) lifoStacks[sym] = { long: [], short: [] }
+      const stacks = lifoStacks[sym]
+
+      if (tc === 'BTO') {
+        stacks.long.push({ pricePerContract, remainingContracts: contracts })
+      } else if (tc === 'STO') {
+        stacks.short.push({ pricePerContract, remainingContracts: contracts })
+      } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+        // Determine which stack to pop from
+        const stack = tc === 'BTC' ? stacks.short : stacks.long
+        let contractsLeft = contracts
+        let costBasis = 0
+        // LIFO: pop from end
+        while (contractsLeft > 0 && stack.length > 0) {
+          const top = stack[stack.length - 1]
+          const matched = Math.min(contractsLeft, top.remainingContracts)
+          costBasis += matched * top.pricePerContract
+          contractsLeft -= matched
+          top.remainingContracts -= matched
+          if (top.remainingContracts === 0) stack.pop()
+        }
+        const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
+        // Long close (STC/OEXP): P&L = proceeds - cost
+        // Short close (BTC): P&L = costBasis (STO received) - proceeds (BTC paid)
+        const realizedPnl = tc === 'BTC'
+          ? costBasis - proceeds
+          : proceeds - costBasis
+        lifoRealizedByIndex[t.id ?? idx] = Math.round(realizedPnl * 100) / 100
+      }
+    })
+
     // First pass: group by contract (full description = unique contract identifier).
     // "Realized" = net flow for contracts that have a closing trade (both legs counted).
     // "Open" = net flow for contracts with only opening trades (premium still at risk).
@@ -2015,7 +2058,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       if (isClosing) cg.hasClosing = true
       cg.tradeDetails.push({
         date: t.trans_date, description: t.symbol,
-        transCode: t.trans_code, cashFlow: Math.round(cashFlow * 100) / 100, isClosing
+        transCode: t.trans_code, cashFlow: Math.round(cashFlow * 100) / 100, isClosing,
+        realizedPnl: isClosing ? (lifoRealizedByIndex[t.id] ?? null) : null
       })
     })
 

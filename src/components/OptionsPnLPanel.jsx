@@ -359,8 +359,21 @@ export default function OptionsPnLPanel() {
                               </div>
                               <div style={{ wordBreak: 'break-word', lineHeight: '1.4' }}>{t.description}</div>
                             </div>
-                            <div style={{ color: t.cashFlow >= 0 ? green : red, fontWeight: '700', whiteSpace: 'nowrap' }}>
-                              {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
+                            <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              {t.isClosing && t.realizedPnl != null ? (
+                                <>
+                                  <div style={{ color: t.realizedPnl >= 0 ? green : red, fontWeight: '700' }}>
+                                    {t.realizedPnl >= 0 ? '+' : ''}{fmt(t.realizedPnl)}
+                                  </div>
+                                  <div style={{ fontSize: '10px', color: textMid }}>
+                                    proceeds {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={{ color: t.cashFlow >= 0 ? green : red, fontWeight: '700' }}>
+                                  {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}
