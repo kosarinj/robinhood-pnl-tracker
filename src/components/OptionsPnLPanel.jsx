@@ -345,36 +345,37 @@ export default function OptionsPnLPanel() {
                           <div key={i} style={{
                             padding: '5px 10px',
                             borderBottom: i < trades.length - 1 ? `1px solid ${border}` : 'none',
-                            display: 'flex', justifyContent: 'space-between', gap: '8px'
                           }}>
-                            <div style={{ color: textMid, flex: 1, minWidth: 0 }}>
-                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                <span style={{ color: text, fontWeight: '600' }}>{t.transCode || t.action}</span>
-                                <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px',
-                                  background: t.isClosing ? 'rgba(34,197,94,0.15)' : 'rgba(148,163,184,0.15)',
-                                  color: t.isClosing ? green : textMid }}>
-                                  {t.isClosing ? 'realized' : 'open'}
-                                </span>
-                                <span style={{ color: textMid }}>{t.date}</span>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                              <div style={{ color: textMid, flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <span style={{ color: text, fontWeight: '600' }}>{t.transCode || t.action}</span>
+                                  <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px',
+                                    background: t.isClosing ? 'rgba(34,197,94,0.15)' : 'rgba(148,163,184,0.15)',
+                                    color: t.isClosing ? green : textMid }}>
+                                    {t.isClosing ? 'realized' : 'open'}
+                                  </span>
+                                  <span style={{ color: textMid }}>{t.date}</span>
+                                </div>
+                                <div style={{ wordBreak: 'break-word', lineHeight: '1.4' }}>{t.description}</div>
                               </div>
-                              <div style={{ wordBreak: 'break-word', lineHeight: '1.4' }}>{t.description}</div>
-                            </div>
-                            <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                              {t.isClosing && t.realizedPnl != null ? (
-                                <>
+                              <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                {t.isClosing && t.realizedPnl != null ? (
                                   <div style={{ color: t.realizedPnl >= 0 ? green : red, fontWeight: '700' }}>
                                     {t.realizedPnl >= 0 ? '+' : ''}{fmt(t.realizedPnl)}
                                   </div>
-                                  <div style={{ fontSize: '10px', color: textMid, marginTop: '3px' }}>
-                                    proceeds {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
+                                ) : (
+                                  <div style={{ color: t.cashFlow >= 0 ? green : red, fontWeight: '700' }}>
+                                    {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
                                   </div>
-                                </>
-                              ) : (
-                                <div style={{ color: t.cashFlow >= 0 ? green : red, fontWeight: '700' }}>
-                                  {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
-                                </div>
-                              )}
+                                )}
+                              </div>
                             </div>
+                            {t.isClosing && t.realizedPnl != null && (
+                              <div style={{ fontSize: '10px', color: textMid, textAlign: 'right', marginTop: '2px' }}>
+                                proceeds {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
