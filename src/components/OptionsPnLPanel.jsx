@@ -170,15 +170,23 @@ export default function OptionsPnLPanel() {
       {/* This Week Hero Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         {/* Options P&L */}
-        <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${(data?.currentWeekPnL || 0) >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
-          <div style={{ fontSize: '2rem', fontWeight: '800', color: (data?.currentWeekPnL || 0) >= 0 ? green : red, lineHeight: 1 }}>
-            {loading ? '…' : fmt(data?.currentWeekPnL || 0)}
-          </div>
-          <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>
-            Realized: <span style={{ color: (data?.currentWeekRealizedTotal || 0) >= 0 ? green : red, fontWeight: '600' }}>{fmt(data?.currentWeekRealizedTotal || 0)}</span>
-          </div>
-        </div>
+        {(() => {
+          const optionsDisplay = hasPrices
+            ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
+            : (data?.currentWeekPnL || 0)
+          return (
+            <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${optionsDisplay >= 0 ? green : red}` }}>
+              <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
+              <div style={{ fontSize: '2rem', fontWeight: '800', color: optionsDisplay >= 0 ? green : red, lineHeight: 1 }}>
+                {loading ? '…' : fmt(optionsDisplay)}
+              </div>
+              <div style={{ fontSize: '12px', color: textMid, marginTop: '6px' }}>
+                Realized: <span style={{ color: (data?.currentWeekRealizedTotal || 0) >= 0 ? green : red, fontWeight: '600' }}>{fmt(data?.currentWeekRealizedTotal || 0)}</span>
+                {hasPrices && <span style={{ marginLeft: '8px' }}>· Unrealized: <span style={{ color: totalUnrealizedPnl >= 0 ? green : red, fontWeight: '600' }}>{fmt(totalUnrealizedPnl)}</span></span>}
+              </div>
+            </div>
+          )
+        })()}
         {/* Stock P&L */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${totalStockPnL >= 0 ? green : red}` }}>
           <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Stock</div>

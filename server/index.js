@@ -1529,12 +1529,13 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
             const mid = snap.last_quote?.midpoint
             const bid = snap.last_quote?.bid || 0
             const ask = snap.last_quote?.ask || 0
-            const mark = mid || (bid && ask ? (bid + ask) / 2 : 0) || snap.day?.close || snap.last_trade?.price || 0
-            markPrices[pos.symbol] = mark
+            const fallback = snap.day?.close || snap.last_trade?.price || 0
+            // Store bid/ask/mid separately so we can pick the right one per position direction
+            markPrices[pos.symbol] = { bid, ask, mid: mid || (bid && ask ? (bid + ask) / 2 : fallback), fallback }
             // Grab underlying stock price from the snapshot — no extra API call needed
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
-            console.log(`Polygon ${pos.symbol}: mark=${mark} underlying=${underlyingPrice}`)
+            console.log(`Polygon ${pos.symbol}: bid=${bid} ask=${ask} mid=${mid} underlying=${underlyingPrice}`)
           } else {
             console.warn(`Polygon ${pos.symbol}: no results — status=${resp.data?.status}`)
           }
@@ -1568,11 +1569,12 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
     const positions = []
     activeOpts.forEach(pos => {
-      const mark = markPrices[pos.symbol] || 0
+      const quotes = markPrices[pos.symbol] || null
       const parsed = parseOptionDescription(pos.symbol)
       if (!parsed) return
       const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
       const isLong = pos.net_long > 0
+      const mark = quotes?.mid || 0
       const openContracts = isLong ? pos.net_long : pos.net_short
       const totalCostBasis = isLong ? pos.total_paid : pos.total_received
       const avgCostPerContract = openContracts > 0 ? Math.abs(totalCostBasis) / (isLong ? pos.bto_contracts : pos.sto_contracts) : 0
@@ -1586,7 +1588,6 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         ?? (stockPrices[parsed.ticker] > 0 ? stockPrices[parsed.ticker] : null)
 
       // Remaining premium (extrinsic value) for short calls and long puts
-      // Only calculate when we have a real stock price — otherwise intrinsic is unknown
       let remainingPremium = null
       let remainingPremiumLabel = null
       if (mark > 0 && stockPrice) {
