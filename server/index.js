@@ -1538,19 +1538,17 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         }
       }
 
-      // Step 2: stock snapshot for ALL underlying tickers not yet covered (including closed-option tickers)
+      // Step 2: use prevDay aggregates for all tickers not yet covered — reliable on free tier
       const tickersNeedingPrice = allUnderlyingTickers.filter(t => !polygonStockPrices[t])
       for (const ticker of tickersNeedingPrice) {
         try {
-          const r = await axios.get(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}`, {
-            params: { apiKey: polygonKey }, timeout: 5000
+          const r = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev`, {
+            params: { apiKey: polygonKey, adjusted: true }, timeout: 5000
           })
-          // Polygon v2 snapshot uses "results" for single ticker, "ticker" in some older docs
-          const snap = r.data?.results || r.data?.ticker
-          const price = snap?.lastTrade?.p || snap?.lastQuote?.P || snap?.day?.c || snap?.prevDay?.c || 0
+          const price = r.data?.results?.[0]?.c || 0
           if (price > 0) polygonStockPrices[ticker] = price
         } catch (e) {
-          console.warn(`Polygon stock snapshot failed for ${ticker}:`, e.message)
+          console.warn(`Polygon prevDay agg failed for ${ticker}:`, e.message)
         }
       }
 
