@@ -180,8 +180,17 @@ export default function OptionsPnLPanel() {
     return m
   }, {})
 
+  const handleRefreshAll = () => { fetchData(); fetchLivePositions() }
+
   return (
     <div style={{ color: text }}>
+      {/* Global Refresh */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px', gap: '12px', alignItems: 'center' }}>
+        {livePositions?.fetchedAt && <span style={{ fontSize: '11px', color: textMid }}>Updated {new Date(livePositions.fetchedAt).toLocaleTimeString()}</span>}
+        <button onClick={handleRefreshAll} disabled={loading || posLoading} style={{ ...btnStyle(false), padding: '6px 16px', opacity: (loading || posLoading) ? 0.6 : 1 }}>
+          {(loading || posLoading) ? '…' : '↻ Refresh All'}
+        </button>
+      </div>
       {/* This Week Hero Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         {/* Options P&L */}
@@ -250,10 +259,7 @@ export default function OptionsPnLPanel() {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', color: textMid }}>{data?.weekStart ? `Week of ${fmtDate(data.weekStart)}` : ''}</span>
-            <button onClick={() => { fetchData(); fetchLivePositions() }} style={{ ...btnStyle(false), padding: '6px 14px' }}>&#8635; Refresh</button>
-          </div>
+          <span style={{ fontSize: '12px', color: textMid }}>{data?.weekStart ? `Week of ${fmtDate(data.weekStart)}` : ''}</span>
         </div>
 
         {/* Per-underlying breakdown for current week */}
@@ -509,21 +515,7 @@ export default function OptionsPnLPanel() {
       {/* Open Option Positions */}
       <div style={{ ...cardStyle, marginTop: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Option Positions</div>
-            <button
-              onClick={fetchLivePositions}
-              disabled={posLoading}
-              style={{ ...btnStyle(false), padding: '4px 10px', opacity: posLoading ? 0.6 : 1 }}
-            >
-              {posLoading ? '…' : '↻ Refresh Prices'}
-            </button>
-            {livePositions?.fetchedAt && (
-              <span style={{ fontSize: '11px', color: textMid }}>
-                {new Date(livePositions.fetchedAt).toLocaleTimeString()}
-              </span>
-            )}
-          </div>
+          <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open Option Positions</div>
           {openPositions.length > 0 && livePositions?.positions?.some(p => p.unrealizedPnl != null) && (
             <div style={{ fontWeight: '800', fontSize: '1.1rem', color: totalUnrealizedPnl >= 0 ? green : red }}>
               {fmt(totalUnrealizedPnl)} unrealized
