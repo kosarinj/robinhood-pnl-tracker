@@ -523,9 +523,10 @@ export default function OptionsPnLPanel() {
           )}
         </div>
         {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>Error: {posError}</div>}
-        {livePositions?.stockPrices && (
-          <div style={{ fontSize: '11px', color: textMid, marginBottom: '8px', fontFamily: 'monospace' }}>
-            Stock prices: {Object.entries(livePositions.stockPrices).map(([t, p]) => `${t}=$${p}`).join(' · ')}
+        {livePositions && (
+          <div style={{ fontSize: '11px', color: textMid, marginBottom: '8px', fontFamily: 'monospace', lineHeight: '1.6' }}>
+            <div>Stocks: {Object.entries(livePositions.stockPrices || {}).map(([t, p]) => `${t}=$${p}`).join(' · ') || 'none'}</div>
+            <div>Marks: {(livePositions.positions || []).map(p => `${p.ticker}${p.strike}${p.optionType[0].toUpperCase()} mark=$${p.markPrice} stockPx=$${p.stockPrice} remPrem=$${p.remainingPremium}`).join(' · ') || 'none'}</div>
           </div>
         )}
         {openPositions.length === 0 ? (
