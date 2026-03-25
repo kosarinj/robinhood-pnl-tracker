@@ -519,6 +519,11 @@ export default function OptionsPnLPanel() {
           )}
         </div>
         {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>Error: {posError}</div>}
+        {livePositions?.stockPrices && (
+          <div style={{ fontSize: '11px', color: textMid, marginBottom: '8px', fontFamily: 'monospace' }}>
+            Stock prices: {Object.entries(livePositions.stockPrices).map(([t, p]) => `${t}=$${p}`).join(' · ')}
+          </div>
+        )}
         {openPositions.length === 0 ? (
           <div style={{ fontSize: '13px', color: textMid }}>No open positions detected — upload your latest CSV to see open contracts.</div>
         ) : (
