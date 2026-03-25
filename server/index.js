@@ -1545,7 +1545,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
           const r = await axios.get(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}`, {
             params: { apiKey: polygonKey }, timeout: 5000
           })
-          const price = r.data?.ticker?.lastTrade?.p || r.data?.ticker?.day?.c || r.data?.ticker?.prevDay?.c || 0
+          // Polygon v2 snapshot uses "results" for single ticker, "ticker" in some older docs
+          const snap = r.data?.results || r.data?.ticker
+          const price = snap?.lastTrade?.p || snap?.lastQuote?.P || snap?.day?.c || snap?.prevDay?.c || 0
           if (price > 0) polygonStockPrices[ticker] = price
         } catch (e) {
           console.warn(`Polygon stock snapshot failed for ${ticker}:`, e.message)
