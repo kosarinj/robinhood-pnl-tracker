@@ -301,7 +301,7 @@ export default function OptionsPnLPanel() {
               {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
                 const stockEntry = data.weeklyStockPnL?.[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
-                const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
+                const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.shares} shares · ${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
                 const unrealizedPnl = unrealizedByTicker[ticker]
                 const rp = remPremByTicker[ticker]
                 const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
