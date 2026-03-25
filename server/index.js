@@ -2144,6 +2144,53 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       otherStockPnL = Math.round(otherStockPnL * 100) / 100
     }
 
+    // Weekly stock deltas for option-underlying tickers the user also holds stock in
+    const stockHoldingOptionTickers = [...new Set(
+      Object.values(byWeek).flatMap(w => Object.keys(w.byUnderlying))
+    )].filter(t => allPositions[t] > 0)
+
+    if (stockHoldingOptionTickers.length > 0) {
+      // Fetch 2 years of daily history per ticker — one call each, cached in DB
+      const tickerDateMap = {}
+      await Promise.all(stockHoldingOptionTickers.map(async ticker => {
+        try {
+          const hist = await priceService.fetchHistoricalPrices(ticker, '2y', '1d')
+          const m = {}
+          hist.forEach(item => { m[item.date.slice(0, 10)] = item.close })
+          tickerDateMap[ticker] = m
+        } catch (e) { console.warn(`Weekly stock history failed for ${ticker}:`, e.message) }
+      }))
+
+      const findClose = (dateMap, targetStr) => {
+        if (!dateMap) return 0
+        if (dateMap[targetStr]) return dateMap[targetStr]
+        // Find closest trading day within ±3 days
+        const target = new Date(targetStr).getTime()
+        let best = 0, bestDiff = Infinity
+        Object.entries(dateMap).forEach(([d, c]) => {
+          const diff = Math.abs(new Date(d).getTime() - target)
+          if (diff < bestDiff && diff <= 3 * 86400000) { bestDiff = diff; best = c }
+        })
+        return best
+      }
+
+      weeks.forEach(week => {
+        const monday = new Date(week.weekStart + 'T12:00:00')
+        const prevFriStr = new Date(monday.getTime() - 3 * 86400000).toISOString().slice(0, 10)
+        const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
+        const stockDelta = {}
+        Object.keys(week.byUnderlying).forEach(ticker => {
+          if (!allPositions[ticker] || !tickerDateMap[ticker]) return
+          const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
+          const thisClose = findClose(tickerDateMap[ticker], thisFriStr)
+          if (prevClose > 0 && thisClose > 0) {
+            stockDelta[ticker] = Math.round((thisClose - prevClose) * allPositions[ticker] * 100) / 100
+          }
+        })
+        if (Object.keys(stockDelta).length > 0) week.stockDelta = stockDelta
+      })
+    }
+
     // Open option positions — delegate to the dedicated endpoint logic (lightweight, no Polygon here)
     let openOptionPositions = []
     try {
