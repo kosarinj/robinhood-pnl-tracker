@@ -2106,13 +2106,21 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     // All positions — used for both options-linked and other stocks
     const allPositions = databaseService.getAllPositions(req.user.userId)
     const otherSymbols = Object.keys(allPositions).filter(s => !thisWeekSymbols.includes(s))
-    const allSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols])]
+    // Also include option-only underlyings (user holds options but not the stock)
+    const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
+    const optionOnlyTickers = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
+      .filter(t => !allPositions[t])
+    const allSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols, ...optionOnlyTickers])]
 
+    const optionUnderlyingPrices = {}
     if (allSymbols.length > 0) {
       const [lastFridayPrices, currentPrices] = await Promise.all([
         priceService.getPricesForDate(allSymbols, lastFridayStr),
         priceService.getPricesForDate(allSymbols, todayStr)
       ])
+      optionOnlyTickers.forEach(sym => {
+        if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
+      })
 
       thisWeekSymbols.forEach(sym => {
         const pos = allPositions[sym]
@@ -2178,7 +2186,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       console.error('Error fetching open option positions:', e.message)
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
