@@ -371,6 +371,7 @@ try {
   try {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pnl_snapshots_user_date_symbol ON pnl_snapshots(user_id, asof_date, symbol)')
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_csv_uploads_user_date ON csv_uploads(user_id, upload_date)')
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_dedup ON trades(user_id, trans_date, trans_code, symbol, quantity, price, amount)')
     console.log('✅ Created unique indexes for multi-user support')
   } catch (error) {
     console.log('ℹ️ Unique indexes may already exist')
@@ -419,7 +420,7 @@ const upsertPnLSnapshot = db.prepare(`
 `)
 
 const insertTrade = db.prepare(`
-  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, contracts, user_id)
+  INSERT OR IGNORE INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, contracts, user_id)
   VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption, @contracts, @userId)
 `)
 
