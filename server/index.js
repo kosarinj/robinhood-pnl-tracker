@@ -1538,21 +1538,8 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         }
       }
 
-      // Step 2: use prevDay aggregates for all tickers not yet covered — reliable on free tier
-      const tickersNeedingPrice = allUnderlyingTickers.filter(t => !polygonStockPrices[t])
-      for (const ticker of tickersNeedingPrice) {
-        try {
-          const r = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev`, {
-            params: { apiKey: polygonKey, adjusted: true }, timeout: 5000
-          })
-          const price = r.data?.results?.[0]?.c || 0
-          if (price > 0) polygonStockPrices[ticker] = price
-        } catch (e) {
-          console.warn(`Polygon prevDay agg failed for ${ticker}:`, e.message)
-        }
-      }
-
-      console.log('Polygon stock prices:', JSON.stringify(polygonStockPrices))
+      // Stock prices for closed-option tickers come from the frontend (stockEntry?.toPrice)
+      // No additional fetch needed here — underlying_asset.price covers active positions
     } else {
       console.warn('POLYGON_API_KEY not set — skipping options mark prices')
     }

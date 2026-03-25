@@ -165,11 +165,13 @@ export default function OptionsPnLPanel() {
     if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
     return m
   }, {})
-  // Stock price by ticker — prefer livePositions.stockPrices (Polygon), fall back to per-position stockPrice
-  const stockPriceByTicker = {
-    ...openPositions.reduce((m, p) => { if (p.stockPrice && !m[p.ticker]) m[p.ticker] = p.stockPrice; return m }, {}),
-    ...(livePositions?.stockPrices || {})
-  }
+  // Stock price by ticker:
+  // - per-position stockPrice = Polygon underlying_asset.price (live during market hours)
+  // - stockEntry?.toPrice = Yahoo Finance today price from history endpoint (fallback)
+  const stockPriceByTicker = openPositions.reduce((m, p) => {
+    if (p.stockPrice > 0 && !m[p.ticker]) m[p.ticker] = p.stockPrice
+    return m
+  }, {})
   // Remaining premium — compute client-side using stock prices already in stockPriceByTicker
   const remPremByTicker = openPositions.reduce((m, p) => {
     const stockPrice = stockPriceByTicker[p.ticker]
@@ -536,7 +538,7 @@ export default function OptionsPnLPanel() {
         {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>Error: {posError}</div>}
         {livePositions && (
           <div style={{ fontSize: '11px', color: textMid, marginBottom: '8px', fontFamily: 'monospace', lineHeight: '1.6' }}>
-            <div>Stocks: {Object.entries(stockPriceByTicker).map(([t, p]) => `${t}=$${p}`).join(' · ') || 'none'}</div>
+            <div>Stocks (Polygon): {Object.entries(stockPriceByTicker).map(([t, p]) => `${t}=$${p}`).join(' · ') || 'none (using Yahoo fallback in cards)'}</div>
             <div>Marks: {(livePositions.positions || []).map(p => `${p.ticker}${p.strike}${p.optionType[0].toUpperCase()} mark=$${p.markPrice} remPrem=$${remPremByTicker[p.ticker]?.shortCall ?? remPremByTicker[p.ticker]?.longPut ?? 'null'}`).join(' · ') || 'none'}</div>
           </div>
         )}
