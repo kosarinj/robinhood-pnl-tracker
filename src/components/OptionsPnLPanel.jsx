@@ -170,12 +170,23 @@ export default function OptionsPnLPanel() {
     ...openPositions.reduce((m, p) => { if (p.stockPrice && !m[p.ticker]) m[p.ticker] = p.stockPrice; return m }, {}),
     ...(livePositions?.stockPrices || {})
   }
-  // Remaining premium grouped by ticker — track short calls and long puts separately
+  // Remaining premium — compute client-side using stock prices already in stockPriceByTicker
   const remPremByTicker = openPositions.reduce((m, p) => {
-    if (p.remainingPremium != null) {
-      if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null }
-      if (!p.isLong && p.optionType === 'call') m[p.ticker].shortCall = (m[p.ticker].shortCall || 0) + p.remainingPremium
-      if (p.isLong && p.optionType === 'put') m[p.ticker].longPut = (m[p.ticker].longPut || 0) + p.remainingPremium
+    const stockPrice = stockPriceByTicker[p.ticker]
+    const mark = p.markPrice
+    if (!stockPrice || !mark) return m
+    if (!p.isLong && p.optionType === 'call') {
+      const extrinsic = Math.round(Math.max(0, mark - Math.max(0, stockPrice - p.strike)) * 100) / 100
+      if (extrinsic > 0) {
+        if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null }
+        m[p.ticker].shortCall = Math.round(((m[p.ticker].shortCall || 0) + extrinsic) * 100) / 100
+      }
+    } else if (p.isLong && p.optionType === 'put') {
+      const extrinsic = Math.round(Math.max(0, mark - Math.max(0, p.strike - stockPrice)) * 100) / 100
+      if (extrinsic > 0) {
+        if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null }
+        m[p.ticker].longPut = Math.round(((m[p.ticker].longPut || 0) + extrinsic) * 100) / 100
+      }
     }
     return m
   }, {})
@@ -525,8 +536,8 @@ export default function OptionsPnLPanel() {
         {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>Error: {posError}</div>}
         {livePositions && (
           <div style={{ fontSize: '11px', color: textMid, marginBottom: '8px', fontFamily: 'monospace', lineHeight: '1.6' }}>
-            <div>Stocks: {Object.entries(livePositions.stockPrices || {}).map(([t, p]) => `${t}=$${p}`).join(' · ') || 'none'}</div>
-            <div>Marks: {(livePositions.positions || []).map(p => `${p.ticker}${p.strike}${p.optionType[0].toUpperCase()} mark=$${p.markPrice} stockPx=$${p.stockPrice} remPrem=$${p.remainingPremium}`).join(' · ') || 'none'}</div>
+            <div>Stocks: {Object.entries(stockPriceByTicker).map(([t, p]) => `${t}=$${p}`).join(' · ') || 'none'}</div>
+            <div>Marks: {(livePositions.positions || []).map(p => `${p.ticker}${p.strike}${p.optionType[0].toUpperCase()} mark=$${p.markPrice} remPrem=$${remPremByTicker[p.ticker]?.shortCall ?? remPremByTicker[p.ticker]?.longPut ?? 'null'}`).join(' · ') || 'none'}</div>
           </div>
         )}
         {openPositions.length === 0 ? (
