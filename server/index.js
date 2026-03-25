@@ -1502,22 +1502,18 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
     console.log(`Open option positions: ${openOpts.length} total, ${activeOpts.length} non-expired`)
 
-    // Collect tickers from active open positions AND all option trades (for closed-option tickers in By Underlying)
+    // Collect all unique underlying tickers (active + historical) for stock price fetch
     const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
     const allUnderlyingTickers = [...new Set([
       ...activeOpts.map(pos => parseOptionDescription(pos.symbol)?.ticker),
       ...allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker)
     ].filter(Boolean))]
 
-    // Force-refresh Yahoo Finance prices (bypass cache) so Refresh button always gets live data
-    const stockPrices = allUnderlyingTickers.length > 0
-      ? await priceService.fetchPrices(allUnderlyingTickers)
-      : {}
-
-    // Fetch Polygon mark prices + underlying stock prices for each open contract
+    // Fetch Polygon mark prices + underlying stock prices
     const markPrices = {}
-    const polygonStockPrices = {}  // stock prices from Polygon option snapshot
+    const polygonStockPrices = {}
     if (polygonKey) {
+      // Step 1: options snapshots for active positions (gets mark price + underlying price in one call)
       for (const pos of activeOpts) {
         const polygonTicker = toPolygonTicker(pos.symbol)
         const parsed = parseOptionDescription(pos.symbol)
@@ -1531,12 +1527,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
             const bid = snap.last_quote?.bid || 0
             const ask = snap.last_quote?.ask || 0
             const fallback = snap.day?.close || snap.last_trade?.price || 0
-            // Store bid/ask/mid separately so we can pick the right one per position direction
             markPrices[pos.symbol] = { bid, ask, mid: mid || (bid && ask ? (bid + ask) / 2 : fallback), fallback }
-            // Grab underlying stock price from the snapshot — no extra API call needed
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
-            console.log(`Polygon ${pos.symbol}: bid=${bid} ask=${ask} mid=${mid} underlying=${underlyingPrice}`)
           } else {
             console.warn(`Polygon ${pos.symbol}: no results — status=${resp.data?.status}`)
           }
@@ -1544,26 +1537,22 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
           console.warn(`Polygon mark price failed for ${pos.symbol}:`, e.response?.status, e.message)
         }
       }
-      // For any tickers still missing a stock price, fetch via Polygon prev close
-      const missingTickers = [...new Set(activeOpts.map(pos => {
-        const p = parseOptionDescription(pos.symbol)
-        return p?.ticker
-      }).filter(t => t && !polygonStockPrices[t]))]
 
-      for (const ticker of missingTickers) {
+      // Step 2: stock snapshot for ALL underlying tickers not yet covered (including closed-option tickers)
+      const tickersNeedingPrice = allUnderlyingTickers.filter(t => !polygonStockPrices[t])
+      for (const ticker of tickersNeedingPrice) {
         try {
           const r = await axios.get(`https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}`, {
             params: { apiKey: polygonKey }, timeout: 5000
           })
-          const price = r.data?.ticker?.day?.c || r.data?.ticker?.prevDay?.c || 0
-          if (price > 0) {
-            polygonStockPrices[ticker] = price
-            console.log(`Polygon stock fallback ${ticker}: $${price}`)
-          }
+          const price = r.data?.ticker?.lastTrade?.p || r.data?.ticker?.day?.c || r.data?.ticker?.prevDay?.c || 0
+          if (price > 0) polygonStockPrices[ticker] = price
         } catch (e) {
-          console.warn(`Polygon stock price fallback failed for ${ticker}:`, e.message)
+          console.warn(`Polygon stock snapshot failed for ${ticker}:`, e.message)
         }
       }
+
+      console.log('Polygon stock prices:', JSON.stringify(polygonStockPrices))
     } else {
       console.warn('POLYGON_API_KEY not set — skipping options mark prices')
     }
@@ -1584,9 +1573,7 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         ? currentValue - (avgCostPerContract * openContracts)
         : (avgCostPerContract * openContracts) - currentValue
 
-      // Prefer Polygon underlying price (from snapshot), fall back to Yahoo Finance cache
-      const stockPrice = (polygonStockPrices[parsed.ticker] > 0 ? polygonStockPrices[parsed.ticker] : null)
-        ?? (stockPrices[parsed.ticker] > 0 ? stockPrices[parsed.ticker] : null)
+      const stockPrice = polygonStockPrices[parsed.ticker] || null
 
       // Remaining premium (extrinsic value) for short calls and long puts
       let remainingPremium = null
@@ -1623,12 +1610,7 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
     positions.sort((a, b) => a.expiry.localeCompare(b.expiry))
 
-    // Merge: start with Polygon snapshot prices, let fresh Yahoo Finance prices win when non-zero
-    const allStockPrices = { ...polygonStockPrices }
-    Object.entries(stockPrices).forEach(([ticker, price]) => {
-      if (price > 0) allStockPrices[ticker] = price
-    })
-    console.log('Stock prices for By Underlying:', JSON.stringify(allStockPrices))
+    const allStockPrices = polygonStockPrices
 
     res.json({
       success: true,
