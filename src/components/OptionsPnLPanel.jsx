@@ -166,12 +166,16 @@ export default function OptionsPnLPanel() {
     return m
   }, {})
   // Stock price by ticker:
-  // - per-position stockPrice = Polygon underlying_asset.price (live during market hours)
-  // - stockEntry?.toPrice = Yahoo Finance today price from history endpoint (fallback)
-  const stockPriceByTicker = openPositions.reduce((m, p) => {
-    if (p.stockPrice > 0 && !m[p.ticker]) m[p.ticker] = p.stockPrice
-    return m
-  }, {})
+  // Start with Yahoo Finance today prices from history endpoint (always available after load)
+  // then override with Polygon live underlying_asset.price when available (market hours)
+  const stockPriceByTicker = {
+    ...Object.fromEntries(
+      Object.entries(data?.weeklyStockPnL || {})
+        .filter(([, e]) => (e?.toPrice ?? 0) > 0)
+        .map(([sym, e]) => [sym, e.toPrice])
+    ),
+    ...openPositions.reduce((m, p) => { if (p.stockPrice > 0) m[p.ticker] = p.stockPrice; return m }, {})
+  }
   // Remaining premium — compute client-side using stock prices already in stockPriceByTicker
   const remPremByTicker = openPositions.reduce((m, p) => {
     const stockPrice = stockPriceByTicker[p.ticker]
