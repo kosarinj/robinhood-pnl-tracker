@@ -86,6 +86,11 @@ export default function OptionsPnLPanel() {
   useEffect(() => {
     fetchData()
     fetchLivePositions()
+    const interval = setInterval(() => {
+      fetchData()
+      fetchLivePositions()
+    }, 5 * 60 * 1000)
+    return () => clearInterval(interval)
   }, [])
 
   const setQuick = (range) => {
