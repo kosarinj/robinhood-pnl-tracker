@@ -32,6 +32,7 @@ export default function OptionsPnLPanel() {
   const [toDate, setToDate] = useState('')
   const [activeQuick, setActiveQuick] = useState('all')
   const [expandedTicker, setExpandedTicker] = useState(null)
+  const [showWeeklyTable, setShowWeeklyTable] = useState(false)
   const [livePositions, setLivePositions] = useState(null)
   const [posLoading, setPosLoading] = useState(false)
   const [posError, setPosError] = useState(null)
@@ -436,16 +437,21 @@ export default function OptionsPnLPanel() {
 
       {/* Weekly Table */}
       <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          onClick={() => setShowWeeklyTable(s => !s)}
+          style={{ padding: '14px 20px', borderBottom: showWeeklyTable ? `1px solid ${border}` : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
           <span style={{ fontWeight: '700', fontSize: '14px' }}>Weekly Breakdown</span>
-          <span style={{ fontSize: '12px', color: textMid }}>{filteredWeeks.length} week{filteredWeeks.length !== 1 ? 's' : ''}</span>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: textMid }}>{filteredWeeks.length} week{filteredWeeks.length !== 1 ? 's' : ''}</span>
+            <span style={{ fontSize: '12px', color: textMid }}>{showWeeklyTable ? '▲' : '▼'}</span>
+          </div>
         </div>
-        {loading && <div style={{ padding: '40px', textAlign: 'center', color: textMid }}>Loading…</div>}
-        {error && <div style={{ padding: '20px', color: red }}>{error}</div>}
-        {!loading && !error && filteredWeeks.length === 0 && (
+        {showWeeklyTable && loading && <div style={{ padding: '40px', textAlign: 'center', color: textMid }}>Loading…</div>}
+        {showWeeklyTable && error && <div style={{ padding: '20px', color: red }}>{error}</div>}
+        {showWeeklyTable && !loading && !error && filteredWeeks.length === 0 && (
           <div style={{ padding: '40px', textAlign: 'center', color: textMid }}>No data for selected range</div>
         )}
-        {!loading && filteredWeeks.length > 0 && (
+        {showWeeklyTable && !loading && filteredWeeks.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
