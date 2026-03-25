@@ -67,9 +67,15 @@ export default function OptionsPnLPanel() {
       const text = await res.text()
       let json
       try { json = JSON.parse(text) } catch { setPosError(`Bad response (${res.status}): ${text.slice(0, 200)}`); return }
-      if (json.success && json.positions?.length > 0) setLivePositions(json)
-      else if (json.success && json.positions?.length === 0) { /* keep old positions if new fetch returns empty */ }
-      else setPosError(json.error || 'Unknown error')
+      if (json.success) {
+        // Always update stockPrices; keep previous positions if new fetch returns empty (avoid blanking on glitch)
+        setLivePositions(prev => ({
+          ...json,
+          positions: json.positions?.length > 0 ? json.positions : (prev?.positions || [])
+        }))
+      } else {
+        setPosError(json.error || 'Unknown error')
+      }
     } catch (e) {
       setPosError(e.message)
     } finally {
