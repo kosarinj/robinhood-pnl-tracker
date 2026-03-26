@@ -396,9 +396,9 @@ export default function OptionsPnLPanel() {
                                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                   <span style={{ color: text, fontWeight: '600' }}>{t.transCode || t.action}</span>
                                   <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px',
-                                    background: t.isClosing ? 'rgba(34,197,94,0.15)' : 'rgba(148,163,184,0.15)',
-                                    color: t.isClosing ? green : textMid }}>
-                                    {t.isClosing ? 'realized' : 'open'}
+                                    background: t.isClosing && t.realizedPnl != null ? 'rgba(34,197,94,0.15)' : t.isClosing ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.15)',
+                                    color: t.isClosing && t.realizedPnl != null ? green : t.isClosing ? '#f87171' : textMid }}>
+                                    {t.isClosing && t.realizedPnl != null ? 'realized' : t.isClosing ? 'unmatched' : 'open'}
                                   </span>
                                   <span style={{ color: textMid }}>{t.date}</span>
                                 </div>
@@ -416,6 +416,11 @@ export default function OptionsPnLPanel() {
                                 )}
                               </div>
                             </div>
+                            {t.isClosing && t.realizedPnl == null && (
+                              <div style={{ fontSize: '10px', color: '#f87171', textAlign: 'right', marginTop: '2px' }}>
+                                no matching opening trade found
+                              </div>
+                            )}
                             {t.isClosing && t.realizedPnl != null && (
                               <div style={{ fontSize: '10px', color: textMid, textAlign: 'right', marginTop: '2px' }}>
                                 proceeds {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
