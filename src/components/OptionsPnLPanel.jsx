@@ -241,7 +241,7 @@ export default function OptionsPnLPanel() {
             {loading ? '…' : fmt(otherStockPnL)}
           </div>
           {Object.keys(data?.otherStockPnLBySymbol || {}).length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
               {Object.entries(data.otherStockPnLBySymbol)
                 .sort((a, b) => a[0].localeCompare(b[0]))
                 .map(([sym, entry]) => {
