@@ -217,7 +217,7 @@ export default function OptionsPnLPanel() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         {/* Options P&L */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${optionsWeekPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: optionsWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(optionsWeekPnL)}
           </div>
@@ -228,7 +228,7 @@ export default function OptionsPnLPanel() {
         </div>
         {/* Stock P&L */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${totalStockPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Stock</div>
+          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>This Week — Stock</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: totalStockPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(totalStockPnL)}
           </div>
@@ -236,7 +236,7 @@ export default function OptionsPnLPanel() {
         </div>
         {/* Other Stocks */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${otherStockPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '8px' }}>This Week — Other Stocks</div>
+          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '8px' }}>This Week — Other Stocks</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: otherStockPnL >= 0 ? green : red, lineHeight: 1, marginBottom: '10px' }}>
             {loading ? '…' : fmt(otherStockPnL)}
           </div>
@@ -266,7 +266,7 @@ export default function OptionsPnLPanel() {
         </div>
         {/* Net Total */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${netWeekPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '6px' }}>This Week — Net Total</div>
+          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>This Week — Net Total</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: netWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(netWeekPnL)}
           </div>
@@ -287,7 +287,7 @@ export default function OptionsPnLPanel() {
         {/* Per-underlying breakdown for current week */}
         {data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, marginBottom: '8px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '8px' }}>
               This Week by Underlying
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
@@ -475,7 +475,7 @@ export default function OptionsPnLPanel() {
             { label: 'Losing Weeks', value: negativeWeeks, color: red },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ ...cardStyle, padding: '14px 18px', marginBottom: 0 }}>
-              <div style={{ fontSize: '11px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>{label}</div>
+              <div style={{ fontSize: '11px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: '6px' }}>{label}</div>
               <div style={{ fontSize: '1.2rem', fontWeight: '700', color }}>{value}</div>
             </div>
           ))}
@@ -505,7 +505,7 @@ export default function OptionsPnLPanel() {
                 <tr style={{ background: isDark ? '#252b3b' : '#f8fafc' }}>
                   {['Week Of', 'Trades', 'Options P&L', 'Realized', 'Stock Δ', 'Running Total'].map(h => (
                     <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700',
-                      textTransform: 'uppercase', letterSpacing: '0.06em', color: textMid, borderBottom: `1px solid ${border}` }}>{h}</th>
+                      textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, borderBottom: `1px solid ${border}` }}>{h}</th>
                   ))}
                 </tr>
               </thead>
