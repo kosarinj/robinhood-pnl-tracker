@@ -217,7 +217,7 @@ export default function OptionsPnLPanel() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         {/* Options P&L */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${optionsWeekPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>This Week — Options</div>
+          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>Wk — Options</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: optionsWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(optionsWeekPnL)}
           </div>
@@ -228,7 +228,7 @@ export default function OptionsPnLPanel() {
         </div>
         {/* Stock P&L */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${totalStockPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>This Week — Stock</div>
+          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>Wk — Stock</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: totalStockPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(totalStockPnL)}
           </div>
@@ -236,7 +236,7 @@ export default function OptionsPnLPanel() {
         </div>
         {/* Other Stocks */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${otherStockPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '8px' }}>This Week — Other Stocks</div>
+          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '8px' }}>Wk — Other Stocks</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: otherStockPnL >= 0 ? green : red, lineHeight: 1, marginBottom: '10px' }}>
             {loading ? '…' : fmt(otherStockPnL)}
           </div>
@@ -266,7 +266,7 @@ export default function OptionsPnLPanel() {
         </div>
         {/* Net Total */}
         <div style={{ ...cardStyle, marginBottom: 0, borderLeft: `4px solid ${netWeekPnL >= 0 ? green : red}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>This Week — Net Total</div>
+          <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '6px' }}>Wk — Net Total</div>
           <div style={{ fontSize: '2rem', fontWeight: '800', color: netWeekPnL >= 0 ? green : red, lineHeight: 1 }}>
             {loading ? '…' : fmt(netWeekPnL)}
           </div>
