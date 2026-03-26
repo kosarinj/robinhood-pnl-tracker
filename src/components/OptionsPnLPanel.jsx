@@ -249,7 +249,7 @@ export default function OptionsPnLPanel() {
                   const tooltip = entry?.fromPrice ? `${entry.fromDate}: $${entry.fromPrice.toFixed(2)} → ${entry.toDate}: $${entry.toPrice.toFixed(2)}` : undefined
                   return (
                     <div key={sym} title={tooltip} style={{
-                      padding: '3px 6px', borderRadius: '6px', fontSize: '11px',
+                      padding: '3px 5px', borderRadius: '6px', fontSize: '10px',
                       background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
                       border: `1px solid ${border}`, cursor: tooltip ? 'help' : 'default',
                       minWidth: 0, overflow: 'hidden'
