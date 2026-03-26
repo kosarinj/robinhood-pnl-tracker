@@ -6,9 +6,12 @@ const YF_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
 }
 
+const PRICE_CACHE_TTL_MS = 4 * 60 * 1000 // 4 minutes
+
 export class PriceService {
   constructor(databaseService = null) {
-    this.priceCache = new Map()
+    this.priceCache = new Map()   // symbol → price
+    this.priceCacheTime = new Map() // symbol → timestamp
     this.trackedSymbols = new Set()
     this.lastUpdate = null
     this.databaseService = databaseService
@@ -34,9 +37,21 @@ export class PriceService {
     return prices
   }
 
-  // Get price for a single symbol (fetch if not cached)
+  // Check if a cached price is still fresh
+  _isFresh(symbol) {
+    const t = this.priceCacheTime.get(symbol)
+    return t && (Date.now() - t) < PRICE_CACHE_TTL_MS
+  }
+
+  // Store a price in cache with timestamp
+  _cachePrice(symbol, price) {
+    this.priceCache.set(symbol, price)
+    this.priceCacheTime.set(symbol, Date.now())
+  }
+
+  // Get price for a single symbol (fetch if not cached or stale)
   async getPrice(symbol) {
-    if (this.priceCache.has(symbol)) {
+    if (this._isFresh(symbol)) {
       return this.priceCache.get(symbol)
     }
 
@@ -44,14 +59,14 @@ export class PriceService {
     return prices[symbol] || 0
   }
 
-  // Get prices for multiple symbols (uses cache if available)
+  // Get prices for multiple symbols (uses cache if fresh)
   async getPrices(symbols) {
     const prices = {}
     const symbolsToFetch = []
 
     // Check cache first
     symbols.forEach(symbol => {
-      if (this.priceCache.has(symbol)) {
+      if (this._isFresh(symbol)) {
         prices[symbol] = this.priceCache.get(symbol)
       } else {
         symbolsToFetch.push(symbol)
@@ -109,7 +124,7 @@ export class PriceService {
             else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
             if (price) {
               prices[q.symbol] = price
-              this.priceCache.set(q.symbol, price)
+              this._cachePrice(q.symbol, price)
             }
           })
 
@@ -118,14 +133,14 @@ export class PriceService {
             if (prices[symbol] === undefined) {
               console.warn(`No price data for ${symbol}`)
               prices[symbol] = 0
-              this.priceCache.set(symbol, 0)
+              this._cachePrice(symbol, 0)
             }
           })
         } catch (error) {
           console.error(`Error fetching bulk prices (batch ${i / batchSize + 1}):`, error.message)
           batch.forEach(symbol => {
             prices[symbol] = 0
-            this.priceCache.set(symbol, 0)
+            this._cachePrice(symbol, 0)
           })
         }
 
