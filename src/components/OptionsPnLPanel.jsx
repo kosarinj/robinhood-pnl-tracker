@@ -419,6 +419,14 @@ export default function OptionsPnLPanel() {
                             {t.isClosing && t.realizedPnl != null && (
                               <div style={{ fontSize: '10px', color: textMid, textAlign: 'right', marginTop: '2px' }}>
                                 proceeds {t.cashFlow >= 0 ? '+' : ''}{fmt(t.cashFlow)}
+                                {t.realizedPnlDetail && (
+                                  <span style={{ marginLeft: '6px' }}>
+                                    · cost basis {fmt(t.realizedPnlDetail.costBasis)}
+                                    {t.realizedPnlDetail.matchedLegs?.map((leg, li) => (
+                                      <span key={li}> [{leg.contracts}c @ {fmt(leg.pricePerContract)}{leg.date ? ` on ${leg.date}` : ''}]</span>
+                                    ))}
+                                  </span>
+                                )}
                               </div>
                             )}
                           </div>

@@ -1993,17 +1993,19 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       const stacks = lifoStacks[sym]
 
       if (tc === 'BTO') {
-        stacks.long.push({ pricePerContract, remainingContracts: contracts })
+        stacks.long.push({ pricePerContract, remainingContracts: contracts, date: t.trans_date })
       } else if (tc === 'STO') {
-        stacks.short.push({ pricePerContract, remainingContracts: contracts })
+        stacks.short.push({ pricePerContract, remainingContracts: contracts, date: t.trans_date })
       } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
         const stack = tc === 'BTC' ? stacks.short : stacks.long
         let contractsLeft = contracts
         let costBasis = 0
+        const matchedLegs = []
         while (contractsLeft > 0 && stack.length > 0) {
           const top = stack[stack.length - 1]
           const matched = Math.min(contractsLeft, top.remainingContracts)
           costBasis += matched * top.pricePerContract
+          matchedLegs.push({ contracts: matched, pricePerContract: Math.round(top.pricePerContract * 100) / 100, date: top.date })
           contractsLeft -= matched
           top.remainingContracts -= matched
           if (top.remainingContracts === 0) stack.pop()
@@ -2012,6 +2014,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         if (contractsLeft === 0) {
           const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
           t._realizedPnl = Math.round((tc === 'BTC' ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
+          t._realizedPnlDetail = { costBasis: Math.round(costBasis * 100) / 100, proceeds: Math.round(proceeds * 100) / 100, matchedLegs }
         }
       }
     })
@@ -2040,7 +2043,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       cg.tradeDetails.push({
         date: t.trans_date, description: t.symbol,
         transCode: t.trans_code, cashFlow: Math.round(cashFlow * 100) / 100, isClosing,
-        realizedPnl: isClosing ? (t._realizedPnl ?? null) : null
+        realizedPnl: isClosing ? (t._realizedPnl ?? null) : null,
+        realizedPnlDetail: isClosing ? (t._realizedPnlDetail ?? null) : null
       })
     })
 
