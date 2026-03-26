@@ -24,7 +24,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
   const [loading, setLoading] = useState(true)
   const [symbolLoading, setSymbolLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
   const [calculationMode, setCalculationMode] = useState('historical') // 'historical' or 'snapshots'
   const [showStockPnL, setShowStockPnL] = useState(true)
   const [showOptionsPnL, setShowOptionsPnL] = useState(true)
