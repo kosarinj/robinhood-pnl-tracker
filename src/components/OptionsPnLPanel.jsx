@@ -251,7 +251,8 @@ export default function OptionsPnLPanel() {
                     <div key={sym} title={tooltip} style={{
                       padding: '4px 8px', borderRadius: '6px', fontSize: '12px',
                       background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                      border: `1px solid ${border}`, cursor: tooltip ? 'help' : 'default'
+                      border: `1px solid ${border}`, cursor: tooltip ? 'help' : 'default',
+                      minWidth: 0, overflow: 'hidden'
                     }}>
                       <span style={{ fontWeight: '700', color: text }}>{sym}</span>
                       {entry?.toPrice && <span style={{ color: textMid, marginLeft: '5px', fontSize: '11px' }}>{fmt(entry.toPrice)}</span>}
