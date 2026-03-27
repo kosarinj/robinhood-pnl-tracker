@@ -1968,7 +1968,10 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     }
 
     const now = new Date()
-    const mondayStr = getWeekStart(now.toISOString().slice(0, 10))
+    const todayDefault = now.toISOString().slice(0, 10)
+    // asOf lets the caller view any past week as if it were "this week"
+    const asOf = req.query.asOf && /^\d{4}-\d{2}-\d{2}$/.test(req.query.asOf) ? req.query.asOf : todayDefault
+    const mondayStr = getWeekStart(asOf)
     const fridayStr = (() => { const d = new Date(mondayStr + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
 
     // Global LIFO pass: compute realized P&L per closing trade across all time
@@ -2102,7 +2105,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       d.setDate(d.getDate() - 3)
       return d.toISOString().slice(0, 10)
     })()
-    const todayStr = now.toISOString().slice(0, 10)
+    const todayStr = asOf
 
     let weeklyStockPnL = {}
     let otherStockPnL = 0

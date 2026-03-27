@@ -36,6 +36,7 @@ export default function OptionsPnLPanel() {
   const [livePositions, setLivePositions] = useState(null)
   const [posLoading, setPosLoading] = useState(false)
   const [posError, setPosError] = useState(null)
+  const [asOfDate, setAsOfDate] = useState('')
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -44,11 +45,13 @@ export default function OptionsPnLPanel() {
   const green = '#22c55e'
   const red = '#ef4444'
 
-  const fetchData = async () => {
+  const fetchData = async (overrideAsOf) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/options-pnl/history', { credentials: 'include' })
+      const asOf = overrideAsOf ?? asOfDate
+      const url = asOf ? `/api/options-pnl/history?asOf=${asOf}` : '/api/options-pnl/history'
+      const res = await fetch(url, { credentials: 'include' })
       const json = await res.json()
       if (json.success) setData(json)
       else setError(json.error)
@@ -203,12 +206,27 @@ export default function OptionsPnLPanel() {
   }, {})
 
   const handleRefreshAll = () => { fetchData(); fetchLivePositions() }
+  const handleAsOfChange = (e) => {
+    const val = e.target.value
+    setAsOfDate(val)
+    fetchData(val)
+  }
+  const handleAsOfClear = () => {
+    setAsOfDate('')
+    fetchData('')
+  }
 
   return (
     <div style={{ color: text }}>
       {/* Global Refresh */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px', gap: '12px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         {livePositions?.fetchedAt && <span style={{ fontSize: '11px', color: textMid }}>Updated {new Date(livePositions.fetchedAt).toLocaleTimeString()}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', color: textMid }}>As of</span>
+          <input type="date" value={asOfDate} onChange={handleAsOfChange}
+            style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', border: `1px solid ${asOfDate ? '#667eea' : border}`, background: surface, color: text, cursor: 'pointer' }} />
+          {asOfDate && <button onClick={handleAsOfClear} style={{ fontSize: '11px', color: textMid, background: 'none', border: 'none', cursor: 'pointer' }}>✕ today</button>}
+        </div>
         <button onClick={handleRefreshAll} disabled={loading || posLoading} style={{ ...btnStyle(false), padding: '6px 16px', opacity: (loading || posLoading) ? 0.6 : 1 }}>
           {(loading || posLoading) ? '…' : '↻ Refresh All'}
         </button>
