@@ -155,7 +155,6 @@ export default function OptionsPnLPanel() {
   })
 
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
-  const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
@@ -164,23 +163,23 @@ export default function OptionsPnLPanel() {
   const optionsWeekPnL = hasPrices
     ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
     : (data?.currentWeekPnL || 0)
-  const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
   // Unrealized P&L grouped by underlying ticker
   const unrealizedByTicker = openPositions.reduce((m, p) => {
     if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
     return m
   }, {})
-  // Stock price by ticker:
-  // Start with Yahoo Finance today prices from history endpoint (always available after load)
-  // then override with Polygon live underlying_asset.price when available (market hours)
+  // Stock price by ticker: Polygon only for option underlyings (keeps options + stock in sync)
   const stockPriceByTicker = {
-    // Yahoo Finance today prices for stocks user holds
-    ...Object.fromEntries(Object.entries(data?.weeklyStockPnL || {}).filter(([, e]) => (e?.toPrice ?? 0) > 0).map(([sym, e]) => [sym, e.toPrice])),
-    // Yahoo Finance today prices for option-only underlyings (e.g. HOOD where user holds no stock)
-    ...(data?.optionUnderlyingPrices || {}),
-    // Polygon live underlying_asset.price overrides when available (market hours)
+    // Polygon live underlying_asset.price from open-positions endpoint
     ...openPositions.reduce((m, p) => { if (p.stockPrice > 0) m[p.ticker] = p.stockPrice; return m }, {})
   }
+  // Weekly stock P&L: computed client-side using Polygon prices so it stays in sync with options
+  const totalStockPnL = Object.entries(data?.weeklyStockPnL || {}).reduce((s, [sym, e]) => {
+    const toPrice = stockPriceByTicker[sym]
+    if (!toPrice || !e?.fromPrice || !e?.shares) return s
+    return s + Math.round((toPrice - e.fromPrice) * e.shares * 100) / 100
+  }, 0)
+  const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
   // Remaining premium — compute client-side using stock prices already in stockPriceByTicker
   const remPremByTicker = openPositions.reduce((m, p) => {
     const stockPrice = stockPriceByTicker[p.ticker]
@@ -323,8 +322,11 @@ export default function OptionsPnLPanel() {
               }
               {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
                 const stockEntry = data.weeklyStockPnL?.[ticker]
-                const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
-                const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.shares} shares · ${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
+                const toPrice = stockPriceByTicker[ticker]
+                const stockPnl = (stockEntry?.fromPrice && stockEntry?.shares && toPrice)
+                  ? Math.round((toPrice - stockEntry.fromPrice) * stockEntry.shares * 100) / 100
+                  : undefined
+                const stockTooltip = stockEntry?.fromPrice && toPrice ? `${stockEntry.shares} shares · ${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${toPrice.toFixed(2)}` : undefined
                 const unrealizedPnl = unrealizedByTicker[ticker]
                 const rp = remPremByTicker[ticker]
                 const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
