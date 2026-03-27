@@ -2119,32 +2119,27 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
 
     const optionUnderlyingPrices = {}
     if (allSymbols.length > 0) {
-      // For option-underlying tickers: only fetch last-Friday close from Yahoo.
-      // Current price comes from Polygon (open-positions endpoint) so options + stock stay in sync.
-      // For other stocks (no options): fetch both dates from Yahoo since there's no Polygon data.
-      const optionSymbols = [...new Set([...thisWeekSymbols, ...optionOnlyTickers])]
-      const [lastFridayPricesOption, lastFridayPricesOther, currentPricesOther] = await Promise.all([
-        priceService.getPricesForDate(optionSymbols, lastFridayStr),
-        otherSymbols.length > 0 ? priceService.getPricesForDate(otherSymbols, lastFridayStr) : Promise.resolve({}),
-        otherSymbols.length > 0 ? priceService.getPricesForDate(otherSymbols, todayStr) : Promise.resolve({})
+      const [lastFridayPrices, currentPrices] = await Promise.all([
+        priceService.getPricesForDate(allSymbols, lastFridayStr),
+        priceService.getPricesForDate(allSymbols, todayStr)
       ])
+      optionOnlyTickers.forEach(sym => {
+        if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
+      })
 
-      // weeklyStockPnL: return fromPrice + shares only — frontend computes pnl using Polygon toPrice
       thisWeekSymbols.forEach(sym => {
         const pos = allPositions[sym]
-        const lastClose = lastFridayPricesOption[sym]
-        if (pos && lastClose) {
-          weeklyStockPnL[sym] = { fromPrice: lastClose, fromDate: lastFridayStr, shares: pos }
+        const lastClose = lastFridayPrices[sym]
+        const curPrice = currentPrices[sym]
+        if (pos && lastClose && curPrice) {
+          weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
         }
       })
 
-      // optionUnderlyingPrices: not fetched from Yahoo — frontend uses Polygon prices
-      // (kept as empty object; Polygon prices flow in via open-positions endpoint)
-
       otherSymbols.forEach(sym => {
         const pos = allPositions[sym]
-        const lastClose = lastFridayPricesOther[sym]
-        const curPrice = currentPricesOther[sym]
+        const lastClose = lastFridayPrices[sym]
+        const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
           const pnl = Math.round((curPrice - lastClose) * pos * 100) / 100
           otherStockPnLBySymbol[sym] = { pnl, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr }
