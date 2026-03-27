@@ -522,9 +522,10 @@ export default function OptionsPnLPanel() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: isDark ? '#252b3b' : '#f8fafc' }}>
-                  {['Week Of', 'Options', 'Stock Δ', 'Net'].map(h => (
-                    <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700',
-                      textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, borderBottom: `1px solid ${border}` }}>{h}</th>
+                  {['Week', 'Options', 'Stock Δ', 'Net'].map((h, hi) => (
+                    <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: '12px', fontWeight: '700',
+                      color: text, borderBottom: `1px solid ${border}`, whiteSpace: 'nowrap',
+                      width: hi === 0 ? '40%' : undefined }}>{h}</th>
                   ))}
                 </tr>
               </thead>
