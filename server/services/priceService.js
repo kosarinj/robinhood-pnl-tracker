@@ -197,8 +197,9 @@ export class PriceService {
   // Get closing price for a specific date
   async getPriceForDate(symbol, dateString) {
     try {
-      // Check database cache first
-      if (this.databaseService) {
+      const isToday = dateString === new Date().toISOString().slice(0, 10)
+      // Check database cache first — but never for today (prices change intraday)
+      if (this.databaseService && !isToday) {
         const cachedPrice = this.databaseService.getHistoricalPrice(symbol, dateString)
         if (cachedPrice !== null) {
           console.log(`✓ ${symbol} price for ${dateString} from cache: $${cachedPrice}`)
@@ -252,8 +253,8 @@ export class PriceService {
       const closingPrice = quotes.close[closestIndex]
       const actualDate = new Date(timestamps[closestIndex] * 1000).toISOString().split('T')[0]
 
-      // Save to cache if databaseService is available
-      if (this.databaseService && closingPrice) {
+      // Save to DB cache for historical dates only — never cache today's price
+      if (this.databaseService && closingPrice && !isToday) {
         this.databaseService.saveHistoricalPrice(
           symbol,
           actualDate,
