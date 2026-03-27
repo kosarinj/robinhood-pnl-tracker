@@ -522,7 +522,7 @@ export default function OptionsPnLPanel() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: isDark ? '#252b3b' : '#f8fafc' }}>
-                  {['Week Of', 'Trades', 'Options P&L', 'Realized', 'Stock Δ', 'Running Total'].map(h => (
+                  {['Week Of', 'Options', 'Stock Δ', 'Net'].map(h => (
                     <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700',
                       textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, borderBottom: `1px solid ${border}` }}>{h}</th>
                   ))}
@@ -531,26 +531,24 @@ export default function OptionsPnLPanel() {
               <tbody>
                 {filteredWeeks.map((week, i) => {
                   const { monday, friday } = getMondayOfWeek(week.weekStart)
-                  const isPos = week.totalDelta >= 0
                   const stockDeltaTotal = week.stockDelta ? Object.values(week.stockDelta).reduce((s, v) => s + v, 0) : null
                   const stockTooltip = week.stockDelta ? Object.entries(week.stockDelta).map(([t, v]) => `${t}: ${v >= 0 ? '+' : ''}${fmt(v)}`).join(', ') : null
+                  const net = week.totalDelta + (stockDeltaTotal ?? 0)
                   return (
                     <tr key={week.weekStart} style={{ borderBottom: `1px solid ${border}`, background: i % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)') }}>
                       <td style={{ padding: '10px 16px', color: text }}>
                         <span style={{ fontWeight: '600' }}>{fmtDate(monday)}</span>
                         <span style={{ color: textMid, marginLeft: '6px', fontSize: '12px' }}>&#8211; {fmtDate(friday)}</span>
                       </td>
-                      <td style={{ padding: '10px 16px', color: textMid }}>{week.tradeCount || week.days?.length || 0}</td>
-                      <td style={{ padding: '10px 16px', fontWeight: '700', color: isPos ? green : red }}>
-                        {isPos ? '+' : ''}{fmt(week.totalDelta)}
-                      </td>
-                      <td style={{ padding: '10px 16px', color: (week.realizedDelta || 0) >= 0 ? green : red }}>
-                        {(week.realizedDelta || 0) >= 0 ? '+' : ''}{fmt(week.realizedDelta || 0)}
+                      <td style={{ padding: '10px 16px', fontWeight: '600', color: week.totalDelta >= 0 ? green : red }}>
+                        {week.totalDelta >= 0 ? '+' : ''}{fmt(week.totalDelta)}
                       </td>
                       <td title={stockTooltip || ''} style={{ padding: '10px 16px', color: stockDeltaTotal == null ? textMid : (stockDeltaTotal >= 0 ? green : red), cursor: stockTooltip ? 'help' : 'default' }}>
                         {stockDeltaTotal == null ? '—' : `${stockDeltaTotal >= 0 ? '+' : ''}${fmt(stockDeltaTotal)}`}
                       </td>
-                      <td style={{ padding: '10px 16px', color: text }}>{fmt(week.runningTotal)}</td>
+                      <td style={{ padding: '10px 16px', fontWeight: '700', color: net >= 0 ? green : red }}>
+                        {net >= 0 ? '+' : ''}{fmt(net)}
+                      </td>
                     </tr>
                   )
                 })}
@@ -558,17 +556,18 @@ export default function OptionsPnLPanel() {
               <tfoot>
                 <tr style={{ background: isDark ? '#252b3b' : '#f8fafc', borderTop: `2px solid ${border}` }}>
                   <td style={{ padding: '10px 16px', fontWeight: '700', color: text }}>Total</td>
-                  <td style={{ padding: '10px 16px', color: textMid }}>{filteredWeeks.reduce((s, w) => s + (w.tradeCount || 0), 0)} trades</td>
                   <td style={{ padding: '10px 16px', fontWeight: '700', color: rangeTotal >= 0 ? green : red }}>
                     {rangeTotal >= 0 ? '+' : ''}{fmt(rangeTotal)}
                   </td>
-                  <td></td>
                   {(() => {
                     const stockTotal = filteredWeeks.reduce((s, w) => w.stockDelta ? s + Object.values(w.stockDelta).reduce((a, b) => a + b, 0) : s, 0)
                     const hasAny = filteredWeeks.some(w => w.stockDelta)
-                    return <td style={{ padding: '10px 16px', fontWeight: '700', color: stockTotal >= 0 ? green : red }}>{hasAny ? `${stockTotal >= 0 ? '+' : ''}${fmt(stockTotal)}` : ''}</td>
+                    const netTotal = rangeTotal + stockTotal
+                    return <>
+                      <td style={{ padding: '10px 16px', fontWeight: '700', color: stockTotal >= 0 ? green : red }}>{hasAny ? `${stockTotal >= 0 ? '+' : ''}${fmt(stockTotal)}` : ''}</td>
+                      <td style={{ padding: '10px 16px', fontWeight: '700', color: netTotal >= 0 ? green : red }}>{hasAny ? `${netTotal >= 0 ? '+' : ''}${fmt(netTotal)}` : `${rangeTotal >= 0 ? '+' : ''}${fmt(rangeTotal)}`}</td>
+                    </>
                   })()}
-                  <td></td>
                 </tr>
               </tfoot>
             </table>
