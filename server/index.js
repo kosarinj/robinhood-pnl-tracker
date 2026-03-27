@@ -2157,10 +2157,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       Object.values(byWeek).flatMap(w => Object.keys(w.byUnderlying))
     )].filter(t => allPositions[t] > 0)
 
-    if (stockHoldingOptionTickers.length > 0) {
+    const allHistoryTickers = [...new Set([...stockHoldingOptionTickers, ...otherSymbols])]
+    if (allHistoryTickers.length > 0) {
       // Fetch 2 years of daily history per ticker — one call each, cached in DB
       const tickerDateMap = {}
-      await Promise.all(stockHoldingOptionTickers.map(async ticker => {
+      await Promise.all(allHistoryTickers.map(async ticker => {
         try {
           const hist = await priceService.fetchHistoricalPrices(ticker, '2y', '1d')
           const m = {}
@@ -2186,6 +2187,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const monday = new Date(week.weekStart + 'T12:00:00')
         const prevFriStr = new Date(monday.getTime() - 3 * 86400000).toISOString().slice(0, 10)
         const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
+
+        // Stock delta for option-underlying tickers
         const stockDelta = {}
         Object.keys(week.byUnderlying).forEach(ticker => {
           if (!allPositions[ticker] || !tickerDateMap[ticker]) return
@@ -2196,6 +2199,18 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
           }
         })
         if (Object.keys(stockDelta).length > 0) week.stockDelta = stockDelta
+
+        // Other stocks delta (non-option holdings)
+        const otherDelta = {}
+        otherSymbols.forEach(ticker => {
+          if (!allPositions[ticker] || !tickerDateMap[ticker]) return
+          const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
+          const thisClose = findClose(tickerDateMap[ticker], thisFriStr)
+          if (prevClose > 0 && thisClose > 0) {
+            otherDelta[ticker] = Math.round((thisClose - prevClose) * allPositions[ticker] * 100) / 100
+          }
+        })
+        if (Object.keys(otherDelta).length > 0) week.otherStockDelta = otherDelta
       })
     }
 
