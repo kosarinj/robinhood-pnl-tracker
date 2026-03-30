@@ -316,7 +316,7 @@ export default function OptionsPnLPanel() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
           <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
           <div style={{ display: 'flex', gap: '4px' }}>
-            {[['1W', 1], ['4W', 4], ['8W', 8], ['All', 0]].map(([label, val]) => (
+            {[['1W', 1], ['2W', 2], ['3W', 3], ['4W', 4], ['8W', 8], ['All', 0]].map(([label, val]) => (
               <button key={label} onClick={() => setByUnderlyingWeeks(val)}
                 style={{ ...btnStyle(byUnderlyingWeeks === val), padding: '3px 10px', fontSize: '11px' }}>
                 {label}
