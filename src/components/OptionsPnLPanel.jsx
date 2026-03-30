@@ -160,18 +160,22 @@ export default function OptionsPnLPanel() {
 
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
 
-  // Cumulative by-underlying: sum byUnderlying across the last N weeks (sorted desc)
-  const cumulativeByUnderlying = (() => {
+  // Cumulative by-underlying: sum byUnderlying + stockDelta across the last N weeks (sorted desc)
+  const { cumulativeByUnderlying, cumulativeStockDelta } = (() => {
     const weeks = data?.weeks || []
     const sorted = [...weeks].sort((a, b) => b.weekStart.localeCompare(a.weekStart))
     const slice = byUnderlyingWeeks === 0 ? sorted : sorted.slice(0, byUnderlyingWeeks)
-    const totals = {}
+    const options = {}
+    const stock = {}
     slice.forEach(w => {
       Object.entries(w.byUnderlying || {}).forEach(([ticker, val]) => {
-        totals[ticker] = (totals[ticker] || 0) + val
+        options[ticker] = (options[ticker] || 0) + val
+      })
+      Object.entries(w.stockDelta || {}).forEach(([ticker, val]) => {
+        stock[ticker] = (stock[ticker] || 0) + val
       })
     })
-    return totals
+    return { cumulativeByUnderlying: options, cumulativeStockDelta: stock }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
@@ -331,17 +335,30 @@ export default function OptionsPnLPanel() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {Object.entries(cumulativeByUnderlying)
                 .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-                .map(([ticker, optPnl]) => (
-                  <div key={ticker} style={{ minWidth: '120px', flex: '1 1 120px', maxWidth: '220px',
-                    padding: '8px 12px', borderRadius: '8px', fontSize: '12px',
-                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                    border: `1px solid ${border}` }}>
-                    <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
-                    <div style={{ color: optPnl >= 0 ? green : red, fontWeight: '600' }}>
-                      {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}
+                .map(([ticker, optPnl]) => {
+                  const stockPnl = cumulativeStockDelta[ticker]
+                  const unrealizedPnl = unrealizedByTicker[ticker]
+                  const sp = stockPriceByTicker[ticker]
+                  const combined = (stockPnl !== undefined || unrealizedPnl !== undefined)
+                    ? optPnl + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
+                    : null
+                  return (
+                    <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px',
+                      padding: '8px 12px', borderRadius: '8px', fontSize: '12px',
+                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                      border: `1px solid ${border}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: '700', color: text }}>{ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ color: optPnl >= 0 ? green : red }}>Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}</div>
+                        {stockPnl !== undefined && <div style={{ color: stockPnl >= 0 ? green : red }}>Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}</div>}
+                        {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
+                        {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
             </div>
           </div>
         )}
