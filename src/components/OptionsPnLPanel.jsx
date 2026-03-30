@@ -37,6 +37,7 @@ export default function OptionsPnLPanel() {
   const [posLoading, setPosLoading] = useState(false)
   const [posError, setPosError] = useState(null)
   const [asOfDate, setAsOfDate] = useState('')
+  const [byUnderlyingWeeks, setByUnderlyingWeeks] = useState(1)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -158,6 +159,20 @@ export default function OptionsPnLPanel() {
   })
 
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
+
+  // Cumulative by-underlying: sum byUnderlying across the last N weeks (sorted desc)
+  const cumulativeByUnderlying = (() => {
+    const weeks = data?.weeks || []
+    const sorted = [...weeks].sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    const slice = byUnderlyingWeeks === 0 ? sorted : sorted.slice(0, byUnderlyingWeeks)
+    const totals = {}
+    slice.forEach(w => {
+      Object.entries(w.byUnderlying || {}).forEach(([ticker, val]) => {
+        totals[ticker] = (totals[ticker] || 0) + val
+      })
+    })
+    return totals
+  })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
@@ -298,13 +313,39 @@ export default function OptionsPnLPanel() {
         ...cardStyle,
         borderLeft: `4px solid ${(data?.currentWeekPnL || 0) >= 0 ? green : red}`,
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
           <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
-          <span style={{ fontSize: '12px', color: textMid }}>{data?.weekStart ? `Week of ${fmtDate(data.weekStart)}` : ''}</span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {[['1W', 1], ['4W', 4], ['8W', 8], ['All', 0]].map(([label, val]) => (
+              <button key={label} onClick={() => setByUnderlyingWeeks(val)}
+                style={{ ...btnStyle(byUnderlyingWeeks === val), padding: '3px 10px', fontSize: '11px' }}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Per-underlying breakdown for current week */}
-        {data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
+        {/* Per-underlying breakdown — single week (detailed) or multi-week (options total only) */}
+        {byUnderlyingWeeks !== 1 && Object.keys(cumulativeByUnderlying).length > 0 && (
+          <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {Object.entries(cumulativeByUnderlying)
+                .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+                .map(([ticker, optPnl]) => (
+                  <div key={ticker} style={{ minWidth: '120px', flex: '1 1 120px', maxWidth: '220px',
+                    padding: '8px 12px', borderRadius: '8px', fontSize: '12px',
+                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                    border: `1px solid ${border}` }}>
+                    <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>{ticker}</div>
+                    <div style={{ color: optPnl >= 0 ? green : red, fontWeight: '600' }}>
+                      {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+        {byUnderlyingWeeks === 1 && data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '8px' }}>
               This Week by Underlying
