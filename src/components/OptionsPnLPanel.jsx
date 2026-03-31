@@ -357,12 +357,21 @@ export default function OptionsPnLPanel() {
               {Object.entries(cumulativeByUnderlying)
                 .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
                 .map(([ticker, optPnl]) => {
-                  const stockPnl = cumulativeStockDelta[ticker]
-                  const unrealizedPnl = unrealizedByTicker[ticker]
-                  const sp = stockPriceByTicker[ticker]
                   const priceRange = cumulativeStockPrices[ticker]
+                  const livePrice = stockPriceByTicker[ticker]
+                  // Use live price as toPrice so stock P&L reflects current market
+                  const stockPnl = priceRange && (livePrice || priceRange.toPrice)
+                    ? Math.round(((livePrice ?? priceRange.toPrice) - priceRange.fromPrice) * priceRange.shares * 100) / 100
+                    : cumulativeStockDelta[ticker]
+                  const displayToPrice = livePrice ?? priceRange?.toPrice
+                  const unrealizedPnl = unrealizedByTicker[ticker]
+                  const sp = livePrice
                   const combined = (stockPnl !== undefined || unrealizedPnl !== undefined)
                     ? optPnl + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
+                    : null
+                  const shares = priceRange?.shares
+                  const combined100 = combined != null && shares && shares !== 100
+                    ? Math.round(combined * 100 / shares * 100) / 100
                     : null
                   const isExpanded = expandedTicker === ticker
                   const wkBreakdown = weeklyBreakdown[ticker] || []
@@ -382,11 +391,12 @@ export default function OptionsPnLPanel() {
                           {stockPnl !== undefined && (
                             <div style={{ color: stockPnl >= 0 ? green : red }}>
                               Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
-                              {priceRange && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${priceRange.fromPrice.toFixed(2)} → ${priceRange.toPrice.toFixed(2)}</span>}
+                              {priceRange && displayToPrice && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${priceRange.fromPrice.toFixed(2)} → ${displayToPrice.toFixed(2)}</span>}
                             </div>
                           )}
                           {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
                           {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
+                          {combined100 !== null && <div style={{ color: combined100 >= 0 ? green : red, fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
                         </div>
                       </div>
                       {isExpanded && wkBreakdown.length > 0 && (
@@ -465,6 +475,10 @@ export default function OptionsPnLPanel() {
                 const combined = stockPnl !== undefined || unrealizedPnl !== undefined
                   ? (unrealizedPnl !== undefined ? (realizedPnl ?? 0) : optPnl) + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
                   : null
+                const shares1w = stockEntry?.shares
+                const combined100 = combined != null && shares1w && shares1w !== 100
+                  ? Math.round(combined * 100 / shares1w * 100) / 100
+                  : null
                 const isExpanded = expandedTicker === ticker
                 const sp = stockPriceByTicker[ticker] || stockEntry?.toPrice
                 return (
@@ -507,6 +521,9 @@ export default function OptionsPnLPanel() {
                           <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
                             Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
                           </div>
+                        )}
+                        {combined100 !== null && (
+                          <div style={{ color: textMid, fontSize: '10px' }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>
                         )}
                       </div>
                     </div>
