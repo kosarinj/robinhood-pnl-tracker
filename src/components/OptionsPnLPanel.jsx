@@ -392,8 +392,9 @@ export default function OptionsPnLPanel() {
                     ? optPnl + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
                     : null
                   const shares = priceRange?.shares
-                  const combined100 = combined != null && shares && shares !== 100
-                    ? Math.round(combined * 100 / shares * 100) / 100
+                  // Scale only stock P&L to 100sh — options/unrealized are independent of share count
+                  const combined100 = combined != null && shares && shares !== 100 && stockPnl !== undefined
+                    ? Math.round((combined - stockPnl + stockPnl * 100 / shares) * 100) / 100
                     : null
                   const isExpanded = expandedTicker === ticker
                   const wkBreakdown = weeklyBreakdown[ticker] || []
@@ -515,8 +516,9 @@ export default function OptionsPnLPanel() {
                   ? (unrealizedPnl !== undefined ? (realizedPnl ?? 0) : optPnl) + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
                   : null
                 const shares1w = stockEntry?.shares
-                const combined100 = combined != null && shares1w && shares1w !== 100
-                  ? Math.round(combined * 100 / shares1w * 100) / 100
+                // Scale only stock P&L to 100sh — options/unrealized are independent of share count
+                const combined100 = combined != null && shares1w && shares1w !== 100 && stockPnl !== undefined
+                  ? Math.round((combined - stockPnl + stockPnl * 100 / shares1w) * 100) / 100
                   : null
                 const isExpanded = expandedTicker === ticker
                 const sp = stockPriceByTicker[ticker] || stockEntry?.toPrice
