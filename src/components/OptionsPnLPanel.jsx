@@ -196,7 +196,12 @@ export default function OptionsPnLPanel() {
     })
     // Sort each ticker's breakdown newest first
     Object.values(breakdown).forEach(arr => arr.sort((a, b) => b.weekStart.localeCompare(a.weekStart)))
-    return { cumulativeByUnderlying: options, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices }
+    // Date range for the slice
+    const fromWeek = slice[slice.length - 1]?.weekStart
+    const toWeek = slice[0]?.weekStart
+    const sliceFromDate = fromWeek ? fromWeek : null
+    const sliceToDate = toWeek ? (() => { const d = new Date(toWeek + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })() : null
+    return { cumulativeByUnderlying: options, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
@@ -339,7 +344,10 @@ export default function OptionsPnLPanel() {
         borderLeft: `4px solid ${(data?.currentWeekPnL || 0) >= 0 ? green : red}`,
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: '700', color: text }}>By Underlying</div>
+            {sliceFromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>{fmtDate(sliceFromDate)} – {fmtDate(sliceToDate)}</div>}
+          </div>
           <div style={{ display: 'flex', gap: '4px' }}>
             {[['1W', 1], ['2W', 2], ['3W', 3], ['4W', 4], ['8W', 8], ['All', 0]].map(([label, val]) => (
               <button key={label} onClick={() => setByUnderlyingWeeks(val)}
@@ -353,6 +361,20 @@ export default function OptionsPnLPanel() {
         {/* Per-underlying breakdown — single week (detailed) or multi-week (options total only) */}
         {byUnderlyingWeeks !== 1 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+            {(() => {
+              const total = Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
+                const priceRange = cumulativeStockPrices[ticker]
+                const livePrice = stockPriceByTicker[ticker]
+                const stockPnl = priceRange && (livePrice || priceRange.toPrice)
+                  ? Math.round(((livePrice ?? priceRange.toPrice) - priceRange.fromPrice) * priceRange.shares * 100) / 100
+                  : (cumulativeStockDelta[ticker] ?? 0)
+                const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
+                return sum + optPnl + stockPnl + unrealizedPnl
+              }, 0)
+              return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
+                Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
+              </div>
+            })()}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {Object.entries(cumulativeByUnderlying)
                 .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
@@ -428,8 +450,25 @@ export default function OptionsPnLPanel() {
         )}
         {byUnderlyingWeeks === 1 && data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
-            <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid, marginBottom: '8px' }}>
-              This Week by Underlying
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
+                This Week by Underlying
+              </div>
+              {(() => {
+                const total = Object.entries(data.currentWeekByUnderlying).reduce((sum, [ticker, optPnl]) => {
+                  const stockEntry = data.weeklyStockPnL?.[ticker]
+                  const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
+                  const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
+                  const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
+                  const combined = unrealizedPnl !== 0
+                    ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
+                    : optPnl + stockPnl
+                  return sum + combined
+                }, 0)
+                return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red }}>
+                  Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
+                </div>
+              })()}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {/* Tickers with open positions but no current-week trades */}
