@@ -161,7 +161,7 @@ export default function OptionsPnLPanel() {
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
 
   // Cumulative by-underlying: sum byUnderlying + stockDelta across the last N weeks (sorted desc)
-  const { cumulativeByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices } = (() => {
+  const { cumulativeByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate } = (() => {
     const weeks = data?.weeks || []
     const sorted = [...weeks].sort((a, b) => b.weekStart.localeCompare(a.weekStart))
     const slice = byUnderlyingWeeks === 0 ? sorted : sorted.slice(0, byUnderlyingWeeks)
