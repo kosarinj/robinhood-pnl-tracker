@@ -222,6 +222,14 @@ db.exec(`
 
 console.log(`Database initialized at: ${dbPath}`)
 
+// Migration: Drop the trades dedup unique index that incorrectly prevents identical legitimate trades
+try {
+  db.exec('DROP INDEX IF EXISTS idx_trades_dedup')
+  console.log('✅ Dropped idx_trades_dedup (replaced with count-based dedup in saveTrades)')
+} catch (error) {
+  console.log('ℹ️ idx_trades_dedup drop skipped:', error.message)
+}
+
 // Migration: Add is_option column to trades table if it doesn't exist
 try {
   const tableInfo = db.pragma('table_info(trades)')
@@ -371,7 +379,6 @@ try {
   try {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pnl_snapshots_user_date_symbol ON pnl_snapshots(user_id, asof_date, symbol)')
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_csv_uploads_user_date ON csv_uploads(user_id, upload_date)')
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_dedup ON trades(user_id, trans_date, trans_code, symbol, quantity, price, amount)')
     console.log('✅ Created unique indexes for multi-user support')
   } catch (error) {
     console.log('ℹ️ Unique indexes may already exist')
@@ -420,8 +427,21 @@ const upsertPnLSnapshot = db.prepare(`
 `)
 
 const insertTrade = db.prepare(`
-  INSERT OR IGNORE INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, contracts, user_id)
+  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, contracts, user_id)
   VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption, @contracts, @userId)
+`)
+
+// Count existing trades matching a given key from upload_dates OTHER than the current one
+const countExistingTrade = db.prepare(`
+  SELECT COUNT(*) as cnt FROM trades
+  WHERE user_id = @userId
+    AND trans_date = @transDate
+    AND COALESCE(trans_code, '') = @transCode
+    AND symbol = @symbol
+    AND quantity = @quantity
+    AND price = @price
+    AND amount = @amount
+    AND upload_date != @uploadDate
 `)
 
 const upsertCsvUpload = db.prepare(`
@@ -983,24 +1003,50 @@ export class DatabaseService {
       db.prepare('DELETE FROM trades WHERE upload_date = ? AND user_id = ?').run(uploadDate, userId)
       db.prepare('DELETE FROM deposits WHERE upload_date = ? AND user_id = ?').run(uploadDate, userId)
 
+      // Group CSV trades by dedup key so identical trades can be counted and compared against DB
+      const csvTradeGroups = new Map()
+      for (const trade of trades) {
+        const transDate = new Date(trade.date || trade.transDate).toISOString().split('T')[0]
+        const transCode = trade.transCode || trade.transactionCode || null
+        const key = `${transDate}|${transCode || ''}|${trade.symbol}|${trade.quantity}|${trade.price}|${trade.amount}`
+        if (!csvTradeGroups.has(key)) csvTradeGroups.set(key, [])
+        csvTradeGroups.get(key).push({ ...trade, _transDate: transDate, _transCode: transCode })
+      }
+
       // Save all trades and deposits in a transaction
-      const saveData = db.transaction((trades, deposits, uploadDate, totalPrincipal, userId) => {
-        for (const trade of trades) {
-          const transDate = new Date(trade.date || trade.transDate).toISOString().split('T')[0]
-          insertTrade.run({
-            uploadDate,
-            transDate,
-            transCode: trade.transCode || trade.transactionCode || null,
-            symbol: trade.symbol,
-            quantity: trade.quantity,
-            price: trade.price,
-            amount: trade.amount,
-            description: trade.description || null,
-            isBuy: trade.isBuy ? 1 : 0,
-            isOption: trade.isOption ? 1 : 0,
-            contracts: trade.contracts || 1,
-            userId
+      const saveData = db.transaction((csvTradeGroups, deposits, uploadDate, totalPrincipal, userId) => {
+        for (const [, tradeList] of csvTradeGroups) {
+          const t = tradeList[0]
+          // Count how many times this trade exists in DB from OTHER upload_dates
+          const { cnt: alreadyInDb } = countExistingTrade.get({
+            userId,
+            transDate: t._transDate,
+            transCode: t._transCode || '',
+            symbol: t.symbol,
+            quantity: t.quantity,
+            price: t.price,
+            amount: t.amount,
+            uploadDate
           })
+          // Insert only the trades that aren't already covered by other uploads
+          const toInsert = Math.max(0, tradeList.length - alreadyInDb)
+          for (let i = 0; i < toInsert; i++) {
+            const trade = tradeList[i]
+            insertTrade.run({
+              uploadDate,
+              transDate: trade._transDate,
+              transCode: trade._transCode,
+              symbol: trade.symbol,
+              quantity: trade.quantity,
+              price: trade.price,
+              amount: trade.amount,
+              description: trade.description || null,
+              isBuy: trade.isBuy ? 1 : 0,
+              isOption: trade.isOption ? 1 : 0,
+              contracts: trade.contracts || 1,
+              userId
+            })
+          }
         }
 
         // Save deposits
@@ -1025,8 +1071,8 @@ export class DatabaseService {
         })
       })
 
-      saveData(trades, deposits, uploadDate, totalPrincipal, userId)
-      console.log(`✅ Saved ${trades.length} trades and ${deposits.length} deposits for ${uploadDate} (user: ${userId}, principal: $${totalPrincipal.toFixed(2)})`)
+      saveData(csvTradeGroups, deposits, uploadDate, totalPrincipal, userId)
+      console.log(`✅ Saved trades and ${deposits.length} deposits for ${uploadDate} (user: ${userId}, principal: $${totalPrincipal.toFixed(2)})`)
       return uploadDate
     } catch (error) {
       console.error('Error saving trades:', error)
