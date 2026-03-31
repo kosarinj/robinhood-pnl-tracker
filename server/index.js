@@ -2196,6 +2196,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
           const thisClose = findClose(tickerDateMap[ticker], thisFriStr)
           if (prevClose > 0 && thisClose > 0) {
             stockDelta[ticker] = Math.round((thisClose - prevClose) * allPositions[ticker] * 100) / 100
+            if (!week.stockPrices) week.stockPrices = {}
+            week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose, shares: allPositions[ticker] }
           }
         })
         if (Object.keys(stockDelta).length > 0) week.stockDelta = stockDelta

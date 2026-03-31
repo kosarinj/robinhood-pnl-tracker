@@ -161,21 +161,42 @@ export default function OptionsPnLPanel() {
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
 
   // Cumulative by-underlying: sum byUnderlying + stockDelta across the last N weeks (sorted desc)
-  const { cumulativeByUnderlying, cumulativeStockDelta } = (() => {
+  const { cumulativeByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices } = (() => {
     const weeks = data?.weeks || []
     const sorted = [...weeks].sort((a, b) => b.weekStart.localeCompare(a.weekStart))
     const slice = byUnderlyingWeeks === 0 ? sorted : sorted.slice(0, byUnderlyingWeeks)
     const options = {}
     const stock = {}
-    slice.forEach(w => {
+    const breakdown = {} // ticker → [{ weekStart, optPnl, stockPnl }]
+    const stockPrices = {} // ticker → { fromPrice (oldest week), toPrice (newest week), shares }
+    slice.forEach((w, i) => {
       Object.entries(w.byUnderlying || {}).forEach(([ticker, val]) => {
         options[ticker] = (options[ticker] || 0) + val
+        if (!breakdown[ticker]) breakdown[ticker] = []
+        const existing = breakdown[ticker].find(e => e.weekStart === w.weekStart)
+        if (existing) existing.optPnl = (existing.optPnl || 0) + val
+        else breakdown[ticker].push({ weekStart: w.weekStart, optPnl: val, stockPnl: null })
       })
       Object.entries(w.stockDelta || {}).forEach(([ticker, val]) => {
         stock[ticker] = (stock[ticker] || 0) + val
+        if (!breakdown[ticker]) breakdown[ticker] = []
+        const existing = breakdown[ticker].find(e => e.weekStart === w.weekStart)
+        if (existing) existing.stockPnl = val
+        else breakdown[ticker].push({ weekStart: w.weekStart, optPnl: null, stockPnl: val })
+      })
+      Object.entries(w.stockPrices || {}).forEach(([ticker, prices]) => {
+        if (!stockPrices[ticker]) {
+          // First (most recent) week sets toPrice; last (oldest) week sets fromPrice
+          stockPrices[ticker] = { fromPrice: prices.fromPrice, toPrice: prices.toPrice, shares: prices.shares }
+        } else {
+          // Older week — update fromPrice to extend the range back
+          stockPrices[ticker].fromPrice = prices.fromPrice
+        }
       })
     })
-    return { cumulativeByUnderlying: options, cumulativeStockDelta: stock }
+    // Sort each ticker's breakdown newest first
+    Object.values(breakdown).forEach(arr => arr.sort((a, b) => b.weekStart.localeCompare(a.weekStart)))
+    return { cumulativeByUnderlying: options, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
@@ -339,23 +360,56 @@ export default function OptionsPnLPanel() {
                   const stockPnl = cumulativeStockDelta[ticker]
                   const unrealizedPnl = unrealizedByTicker[ticker]
                   const sp = stockPriceByTicker[ticker]
+                  const priceRange = cumulativeStockPrices[ticker]
                   const combined = (stockPnl !== undefined || unrealizedPnl !== undefined)
                     ? optPnl + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
                     : null
+                  const isExpanded = expandedTicker === ticker
+                  const wkBreakdown = weeklyBreakdown[ticker] || []
                   return (
-                    <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px',
-                      padding: '8px 12px', borderRadius: '8px', fontSize: '12px',
-                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                      border: `1px solid ${border}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: '700', color: text }}>{ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}</span>
+                    <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                      <div
+                        onClick={() => setExpandedTicker(isExpanded ? null : ticker)}
+                        style={{ padding: '8px 12px', borderRadius: isExpanded ? '8px 8px 0 0' : '8px', fontSize: '12px', cursor: 'pointer',
+                          background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                          border: `1px solid ${border}`, borderBottom: isExpanded ? 'none' : undefined }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: '700', color: text }}>{ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}</span>
+                          <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ color: optPnl >= 0 ? green : red }}>Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}</div>
+                          {stockPnl !== undefined && (
+                            <div style={{ color: stockPnl >= 0 ? green : red }}>
+                              Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                              {priceRange && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${priceRange.fromPrice.toFixed(2)} → ${priceRange.toPrice.toFixed(2)}</span>}
+                            </div>
+                          )}
+                          {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
+                          {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <div style={{ color: optPnl >= 0 ? green : red }}>Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}</div>
-                        {stockPnl !== undefined && <div style={{ color: stockPnl >= 0 ? green : red }}>Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}</div>}
-                        {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
-                        {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
-                      </div>
+                      {isExpanded && wkBreakdown.length > 0 && (
+                        <div style={{ border: `1px solid ${border}`, borderTop: 'none', borderRadius: '0 0 8px 8px',
+                          background: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)', fontSize: '11px' }}>
+                          {wkBreakdown.map((wk, i) => {
+                            const { monday } = getMondayOfWeek(wk.weekStart)
+                            const wkStockPrices = data?.weeks?.find(w => w.weekStart === wk.weekStart)?.stockPrices?.[ticker]
+                            return (
+                              <div key={wk.weekStart} style={{ padding: '5px 10px', borderBottom: i < wkBreakdown.length - 1 ? `1px solid ${border}` : 'none' }}>
+                                <div style={{ color: textMid, marginBottom: '2px', fontWeight: '600' }}>Wk of {fmtDate(monday)}</div>
+                                {wk.optPnl != null && <div style={{ color: wk.optPnl >= 0 ? green : red }}>Options: {wk.optPnl >= 0 ? '+' : ''}{fmt(wk.optPnl)}</div>}
+                                {wk.stockPnl != null && (
+                                  <div style={{ color: wk.stockPnl >= 0 ? green : red }}>
+                                    Stock: {wk.stockPnl >= 0 ? '+' : ''}{fmt(wk.stockPnl)}
+                                    {wkStockPrices && <span style={{ color: textMid, marginLeft: '4px' }}>(${wkStockPrices.fromPrice.toFixed(2)} → ${wkStockPrices.toPrice.toFixed(2)})</span>}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
