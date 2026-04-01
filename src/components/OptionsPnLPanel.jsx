@@ -209,25 +209,30 @@ export default function OptionsPnLPanel() {
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
   const hasPrices = openPositions.some(p => p.unrealizedPnl != null)
   const totalUnrealizedPnl = openPositions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
-  const optionsWeekPnL = hasPrices
+  // When viewing a past week (asOfDate set), unrealized P&L uses today's Polygon prices — not meaningful
+  // for historical views, so exclude it and show realized-only for options
+  const isHistoricalView = !!asOfDate
+  const optionsWeekPnL = hasPrices && !isHistoricalView
     ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
-    : (data?.currentWeekPnL || 0)
+    : (data?.currentWeekRealizedTotal || data?.currentWeekPnL || 0)
   const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
-  // Unrealized P&L grouped by underlying ticker
-  const unrealizedByTicker = openPositions.reduce((m, p) => {
-    if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
-    return m
-  }, {})
+  // Unrealized P&L grouped by underlying ticker (only shown for current week)
+  const unrealizedByTicker = !isHistoricalView
+    ? openPositions.reduce((m, p) => {
+        if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
+        return m
+      }, {})
+    : {}
   // Stock price by ticker:
-  // Start with Yahoo Finance today prices from history endpoint (always available after load)
-  // then override with Polygon live underlying_asset.price when available (market hours)
+  // For historical views use only server-computed historical prices (Yahoo Finance for asOf date)
+  // For current view also override with Polygon live underlying_asset.price when available (market hours)
   const stockPriceByTicker = {
-    // Yahoo Finance today prices for stocks user holds
+    // Yahoo Finance prices for the asOf date (or today) for stocks user holds
     ...Object.fromEntries(Object.entries(data?.weeklyStockPnL || {}).filter(([, e]) => (e?.toPrice ?? 0) > 0).map(([sym, e]) => [sym, e.toPrice])),
-    // Yahoo Finance today prices for option-only underlyings (e.g. HOOD where user holds no stock)
+    // Yahoo Finance prices for option-only underlyings
     ...(data?.optionUnderlyingPrices || {}),
-    // Polygon live underlying_asset.price overrides when available (market hours)
-    ...openPositions.reduce((m, p) => { if (p.stockPrice > 0) m[p.ticker] = p.stockPrice; return m }, {})
+    // Polygon live prices only when viewing current week (not historical)
+    ...(!isHistoricalView ? openPositions.reduce((m, p) => { if (p.stockPrice > 0) m[p.ticker] = p.stockPrice; return m }, {}) : {})
   }
   // Remaining premium — compute client-side using stock prices already in stockPriceByTicker
   const remPremByTicker = openPositions.reduce((m, p) => {
