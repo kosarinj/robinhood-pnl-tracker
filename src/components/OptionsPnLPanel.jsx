@@ -32,6 +32,7 @@ export default function OptionsPnLPanel() {
   const [toDate, setToDate] = useState('')
   const [activeQuick, setActiveQuick] = useState('all')
   const [expandedTicker, setExpandedTicker] = useState(null)
+  const [tradeSearch, setTradeSearch] = useState('')
   const [showWeeklyTable, setShowWeeklyTable] = useState(false)
   const [livePositions, setLivePositions] = useState(null)
   const [posLoading, setPosLoading] = useState(false)
@@ -530,7 +531,7 @@ export default function OptionsPnLPanel() {
                 return (
                   <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                     <div
-                      onClick={() => setExpandedTicker(isExpanded ? null : ticker)}
+                      onClick={() => { setExpandedTicker(isExpanded ? null : ticker); setTradeSearch('') }}
                       style={{
                         padding: '8px 12px', borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
                         background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
@@ -580,10 +581,26 @@ export default function OptionsPnLPanel() {
                         background: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)',
                         fontSize: '11px'
                       }}>
-                        {trades.map((t, i) => (
+                        {trades.length > 3 && (
+                          <div style={{ padding: '6px 10px', borderBottom: `1px solid ${border}` }}>
+                            <input
+                              value={tradeSearch}
+                              onChange={e => setTradeSearch(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              placeholder="Search trades (e.g. 285, Put, Call)…"
+                              style={{
+                                width: '100%', boxSizing: 'border-box',
+                                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+                                border: `1px solid ${border}`, borderRadius: '4px',
+                                color: text, fontSize: '11px', padding: '3px 7px', outline: 'none'
+                              }}
+                            />
+                          </div>
+                        )}
+                        {(tradeSearch ? trades.filter(t => t.description?.toLowerCase().includes(tradeSearch.toLowerCase()) || t.transCode?.toLowerCase().includes(tradeSearch.toLowerCase())) : trades).map((t, i, arr) => (
                           <div key={i} style={{
                             padding: '5px 10px',
-                            borderBottom: i < trades.length - 1 ? `1px solid ${border}` : 'none',
+                            borderBottom: i < arr.length - 1 ? `1px solid ${border}` : 'none',
                           }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
                               <div style={{ color: textMid, flex: 1, minWidth: 0 }}>
