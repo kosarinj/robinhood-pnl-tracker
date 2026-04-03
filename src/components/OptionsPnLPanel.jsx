@@ -164,7 +164,11 @@ export default function OptionsPnLPanel() {
   // Cumulative by-underlying: sum byUnderlying + stockDelta across the last N weeks (sorted desc)
   const { cumulativeByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate } = (() => {
     const weeks = data?.weeks || []
-    const sorted = [...weeks].sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    const currentWeekStart = data?.weekStart || ''
+    // Only include weeks up to and including the current week — exclude future expiry weeks
+    const sorted = [...weeks]
+      .filter(w => !currentWeekStart || w.weekStart <= currentWeekStart)
+      .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
     const slice = byUnderlyingWeeks === 0 ? sorted : sorted.slice(0, byUnderlyingWeeks)
     const options = {}
     const stock = {}
