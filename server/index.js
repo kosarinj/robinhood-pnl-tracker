@@ -2258,7 +2258,14 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       console.error('Error fetching open option positions:', e.message)
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices })
+    // Gather pre-market prices for all tracked stock symbols
+    const allStockSymbols = [...new Set([
+      ...Object.keys(weeklyStockPnL),
+      ...Object.keys(otherStockPnLBySymbol),
+    ])]
+    const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
+
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

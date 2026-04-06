@@ -12,9 +12,22 @@ export class PriceService {
   constructor(databaseService = null) {
     this.priceCache = new Map()   // symbol → price
     this.priceCacheTime = new Map() // symbol → timestamp
+    this.preMarketCache = new Map() // symbol → { price, changePercent }
+    this.marketStateCache = new Map() // symbol → marketState
     this.trackedSymbols = new Set()
     this.lastUpdate = null
     this.databaseService = databaseService
+  }
+
+  // Get pre-market prices for given symbols (from cache populated by fetchPrices)
+  getPreMarketPrices(symbols) {
+    const result = {}
+    symbols.forEach(sym => {
+      const pre = this.preMarketCache.get(sym)
+      const state = this.marketStateCache.get(sym)
+      if (pre) result[sym] = { ...pre, marketState: state }
+    })
+    return result
   }
 
   // Add symbols to track
@@ -119,6 +132,20 @@ export class PriceService {
 
           const quotes = response.data?.quoteResponse?.result || []
           quotes.forEach(q => {
+            // Cache market state for all quotes
+            if (q.marketState) this.marketStateCache.set(q.symbol, q.marketState)
+
+            // Cache pre-market price + change when available
+            if (q.preMarketPrice) {
+              const change = q.regularMarketPrice
+                ? Math.round((q.preMarketPrice - q.regularMarketPrice) * 100) / 100
+                : null
+              const changePct = q.regularMarketPrice
+                ? Math.round((q.preMarketPrice - q.regularMarketPrice) / q.regularMarketPrice * 10000) / 100
+                : null
+              this.preMarketCache.set(q.symbol, { price: q.preMarketPrice, change, changePct })
+            }
+
             let price = q.regularMarketPrice
             if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
             else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice

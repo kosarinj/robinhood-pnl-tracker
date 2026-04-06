@@ -210,6 +210,7 @@ export default function OptionsPnLPanel() {
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
+  const preMarketPrices = data?.preMarketPrices || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
   const hasPrices = openPositions.some(p => p.unrealizedPnl != null)
@@ -329,6 +330,11 @@ export default function OptionsPnLPanel() {
                     }}>
                       <span style={{ fontWeight: '700', color: text }}>{sym}</span>
                       {entry?.toPrice && <span style={{ color: textMid, marginLeft: '5px', fontSize: '11px' }}>{fmt(entry.toPrice)}</span>}
+                      {preMarketPrices[sym] && (
+                        <span style={{ color: preMarketPrices[sym].changePct >= 0 ? green : red, marginLeft: '4px', fontSize: '10px' }}>
+                          Pre {preMarketPrices[sym].changePct >= 0 ? '+' : ''}{preMarketPrices[sym].changePct?.toFixed(2)}%
+                        </span>
+                      )}
                       <span style={{ color: pnl >= 0 ? green : red, marginLeft: '6px' }}>
                         {pnl >= 0 ? '+' : ''}{fmt(pnl)}
                       </span>
@@ -429,6 +435,16 @@ export default function OptionsPnLPanel() {
                             </div>
                           )}
                           {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
+                          {preMarketPrices[ticker] && (
+                            <div style={{ color: textMid, fontSize: '10px' }}>
+                              Pre: ${preMarketPrices[ticker].price.toFixed(2)}
+                              {preMarketPrices[ticker].changePct != null && (
+                                <span style={{ marginLeft: '4px', color: preMarketPrices[ticker].changePct >= 0 ? green : red }}>
+                                  {preMarketPrices[ticker].changePct >= 0 ? '+' : ''}{preMarketPrices[ticker].changePct.toFixed(2)}%
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
                           {combined100 !== null && <div style={{ color: combined100 >= 0 ? green : red, fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
                         </div>
@@ -560,6 +576,16 @@ export default function OptionsPnLPanel() {
                         {stockPnl !== undefined && (
                           <div title={stockTooltip} style={{ color: stockPnl >= 0 ? green : red, cursor: stockTooltip ? 'help' : 'default' }}>
                             Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                          </div>
+                        )}
+                        {preMarketPrices[ticker] && (
+                          <div style={{ color: textMid, fontSize: '10px' }}>
+                            Pre: ${preMarketPrices[ticker].price.toFixed(2)}
+                            {preMarketPrices[ticker].changePct != null && (
+                              <span style={{ marginLeft: '4px', color: preMarketPrices[ticker].changePct >= 0 ? green : red }}>
+                                {preMarketPrices[ticker].changePct >= 0 ? '+' : ''}{preMarketPrices[ticker].changePct.toFixed(2)}%
+                              </span>
+                            )}
                           </div>
                         )}
                         {unrealizedPnl !== undefined && (
