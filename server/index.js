@@ -2029,11 +2029,12 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     const contractGroups = {}
     trades.forEach(t => {
       const cashFlow = t.is_buy ? -t.amount : t.amount
-      const underlying = (t.symbol || '').split(' ')[0].toUpperCase()
+      const parsed = parseOptionDescription(t.symbol || '')
+      const underlying = parsed?.ticker || (t.symbol || '').split(' ')[0].toUpperCase()
+      // Skip trades where the symbol doesn't look like a real ticker (e.g. "Option Exercise")
+      if (!underlying || underlying.length > 6 || !/^[A-Z]+$/.test(underlying)) return
       const tc = (t.trans_code || '').toUpperCase()
       const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
-
-      const parsed = parseOptionDescription(t.symbol || '')
       const expiryDateStr = parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : t.trans_date
       const weekKey = getWeekStart(expiryDateStr)
 
