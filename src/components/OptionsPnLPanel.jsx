@@ -392,7 +392,7 @@ export default function OptionsPnLPanel() {
             })()}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {Object.entries(cumulativeByUnderlying)
-                .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+                .sort((a, b) => a[0].localeCompare(b[0]))
                 .map(([ticker, optPnl]) => {
                   const priceRange = cumulativeStockPrices[ticker]
                   const livePrice = stockPriceByTicker[ticker]
@@ -528,7 +528,7 @@ export default function OptionsPnLPanel() {
                   )
                 })
               }
-              {Object.entries(data.currentWeekByUnderlying).map(([ticker, optPnl]) => {
+              {Object.entries(data.currentWeekByUnderlying).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, optPnl]) => {
                 const stockEntry = data.weeklyStockPnL?.[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
                 const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.shares} shares · ${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
