@@ -191,11 +191,22 @@ export default function OptionsPnLPanel() {
       })
       Object.entries(w.stockPrices || {}).forEach(([ticker, prices]) => {
         if (!stockPrices[ticker]) {
-          // First (most recent) week sets toPrice; last (oldest) week sets fromPrice
-          stockPrices[ticker] = { fromPrice: prices.fromPrice, toPrice: prices.toPrice, shares: prices.shares }
+          // Most recent week — store its fromPrice and shares separately so older weeks
+          // can contribute their own share-count-based P&L correctly
+          stockPrices[ticker] = {
+            fromPrice: prices.fromPrice,   // will be updated to oldest week's fromPrice
+            toPrice: prices.toPrice,
+            shares: prices.shares,
+            recentFromPrice: prices.fromPrice, // most recent week's from (for live price calc)
+            recentShares: prices.shares,
+            olderWeeksStockPnl: 0              // sum of older weeks using each week's shares
+          }
         } else {
-          // Older week — update fromPrice to extend the range back
+          // Older week — accumulate its P&L using that week's actual share count
           stockPrices[ticker].fromPrice = prices.fromPrice
+          if (prices.fromPrice != null && prices.toPrice != null && prices.shares) {
+            stockPrices[ticker].olderWeeksStockPnl += (prices.toPrice - prices.fromPrice) * prices.shares
+          }
         }
       })
     })
@@ -381,8 +392,10 @@ export default function OptionsPnLPanel() {
               const total = Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
                 const priceRange = cumulativeStockPrices[ticker]
                 const livePrice = stockPriceByTicker[ticker]
-                const stockPnl = priceRange && (livePrice || priceRange.toPrice)
-                  ? Math.round(((livePrice ?? priceRange.toPrice) - priceRange.fromPrice) * priceRange.shares * 100) / 100
+                const stockPnl = priceRange
+                  ? Math.round(((priceRange.olderWeeksStockPnl || 0) +
+                      ((livePrice ?? priceRange.toPrice) - priceRange.recentFromPrice) * priceRange.recentShares
+                    ) * 100) / 100
                   : (cumulativeStockDelta[ticker] ?? 0)
                 return sum + optPnl + stockPnl
               }, 0)
@@ -397,8 +410,10 @@ export default function OptionsPnLPanel() {
                   const priceRange = cumulativeStockPrices[ticker]
                   const livePrice = stockPriceByTicker[ticker]
                   // Use live price as toPrice so stock P&L reflects current market
-                  const stockPnl = priceRange && (livePrice || priceRange.toPrice)
-                    ? Math.round(((livePrice ?? priceRange.toPrice) - priceRange.fromPrice) * priceRange.shares * 100) / 100
+                  const stockPnl = priceRange
+                    ? Math.round(((priceRange.olderWeeksStockPnl || 0) +
+                        ((livePrice ?? priceRange.toPrice) - priceRange.recentFromPrice) * priceRange.recentShares
+                      ) * 100) / 100
                     : cumulativeStockDelta[ticker]
                   const displayToPrice = livePrice ?? priceRange?.toPrice
                   const unrealizedPnl = unrealizedByTicker[ticker]
