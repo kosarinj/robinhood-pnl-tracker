@@ -444,7 +444,6 @@ export default function OptionsPnLPanel() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                           <span style={{ fontWeight: '700', color: text }}>
                             {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
-                            {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                           </span>
                           <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
                         </div>
@@ -467,6 +466,7 @@ export default function OptionsPnLPanel() {
                               )}
                             </div>
                           )}
+                          {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                           {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
                           {combined100 !== null && <div style={{ color: combined100 >= 0 ? green : red, fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
                         </div>
@@ -585,7 +585,6 @@ export default function OptionsPnLPanel() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                         <span style={{ fontWeight: '700', color: text }}>
                           {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
-                          {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                         </span>
                         <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>
                       </div>
@@ -620,6 +619,7 @@ export default function OptionsPnLPanel() {
                         )}
                         {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
                         {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
+                        {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                         {combined !== null && (
                           <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
                             Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
