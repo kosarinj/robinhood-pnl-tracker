@@ -2131,11 +2131,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
       })
 
-      // Use share counts as of last Friday (start of week) — not current — so recently-added shares don't inflate historical P&L
-      const lastFridayPositions = databaseService.getPositionsAsOf(req.user.userId, lastFridayStr)
-
       thisWeekSymbols.forEach(sym => {
-        const pos = lastFridayPositions[sym] || allPositions[sym]
+        const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
@@ -2144,7 +2141,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       })
 
       otherSymbols.forEach(sym => {
-        const pos = lastFridayPositions[sym] || allPositions[sym]
+        const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
