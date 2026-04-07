@@ -2192,25 +2192,30 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         // Stock delta for option-underlying tickers — use share count at START of week (prevFriStr)
         // so shares bought mid-week or this week don't inflate the weekly stock P&L
         const weekPositions = databaseService.getPositionsAsOf(req.user.userId, prevFriStr)
+        const weekComplete = thisFriStr <= todayStr
         const stockDelta = {}
         Object.keys(week.byUnderlying).forEach(ticker => {
           const pos = weekPositions[ticker]
           if (!pos || !tickerDateMap[ticker]) return
           const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
-          const thisClose = findClose(tickerDateMap[ticker], thisFriStr)
-          if (prevClose > 0 && thisClose > 0) {
-            stockDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
+          const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
+          // Always store fromPrice/shares so multi-week cards can compute (livePrice - fromPrice) × shares
+          if (prevClose > 0) {
             if (!week.stockPrices) week.stockPrices = {}
-            week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose, shares: pos }
+            week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose || prevClose, shares: pos }
+          }
+          // Only add to weekly breakdown table for completed weeks
+          if (weekComplete && prevClose > 0 && thisClose > 0) {
+            stockDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
           }
         })
         if (Object.keys(stockDelta).length > 0) week.stockDelta = stockDelta
 
-        // Other stocks delta (non-option holdings) — use historical share count
+        // Other stocks delta (non-option holdings) — use historical share count, completed weeks only
         const otherDelta = {}
         otherSymbols.forEach(ticker => {
           const pos = weekPositions[ticker] || 0
-          if (!pos || !tickerDateMap[ticker]) return
+          if (!pos || !tickerDateMap[ticker] || !weekComplete) return
           const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
           const thisClose = findClose(tickerDateMap[ticker], thisFriStr)
           if (prevClose > 0 && thisClose > 0) {
