@@ -2189,10 +2189,9 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const prevFriStr = new Date(monday.getTime() - 3 * 86400000).toISOString().slice(0, 10)
         const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
 
-        // Stock delta for option-underlying tickers — use historical share count as of this week
-        // Cap at todayStr so future-dated weeks don't include shares bought after the period
-        const posDate = thisFriStr < todayStr ? thisFriStr : todayStr
-        const weekPositions = databaseService.getPositionsAsOf(req.user.userId, posDate)
+        // Stock delta for option-underlying tickers — use share count at START of week (prevFriStr)
+        // so shares bought mid-week or this week don't inflate the weekly stock P&L
+        const weekPositions = databaseService.getPositionsAsOf(req.user.userId, prevFriStr)
         const stockDelta = {}
         Object.keys(week.byUnderlying).forEach(ticker => {
           const pos = weekPositions[ticker]
