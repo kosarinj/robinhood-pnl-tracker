@@ -333,7 +333,7 @@ export class PriceService {
 
         bars.push({
           time: ts * 1000,
-          label: new Date(ts * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          label: new Date(ts * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' }),
           open: open ? Math.round(open * 100) / 100 : null,
           high: high ? Math.round(high * 100) / 100 : null,
           low: low ? Math.round(low * 100) / 100 : null,
