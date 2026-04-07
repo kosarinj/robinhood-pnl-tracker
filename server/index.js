@@ -19,6 +19,7 @@ import { dirname } from 'path'
 import path from 'path'
 import axios from 'axios'
 import { parseOptionDescription, toPolygonTicker, calcPremiumLeft, toYahooOptionTicker } from './utils/optionUtils.js'
+import { calculateRSI, calculateEMA } from './services/technicalAnalysis.js'
 
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
@@ -1749,6 +1750,35 @@ app.get('/api/tracked-symbols', (req, res) => {
         count: trackedSymbols.size
       }
     })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Get technical indicators + intraday data for a symbol
+app.get('/api/stock-indicators/:symbol', requireAuth, async (req, res) => {
+  try {
+    const { symbol } = req.params.toUpperCase ? req : { symbol: req.params.symbol.toUpperCase() }
+    const sym = req.params.symbol.toUpperCase()
+
+    const [hist, intraday] = await Promise.all([
+      priceService.fetchHistoricalPrices(sym, '3mo', '1d'),
+      priceService.fetchIntradayData(sym)
+    ])
+
+    const closes = hist.map(d => d.close).filter(Boolean)
+    const rsi = closes.length >= 15 ? Math.round(calculateRSI(closes) * 10) / 10 : null
+    const ema9 = closes.length >= 9 ? Math.round(calculateEMA(closes, 9) * 100) / 100 : null
+    const ema21 = closes.length >= 21 ? Math.round(calculateEMA(closes, 21) * 100) / 100 : null
+    const currentPrice = closes[closes.length - 1] || null
+
+    const highs = intraday.map(b => b.high).filter(Boolean)
+    const lows = intraday.map(b => b.low).filter(Boolean)
+    const dayHigh = highs.length ? Math.max(...highs) : null
+    const dayLow = lows.length ? Math.min(...lows) : null
+    const currentVwap = intraday.length ? intraday[intraday.length - 1].vwap : null
+
+    res.json({ success: true, symbol: sym, rsi, ema9, ema21, currentPrice, intraday, dayHigh, dayLow, currentVwap })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

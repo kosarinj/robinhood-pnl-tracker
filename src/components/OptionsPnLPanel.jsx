@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import IntradayChart, { RSIBadge } from './IntradayChart'
 
 const fmt = (n) => {
   if (n === null || n === undefined || isNaN(n)) return '$0.00'
@@ -39,6 +40,7 @@ export default function OptionsPnLPanel() {
   const [posError, setPosError] = useState(null)
   const [asOfDate, setAsOfDate] = useState('')
   const [byUnderlyingWeeks, setByUnderlyingWeeks] = useState(1)
+  const [chartTicker, setChartTicker] = useState(null)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -285,6 +287,10 @@ export default function OptionsPnLPanel() {
 
   return (
     <div style={{ color: text }}>
+      {/* Intraday chart modal */}
+      {chartTicker && (
+        <IntradayChart symbol={chartTicker} isDark={isDark} onClose={() => setChartTicker(null)} />
+      )}
       {/* Global Refresh */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         {livePositions?.fetchedAt && <span style={{ fontSize: '11px', color: textMid }}>Updated {new Date(livePositions.fetchedAt).toLocaleTimeString()}</span>}
@@ -435,8 +441,11 @@ export default function OptionsPnLPanel() {
                         style={{ padding: '8px 12px', borderRadius: isExpanded ? '8px 8px 0 0' : '8px', fontSize: '12px', cursor: 'pointer',
                           background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
                           border: `1px solid ${border}`, borderBottom: isExpanded ? 'none' : undefined }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-                          <span style={{ fontWeight: '700', color: text }}>{ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: '700', color: text }}>
+                            {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
+                            {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
+                          </span>
                           <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -574,7 +583,10 @@ export default function OptionsPnLPanel() {
                         borderBottom: isExpanded ? 'none' : `1px solid ${border}`
                       }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: '700', color: text }}>{ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}</span>
+                        <span style={{ fontWeight: '700', color: text }}>
+                          {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
+                          {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
+                        </span>
                         <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>

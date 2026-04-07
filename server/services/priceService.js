@@ -302,6 +302,55 @@ export class PriceService {
     }
   }
 
+  // Fetch intraday 5-minute bars for today with running VWAP
+  async fetchIntradayData(symbol) {
+    try {
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=1d&interval=5m`
+      const response = await axios.get(url, { timeout: 10000, headers: YF_HEADERS })
+
+      const result = response.data?.chart?.result?.[0]
+      if (!result) throw new Error('No intraday data')
+
+      const timestamps = result.timestamp || []
+      const quotes = result.indicators?.quote?.[0]
+      if (!quotes || timestamps.length === 0) throw new Error('No intraday quotes')
+
+      let cumPV = 0, cumVol = 0
+      const bars = []
+
+      timestamps.forEach((ts, i) => {
+        const open = quotes.open[i]
+        const high = quotes.high[i]
+        const low = quotes.low[i]
+        const close = quotes.close[i]
+        const volume = quotes.volume[i]
+        if (close == null || volume == null) return
+
+        const typical = ((high ?? close) + (low ?? close) + close) / 3
+        cumPV += typical * volume
+        cumVol += volume
+        const vwap = cumVol > 0 ? Math.round((cumPV / cumVol) * 100) / 100 : null
+
+        bars.push({
+          time: ts * 1000,
+          label: new Date(ts * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          open: open ? Math.round(open * 100) / 100 : null,
+          high: high ? Math.round(high * 100) / 100 : null,
+          low: low ? Math.round(low * 100) / 100 : null,
+          close: Math.round(close * 100) / 100,
+          volume,
+          vwap
+        })
+      })
+
+      console.log(`✓ Fetched ${bars.length} intraday bars for ${symbol}`)
+      return bars
+    } catch (error) {
+      console.error(`✗ Failed to fetch intraday data for ${symbol}:`, error.message)
+      return []
+    }
+  }
+
   // Get closing prices for multiple symbols on a specific date
   async getPricesForDate(symbols, dateString) {
     const prices = {}
