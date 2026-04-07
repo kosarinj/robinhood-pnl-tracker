@@ -2131,8 +2131,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
       })
 
+      // Use share counts as of last Friday (start of week) — not current — so recently-added shares don't inflate historical P&L
+      const lastFridayPositions = databaseService.getPositionsAsOf(req.user.userId, lastFridayStr)
+
       thisWeekSymbols.forEach(sym => {
-        const pos = allPositions[sym]
+        const pos = lastFridayPositions[sym] || allPositions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
@@ -2141,7 +2144,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       })
 
       otherSymbols.forEach(sym => {
-        const pos = allPositions[sym]
+        const pos = lastFridayPositions[sym] || allPositions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
@@ -2190,7 +2193,9 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
 
         // Stock delta for option-underlying tickers — use historical share count as of this week
-        const weekPositions = databaseService.getPositionsAsOf(req.user.userId, thisFriStr)
+        // Cap at todayStr so future-dated weeks don't include shares bought after the period
+        const posDate = thisFriStr < todayStr ? thisFriStr : todayStr
+        const weekPositions = databaseService.getPositionsAsOf(req.user.userId, posDate)
         const stockDelta = {}
         Object.keys(week.byUnderlying).forEach(ticker => {
           const pos = weekPositions[ticker]
@@ -2205,14 +2210,15 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         })
         if (Object.keys(stockDelta).length > 0) week.stockDelta = stockDelta
 
-        // Other stocks delta (non-option holdings)
+        // Other stocks delta (non-option holdings) — use historical share count
         const otherDelta = {}
         otherSymbols.forEach(ticker => {
-          if (!allPositions[ticker] || !tickerDateMap[ticker]) return
+          const pos = weekPositions[ticker] || 0
+          if (!pos || !tickerDateMap[ticker]) return
           const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
           const thisClose = findClose(tickerDateMap[ticker], thisFriStr)
           if (prevClose > 0 && thisClose > 0) {
-            otherDelta[ticker] = Math.round((thisClose - prevClose) * allPositions[ticker] * 100) / 100
+            otherDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
           }
         })
         if (Object.keys(otherDelta).length > 0) week.otherStockDelta = otherDelta
