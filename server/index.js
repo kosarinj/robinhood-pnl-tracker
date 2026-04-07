@@ -2189,16 +2189,18 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const prevFriStr = new Date(monday.getTime() - 3 * 86400000).toISOString().slice(0, 10)
         const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
 
-        // Stock delta for option-underlying tickers
+        // Stock delta for option-underlying tickers — use historical share count as of this week
+        const weekPositions = databaseService.getPositionsAsOf(req.user.userId, thisFriStr)
         const stockDelta = {}
         Object.keys(week.byUnderlying).forEach(ticker => {
-          if (!allPositions[ticker] || !tickerDateMap[ticker]) return
+          const pos = weekPositions[ticker]
+          if (!pos || !tickerDateMap[ticker]) return
           const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
           const thisClose = findClose(tickerDateMap[ticker], thisFriStr)
           if (prevClose > 0 && thisClose > 0) {
-            stockDelta[ticker] = Math.round((thisClose - prevClose) * allPositions[ticker] * 100) / 100
+            stockDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
             if (!week.stockPrices) week.stockPrices = {}
-            week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose, shares: allPositions[ticker] }
+            week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose, shares: pos }
           }
         })
         if (Object.keys(stockDelta).length > 0) week.stockDelta = stockDelta

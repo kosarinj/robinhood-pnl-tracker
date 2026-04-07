@@ -1582,6 +1582,26 @@ export class DatabaseService {
     }
   }
 
+  // Get stock positions as of a specific date (for historical share counts)
+  getPositionsAsOf(userId = 1, dateStr) {
+    try {
+      const stmt = db.prepare(`
+        SELECT symbol, SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS position
+        FROM trades
+        WHERE is_option = 0 AND user_id = ? AND trans_date <= ?
+        GROUP BY symbol
+        HAVING position > 0
+      `)
+      const rows = stmt.all(userId, dateStr)
+      const result = {}
+      rows.forEach(r => { result[r.symbol] = r.position })
+      return result
+    } catch (error) {
+      console.error('Error getting positions as of date:', error)
+      return {}
+    }
+  }
+
   // Get all stock positions computed from trades (net shares = buys - sells)
   getAllPositions(userId = 1) {
     try {
