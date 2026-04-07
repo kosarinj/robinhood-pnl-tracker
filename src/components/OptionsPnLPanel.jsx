@@ -397,7 +397,7 @@ export default function OptionsPnLPanel() {
                       ((livePrice ?? priceRange.toPrice) - priceRange.recentFromPrice) * priceRange.recentShares
                     ) * 100) / 100
                   : (cumulativeStockDelta[ticker] ?? 0)
-                return sum + optPnl + stockPnl
+                return sum + optPnl + stockPnl + (unrealizedByTicker[ticker] ?? 0)
               }, 0)
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
                 Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
@@ -418,13 +418,11 @@ export default function OptionsPnLPanel() {
                   const displayToPrice = livePrice ?? priceRange?.toPrice
                   const unrealizedPnl = unrealizedByTicker[ticker]
                   const sp = livePrice
-                  // Multi-week Net = options cash flows + stock only — unrealized shown separately
-                  // so Net matches the sum of per-week rows in the breakdown dropdown
                   const combined = stockPnl !== undefined
-                    ? optPnl + stockPnl
+                    ? optPnl + stockPnl + (unrealizedPnl ?? 0)
                     : null
                   const shares = priceRange?.shares
-                  // Scale only stock P&L to 100sh — options are independent of share count
+                  // Scale only stock P&L to 100sh — options/unrealized are independent of share count
                   const combined100 = combined != null && shares && shares !== 100 && stockPnl !== undefined
                     ? Math.round((combined - stockPnl + stockPnl * 100 / shares) * 100) / 100
                     : null
