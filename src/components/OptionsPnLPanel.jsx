@@ -833,12 +833,6 @@ export default function OptionsPnLPanel() {
           )}
         </div>
         {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>Error: {posError}</div>}
-        {livePositions && (
-          <div style={{ fontSize: '11px', color: textMid, marginBottom: '8px', fontFamily: 'monospace', lineHeight: '1.6' }}>
-            <div>Stocks (Polygon): {Object.entries(stockPriceByTicker).map(([t, p]) => `${t}=$${p}`).join(' · ') || 'none (using Yahoo fallback in cards)'}</div>
-            <div>Marks: {(livePositions.positions || []).map(p => `${p.ticker}${p.strike}${p.optionType[0].toUpperCase()} mark=$${p.markPrice} remPrem=$${remPremByTicker[p.ticker]?.shortCall ?? remPremByTicker[p.ticker]?.longPut ?? 'null'}`).join(' · ') || 'none'}</div>
-          </div>
-        )}
         {openPositions.length === 0 ? (
           <div style={{ fontSize: '13px', color: textMid }}>No open positions detected — upload your latest CSV to see open contracts.</div>
         ) : (
