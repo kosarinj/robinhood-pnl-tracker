@@ -186,9 +186,9 @@ export default function IntradayChart({ symbol, onClose, isDark }) {
                 />
                 <Tooltip content={<CustomTooltip />} />
                 {/* VWAP as dashed amber line */}
-                <Line type="monotone" dataKey="vwap" stroke={amber} strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="VWAP" />
+                <Line type="monotone" dataKey="vwap" stroke={amber} strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="VWAP" isAnimationActive={false} />
                 {/* Price as solid blue line */}
-                <Line type="monotone" dataKey="close" stroke="#60a5fa" strokeWidth={2} dot={false} name="Price" />
+                <Line type="monotone" dataKey="close" stroke="#60a5fa" strokeWidth={2} dot={false} name="Price" isAnimationActive={false} />
                 {/* EMA9/21 as reference lines if available */}
                 {data.ema9 && <ReferenceLine y={data.ema9} stroke="#818cf8" strokeDasharray="3 3" strokeWidth={1} label={{ value: `EMA9`, position: 'right', fontSize: 9, fill: '#818cf8' }} />}
                 {data.ema21 && <ReferenceLine y={data.ema21} stroke="#c084fc" strokeDasharray="3 3" strokeWidth={1} label={{ value: `EMA21`, position: 'right', fontSize: 9, fill: '#c084fc' }} />}
