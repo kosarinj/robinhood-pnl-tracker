@@ -1755,6 +1755,54 @@ app.get('/api/tracked-symbols', (req, res) => {
   }
 })
 
+// Get current prices for multiple symbols via Polygon snapshot (fast, reliable)
+app.get('/api/current-prices', requireAuth, async (req, res) => {
+  try {
+    const symbols = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+    if (symbols.length === 0) return res.json({ success: true, prices: {} })
+
+    const POLYGON_API_KEY = process.env.POLYGON_API_KEY
+    if (!POLYGON_API_KEY || POLYGON_API_KEY === 'YOUR_API_KEY_HERE') {
+      // Fallback to Yahoo Finance if no Polygon key
+      const prices = await priceService.getPrices(symbols)
+      return res.json({ success: true, prices, source: 'yahoo' })
+    }
+
+    const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers`
+    const response = await axios.get(url, {
+      params: { tickers: symbols.join(','), apiKey: POLYGON_API_KEY },
+      timeout: 8000
+    })
+
+    const prices = {}
+    const tickers = response.data?.tickers || []
+    tickers.forEach(t => {
+      // Use last trade price, fall back to day close, then previous day close
+      const price = t.lastTrade?.p || t.day?.c || t.prevDay?.c || 0
+      if (price > 0) prices[t.ticker] = Math.round(price * 100) / 100
+    })
+
+    // Fill any missing symbols from Yahoo Finance
+    const missing = symbols.filter(s => !prices[s])
+    if (missing.length > 0) {
+      const fallback = await priceService.getPrices(missing)
+      Object.assign(prices, fallback)
+    }
+
+    res.json({ success: true, prices, source: 'polygon' })
+  } catch (error) {
+    console.error('Error fetching current prices:', error.message)
+    // Fallback to Yahoo Finance on any error
+    try {
+      const symbols = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+      const prices = await priceService.getPrices(symbols)
+      res.json({ success: true, prices, source: 'yahoo-fallback' })
+    } catch (e) {
+      res.status(500).json({ success: false, error: error.message })
+    }
+  }
+})
+
 // Get technical indicators + intraday data for a symbol
 app.get('/api/stock-indicators/:symbol', requireAuth, async (req, res) => {
   try {

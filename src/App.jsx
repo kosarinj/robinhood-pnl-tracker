@@ -1362,15 +1362,24 @@ function AuthenticatedApp({ user }) {
         <div style={{ marginBottom: '16px' }}>
           <button
             className="upload-button"
-            onClick={() => {
-              const opportunities = pnlData
-                .filter(row => !row.isOption && !row.isRollup && (row.real?.position || 0) > 0)
+            onClick={async () => {
+              // Fetch fresh Polygon prices for all positions before generating report
+              const positionRows = pnlData.filter(row => !row.isOption && !row.isRollup && (row.real?.position || 0) > 0)
+              const symbols = [...new Set(positionRows.map(r => r.symbol).filter(Boolean))]
+              let livePrices = {}
+              try {
+                const resp = await fetch(`/api/current-prices?symbols=${symbols.join(',')}`, { credentials: 'include' })
+                const json = await resp.json()
+                if (json.success) livePrices = json.prices
+              } catch (e) { console.warn('Price fetch failed, using cached prices', e) }
+
+              const opportunities = positionRows
                 .map(row => {
                   const signal = tradingSignals?.find(s => s.symbol === row.symbol)
                   const unrealizedPnL = row.real?.unrealizedPnL || 0
                   const totalPnL = row.real?.totalPnL || 0
                   const position = row.real?.position || 0
-                  const currentPrice = row.currentPrice || 0
+                  const currentPrice = livePrices[row.symbol] || row.currentPrice || 0
                   const avgCost = row.real?.avgCostBasis || 0
                   const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
 
