@@ -1363,7 +1363,12 @@ function AuthenticatedApp({ user }) {
           <button
             className="upload-button"
             onClick={async () => {
-              // Fetch fresh Polygon prices for all positions before generating report
+              // Open the window immediately (before any await) so browser doesn't block it
+              const newWindow = window.open('', '_blank', 'width=400,height=800')
+              if (!newWindow) return
+              newWindow.document.write('<html><body style="font-family:sans-serif;padding:20px;background:#f5f5f5;color:#333"><p>Loading prices…</p></body></html>')
+
+              // Fetch fresh Polygon prices for all positions
               const positionRows = pnlData.filter(row => !row.isOption && !row.isRollup && (row.real?.position || 0) > 0)
               const symbols = [...new Set(positionRows.map(r => r.symbol).filter(Boolean))]
               let livePrices = {}
@@ -1806,7 +1811,7 @@ function AuthenticatedApp({ user }) {
                 </html>
               `
 
-              const newWindow = window.open('', '_blank', 'width=400,height=800')
+              newWindow.document.open()
               newWindow.document.write(html)
               newWindow.document.close()
             }}
