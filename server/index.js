@@ -1763,9 +1763,10 @@ app.get('/api/current-prices', requireAuth, async (req, res) => {
 
     // Force fresh fetch from Yahoo Finance bulk quote endpoint (bypasses 4-min cache)
     const prices = await priceService.fetchPrices(symbols)
+    const previousClose = priceService.getPreviousClose(symbols)
     const nonZero = Object.values(prices).filter(p => p > 0).length
     console.log(`/api/current-prices: fetched ${nonZero}/${symbols.length} prices`)
-    res.json({ success: true, prices })
+    res.json({ success: true, prices, previousClose })
   } catch (error) {
     console.error('Error in /api/current-prices:', error.message)
     res.status(500).json({ success: false, error: error.message })

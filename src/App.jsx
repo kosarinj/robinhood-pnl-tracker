@@ -468,8 +468,19 @@ function AuthenticatedApp({ user }) {
     // Save stock symbols to state
     setStockSymbols(stockSymbols)
 
-    // Fetch current prices and previous close prices
-    const { currentPrices: fetchedPrices, previousClosePrices: fetchedPrevClosePrices } = await fetchCurrentPrices(stockSymbols)
+    // Fetch current prices via server endpoint (avoids CORS issues)
+    let fetchedPrices = {}
+    let fetchedPrevClosePrices = {}
+    try {
+      const resp = await fetch(`/api/current-prices?symbols=${stockSymbols.join(',')}`, { credentials: 'include' })
+      const json = await resp.json()
+      if (json.success) {
+        fetchedPrices = json.prices || {}
+        fetchedPrevClosePrices = json.previousClose || {}
+      }
+    } catch (e) {
+      console.error('Failed to fetch prices from server:', e)
+    }
 
     // Debug previousClose for display
     const prevCloseSamples = Object.entries(fetchedPrevClosePrices).slice(0, 5)
@@ -1372,11 +1383,20 @@ function AuthenticatedApp({ user }) {
               const positionRows = pnlData.filter(row => !row.isOption && !row.isRollup && (row.real?.position || 0) > 0)
               const symbols = [...new Set(positionRows.map(r => r.symbol).filter(Boolean))]
               let livePrices = {}
+              let fetchDebug = ''
               try {
                 const resp = await fetch(`/api/current-prices?symbols=${symbols.join(',')}`, { credentials: 'include' })
                 const json = await resp.json()
                 if (json.success) livePrices = json.prices
-              } catch (e) { console.warn('Price fetch failed, using cached prices', e) }
+                fetchDebug = `API status: ${resp.status} · symbols sent: ${symbols.length} · prices returned: ${Object.keys(livePrices).length} · sample: ${JSON.stringify(Object.entries(livePrices).slice(0,3))}`
+              } catch (e) {
+                fetchDebug = `Fetch error: ${e.message}`
+                console.warn('Price fetch failed', e)
+              }
+
+              // Debug: also show first row's symbol and currentPrice from pnlData
+              const firstRow = positionRows[0]
+              fetchDebug += ` · first row symbol="${firstRow?.symbol}" pnlCurrentPrice=${firstRow?.currentPrice}`
 
               const opportunities = positionRows
                 .map(row => {
@@ -1384,7 +1404,8 @@ function AuthenticatedApp({ user }) {
                   const unrealizedPnL = row.real?.unrealizedPnL || 0
                   const totalPnL = row.real?.totalPnL || 0
                   const position = row.real?.position || 0
-                  const currentPrice = livePrices[row.symbol] || row.currentPrice || 0
+                  const sym = (row.symbol || '').trim().toUpperCase()
+                  const currentPrice = livePrices[sym] || livePrices[row.symbol] || row.currentPrice || 0
                   const avgCost = row.real?.avgCostBasis || 0
                   const gainPercent = avgCost > 0 ? ((currentPrice - avgCost) / avgCost * 100) : 0
 

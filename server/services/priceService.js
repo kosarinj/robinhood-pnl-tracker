@@ -14,6 +14,7 @@ export class PriceService {
     this.priceCacheTime = new Map() // symbol → timestamp
     this.preMarketCache = new Map() // symbol → { price, changePercent }
     this.marketStateCache = new Map() // symbol → marketState
+    this.prevCloseCache = new Map() // symbol → previousClose
     this.trackedSymbols = new Set()
     this.lastUpdate = null
     this.databaseService = databaseService
@@ -48,6 +49,16 @@ export class PriceService {
       prices[symbol] = price
     })
     return prices
+  }
+
+  // Get previous close prices for given symbols (from cache)
+  getPreviousClose(symbols) {
+    const result = {}
+    symbols.forEach(sym => {
+      const pc = this.prevCloseCache.get(sym)
+      if (pc != null) result[sym] = pc
+    })
+    return result
   }
 
   // Check if a cached price is still fresh
@@ -134,6 +145,7 @@ export class PriceService {
           quotes.forEach(q => {
             // Cache market state for all quotes
             if (q.marketState) this.marketStateCache.set(q.symbol, q.marketState)
+            if (q.regularMarketPreviousClose) this.prevCloseCache.set(q.symbol, q.regularMarketPreviousClose)
 
             // Cache pre-market price + change when available
             if (q.preMarketPrice) {
