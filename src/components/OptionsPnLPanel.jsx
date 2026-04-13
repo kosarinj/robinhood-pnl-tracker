@@ -33,6 +33,7 @@ export default function OptionsPnLPanel() {
   const [toDate, setToDate] = useState('')
   const [activeQuick, setActiveQuick] = useState('all')
   const [expandedTicker, setExpandedTicker] = useState(null)
+  const [expandedOpenPos, setExpandedOpenPos] = useState({})
   const [tradeSearch, setTradeSearch] = useState('')
   const [showWeeklyTable, setShowWeeklyTable] = useState(false)
   const [livePositions, setLivePositions] = useState(null)
@@ -845,41 +846,92 @@ export default function OptionsPnLPanel() {
         {posError && <div style={{ fontSize: '12px', color: red, marginBottom: '8px' }}>Error: {posError}</div>}
         {openPositions.length === 0 ? (
           <div style={{ fontSize: '13px', color: textMid }}>No open positions detected — upload your latest CSV to see open contracts.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {openPositions.map((pos, i) => {
-              const hasPrice = pos.markPrice > 0
-              const pnlColor = pos.unrealizedPnl == null ? textMid : (pos.unrealizedPnl >= 0 ? green : red)
-              return (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: isDark ? '#161926' : '#f8fafc', borderRadius: '8px', border: `1px solid ${border}` }}>
-                  <div>
-                    <div style={{ fontWeight: '700', fontSize: '14px', color: text }}>
-                      {pos.ticker} ${pos.strike} {pos.optionType?.toUpperCase()}&nbsp;
-                      <span style={{ fontSize: '12px', fontWeight: '500', color: pos.isLong ? green : '#f59e0b' }}>{pos.isLong ? 'LONG' : 'SHORT'}</span>
+        ) : (() => {
+          // Group by underlying ticker
+          const grouped = {}
+          openPositions.forEach(pos => {
+            const t = pos.ticker || 'Unknown'
+            if (!grouped[t]) grouped[t] = []
+            grouped[t].push(pos)
+          })
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([ticker, positions]) => {
+                const isExpanded = !!expandedOpenPos[ticker]
+                const tickerUnrealized = positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
+                const hasPnl = positions.some(p => p.unrealizedPnl != null)
+                const contractCount = positions.reduce((s, p) => s + (p.openContracts || 0), 0)
+                const stockPrice = positions[0]?.stockPrice
+                return (
+                  <div key={ticker}>
+                    {/* Underlying header row */}
+                    <div
+                      onClick={() => setExpandedOpenPos(prev => ({ ...prev, [ticker]: !prev[ticker] }))}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+                        fontSize: '12px', cursor: 'pointer',
+                        background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                        border: `1px solid ${border}`,
+                        borderBottom: isExpanded ? 'none' : undefined,
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: '700', fontSize: '13px', color: text }}>{ticker}</span>
+                        {stockPrice ? <span style={{ fontSize: '11px', color: textMid }}>{fmt(stockPrice)}</span> : null}
+                        <span style={{ fontSize: '11px', color: textMid }}>{contractCount} contract{contractCount !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {hasPnl && (
+                          <span style={{ fontWeight: '700', fontSize: '13px', color: tickerUnrealized >= 0 ? green : red }}>
+                            {tickerUnrealized >= 0 ? '+' : ''}{fmt(tickerUnrealized)}
+                          </span>
+                        )}
+                        <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
+                      </div>
                     </div>
-                    <div style={{ fontSize: '12px', color: textMid, marginTop: '2px' }}>
-                      Exp {pos.expiry} · {pos.openContracts} contract{pos.openContracts !== 1 ? 's' : ''} · avg cost {fmt(pos.avgCostPerContract)}/contract
-                      {pos.stockPrice ? <span style={{ marginLeft: '8px', color: text }}>{pos.ticker} @ {fmt(pos.stockPrice)}</span> : null}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: '700', fontSize: '14px', color: pnlColor }}>
-                      {pos.unrealizedPnl == null ? '—' : fmt(pos.unrealizedPnl)}
-                    </div>
-                    <div style={{ fontSize: '12px', color: textMid }}>
-                      mark {hasPrice ? fmt(pos.markPrice) : (posLoading ? '…' : 'N/A')}
-                    </div>
-                    {pos.remainingPremium != null && (
-                      <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '2px' }}>
-                        {pos.remainingPremiumLabel || 'Rem. Premium'}: {fmt(pos.remainingPremium)}
+                    {/* Expanded contracts */}
+                    {isExpanded && (
+                      <div style={{ border: `1px solid ${border}`, borderTop: 'none', borderRadius: '0 0 8px 8px', background: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)' }}>
+                        {positions.map((pos, i) => {
+                          const hasPrice = pos.markPrice > 0
+                          const pnlColor = pos.unrealizedPnl == null ? textMid : (pos.unrealizedPnl >= 0 ? green : red)
+                          return (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px', borderBottom: i < positions.length - 1 ? `1px solid ${border}` : 'none' }}>
+                              <div>
+                                <div style={{ fontWeight: '600', fontSize: '13px', color: text }}>
+                                  ${pos.strike} {pos.optionType?.toUpperCase()}&nbsp;
+                                  <span style={{ fontSize: '11px', fontWeight: '500', color: pos.isLong ? green : '#f59e0b' }}>{pos.isLong ? 'LONG' : 'SHORT'}</span>
+                                </div>
+                                <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>
+                                  Exp {pos.expiry} · {pos.openContracts} contract{pos.openContracts !== 1 ? 's' : ''} · avg {fmt(pos.avgCostPerContract)}/contract
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontWeight: '700', fontSize: '13px', color: pnlColor }}>
+                                  {pos.unrealizedPnl == null ? '—' : fmt(pos.unrealizedPnl)}
+                                </div>
+                                <div style={{ fontSize: '11px', color: textMid }}>
+                                  mark {hasPrice ? fmt(pos.markPrice) : (posLoading ? '…' : 'N/A')}
+                                </div>
+                                {pos.remainingPremium != null && (
+                                  <div style={{ fontSize: '11px', color: '#f59e0b', marginTop: '2px' }}>
+                                    {pos.remainingPremiumLabel || 'Rem. Premium'}: {fmt(pos.remainingPremium)}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+                )
+              })}
+            </div>
+          )
+        })()}
         {livePositions?.expiredFiltered > 0 && (
           <div style={{ fontSize: '11px', color: textMid, marginTop: '8px' }}>
             {livePositions.expiredFiltered} expired contract{livePositions.expiredFiltered !== 1 ? 's' : ''} hidden — re-upload CSV to reconcile
