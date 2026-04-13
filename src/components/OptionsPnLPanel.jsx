@@ -861,7 +861,7 @@ export default function OptionsPnLPanel() {
                 const tickerUnrealized = positions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
                 const hasPnl = positions.some(p => p.unrealizedPnl != null)
                 const contractCount = positions.reduce((s, p) => s + (p.openContracts || 0), 0)
-                const stockPrice = positions[0]?.stockPrice
+                const stockPrice = stockPriceByTicker[ticker] || positions[0]?.stockPrice
                 return (
                   <div key={ticker}>
                     {/* Underlying header row */}
