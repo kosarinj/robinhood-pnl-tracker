@@ -1500,7 +1500,7 @@ function AuthenticatedApp({ user }) {
                     recentSells
                   }
                 })
-                .filter(opp => opp.symbol) // Keep all symbols with trade history
+                .filter(opp => opp.symbol && opp.position > 0) // Only symbols with current shares held
                 .sort((a, b) => a.symbol.localeCompare(b.symbol)) // Sort alphabetically by symbol
 
               const html = `
