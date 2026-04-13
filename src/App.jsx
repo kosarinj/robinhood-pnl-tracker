@@ -1380,7 +1380,7 @@ function AuthenticatedApp({ user }) {
               newWindow.document.write('<html><body style="font-family:sans-serif;padding:20px;background:#f5f5f5;color:#333"><p>Loading prices…</p></body></html>')
 
               // Fetch fresh Polygon prices for all positions
-              const positionRows = pnlData.filter(row => !row.isOption && !row.isRollup && (row.real?.position || 0) > 0)
+              const positionRows = pnlData.filter(row => !row.isOption && !row.isRollup)
               const symbols = [...new Set(positionRows.map(r => r.symbol).filter(Boolean))]
               let livePrices = {}
               let fetchDebug = ''
@@ -1500,10 +1500,7 @@ function AuthenticatedApp({ user }) {
                     recentSells
                   }
                 })
-                .filter(opp => {
-                  // Show all positions where you have shares (you can always sell if you own it)
-                  return opp.position > 0
-                })
+                .filter(opp => opp.symbol) // Keep all symbols with trade history
                 .sort((a, b) => a.symbol.localeCompare(b.symbol)) // Sort alphabetically by symbol
 
               const html = `
