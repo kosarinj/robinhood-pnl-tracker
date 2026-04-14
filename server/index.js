@@ -2110,7 +2110,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       const wk = byWeek[weekKey]
       wk.totalDelta += netFlow
       wk.tradeCount += tradeDetails.length
-      if (hasClosing) wk.realizedDelta += netFlow
 
       if (!wk.byUnderlying[underlying]) {
         wk.byUnderlying[underlying] = 0
@@ -2118,7 +2117,18 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         wk.tradesByUnderlying[underlying] = []
       }
       wk.byUnderlying[underlying] += netFlow
-      if (hasClosing) wk.realizedByUnderlying[underlying] += netFlow
+      // Use LIFO-matched realizedPnl per closing trade (matches what the expanded trade rows show)
+      // Falls back to netFlow only for closing trades with no LIFO match
+      if (hasClosing) {
+        const lifoSum = tradeDetails
+          .filter(t => t.isClosing && t.realizedPnl != null)
+          .reduce((s, t) => s + t.realizedPnl, 0)
+        const unmatchedNetFlow = tradeDetails
+          .filter(t => t.isClosing && t.realizedPnl == null)
+          .reduce((s, t) => s + t.cashFlow, 0)
+        wk.realizedByUnderlying[underlying] += lifoSum + unmatchedNetFlow
+        wk.realizedDelta += lifoSum + unmatchedNetFlow
+      }
       wk.tradesByUnderlying[underlying].push(...tradeDetails)
     })
 
