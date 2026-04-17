@@ -411,7 +411,7 @@ export default function OptionsPnLPanel() {
         </div>
 
         {/* Per-underlying breakdown — single week (detailed) or multi-week (options total only) */}
-        {byUnderlyingWeeks !== 1 && Object.keys(cumulativeByUnderlying).length > 0 && (
+        {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             {(() => {
               const total = Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
