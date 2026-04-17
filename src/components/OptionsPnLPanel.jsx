@@ -237,9 +237,23 @@ export default function OptionsPnLPanel() {
     : (data?.currentWeekRealizedTotal || data?.currentWeekPnL || 0)
   const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
   // Unrealized P&L grouped by underlying ticker (only shown for current week)
+  // When in 1W view, exclude positions expiring after this week's Friday
+  const thisWeekFriday = data?.weekStart
+    ? (() => { const d = new Date(data.weekStart + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
+    : null
+  const nextWeekFriday = thisWeekFriday
+    ? (() => { const d = new Date(thisWeekFriday + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10) })()
+    : null
   const unrealizedByTicker = !isHistoricalView
     ? openPositions.reduce((m, p) => {
-        if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
+        if (p.unrealizedPnl != null) {
+          if (byUnderlyingWeeks === 1 && thisWeekFriday && p.expiry > thisWeekFriday) return m
+          if (byUnderlyingWeeks === -1 && (
+            !thisWeekFriday || p.expiry <= thisWeekFriday ||
+            (nextWeekFriday && p.expiry > nextWeekFriday)
+          )) return m
+          m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
+        }
         return m
       }, {})
     : {}
@@ -383,7 +397,7 @@ export default function OptionsPnLPanel() {
             {sliceFromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>{fmtDate(sliceFromDate)} – {fmtDate(sliceToDate)}</div>}
           </div>
           <div style={{ display: 'flex', gap: '4px' }}>
-            {[['1W', 1], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['All', 0]].map(([label, val]) => (
+            {[['1W', 1], ['NW', -1], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['All', 0]].map(([label, val]) => (
               <button key={label} onClick={() => setByUnderlyingWeeks(val)}
                 style={{ ...btnStyle(byUnderlyingWeeks === val), padding: '3px 10px', fontSize: '11px' }}>
                 {label}
@@ -499,23 +513,28 @@ export default function OptionsPnLPanel() {
             </div>
           </div>
         )}
-        {byUnderlyingWeeks === 1 && data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
+        {(byUnderlyingWeeks === 1 || byUnderlyingWeeks === -1) && (byUnderlyingWeeks === -1 ? Object.keys(unrealizedByTicker).length > 0 : data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0) && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
               <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
-                This Week by Underlying
+                {byUnderlyingWeeks === -1 ? 'Next Week by Underlying' : 'This Week by Underlying'}
               </div>
               {(() => {
-                const total = Object.entries(data.currentWeekByUnderlying).reduce((sum, [ticker, optPnl]) => {
-                  const stockEntry = data.weeklyStockPnL?.[ticker]
-                  const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
-                  const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                  const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
-                  const combined = unrealizedPnl !== 0
-                    ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
-                    : optPnl + stockPnl
-                  return sum + combined
-                }, 0)
+                let total
+                if (byUnderlyingWeeks === -1) {
+                  total = Object.values(unrealizedByTicker).reduce((s, v) => s + v, 0)
+                } else {
+                  total = Object.entries(data.currentWeekByUnderlying).reduce((sum, [ticker, optPnl]) => {
+                    const stockEntry = data.weeklyStockPnL?.[ticker]
+                    const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
+                    const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
+                    const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
+                    const combined = unrealizedPnl !== 0
+                      ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
+                      : optPnl + stockPnl
+                    return sum + combined
+                  }, 0)
+                }
                 return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red }}>
                   Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
                 </div>
@@ -524,7 +543,7 @@ export default function OptionsPnLPanel() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {/* Tickers with open positions but no current-week trades */}
               {Object.entries(unrealizedByTicker)
-                .filter(([ticker]) => !data.currentWeekByUnderlying[ticker])
+                .filter(([ticker]) => !data.currentWeekByUnderlying?.[ticker])
                 .map(([ticker, unrealizedPnl]) => {
                   const rp = remPremByTicker[ticker]
                   const sp = stockPriceByTicker[ticker]
@@ -551,7 +570,7 @@ export default function OptionsPnLPanel() {
                   )
                 })
               }
-              {Object.entries(data.currentWeekByUnderlying).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, optPnl]) => {
+              {byUnderlyingWeeks !== -1 && Object.entries(data.currentWeekByUnderlying).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, optPnl]) => {
                 const stockEntry = data.weeklyStockPnL?.[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
                 const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.shares} shares · ${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
