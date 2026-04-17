@@ -236,13 +236,6 @@ export default function OptionsPnLPanel() {
     ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
     : (data?.currentWeekRealizedTotal || data?.currentWeekPnL || 0)
   const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
-  // Unrealized P&L grouped by underlying ticker (only shown for current week)
-  const unrealizedByTicker = !isHistoricalView
-    ? openPositions.reduce((m, p) => {
-        if (p.unrealizedPnl != null) m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
-        return m
-      }, {})
-    : {}
   // Next-week unrealized: positions expiring after this Friday and up to next Friday
   const thisWeekFriday = data?.weekStart
     ? (() => { const d = new Date(data.weekStart + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
@@ -250,6 +243,17 @@ export default function OptionsPnLPanel() {
   const nextWeekFriday = thisWeekFriday
     ? (() => { const d = new Date(thisWeekFriday + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10) })()
     : null
+  // Unrealized P&L grouped by underlying ticker (only shown for current week)
+  // For 1W view: only include positions expiring this week so next-week BTOs don't drag down the total
+  const unrealizedByTicker = !isHistoricalView
+    ? openPositions.reduce((m, p) => {
+        if (p.unrealizedPnl != null) {
+          if (byUnderlyingWeeks === 1 && thisWeekFriday && p.expiry > thisWeekFriday) return m
+          m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
+        }
+        return m
+      }, {})
+    : {}
   const nextWeekUnrealizedByTicker = !isHistoricalView && thisWeekFriday
     ? openPositions.reduce((m, p) => {
         if (p.unrealizedPnl != null && p.expiry > thisWeekFriday && (!nextWeekFriday || p.expiry <= nextWeekFriday))
@@ -525,7 +529,7 @@ export default function OptionsPnLPanel() {
                   const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
                   const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
                   const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
-                  const combined = unrealizedPnl !== 0
+                  const combined = realizedPnl != null || unrealizedPnl !== 0
                     ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
                     : optPnl + stockPnl
                   return sum + combined
@@ -573,11 +577,10 @@ export default function OptionsPnLPanel() {
                 const rp = remPremByTicker[ticker]
                 const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
                 const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
-                // When unrealized is available, Net = realized + unrealized + stock
-                // (avoids double-counting BTO cost which is already inside unrealizedPnl)
-                // When no unrealized, Net = options cash flows + stock (existing behavior)
-                const combined = stockPnl !== undefined || unrealizedPnl !== undefined
-                  ? (unrealizedPnl !== undefined ? (realizedPnl ?? 0) : optPnl) + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
+                // Net = realized (LIFO) + unrealized (this-week expiry only) + stock
+                // Falls back to net cash flow (optPnl) only when no realized or unrealized data
+                const combined = stockPnl !== undefined || unrealizedPnl !== undefined || realizedPnl != null
+                  ? (realizedPnl != null || unrealizedPnl !== undefined ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0) : optPnl) + (stockPnl ?? 0)
                   : null
                 const shares1w = stockEntry?.shares
                 // Scale only stock P&L to 100sh — options/unrealized are independent of share count
