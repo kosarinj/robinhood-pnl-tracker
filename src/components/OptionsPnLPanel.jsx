@@ -243,6 +243,20 @@ export default function OptionsPnLPanel() {
         return m
       }, {})
     : {}
+  // Next-week unrealized: positions expiring after this Friday and up to next Friday
+  const thisWeekFriday = data?.weekStart
+    ? (() => { const d = new Date(data.weekStart + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
+    : null
+  const nextWeekFriday = thisWeekFriday
+    ? (() => { const d = new Date(thisWeekFriday + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10) })()
+    : null
+  const nextWeekUnrealizedByTicker = !isHistoricalView && thisWeekFriday
+    ? openPositions.reduce((m, p) => {
+        if (p.unrealizedPnl != null && p.expiry > thisWeekFriday && (!nextWeekFriday || p.expiry <= nextWeekFriday))
+          m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
+        return m
+      }, {})
+    : {}
   // Stock price by ticker:
   // For historical views use only server-computed historical prices (Yahoo Finance for asOf date)
   // For current view also override with Polygon live underlying_asset.price when available (market hours)
@@ -383,7 +397,7 @@ export default function OptionsPnLPanel() {
             {sliceFromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>{fmtDate(sliceFromDate)} – {fmtDate(sliceToDate)}</div>}
           </div>
           <div style={{ display: 'flex', gap: '4px' }}>
-            {[['1W', 1], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['All', 0]].map(([label, val]) => (
+            {[['1W', 1], ['NW', -1], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['All', 0]].map(([label, val]) => (
               <button key={label} onClick={() => setByUnderlyingWeeks(val)}
                 style={{ ...btnStyle(byUnderlyingWeeks === val), padding: '3px 10px', fontSize: '11px' }}>
                 {label}
@@ -706,6 +720,43 @@ export default function OptionsPnLPanel() {
                         ))}
                       </div>
                     )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {byUnderlyingWeeks === -1 && Object.keys(nextWeekUnrealizedByTicker).length > 0 && (
+          <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
+                Next Week Open Positions
+              </div>
+              {(() => {
+                const total = Object.values(nextWeekUnrealizedByTicker).reduce((s, v) => s + v, 0)
+                return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red }}>
+                  Unrealized: {total >= 0 ? '+' : ''}{fmt(total)}
+                </div>
+              })()}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {Object.entries(nextWeekUnrealizedByTicker).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, unrealizedPnl]) => {
+                const sp = stockPriceByTicker[ticker]
+                return (
+                  <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                    <div style={{
+                      padding: '8px 12px', borderRadius: '8px',
+                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                      border: `1px solid ${border}`, fontSize: '12px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                        {sp && <span style={{ fontSize: '11px', color: textMid }}>{fmt(sp)}</span>}
+                      </div>
+                      <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
+                        Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                      </div>
+                    </div>
                   </div>
                 )
               })}
