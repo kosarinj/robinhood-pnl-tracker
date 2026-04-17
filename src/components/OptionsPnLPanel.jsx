@@ -529,7 +529,7 @@ export default function OptionsPnLPanel() {
                     const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
                     const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
                     const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
-                    const combined = unrealizedPnl !== 0
+                    const combined = realizedPnl != null || unrealizedPnl !== 0
                       ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
                       : optPnl + stockPnl
                     return sum + combined
@@ -578,11 +578,11 @@ export default function OptionsPnLPanel() {
                 const rp = remPremByTicker[ticker]
                 const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
                 const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
-                // When unrealized is available, Net = realized + unrealized + stock
+                // When realized or unrealized is available, Net = realized + unrealized + stock
                 // (avoids double-counting BTO cost which is already inside unrealizedPnl)
-                // When no unrealized, Net = options cash flows + stock (existing behavior)
-                const combined = stockPnl !== undefined || unrealizedPnl !== undefined
-                  ? (unrealizedPnl !== undefined ? (realizedPnl ?? 0) : optPnl) + (stockPnl ?? 0) + (unrealizedPnl ?? 0)
+                // When neither is available, Net = options cash flows + stock (existing behavior)
+                const combined = stockPnl !== undefined || unrealizedPnl !== undefined || realizedPnl != null
+                  ? (realizedPnl != null || unrealizedPnl !== undefined ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0) : optPnl) + (stockPnl ?? 0)
                   : null
                 const shares1w = stockEntry?.shares
                 // Scale only stock P&L to 100sh — options/unrealized are independent of share count
