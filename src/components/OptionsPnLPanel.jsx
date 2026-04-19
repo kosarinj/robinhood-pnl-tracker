@@ -41,6 +41,7 @@ export default function OptionsPnLPanel() {
   const [posError, setPosError] = useState(null)
   const [asOfDate, setAsOfDate] = useState('')
   const [byUnderlyingWeeks, setByUnderlyingWeeks] = useState(1)
+  const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, 1 = 1W ago, etc.
   const [chartTicker, setChartTicker] = useState(null)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
@@ -517,18 +518,41 @@ export default function OptionsPnLPanel() {
             </div>
           </div>
         )}
-        {byUnderlyingWeeks === 1 && data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 && (
+        {byUnderlyingWeeks === 1 && (weekOffset === 0 ? data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 : data?.weeks?.[weekOffset - 1]?.byUnderlying && Object.keys(data.weeks[weekOffset - 1].byUnderlying).length > 0) && (() => {
+          const histWk = weekOffset > 0 ? data.weeks[weekOffset - 1] : null
+          const wkByUnderlying = histWk ? histWk.byUnderlying : data.currentWeekByUnderlying
+          const wkRealized = histWk ? histWk.realizedByUnderlying : data.currentWeekRealizedByUnderlying
+          const wkCalls = histWk ? histWk.realizedCallsByUnderlying : data.currentWeekRealizedCallsByUnderlying
+          const wkPuts = histWk ? histWk.realizedPutsByUnderlying : data.currentWeekRealizedPutsByUnderlying
+          const wkTrades = histWk ? null : data.currentWeekTradesByUnderlying
+          const wkStockByTicker = histWk
+            ? Object.fromEntries(Object.entries(histWk.stockDelta || {}).map(([sym, pnl]) => {
+                const sp = histWk.stockPrices?.[sym]
+                return [sym, { pnl, fromPrice: sp?.fromPrice, toPrice: sp?.toPrice, shares: sp?.shares }]
+              }))
+            : data.weeklyStockPnL || {}
+          const wkLabel = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? '1W Ago' : `${weekOffset}W Ago`
+          const maxOffset = (data?.weeks?.length || 0)
+          return (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
-              <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
-                This Week by Underlying
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
+                  {wkLabel} by Underlying
+                </div>
+                <div style={{ display: 'flex', gap: '2px' }}>
+                  <button onClick={() => setWeekOffset(w => Math.min(w + 1, maxOffset))} disabled={weekOffset >= maxOffset}
+                    style={{ ...btnStyle(false), padding: '1px 6px', fontSize: '11px', opacity: weekOffset >= maxOffset ? 0.3 : 1 }}>◀</button>
+                  <button onClick={() => setWeekOffset(w => Math.max(w - 1, 0))} disabled={weekOffset === 0}
+                    style={{ ...btnStyle(false), padding: '1px 6px', fontSize: '11px', opacity: weekOffset === 0 ? 0.3 : 1 }}>▶</button>
+                </div>
               </div>
               {(() => {
-                const total = Object.entries(data.currentWeekByUnderlying).reduce((sum, [ticker, optPnl]) => {
-                  const stockEntry = data.weeklyStockPnL?.[ticker]
+                const total = Object.entries(wkByUnderlying).reduce((sum, [ticker, optPnl]) => {
+                  const stockEntry = wkStockByTicker[ticker]
                   const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
-                  const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                  const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
+                  const unrealizedPnl = weekOffset === 0 ? (unrealizedByTicker[ticker] ?? 0) : 0
+                  const realizedPnl = wkRealized?.[ticker]
                   const combined = realizedPnl != null || unrealizedPnl !== 0
                     ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
                     : optPnl + stockPnl
@@ -540,8 +564,8 @@ export default function OptionsPnLPanel() {
               })()}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {/* Tickers with open positions but no current-week trades */}
-              {Object.entries(unrealizedByTicker)
+              {/* Tickers with open positions but no current-week trades (current week only) */}
+              {weekOffset === 0 && Object.entries(unrealizedByTicker)
                 .filter(([ticker]) => !data.currentWeekByUnderlying[ticker])
                 .map(([ticker, unrealizedPnl]) => {
                   const rp = remPremByTicker[ticker]
@@ -569,14 +593,16 @@ export default function OptionsPnLPanel() {
                   )
                 })
               }
-              {Object.entries(data.currentWeekByUnderlying).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, optPnl]) => {
-                const stockEntry = data.weeklyStockPnL?.[ticker]
+              {Object.entries(wkByUnderlying).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, optPnl]) => {
+                const stockEntry = wkStockByTicker[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
-                const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.shares} shares · ${stockEntry.fromDate}: $${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toDate}: $${stockEntry.toPrice.toFixed(2)}` : undefined
-                const unrealizedPnl = unrealizedByTicker[ticker]
-                const rp = remPremByTicker[ticker]
-                const trades = data.currentWeekTradesByUnderlying?.[ticker] || []
-                const realizedPnl = data.currentWeekRealizedByUnderlying?.[ticker]
+                const stockTooltip = stockEntry?.fromPrice ? `${stockEntry.shares ?? ''} shares · $${stockEntry.fromPrice.toFixed(2)} → $${stockEntry.toPrice.toFixed(2)}` : undefined
+                const unrealizedPnl = weekOffset === 0 ? unrealizedByTicker[ticker] : undefined
+                const rp = weekOffset === 0 ? remPremByTicker[ticker] : null
+                const trades = wkTrades?.[ticker] || []
+                const realizedPnl = wkRealized?.[ticker]
+                const realizedCalls = wkCalls?.[ticker]
+                const realizedPuts = wkPuts?.[ticker]
                 // Net = realized (LIFO) + unrealized (this-week expiry only) + stock
                 // Falls back to net cash flow (optPnl) only when no realized or unrealized data
                 const combined = stockPnl !== undefined || unrealizedPnl !== undefined || realizedPnl != null
@@ -588,7 +614,7 @@ export default function OptionsPnLPanel() {
                   ? Math.round((combined - stockPnl + stockPnl * 100 / shares1w) * 100) / 100
                   : null
                 const isExpanded = expandedTicker === ticker
-                const sp = stockPriceByTicker[ticker] || stockEntry?.toPrice
+                const sp = weekOffset === 0 ? (stockPriceByTicker[ticker] || stockEntry?.toPrice) : stockEntry?.toPrice
                 return (
                   <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                     <div
@@ -597,14 +623,14 @@ export default function OptionsPnLPanel() {
                         padding: '8px 12px', borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
                         background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
                         border: `1px solid ${border}`,
-                        fontSize: '12px', cursor: 'pointer',
+                        fontSize: '12px', cursor: trades.length > 0 ? 'pointer' : 'default',
                         borderBottom: isExpanded ? 'none' : `1px solid ${border}`
                       }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                         <span style={{ fontWeight: '700', color: text }}>
                           {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
                         </span>
-                        <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>
+                        {trades.length > 0 && <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <div style={{ color: optPnl >= 0 ? green : red }}>
@@ -615,12 +641,22 @@ export default function OptionsPnLPanel() {
                             ↳ Realized: {realizedPnl >= 0 ? '+' : ''}{fmt(realizedPnl)}
                           </div>
                         )}
+                        {realizedCalls != null && (
+                          <div style={{ color: realizedCalls >= 0 ? green : red, fontSize: '11px', paddingLeft: '10px' }}>
+                            Calls: {realizedCalls >= 0 ? '+' : ''}{fmt(realizedCalls)}
+                          </div>
+                        )}
+                        {realizedPuts != null && (
+                          <div style={{ color: realizedPuts >= 0 ? green : red, fontSize: '11px', paddingLeft: '10px' }}>
+                            Puts: {realizedPuts >= 0 ? '+' : ''}{fmt(realizedPuts)}
+                          </div>
+                        )}
                         {stockPnl !== undefined && (
                           <div title={stockTooltip} style={{ color: stockPnl >= 0 ? green : red, cursor: stockTooltip ? 'help' : 'default' }}>
                             Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
                           </div>
                         )}
-                        {preMarketPrices[ticker] && (
+                        {weekOffset === 0 && preMarketPrices[ticker] && (
                           <div style={{ color: textMid, fontSize: '10px' }}>
                             Pre: ${preMarketPrices[ticker].price.toFixed(2)}
                             {preMarketPrices[ticker].changePct != null && (
@@ -637,7 +673,7 @@ export default function OptionsPnLPanel() {
                         )}
                         {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
                         {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
-                        {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
+                        {weekOffset === 0 && !isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                         {combined !== null && (
                           <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
                             Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
@@ -728,7 +764,8 @@ export default function OptionsPnLPanel() {
               })}
             </div>
           </div>
-        )}
+          )
+        })()}
         {byUnderlyingWeeks === -1 && Object.keys(nextWeekUnrealizedByTicker).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>

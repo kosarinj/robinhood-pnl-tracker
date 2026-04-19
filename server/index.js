@@ -2086,9 +2086,10 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       const expiryDateStr = parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : t.trans_date
       const weekKey = getWeekStart(expiryDateStr)
 
+      const optionType = parsed?.type || null // 'call' or 'put'
       const contractKey = (t.symbol || '') + '|' + weekKey
       if (!contractGroups[contractKey]) {
-        contractGroups[contractKey] = { underlying, weekKey, netFlow: 0, hasClosing: false, tradeDetails: [] }
+        contractGroups[contractKey] = { underlying, weekKey, netFlow: 0, hasClosing: false, tradeDetails: [], optionType }
       }
       const cg = contractGroups[contractKey]
       cg.netFlow += cashFlow
@@ -2103,9 +2104,9 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
 
     // Second pass: roll contracts into byWeek buckets
     const byWeek = {}
-    Object.values(contractGroups).forEach(({ underlying, weekKey, netFlow, hasClosing, tradeDetails }) => {
+    Object.values(contractGroups).forEach(({ underlying, weekKey, netFlow, hasClosing, tradeDetails, optionType }) => {
       if (!byWeek[weekKey]) {
-        byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, realizedDelta: 0, tradeCount: 0, byUnderlying: {}, realizedByUnderlying: {}, tradesByUnderlying: {} }
+        byWeek[weekKey] = { weekStart: weekKey, totalDelta: 0, realizedDelta: 0, tradeCount: 0, byUnderlying: {}, realizedByUnderlying: {}, realizedCallsByUnderlying: {}, realizedPutsByUnderlying: {}, tradesByUnderlying: {} }
       }
       const wk = byWeek[weekKey]
       wk.totalDelta += netFlow
@@ -2126,8 +2127,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const unmatchedNetFlow = tradeDetails
           .filter(t => t.isClosing && t.realizedPnl == null)
           .reduce((s, t) => s + t.cashFlow, 0)
-        wk.realizedByUnderlying[underlying] += lifoSum + unmatchedNetFlow
-        wk.realizedDelta += lifoSum + unmatchedNetFlow
+        const realizedAmount = lifoSum + unmatchedNetFlow
+        wk.realizedByUnderlying[underlying] += realizedAmount
+        wk.realizedDelta += realizedAmount
+        if (optionType === 'call') wk.realizedCallsByUnderlying[underlying] = (wk.realizedCallsByUnderlying[underlying] || 0) + realizedAmount
+        else if (optionType === 'put') wk.realizedPutsByUnderlying[underlying] = (wk.realizedPutsByUnderlying[underlying] || 0) + realizedAmount
       }
       wk.tradesByUnderlying[underlying].push(...tradeDetails)
     })
@@ -2141,12 +2145,21 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         tradeCount: w.tradeCount,
         byUnderlying: Object.fromEntries(
           Object.entries(w.byUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100]).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+        ),
+        realizedByUnderlying: Object.fromEntries(
+          Object.entries(w.realizedByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
+        ),
+        realizedCallsByUnderlying: Object.fromEntries(
+          Object.entries(w.realizedCallsByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
+        ),
+        realizedPutsByUnderlying: Object.fromEntries(
+          Object.entries(w.realizedPutsByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
         )
       }))
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
 
     // Hero card: current expiry week only
-    const cw = byWeek[mondayStr] || { totalDelta: 0, realizedDelta: 0, byUnderlying: {}, realizedByUnderlying: {}, tradesByUnderlying: {} }
+    const cw = byWeek[mondayStr] || { totalDelta: 0, realizedDelta: 0, byUnderlying: {}, realizedByUnderlying: {}, realizedCallsByUnderlying: {}, realizedPutsByUnderlying: {}, tradesByUnderlying: {} }
     const currentWeekPnL = Math.round(cw.totalDelta * 100) / 100
     const currentWeekRealizedTotal = Math.round(cw.realizedDelta * 100) / 100
     const currentWeekByUnderlying = Object.fromEntries(
@@ -2154,6 +2167,12 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     )
     const currentWeekRealizedByUnderlying = Object.fromEntries(
       Object.entries(cw.realizedByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
+    )
+    const currentWeekRealizedCallsByUnderlying = Object.fromEntries(
+      Object.entries(cw.realizedCallsByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
+    )
+    const currentWeekRealizedPutsByUnderlying = Object.fromEntries(
+      Object.entries(cw.realizedPutsByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
     )
     const currentWeekTradesByUnderlying = cw.tradesByUnderlying
 
@@ -2333,7 +2352,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     ])]
     const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
