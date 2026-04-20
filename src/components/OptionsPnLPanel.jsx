@@ -40,6 +40,7 @@ export default function OptionsPnLPanel() {
   const [posLoading, setPosLoading] = useState(false)
   const [posError, setPosError] = useState(null)
   const [asOfDate, setAsOfDate] = useState('')
+  const [activeTab, setActiveTab] = useState('week')
   const [byUnderlyingWeeks, setByUnderlyingWeeks] = useState(1)
   const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, 1 = 1W ago, etc.
   const [chartTicker, setChartTicker] = useState(null)
@@ -333,6 +334,18 @@ export default function OptionsPnLPanel() {
           {(loading || posLoading) ? '…' : '↻ Refresh All'}
         </button>
       </div>
+      {/* Tab bar */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: `2px solid ${border}`, paddingBottom: '0' }}>
+        {[['week', 'This Week'], ['history', 'History']].map(([key, label]) => (
+          <button key={key} onClick={() => setActiveTab(key)} style={{
+            padding: '8px 20px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
+            background: 'none', borderBottom: activeTab === key ? `2px solid #667eea` : '2px solid transparent',
+            marginBottom: '-2px', color: activeTab === key ? '#667eea' : textMid,
+            transition: 'color 0.15s'
+          }}>{label}</button>
+        ))}
+      </div>
+      {activeTab === 'week' && <>
       {/* This Week Hero Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         {/* Options P&L */}
@@ -838,6 +851,8 @@ export default function OptionsPnLPanel() {
         )}
       </div>
 
+      </>}
+      {activeTab === 'history' && <>
       {/* Date Range Filter */}
       <div style={{ ...cardStyle, padding: '14px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -957,6 +972,8 @@ export default function OptionsPnLPanel() {
         )}
       </div>
 
+      </>}
+      {activeTab === 'week' && <>
       {/* Open Option Positions */}
       <div style={{ ...cardStyle, marginTop: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -1062,6 +1079,7 @@ export default function OptionsPnLPanel() {
           </div>
         )}
       </div>
+      </>}
     </div>
   )
 }
