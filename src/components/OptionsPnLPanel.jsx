@@ -220,7 +220,12 @@ export default function OptionsPnLPanel() {
     const fromWeek = slice[slice.length - 1]?.weekStart
     const toWeek = slice[0]?.weekStart
     const sliceFromDate = fromWeek ? fromWeek : null
-    const sliceToDate = toWeek ? (() => { const d = new Date(toWeek + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })() : null
+    // Use Friday of the toWeek, but cap at today so current partial week doesn't show future date
+    const sliceToDate = toWeek ? (() => {
+      const d = new Date(toWeek + 'T12:00:00'); d.setDate(d.getDate() + 4)
+      const today = new Date(); today.setHours(0,0,0,0)
+      return (d <= today ? d : today).toISOString().slice(0, 10)
+    })() : null
     return { cumulativeByUnderlying: options, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
@@ -518,8 +523,14 @@ export default function OptionsPnLPanel() {
             </div>
           </div>
         )}
-        {byUnderlyingWeeks === 1 && (weekOffset === 0 ? data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0 : data?.weeks?.[weekOffset - 1]?.byUnderlying && Object.keys(data.weeks[weekOffset - 1].byUnderlying).length > 0) && (() => {
-          const histWk = weekOffset > 0 ? data.weeks[weekOffset - 1] : null
+        {byUnderlyingWeeks === 1 && (() => {
+          // Exclude the current week from history — data.weeks[0] is the current week
+          const histWeeks = (data?.weeks || []).filter(w => w.weekStart !== data?.weekStart)
+          const histWk = weekOffset > 0 ? histWeeks[weekOffset - 1] : null
+          const hasData = weekOffset === 0
+            ? data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0
+            : histWk?.byUnderlying && Object.keys(histWk.byUnderlying).length > 0
+          if (!hasData) return null
           const wkByUnderlying = histWk ? histWk.byUnderlying : data.currentWeekByUnderlying
           const wkRealized = histWk ? histWk.realizedByUnderlying : data.currentWeekRealizedByUnderlying
           const wkCalls = histWk ? histWk.realizedCallsByUnderlying : data.currentWeekRealizedCallsByUnderlying
@@ -532,7 +543,7 @@ export default function OptionsPnLPanel() {
               }))
             : data.weeklyStockPnL || {}
           const wkLabel = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? '1W Ago' : `${weekOffset}W Ago`
-          const maxOffset = (data?.weeks?.length || 0)
+          const maxOffset = histWeeks.length
           const wkDateStr = (() => {
             const ws = histWk ? histWk.weekStart : data?.weekStart
             if (!ws) return null
