@@ -166,7 +166,7 @@ export default function OptionsPnLPanel() {
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
 
   // Cumulative by-underlying: sum byUnderlying + stockDelta across the last N weeks (sorted desc)
-  const { cumulativeByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate } = (() => {
+  const { cumulativeByUnderlying, cumulativeRealizedByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate } = (() => {
     const weeks = data?.weeks || []
     const currentWeekStart = data?.weekStart || ''
     // Only include weeks up to and including the current week — exclude future expiry weeks
@@ -175,6 +175,7 @@ export default function OptionsPnLPanel() {
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
     const slice = byUnderlyingWeeks === 0 ? sorted : sorted.slice(0, byUnderlyingWeeks)
     const options = {}
+    const realized = {}
     const stock = {}
     const breakdown = {} // ticker → [{ weekStart, optPnl, stockPnl }]
     const stockPrices = {} // ticker → { fromPrice (oldest week), toPrice (newest week), shares }
@@ -185,6 +186,9 @@ export default function OptionsPnLPanel() {
         const existing = breakdown[ticker].find(e => e.weekStart === w.weekStart)
         if (existing) existing.optPnl = (existing.optPnl || 0) + val
         else breakdown[ticker].push({ weekStart: w.weekStart, optPnl: val, stockPnl: null })
+      })
+      Object.entries(w.realizedByUnderlying || {}).forEach(([ticker, val]) => {
+        realized[ticker] = (realized[ticker] || 0) + val
       })
       Object.entries(w.stockDelta || {}).forEach(([ticker, val]) => {
         stock[ticker] = (stock[ticker] || 0) + val
@@ -226,7 +230,7 @@ export default function OptionsPnLPanel() {
       const today = new Date(); today.setHours(0,0,0,0)
       return (d <= today ? d : today).toISOString().slice(0, 10)
     })() : null
-    return { cumulativeByUnderlying: options, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate }
+    return { cumulativeByUnderlying: options, cumulativeRealizedByUnderlying: realized, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
@@ -428,7 +432,12 @@ export default function OptionsPnLPanel() {
                       ((livePrice ?? priceRange.toPrice) - priceRange.recentFromPrice) * priceRange.recentShares
                     ) * 100) / 100
                   : (cumulativeStockDelta[ticker] ?? 0)
-                return sum + optPnl + stockPnl + (unrealizedByTicker[ticker] ?? 0)
+                const realizedPnl = cumulativeRealizedByUnderlying[ticker]
+                const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
+                const optTotal = realizedPnl != null || unrealizedPnl !== 0
+                  ? (realizedPnl ?? 0) + unrealizedPnl
+                  : optPnl
+                return sum + optTotal + stockPnl
               }, 0)
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
                 Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
@@ -448,9 +457,13 @@ export default function OptionsPnLPanel() {
                     : cumulativeStockDelta[ticker]
                   const displayToPrice = livePrice ?? priceRange?.toPrice
                   const unrealizedPnl = unrealizedByTicker[ticker]
+                  const realizedPnl = cumulativeRealizedByUnderlying[ticker]
                   const sp = livePrice
+                  const optTotal = realizedPnl != null || unrealizedPnl !== undefined
+                    ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0)
+                    : optPnl
                   const combined = stockPnl !== undefined
-                    ? optPnl + stockPnl + (unrealizedPnl ?? 0)
+                    ? optTotal + stockPnl
                     : null
                   const shares = priceRange?.shares
                   // Scale only stock P&L to 100sh — options/unrealized are independent of share count
