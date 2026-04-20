@@ -533,12 +533,21 @@ export default function OptionsPnLPanel() {
             : data.weeklyStockPnL || {}
           const wkLabel = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? '1W Ago' : `${weekOffset}W Ago`
           const maxOffset = (data?.weeks?.length || 0)
+          const wkDateStr = (() => {
+            const ws = histWk ? histWk.weekStart : data?.weekStart
+            if (!ws) return null
+            const { monday, friday } = getMondayOfWeek(ws)
+            return `${fmtDate(monday)} – ${fmtDate(friday)}`
+          })()
           return (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
-                  {wkLabel} by Underlying
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
+                    {wkLabel} by Underlying
+                  </div>
+                  {wkDateStr && <div style={{ fontSize: '10px', color: textMid, marginTop: '1px' }}>{wkDateStr}</div>}
                 </div>
                 <div style={{ display: 'flex', gap: '2px' }}>
                   <button onClick={() => setWeekOffset(w => Math.min(w + 1, maxOffset))} disabled={weekOffset >= maxOffset}
