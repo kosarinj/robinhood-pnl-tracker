@@ -730,6 +730,15 @@ export default function OptionsPnLPanel() {
                         {combined100 !== null && (
                           <div style={{ color: textMid, fontSize: '10px' }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>
                         )}
+                        {combined !== null && rp != null && ((rp.shortCall ?? 0) + (rp.longPut ?? 0)) > 0 && (() => {
+                          const remTotal = Math.round(((rp.shortCall ?? 0) + (rp.longPut ?? 0)) * 100) / 100
+                          const netRem = Math.round((combined + remTotal) * 100) / 100
+                          return (
+                            <div style={{ color: netRem >= 0 ? green : red, fontWeight: '700', fontSize: '11px' }}>
+                              Net + Rem: {netRem >= 0 ? '+' : ''}{fmt(netRem)}
+                            </div>
+                          )
+                        })()}
                       </div>
                     </div>
                     {isExpanded && (
