@@ -291,14 +291,16 @@ export default function OptionsPnLPanel() {
     if (!p.isLong && p.optionType === 'call') {
       const extrinsic = Math.round(Math.max(0, mark - Math.max(0, stockPrice - p.strike)) * 100) / 100
       if (extrinsic > 0) {
-        if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null }
+        if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null, shortCallStrikes: [], longPutStrikes: [] }
         m[p.ticker].shortCall = Math.round(((m[p.ticker].shortCall || 0) + extrinsic) * 100) / 100
+        if (p.strike && !m[p.ticker].shortCallStrikes.includes(p.strike)) m[p.ticker].shortCallStrikes.push(p.strike)
       }
     } else if (p.isLong && p.optionType === 'put') {
       const extrinsic = Math.round(Math.max(0, mark - Math.max(0, p.strike - stockPrice)) * 100) / 100
       if (extrinsic > 0) {
-        if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null }
+        if (!m[p.ticker]) m[p.ticker] = { shortCall: null, longPut: null, shortCallStrikes: [], longPutStrikes: [] }
         m[p.ticker].longPut = Math.round(((m[p.ticker].longPut || 0) + extrinsic) * 100) / 100
+        if (p.strike && !m[p.ticker].longPutStrikes.includes(p.strike)) m[p.ticker].longPutStrikes.push(p.strike)
       }
     }
     return m
@@ -631,8 +633,8 @@ export default function OptionsPnLPanel() {
                           <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
                             Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
                           </div>
-                          {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
-                          {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
+                          {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}{rp.shortCallStrikes?.length > 0 && ` ($${rp.shortCallStrikes.join('/$')})`}</div>}
+                          {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}{rp.longPutStrikes?.length > 0 && ` ($${rp.longPutStrikes.join('/$')})`}</div>}
                         </div>
                       </div>
                     </div>
@@ -717,8 +719,8 @@ export default function OptionsPnLPanel() {
                             Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
                           </div>
                         )}
-                        {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
-                        {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
+                        {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}{rp.shortCallStrikes?.length > 0 && ` ($${rp.shortCallStrikes.join('/$')})`}</div>}
+                        {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}{rp.longPutStrikes?.length > 0 && ` ($${rp.longPutStrikes.join('/$')})`}</div>}
                         {weekOffset === 0 && !isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                         {combined !== null && (
                           <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
