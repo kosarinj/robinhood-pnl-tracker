@@ -606,8 +606,17 @@ export default function OptionsPnLPanel() {
                     : optPnl + stockPnl
                   return sum + combined
                 }, 0)
-                return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red }}>
-                  Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
+                const totalRemAdj = weekOffset === 0
+                  ? Math.round((total + Object.values(remPremByTicker).reduce((sum, rp) =>
+                      sum + (rp.shortCall ?? 0) * 100 - (rp.longPut ?? 0) * 100, 0)) * 100) / 100
+                  : null
+                return <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red }}>
+                    Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
+                  </div>
+                  {totalRemAdj !== null && <div style={{ fontSize: '11px', fontWeight: '700', color: totalRemAdj >= 0 ? green : red }}>
+                    Total Net + Rem: {totalRemAdj >= 0 ? '+' : ''}{fmt(totalRemAdj)}
+                  </div>}
                 </div>
               })()}
             </div>
