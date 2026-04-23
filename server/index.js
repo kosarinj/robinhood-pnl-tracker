@@ -1524,11 +1524,13 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
           const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 8000 })
           const snap = resp.data?.results
           if (snap) {
-            const mid = snap.last_quote?.midpoint
+            const mid = snap.last_quote?.midpoint || (snap.last_quote?.bid && snap.last_quote?.ask ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
             const bid = snap.last_quote?.bid || 0
             const ask = snap.last_quote?.ask || 0
             const fallback = snap.day?.close || snap.last_trade?.price || 0
-            markPrices[pos.symbol] = { bid, ask, mid: mid || (bid && ask ? (bid + ask) / 2 : fallback), fallback }
+            // Use the higher of midpoint vs day close — deep ITM options often have stale quotes
+            const best = Math.max(mid || 0, fallback || 0) || mid || fallback || 0
+            markPrices[pos.symbol] = { bid, ask, mid: best, fallback }
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
           } else {
