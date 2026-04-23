@@ -710,7 +710,7 @@ export default function OptionsPnLPanel() {
                         )}
                         {stockPnl !== undefined && (
                           <div title={stockTooltip} style={{ color: stockPnl >= 0 ? green : red, cursor: stockTooltip ? 'help' : 'default' }}>
-                            Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                            Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}{sp ? <span style={{ color: textMid, fontWeight: '400' }}> (${sp.toFixed(2)})</span> : null}
                           </div>
                         )}
                         {weekOffset === 0 && preMarketPrices[ticker] && (
