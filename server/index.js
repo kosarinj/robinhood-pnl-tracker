@@ -2210,12 +2210,19 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
       })
 
+      const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols)
       thisWeekSymbols.forEach(sym => {
         const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
           weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
+        } else if (!pos && thisWeekSells[sym] && lastClose) {
+          // Position closed this week — use actual sale price vs last Friday close
+          const { sharesSold, avgPrice } = thisWeekSells[sym]
+          if (sharesSold > 0) {
+            weeklyStockPnL[sym] = { pnl: Math.round((avgPrice - lastClose) * sharesSold * 100) / 100, fromPrice: lastClose, toPrice: avgPrice, fromDate: lastFridayStr, toDate: todayStr, shares: sharesSold }
+          }
         }
       })
 

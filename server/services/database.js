@@ -1622,6 +1622,31 @@ export class DatabaseService {
     }
   }
 
+  getThisWeekStockSells(userId, since, symbols) {
+    if (!symbols || symbols.length === 0) return {}
+    try {
+      const placeholders = symbols.map(() => '?').join(',')
+      const rows = db.prepare(`
+        SELECT symbol,
+          SUM(quantity) AS shares_sold,
+          SUM(ABS(amount)) AS total_proceeds
+        FROM trades
+        WHERE is_option = 0 AND is_buy = 0 AND user_id = ?
+          AND trans_date >= ?
+          AND symbol IN (${placeholders})
+        GROUP BY symbol
+      `).all(userId, since, ...symbols)
+      const result = {}
+      rows.forEach(r => {
+        result[r.symbol] = { sharesSold: r.shares_sold, avgPrice: r.shares_sold > 0 ? r.total_proceeds / r.shares_sold : 0 }
+      })
+      return result
+    } catch (e) {
+      console.error('Error getting this week stock sells:', e)
+      return {}
+    }
+  }
+
   getOpenOptionPositions(userId = 1) {
     const rows = db.prepare(`
       SELECT
