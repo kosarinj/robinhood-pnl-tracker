@@ -167,7 +167,7 @@ export default function OptionsPnLPanel() {
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
 
   // Cumulative by-underlying: sum byUnderlying + stockDelta across the last N weeks (sorted desc)
-  const { cumulativeByUnderlying, cumulativeRealizedByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate } = (() => {
+  const { cumulativeByUnderlying, cumulativeRealizedByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate, allWeeks } = (() => {
     const weeks = data?.weeks || []
     const currentWeekStart = data?.weekStart || ''
     // Only include weeks up to and including the current week — exclude future expiry weeks
@@ -241,7 +241,7 @@ export default function OptionsPnLPanel() {
       const today = new Date(); today.setHours(0,0,0,0)
       return (d <= today ? d : today).toISOString().slice(0, 10)
     })() : null
-    return { cumulativeByUnderlying: options, cumulativeRealizedByUnderlying: realized, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate }
+    return { cumulativeByUnderlying: options, cumulativeRealizedByUnderlying: realized, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate, allWeeks }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
@@ -449,21 +449,23 @@ export default function OptionsPnLPanel() {
         {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             {(() => {
-              const total = Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
-                const priceRange = cumulativeStockPrices[ticker]
-                const livePrice = stockPriceByTicker[ticker]
-                const stockPnl = priceRange
-                  ? Math.round(((priceRange.olderWeeksStockPnl || 0) +
-                      ((livePrice ?? priceRange.toPrice) - priceRange.recentFromPrice) * priceRange.recentShares
-                    ) * 100) / 100
-                  : (cumulativeStockDelta[ticker] ?? 0)
-                const realizedPnl = cumulativeRealizedByUnderlying[ticker]
-                const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                const optTotal = realizedPnl != null || unrealizedPnl !== 0
-                  ? (realizedPnl ?? 0) + unrealizedPnl
-                  : optPnl
-                return sum + optTotal + stockPnl
-              }, 0)
+              // Sum each week's contribution independently — same logic as individual week sections
+              const weekSlice = byUnderlyingWeeks === 0 ? allWeeks : allWeeks.slice(0, byUnderlyingWeeks)
+              const total = Math.round(weekSlice.reduce((sum, w) => {
+                const isCurrentWeek = w.weekStart === data?.weekStart
+                const tickers = new Set([...Object.keys(w.byUnderlying || {}), ...Object.keys(w.realizedByUnderlying || {})])
+                return sum + [...tickers].reduce((s, ticker) => {
+                  const optPnl = w.byUnderlying?.[ticker] ?? 0
+                  const stockPnl = isCurrentWeek
+                    ? (() => { const e = data?.weeklyStockPnL?.[ticker]; return e != null ? (e?.pnl ?? e) : 0 })()
+                    : (w.stockDelta?.[ticker] ?? 0)
+                  const unrealizedPnl = isCurrentWeek ? (unrealizedByTicker[ticker] ?? 0) : 0
+                  const realizedPnl = isCurrentWeek ? data?.currentWeekRealizedByUnderlying?.[ticker] : w.realizedByUnderlying?.[ticker]
+                  return s + (realizedPnl != null || unrealizedPnl !== 0
+                    ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
+                    : optPnl + stockPnl)
+                }, 0)
+              }, 0) * 100) / 100
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
                 Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
               </div>
