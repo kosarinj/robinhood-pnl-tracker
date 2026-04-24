@@ -231,7 +231,7 @@ export default function OptionsPnLPanel() {
       const today = new Date(); today.setHours(0,0,0,0)
       return (d <= today ? d : today).toISOString().slice(0, 10)
     })() : null
-    return { cumulativeByUnderlying: options, cumulativeRealizedByUnderlying: realized, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate, historicalWeeks: sorted }
+    return { cumulativeByUnderlying: options, cumulativeRealizedByUnderlying: realized, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate, historicalWeeks: sorted.filter(w => w.weekStart !== currentWeekStart) }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
