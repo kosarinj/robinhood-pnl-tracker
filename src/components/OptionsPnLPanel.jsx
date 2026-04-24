@@ -175,12 +175,13 @@ export default function OptionsPnLPanel() {
       .filter(w => !currentWeekStart || w.weekStart <= currentWeekStart)
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
     // Prepend current (in-progress) week so "2W" = current + 1W ago
+    // Include current week options only — stock is already covered by live price in the cumulative calc
     const currentWeekEntry = currentWeekStart ? {
       weekStart: currentWeekStart,
       byUnderlying: data?.currentWeekByUnderlying || {},
       realizedByUnderlying: data?.currentWeekRealizedByUnderlying || {},
-      stockDelta: Object.fromEntries(Object.entries(data?.weeklyStockPnL || {}).map(([t, e]) => [t, e?.pnl ?? e])),
-      stockPrices: Object.fromEntries(Object.entries(data?.weeklyStockPnL || {}).filter(([, e]) => e?.fromPrice != null).map(([t, e]) => [t, { fromPrice: e.fromPrice, toPrice: e.toPrice, shares: e.shares }]))
+      stockDelta: {},
+      stockPrices: {}
     } : null
     const allWeeks = currentWeekEntry ? [currentWeekEntry, ...sorted] : sorted
     const slice = byUnderlyingWeeks === 0 ? allWeeks : allWeeks.slice(0, byUnderlyingWeeks)
