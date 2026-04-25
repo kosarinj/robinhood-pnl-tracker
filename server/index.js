@@ -2239,10 +2239,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       otherStockPnL = Math.round(otherStockPnL * 100) / 100
     }
 
-    // Weekly stock deltas for option-underlying tickers the user also holds stock in
+    // Weekly stock deltas for option-underlying tickers — include all, even closed positions,
+    // so historical weeks show correct stock P&L while the shares were held
     const stockHoldingOptionTickers = [...new Set(
       Object.values(byWeek).flatMap(w => Object.keys(w.byUnderlying))
-    )].filter(t => allPositions[t] > 0)
+    )]
 
     const allHistoryTickers = [...new Set([...stockHoldingOptionTickers, ...otherSymbols])]
     if (allHistoryTickers.length > 0) {
