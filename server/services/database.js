@@ -1647,24 +1647,31 @@ export class DatabaseService {
     }
   }
 
-  // Get stock buys within a date range — used to detect positions started mid-week
+  // Get net stock activity within a date range — used to detect positions started mid-week.
+  // Returns netChange (buys - sells) and avgBuyPrice. Only trigger mid-week P&L when
+  // netChange >= 100, so buy-and-sell-same-week (assignments that were quickly sold) are excluded.
   getStockBuysInPeriod(userId, fromDateExclusive, toDateInclusive, symbols) {
     if (!symbols || symbols.length === 0) return {}
     try {
       const placeholders = symbols.map(() => '?').join(',')
       const rows = db.prepare(`
         SELECT symbol,
-          SUM(quantity) AS shares_bought,
-          SUM(ABS(amount)) AS total_cost
+          SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS net_change,
+          SUM(CASE WHEN is_buy = 1 THEN quantity ELSE 0 END) AS shares_bought,
+          SUM(CASE WHEN is_buy = 1 THEN ABS(amount) ELSE 0 END) AS total_cost
         FROM trades
-        WHERE is_option = 0 AND is_buy = 1 AND user_id = ?
+        WHERE is_option = 0 AND user_id = ?
           AND trans_date > ? AND trans_date <= ?
           AND symbol IN (${placeholders})
         GROUP BY symbol
       `).all(userId, fromDateExclusive, toDateInclusive, ...symbols)
       const result = {}
       rows.forEach(r => {
-        result[r.symbol] = { sharesBought: r.shares_bought, avgPrice: r.shares_bought > 0 ? r.total_cost / r.shares_bought : 0 }
+        result[r.symbol] = {
+          netChange: r.net_change,
+          sharesBought: r.shares_bought,
+          avgPrice: r.shares_bought > 0 ? r.total_cost / r.shares_bought : 0
+        }
       })
       return result
     } catch (e) {

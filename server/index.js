@@ -2220,7 +2220,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         if (pos && curPrice) {
           const hadSharesLastFriday = (lastFriPositions[sym] || 0) > 0
           const buys = thisWeekBuys[sym]
-          if (!hadSharesLastFriday && buys && buys.sharesBought >= 100) {
+          if (!hadSharesLastFriday && buys && buys.netChange >= 100) {
             // Position started this week — use avg buy price as baseline, not last Friday close
             weeklyStockPnL[sym] = { pnl: Math.round((curPrice - buys.avgPrice) * pos * 100) / 100, fromPrice: buys.avgPrice, toPrice: curPrice, fromDate: mondayStr, toDate: todayStr, shares: pos }
           } else if (lastClose) {
@@ -2311,14 +2311,17 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
               stockDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
             }
           } else {
-            // Check if position was started MID-WEEK (bought during the week, 0 at start)
+            // Check if position was started MID-WEEK and held through EOW.
+            // Use netChange (buys - sells) so quick buy-and-sell same week (e.g. assigned put
+            // immediately sold) doesn't produce phantom stock P&L.
             const buys = weekBuys[ticker]
-            if (buys && buys.sharesBought >= 100) {
+            if (buys && buys.netChange >= 100) {
+              const shares = buys.netChange
               const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
               if (!week.stockPrices) week.stockPrices = {}
-              week.stockPrices[ticker] = { fromPrice: buys.avgPrice, toPrice: thisClose || buys.avgPrice, shares: buys.sharesBought }
+              week.stockPrices[ticker] = { fromPrice: buys.avgPrice, toPrice: thisClose || buys.avgPrice, shares }
               if (weekComplete && thisClose > 0) {
-                stockDelta[ticker] = Math.round((thisClose - buys.avgPrice) * buys.sharesBought * 100) / 100
+                stockDelta[ticker] = Math.round((thisClose - buys.avgPrice) * shares * 100) / 100
               }
             }
           }
