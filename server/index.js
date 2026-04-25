@@ -2211,12 +2211,21 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       })
 
       const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols)
+      const thisWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, lastFridayStr, todayStr, thisWeekSymbols)
+      const lastFriPositions = databaseService.getPositionsAsOf(req.user.userId, lastFridayStr)
       thisWeekSymbols.forEach(sym => {
         const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
         const curPrice = currentPrices[sym]
-        if (pos && lastClose && curPrice) {
-          weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
+        if (pos && curPrice) {
+          const hadSharesLastFriday = (lastFriPositions[sym] || 0) > 0
+          const buys = thisWeekBuys[sym]
+          if (!hadSharesLastFriday && buys && buys.sharesBought >= 100) {
+            // Position started this week — use avg buy price as baseline, not last Friday close
+            weeklyStockPnL[sym] = { pnl: Math.round((curPrice - buys.avgPrice) * pos * 100) / 100, fromPrice: buys.avgPrice, toPrice: curPrice, fromDate: mondayStr, toDate: todayStr, shares: pos }
+          } else if (lastClose) {
+            weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
+          }
         } else if (!pos && thisWeekSells[sym] && lastClose) {
           // Position closed this week — use actual sale price vs last Friday close
           const { sharesSold, avgPrice } = thisWeekSells[sym]
@@ -2276,25 +2285,42 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const prevFriStr = new Date(monday.getTime() - 3 * 86400000).toISOString().slice(0, 10)
         const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
 
-        // Stock delta for option-underlying tickers — use share count at START of week (prevFriStr)
-        // so shares bought mid-week or this week don't inflate the weekly stock P&L
         const weekPositions = databaseService.getPositionsAsOf(req.user.userId, prevFriStr)
         const weekComplete = thisFriStr <= todayStr
+
+        // For completed weeks, get any stocks bought MID-WEEK (position was 0 at start but bought during the week)
+        const allWeekTickers = Object.keys(week.byUnderlying)
+        const weekBuys = weekComplete
+          ? databaseService.getStockBuysInPeriod(req.user.userId, prevFriStr, thisFriStr, allWeekTickers)
+          : {}
+
         const stockDelta = {}
         Object.keys(week.byUnderlying).forEach(ticker => {
           const pos = weekPositions[ticker]
-          // Require 100+ shares — options are 100-share lots so anything less isn't a real covered position
-          if (!pos || pos < 100 || !tickerDateMap[ticker]) return
-          const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
-          const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
-          // Always store fromPrice/shares so multi-week cards can compute (livePrice - fromPrice) × shares
-          if (prevClose > 0) {
-            if (!week.stockPrices) week.stockPrices = {}
-            week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose || prevClose, shares: pos }
-          }
-          // Only add to weekly breakdown table for completed weeks
-          if (weekComplete && prevClose > 0 && thisClose > 0) {
-            stockDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
+          if (!tickerDateMap[ticker]) return
+
+          if (pos && pos >= 100) {
+            // Normal: had 100+ shares at start of week
+            const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
+            const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
+            if (prevClose > 0) {
+              if (!week.stockPrices) week.stockPrices = {}
+              week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose || prevClose, shares: pos }
+            }
+            if (weekComplete && prevClose > 0 && thisClose > 0) {
+              stockDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
+            }
+          } else {
+            // Check if position was started MID-WEEK (bought during the week, 0 at start)
+            const buys = weekBuys[ticker]
+            if (buys && buys.sharesBought >= 100) {
+              const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
+              if (!week.stockPrices) week.stockPrices = {}
+              week.stockPrices[ticker] = { fromPrice: buys.avgPrice, toPrice: thisClose || buys.avgPrice, shares: buys.sharesBought }
+              if (weekComplete && thisClose > 0) {
+                stockDelta[ticker] = Math.round((thisClose - buys.avgPrice) * buys.sharesBought * 100) / 100
+              }
+            }
           }
         })
         if (Object.keys(stockDelta).length > 0) week.stockDelta = stockDelta

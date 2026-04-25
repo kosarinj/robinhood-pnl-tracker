@@ -1647,6 +1647,32 @@ export class DatabaseService {
     }
   }
 
+  // Get stock buys within a date range — used to detect positions started mid-week
+  getStockBuysInPeriod(userId, fromDateExclusive, toDateInclusive, symbols) {
+    if (!symbols || symbols.length === 0) return {}
+    try {
+      const placeholders = symbols.map(() => '?').join(',')
+      const rows = db.prepare(`
+        SELECT symbol,
+          SUM(quantity) AS shares_bought,
+          SUM(ABS(amount)) AS total_cost
+        FROM trades
+        WHERE is_option = 0 AND is_buy = 1 AND user_id = ?
+          AND trans_date > ? AND trans_date <= ?
+          AND symbol IN (${placeholders})
+        GROUP BY symbol
+      `).all(userId, fromDateExclusive, toDateInclusive, ...symbols)
+      const result = {}
+      rows.forEach(r => {
+        result[r.symbol] = { sharesBought: r.shares_bought, avgPrice: r.shares_bought > 0 ? r.total_cost / r.shares_bought : 0 }
+      })
+      return result
+    } catch (e) {
+      console.error('Error getting stock buys in period:', e)
+      return {}
+    }
+  }
+
   getOpenOptionPositions(userId = 1) {
     const rows = db.prepare(`
       SELECT
