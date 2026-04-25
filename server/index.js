@@ -2283,7 +2283,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const stockDelta = {}
         Object.keys(week.byUnderlying).forEach(ticker => {
           const pos = weekPositions[ticker]
-          if (!pos || !tickerDateMap[ticker]) return
+          // Require 100+ shares — options are 100-share lots so anything less isn't a real covered position
+          if (!pos || pos < 100 || !tickerDateMap[ticker]) return
           const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
           const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
           // Always store fromPrice/shares so multi-week cards can compute (livePrice - fromPrice) × shares
