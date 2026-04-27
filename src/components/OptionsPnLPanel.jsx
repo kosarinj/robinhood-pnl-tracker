@@ -441,57 +441,66 @@ export default function OptionsPnLPanel() {
           </div>
         </div>
 
-        {/* Total Investment strip — open positions grouped by ticker */}
+        {/* Total Investment strip — stock value + net options premium per ticker */}
         {!isHistoricalView && openPositions.length > 0 && (() => {
-          const byTicker = {}
+          // Build options map: shortCredit = premium received, longCost = premium paid
+          const optsByTicker = {}
           openPositions.forEach(pos => {
             const t = pos.ticker || 'Unknown'
-            if (!byTicker[t]) byTicker[t] = { shortCredit: 0, longCost: 0, contracts: 0 }
+            if (!optsByTicker[t]) optsByTicker[t] = { shortCredit: 0, longCost: 0, contracts: 0 }
             const amount = Math.round(pos.avgCostPerContract * pos.openContracts * 100 * 100) / 100
-            if (pos.isLong) byTicker[t].longCost += amount
-            else byTicker[t].shortCredit += amount
-            byTicker[t].contracts += pos.openContracts
+            if (pos.isLong) optsByTicker[t].longCost += amount
+            else optsByTicker[t].shortCredit += amount
+            optsByTicker[t].contracts += pos.openContracts
           })
-          const totalShort = Object.values(byTicker).reduce((s, v) => s + v.shortCredit, 0)
-          const totalLong = Object.values(byTicker).reduce((s, v) => s + v.longCost, 0)
-          const totalNet = Math.round((totalShort - totalLong) * 100) / 100
+          // Union of tickers that have either stock or open options
+          const allTickers = [...new Set([
+            ...Object.keys(optsByTicker),
+            ...Object.keys(data?.weeklyStockPnL || {})
+          ])].sort()
+          let grandTotal = 0
+          const rows = allTickers.map(ticker => {
+            const opts = optsByTicker[ticker] || { shortCredit: 0, longCost: 0, contracts: 0 }
+            const stockEntry = data?.weeklyStockPnL?.[ticker]
+            const shares = stockEntry?.shares ?? 0
+            const price = stockPriceByTicker[ticker] || stockEntry?.toPrice || 0
+            const stockValue = shares > 0 && price > 0 ? Math.round(shares * price * 100) / 100 : 0
+            const optionsNet = Math.round((opts.shortCredit - opts.longCost) * 100) / 100
+            const total = Math.round((stockValue - optionsNet) * 100) / 100
+            if (stockValue === 0 && opts.contracts === 0) return null
+            grandTotal += total
+            return { ticker, stockValue, shortCredit: opts.shortCredit, longCost: opts.longCost, contracts: opts.contracts, optionsNet, total }
+          }).filter(Boolean)
+          grandTotal = Math.round(grandTotal * 100) / 100
+          if (rows.length === 0) return null
           return (
             <div style={{ borderTop: `1px solid ${border}`, paddingTop: '10px', marginBottom: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', color: textMid }}>Total Investment (Open Positions)</div>
-                <div style={{ fontSize: '12px', fontWeight: '700', color: totalNet >= 0 ? green : red }}>
-                  Net: {totalNet >= 0 ? '+' : ''}{fmt(totalNet)}
-                </div>
+                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', color: textMid }}>Total Investment</div>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: text }}>{fmt(grandTotal)}</div>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {Object.entries(byTicker).sort(([a], [b]) => a.localeCompare(b)).map(([ticker, { shortCredit, longCost, contracts }]) => {
-                  const net = Math.round((shortCredit - longCost) * 100) / 100
-                  return (
-                    <div key={ticker} style={{
-                      padding: '4px 10px', borderRadius: '8px', fontSize: '11px',
-                      background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                      border: `1px solid ${border}`,
-                      display: 'flex', flexDirection: 'column', gap: '1px'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                        <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
-                        <span style={{ color: textMid, fontSize: '10px' }}>{contracts}c</span>
-                        <span style={{ fontWeight: '700', color: net >= 0 ? green : red }}>{net >= 0 ? '+' : ''}{fmt(net)}</span>
-                      </div>
-                      {shortCredit > 0 && longCost > 0 && (
-                        <div style={{ fontSize: '10px', color: textMid }}>
-                          {fmt(shortCredit)} short · {fmt(longCost)} long
-                        </div>
-                      )}
-                      {shortCredit > 0 && longCost === 0 && (
-                        <div style={{ fontSize: '10px', color: textMid }}>{fmt(shortCredit)} short credit</div>
-                      )}
-                      {longCost > 0 && shortCredit === 0 && (
-                        <div style={{ fontSize: '10px', color: textMid }}>{fmt(longCost)} long cost</div>
-                      )}
+                {rows.map(({ ticker, stockValue, shortCredit, longCost, contracts, optionsNet, total }) => (
+                  <div key={ticker} style={{
+                    padding: '5px 10px', borderRadius: '8px', fontSize: '11px',
+                    background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                    border: `1px solid ${border}`,
+                    display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '130px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
+                      <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                      <span style={{ fontWeight: '700', color: text }}>{fmt(total)}</span>
                     </div>
-                  )
-                })}
+                    {stockValue > 0 && (
+                      <div style={{ fontSize: '10px', color: textMid }}>Stock: {fmt(stockValue)}</div>
+                    )}
+                    {contracts > 0 && (
+                      <div style={{ fontSize: '10px', color: optionsNet >= 0 ? green : red }}>
+                        Options ({contracts}c): {optionsNet >= 0 ? '−' : '+'}{fmt(Math.abs(optionsNet))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )
