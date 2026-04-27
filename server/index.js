@@ -2299,6 +2299,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const stockDelta = {}
         allWeekTickers.forEach(ticker => {
           const pos = weekPositions[ticker]
+          const DEBUG = ticker === 'FAS' || ticker === 'AAPL'
+          if (DEBUG) console.log(`[STOCK DEBUG] ${week.weekStart} ${ticker}: pos=${pos}, weekComplete=${weekComplete}, hasPriceData=${!!tickerDateMap[ticker]}, weekBuys=${JSON.stringify(weekBuys[ticker])}`)
           if (!tickerDateMap[ticker]) return
 
           if (pos && pos >= 100) {
