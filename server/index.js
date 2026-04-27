@@ -2288,14 +2288,16 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const weekPositions = databaseService.getPositionsAsOf(req.user.userId, prevFriStr)
         const weekComplete = thisFriStr <= todayStr
 
-        // For completed weeks, get any stocks bought MID-WEEK (position was 0 at start but bought during the week)
-        const allWeekTickers = Object.keys(week.byUnderlying)
+        // Check stock for ALL tickers ever seen, not just those with options expiring this week.
+        // Options are grouped by expiry week, so a ticker may hold stock in a week where its
+        // options expire a different week — allHistoryTickers catches those cases.
+        const allWeekTickers = [...new Set([...Object.keys(week.byUnderlying), ...allHistoryTickers])]
         const weekBuys = weekComplete
           ? databaseService.getStockBuysInPeriod(req.user.userId, prevFriStr, thisFriStr, allWeekTickers)
           : {}
 
         const stockDelta = {}
-        Object.keys(week.byUnderlying).forEach(ticker => {
+        allWeekTickers.forEach(ticker => {
           const pos = weekPositions[ticker]
           if (!tickerDateMap[ticker]) return
 
@@ -2309,6 +2311,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
             }
             if (weekComplete && prevClose > 0 && thisClose > 0) {
               stockDelta[ticker] = Math.round((thisClose - prevClose) * pos * 100) / 100
+              // Ticker held stock this week but had no options expiring — inject with 0 optPnl
+              if (week.byUnderlying[ticker] === undefined) {
+                week.byUnderlying[ticker] = 0
+                week.realizedByUnderlying[ticker] = 0
+              }
             }
           } else {
             // Check if position was started MID-WEEK and held through EOW.
@@ -2322,6 +2329,11 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
               week.stockPrices[ticker] = { fromPrice: buys.avgPrice, toPrice: thisClose || buys.avgPrice, shares }
               if (weekComplete && thisClose > 0) {
                 stockDelta[ticker] = Math.round((thisClose - buys.avgPrice) * shares * 100) / 100
+                // Ticker held stock this week but had no options expiring — inject with 0 optPnl
+                if (week.byUnderlying[ticker] === undefined) {
+                  week.byUnderlying[ticker] = 0
+                  week.realizedByUnderlying[ticker] = 0
+                }
               }
             }
           }

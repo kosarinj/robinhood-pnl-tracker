@@ -683,10 +683,10 @@ export default function OptionsPnLPanel() {
                         {trades.length > 0 && <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <div style={{ color: optPnl >= 0 ? green : red }}>
+                        {optPnl !== 0 && <div style={{ color: optPnl >= 0 ? green : red }}>
                           Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}
-                        </div>
-                        {realizedPnl !== undefined && (
+                        </div>}
+                        {realizedPnl != null && realizedPnl !== 0 && (
                           <div style={{ color: realizedPnl >= 0 ? green : red, fontSize: '11px' }}>
                             ↳ Realized: {realizedPnl >= 0 ? '+' : ''}{fmt(realizedPnl)}
                           </div>
