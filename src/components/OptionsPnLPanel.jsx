@@ -603,12 +603,15 @@ export default function OptionsPnLPanel() {
                 </div>
               </div>
               {(() => {
-                const total = Object.entries(wkByUnderlying).reduce((sum, [ticker, optPnl]) => {
-                  const stockEntry = wkStockByTicker[ticker]
-                  const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
-                  const unrealizedPnl = weekOffset === 0 ? (unrealizedByTicker[ticker] ?? 0) : 0
-                  return sum + optPnl + stockPnl + unrealizedPnl
-                }, 0)
+                // For the current week, use the same calculation as "Wk — Net Total" so they match.
+                // For historical weeks, sum per-ticker cash flow + stock (no unrealized/other stocks).
+                const total = weekOffset === 0
+                  ? Math.round(netWeekPnL * 100) / 100
+                  : Object.entries(wkByUnderlying).reduce((sum, [ticker, optPnl]) => {
+                      const stockEntry = wkStockByTicker[ticker]
+                      const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
+                      return sum + optPnl + stockPnl
+                    }, 0)
                 const totalRemAdj = weekOffset === 0
                   ? Math.round((total + Object.values(remPremByTicker).reduce((sum, rp) =>
                       sum + (rp.shortCall ?? 0) * 100 - (rp.longPut ?? 0) * 100, 0)) * 100) / 100
