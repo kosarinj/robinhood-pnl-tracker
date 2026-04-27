@@ -444,18 +444,14 @@ export default function OptionsPnLPanel() {
               const histTotal = histSlice.reduce((sum, w) => {
                 return sum + Object.entries(w.byUnderlying || {}).reduce((s, [ticker, optPnl]) => {
                   const stockPnl = w.stockDelta?.[ticker] ?? 0
-                  const realizedPnl = w.realizedByUnderlying?.[ticker]
-                  return s + (realizedPnl != null ? (realizedPnl ?? 0) + stockPnl : optPnl + stockPnl)
+                  return s + optPnl + stockPnl
                 }, 0)
               }, 0)
               const currentTotal = Object.entries(data?.currentWeekByUnderlying || {}).reduce((sum, [ticker, optPnl]) => {
                 const stockEntry = data?.weeklyStockPnL?.[ticker]
                 const stockPnl = stockEntry != null ? (stockEntry?.pnl ?? stockEntry) : 0
                 const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                const realizedPnl = data?.currentWeekRealizedByUnderlying?.[ticker]
-                return sum + (realizedPnl != null || unrealizedPnl !== 0
-                  ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
-                  : optPnl + stockPnl)
+                return sum + optPnl + stockPnl + unrealizedPnl
               }, 0)
               const total = Math.round((histTotal + currentTotal) * 100) / 100
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
@@ -478,9 +474,7 @@ export default function OptionsPnLPanel() {
                   const unrealizedPnl = unrealizedByTicker[ticker]
                   const realizedPnl = cumulativeRealizedByUnderlying[ticker]
                   const sp = livePrice
-                  const optTotal = realizedPnl != null || unrealizedPnl !== undefined
-                    ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0)
-                    : optPnl
+                  const optTotal = optPnl + (unrealizedPnl ?? 0)
                   const combined = stockPnl !== undefined
                     ? optTotal + stockPnl
                     : null
@@ -664,11 +658,10 @@ export default function OptionsPnLPanel() {
                 const realizedPnl = wkRealized?.[ticker]
                 const realizedCalls = wkCalls?.[ticker]
                 const realizedPuts = wkPuts?.[ticker]
-                // Net = realized (LIFO) + unrealized (this-week expiry only) + stock
-                // Falls back to net cash flow (optPnl) only when no realized or unrealized data
-                const combined = stockPnl !== undefined || unrealizedPnl !== undefined || realizedPnl != null
-                  ? (realizedPnl != null || unrealizedPnl !== undefined ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0) : optPnl) + (stockPnl ?? 0)
-                  : null
+                // Net = options cash flow + unrealized (this-week expiry only) + stock
+                const combined = stockPnl !== undefined || unrealizedPnl !== undefined
+                  ? optPnl + (unrealizedPnl ?? 0) + (stockPnl ?? 0)
+                  : optPnl || null
                 const shares1w = stockEntry?.shares
                 // Scale only stock P&L to 100sh — options/unrealized are independent of share count
                 const combined100 = combined != null && shares1w && shares1w !== 100 && stockPnl !== undefined
