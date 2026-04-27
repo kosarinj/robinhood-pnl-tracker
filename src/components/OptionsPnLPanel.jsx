@@ -666,10 +666,13 @@ export default function OptionsPnLPanel() {
                 const realizedPnl = wkRealized?.[ticker]
                 const realizedCalls = wkCalls?.[ticker]
                 const realizedPuts = wkPuts?.[ticker]
-                // Net = options cash flow + unrealized (this-week expiry only) + stock
-                const combined = stockPnl !== undefined || unrealizedPnl !== undefined
-                  ? optPnl + (unrealizedPnl ?? 0) + (stockPnl ?? 0)
-                  : optPnl || null
+                // Current week: realized (closed legs) + unrealized (open legs, Polygon) + stock
+                // Historical weeks: optPnl (cash flow, all closed) + stock
+                const combined = weekOffset === 0
+                  ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0) + (stockPnl ?? 0)
+                  : stockPnl !== undefined || unrealizedPnl !== undefined
+                    ? optPnl + (unrealizedPnl ?? 0) + (stockPnl ?? 0)
+                    : optPnl || null
                 const shares1w = stockEntry?.shares
                 // Scale only stock P&L to 100sh — options/unrealized are independent of share count
                 const combined100 = combined != null && shares1w && shares1w !== 100 && stockPnl !== undefined
