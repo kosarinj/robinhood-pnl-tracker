@@ -945,19 +945,24 @@ export default function OptionsPnLPanel() {
               <tbody>
                 {filteredWeeks.map((week, i) => {
                   const { monday, friday } = getMondayOfWeek(week.weekStart)
+                  // Current week: use live realized+unrealized (same as WK hero card) instead of cash flow
+                  const isCurrWeek = week.weekStart === data?.weekStart
+                  const optionsPnL = isCurrWeek && hasPrices && !isHistoricalView
+                    ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
+                    : week.totalDelta
                   const stockDeltaTotal = week.stockDelta ? Object.values(week.stockDelta).reduce((s, v) => s + v, 0) : null
                   const stockTooltip = week.stockDelta ? Object.entries(week.stockDelta).map(([t, v]) => `${t}: ${v >= 0 ? '+' : ''}${fmt(v)}`).join(', ') : null
                   const otherDeltaTotal = week.otherStockDelta ? Object.values(week.otherStockDelta).reduce((s, v) => s + v, 0) : null
                   const otherTooltip = week.otherStockDelta ? Object.entries(week.otherStockDelta).map(([t, v]) => `${t}: ${v >= 0 ? '+' : ''}${fmt(v)}`).join(', ') : null
-                  const net = week.totalDelta + (stockDeltaTotal ?? 0) + (otherDeltaTotal ?? 0)
+                  const net = optionsPnL + (stockDeltaTotal ?? 0) + (otherDeltaTotal ?? 0)
                   return (
                     <tr key={week.weekStart} style={{ borderBottom: `1px solid ${border}`, background: i % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)') }}>
                       <td style={{ padding: '10px 12px', color: text }}>
                         <span style={{ fontWeight: '600' }}>{fmtDate(monday)}</span>
                         <span style={{ color: textMid, marginLeft: '6px', fontSize: '12px' }}>&#8211; {fmtDate(friday)}</span>
                       </td>
-                      <td style={{ padding: '10px 12px', fontWeight: '600', color: week.totalDelta >= 0 ? green : red }}>
-                        {week.totalDelta >= 0 ? '+' : ''}{fmt(week.totalDelta)}
+                      <td style={{ padding: '10px 12px', fontWeight: '600', color: optionsPnL >= 0 ? green : red }}>
+                        {optionsPnL >= 0 ? '+' : ''}{fmt(optionsPnL)}
                       </td>
                       <td title={stockTooltip || ''} style={{ padding: '10px 12px', color: stockDeltaTotal == null ? textMid : (stockDeltaTotal >= 0 ? green : red), cursor: stockTooltip ? 'help' : 'default' }}>
                         {stockDeltaTotal == null ? '—' : `${stockDeltaTotal >= 0 ? '+' : ''}${fmt(stockDeltaTotal)}`}
@@ -975,16 +980,20 @@ export default function OptionsPnLPanel() {
               <tfoot>
                 <tr style={{ background: isDark ? '#252b3b' : '#f8fafc', borderTop: `2px solid ${border}` }}>
                   <td style={{ padding: '10px 16px', fontWeight: '700', color: text }}>Total</td>
-                  <td style={{ padding: '10px 16px', fontWeight: '700', color: rangeTotal >= 0 ? green : red }}>
-                    {rangeTotal >= 0 ? '+' : ''}{fmt(rangeTotal)}
-                  </td>
                   {(() => {
+                    const adjOptionsTotal = filteredWeeks.reduce((s, w) => {
+                      const isCW = w.weekStart === data?.weekStart
+                      return s + (isCW && hasPrices && !isHistoricalView
+                        ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
+                        : w.totalDelta)
+                    }, 0)
                     const stockTotal = filteredWeeks.reduce((s, w) => w.stockDelta ? s + Object.values(w.stockDelta).reduce((a, b) => a + b, 0) : s, 0)
                     const otherTotal = filteredWeeks.reduce((s, w) => w.otherStockDelta ? s + Object.values(w.otherStockDelta).reduce((a, b) => a + b, 0) : s, 0)
                     const hasStock = filteredWeeks.some(w => w.stockDelta)
                     const hasOther = filteredWeeks.some(w => w.otherStockDelta)
-                    const netTotal = rangeTotal + stockTotal + otherTotal
+                    const netTotal = adjOptionsTotal + stockTotal + otherTotal
                     return <>
+                      <td style={{ padding: '10px 16px', fontWeight: '700', color: adjOptionsTotal >= 0 ? green : red }}>{adjOptionsTotal >= 0 ? '+' : ''}{fmt(adjOptionsTotal)}</td>
                       <td style={{ padding: '10px 12px', fontWeight: '700', color: stockTotal >= 0 ? green : red }}>{hasStock ? `${stockTotal >= 0 ? '+' : ''}${fmt(stockTotal)}` : '—'}</td>
                       <td style={{ padding: '10px 12px', fontWeight: '700', color: otherTotal >= 0 ? green : red }}>{hasOther ? `${otherTotal >= 0 ? '+' : ''}${fmt(otherTotal)}` : '—'}</td>
                       <td style={{ padding: '10px 12px', fontWeight: '700', color: netTotal >= 0 ? green : red }}>{`${netTotal >= 0 ? '+' : ''}${fmt(netTotal)}`}</td>
