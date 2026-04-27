@@ -261,11 +261,9 @@ export default function OptionsPnLPanel() {
     ? (() => { const d = new Date(thisWeekFriday + 'T12:00:00'); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10) })()
     : null
   // Unrealized P&L grouped by underlying ticker (only shown for current week)
-  // For 1W view: only include positions expiring this week so next-week BTOs don't drag down the total
   const unrealizedByTicker = !isHistoricalView
     ? openPositions.reduce((m, p) => {
         if (p.unrealizedPnl != null) {
-          if (byUnderlyingWeeks === 1 && thisWeekFriday && p.expiry > thisWeekFriday) return m
           m[p.ticker] = (m[p.ticker] || 0) + p.unrealizedPnl
         }
         return m
@@ -900,6 +898,24 @@ export default function OptionsPnLPanel() {
                   </div>
                 )
               })}
+              {/* Other Stocks chip — accounts for the gap between card sum and Total Net */}
+              {weekOffset === 0 && otherStockPnL !== 0 && (
+                <div style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                  <div style={{
+                    padding: '8px 12px', borderRadius: '8px',
+                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                    border: `1px solid ${border}`, fontSize: '12px'
+                  }}>
+                    <div style={{ fontWeight: '700', color: text, marginBottom: '4px' }}>Other Stocks</div>
+                    <div style={{ color: otherStockPnL >= 0 ? green : red }}>
+                      Stock: {otherStockPnL >= 0 ? '+' : ''}{fmt(otherStockPnL)}
+                    </div>
+                    <div style={{ color: otherStockPnL >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                      Net: {otherStockPnL >= 0 ? '+' : ''}{fmt(otherStockPnL)}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           )
