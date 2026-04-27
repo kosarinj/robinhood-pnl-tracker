@@ -561,7 +561,7 @@ export default function OptionsPnLPanel() {
           const wkRealized = histWk ? histWk.realizedByUnderlying : data.currentWeekRealizedByUnderlying
           const wkCalls = histWk ? histWk.realizedCallsByUnderlying : data.currentWeekRealizedCallsByUnderlying
           const wkPuts = histWk ? histWk.realizedPutsByUnderlying : data.currentWeekRealizedPutsByUnderlying
-          const wkTrades = histWk ? null : data.currentWeekTradesByUnderlying
+          const wkTrades = histWk ? histWk.tradesByUnderlying : data.currentWeekTradesByUnderlying
           const wkStockByTicker = histWk
             ? Object.fromEntries(Object.entries(histWk.stockDelta || {}).map(([sym, pnl]) => {
                 const sp = histWk.stockPrices?.[sym]
@@ -598,11 +598,7 @@ export default function OptionsPnLPanel() {
                   const stockEntry = wkStockByTicker[ticker]
                   const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
                   const unrealizedPnl = weekOffset === 0 ? (unrealizedByTicker[ticker] ?? 0) : 0
-                  const realizedPnl = wkRealized?.[ticker]
-                  const combined = realizedPnl != null || unrealizedPnl !== 0
-                    ? (realizedPnl ?? 0) + stockPnl + unrealizedPnl
-                    : optPnl + stockPnl
-                  return sum + combined
+                  return sum + optPnl + stockPnl + unrealizedPnl
                 }, 0)
                 const totalRemAdj = weekOffset === 0
                   ? Math.round((total + Object.values(remPremByTicker).reduce((sum, rp) =>

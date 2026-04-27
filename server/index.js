@@ -2138,7 +2138,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       wk.tradesByUnderlying[underlying].push(...tradeDetails)
     })
 
-    // History table (no trade detail — keep payload small)
     const weeks = Object.values(byWeek)
       .map(w => ({
         weekStart: w.weekStart,
@@ -2156,7 +2155,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         ),
         realizedPutsByUnderlying: Object.fromEntries(
           Object.entries(w.realizedPutsByUnderlying).map(([k, v]) => [k, Math.round(v * 100) / 100])
-        )
+        ),
+        tradesByUnderlying: w.tradesByUnderlying
       }))
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
 
