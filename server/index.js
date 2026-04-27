@@ -1486,6 +1486,117 @@ app.get('/api/debug/polygon-options', requireAuth, async (req, res) => {
   }
 })
 
+// What-If analysis: compare hold-to-today vs actual P&L for this week's original opens
+app.get('/api/whatif', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const today = new Date().toISOString().slice(0, 10)
+    const now = new Date()
+    const dow = now.getDay()
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1))
+    monday.setHours(0, 0, 0, 0)
+    const mondayStr = monday.toISOString().slice(0, 10)
+
+    // Pull all option trades for current week with quantity and price
+    const weekTrades = databaseService.getOptionTradesForWeek(userId, mondayStr)
+
+    // Group by contract symbol — track opens and closes separately
+    const contractMap = {}
+    weekTrades.forEach(t => {
+      const tc = (t.trans_code || '').toUpperCase()
+      if (!['BTO', 'STO', 'BTC', 'STC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) return
+      const symbol = t.symbol
+      if (!symbol) return
+      const isClosing = ['BTC', 'STC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
+      const isExpiry = ['OEXP', 'OASGN', 'OEXC'].includes(tc)
+      const cashFlow = t.is_buy ? -(t.amount || 0) : (t.amount || 0)
+      const contracts = Math.abs(t.quantity || 1)
+
+      if (!contractMap[symbol]) {
+        contractMap[symbol] = { symbol, parsed: parseOptionDescription(symbol), opens: [], closes: [], expired: false }
+      }
+      const cm = contractMap[symbol]
+      if (isClosing) {
+        cm.closes.push({ contracts, cashFlow, tc, isExpiry })
+        if (isExpiry) cm.expired = true
+      } else {
+        cm.opens.push({ contracts, cashFlow, price: t.price || 0, date: t.trans_date })
+      }
+    })
+
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    const results = []
+
+    for (const cm of Object.values(contractMap)) {
+      if (!cm.parsed || cm.opens.length === 0) continue
+      const expiry = `${cm.parsed.year}-${cm.parsed.month}-${cm.parsed.day}`
+      const isExpired = cm.expired || expiry < today
+
+      const totalOpenContracts = cm.opens.reduce((s, o) => s + o.contracts, 0)
+      const totalOpenPremium = cm.opens.reduce((s, o) => s + o.cashFlow, 0) // + for STO (received), - for BTO (paid)
+      const isShort = totalOpenPremium >= 0
+      const avgOpenPrice = totalOpenContracts > 0 ? Math.abs(totalOpenPremium) / totalOpenContracts : 0
+
+      // Contracts closed early (BTC/STC, not expiry)
+      const earlyClosedContracts = cm.closes.filter(c => !c.isExpiry).reduce((s, c) => s + c.contracts, 0)
+      const stillOpenContracts = Math.max(0, totalOpenContracts - cm.closes.reduce((s, c) => s + c.contracts, 0))
+
+      // Fetch Polygon mark for contracts that need it (not expired, and either closed early OR still open)
+      let currentMark = 0
+      if (!isExpired && polygonKey) {
+        const polygonTicker = toPolygonTicker(cm.symbol)
+        if (polygonTicker) {
+          try {
+            const url = `https://api.polygon.io/v3/snapshot/options/${cm.parsed.ticker}/${polygonTicker}`
+            const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
+            const snap = resp.data?.results
+            if (snap) {
+              const mid = snap.last_quote?.midpoint ||
+                (snap.last_quote?.bid && snap.last_quote?.ask
+                  ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
+              const fallback = snap.day?.close || snap.last_trade?.price || 0
+              currentMark = Math.max(mid || 0, fallback || 0) || mid || fallback || 0
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }
+
+      // Hold P&L: what if they held ALL originally opened contracts from open to now
+      const holdPnl = isShort
+        ? Math.round((totalOpenPremium - currentMark * totalOpenContracts * 100) * 100) / 100
+        : Math.round((currentMark * totalOpenContracts * 100 + totalOpenPremium) * 100) / 100  // totalOpenPremium is negative for BTO
+
+      // Actual cash-flow P&L: net of all open + close premiums on this contract
+      const totalClosePremium = cm.closes.reduce((s, c) => s + c.cashFlow, 0)
+      const actualCashFlow = Math.round((totalOpenPremium + totalClosePremium) * 100) / 100
+
+      results.push({
+        symbol: cm.symbol,
+        ticker: cm.parsed.ticker,
+        expiry,
+        strike: cm.parsed.strike,
+        optionType: cm.parsed.type,
+        isShort,
+        openContracts: totalOpenContracts,
+        avgOpenPrice: Math.round(avgOpenPrice * 100) / 100,
+        currentMark: Math.round(currentMark * 100) / 100,
+        holdPnl,
+        actualCashFlow,
+        earlyClosedContracts,
+        stillOpenContracts,
+        expired: isExpired
+      })
+    }
+
+    results.sort((a, b) => a.ticker.localeCompare(b.ticker) || a.expiry.localeCompare(b.expiry))
+    res.json({ success: true, whatIf: results })
+  } catch (error) {
+    console.error('Error in /api/whatif:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 // Dedicated lightweight endpoint: open option positions with live mark prices
 app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
   try {

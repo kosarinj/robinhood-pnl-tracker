@@ -1560,6 +1560,22 @@ export class DatabaseService {
     }
   }
 
+  // Get option trades for a specific week (for what-if analysis)
+  getOptionTradesForWeek(userId = 1, startDate = '') {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy
+        FROM trades
+        WHERE is_option = 1 AND user_id = ? AND trans_date >= ?
+        GROUP BY trans_date, symbol, trans_code, is_buy, amount
+        ORDER BY trans_date ASC
+      `).all(userId, startDate)
+    } catch (error) {
+      console.error('Error getting option trades for week:', error)
+      return []
+    }
+  }
+
   // Get positions for specific symbols computed from trades
   getPositionsForSymbols(symbols, userId = 1) {
     try {

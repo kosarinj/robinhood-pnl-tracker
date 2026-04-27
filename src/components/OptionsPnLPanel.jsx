@@ -44,6 +44,10 @@ export default function OptionsPnLPanel() {
   const [byUnderlyingWeeks, setByUnderlyingWeeks] = useState(1)
   const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, 1 = 1W ago, etc.
   const [chartTicker, setChartTicker] = useState(null)
+  const [whatIfData, setWhatIfData] = useState(null)
+  const [whatIfLoading, setWhatIfLoading] = useState(false)
+  const [whatIfError, setWhatIfError] = useState(null)
+  const [showWhatIf, setShowWhatIf] = useState(false)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -309,6 +313,21 @@ export default function OptionsPnLPanel() {
     }
     return m
   }, {})
+
+  const fetchWhatIf = async () => {
+    setWhatIfLoading(true)
+    setWhatIfError(null)
+    try {
+      const res = await fetch('/api/whatif', { credentials: 'include' })
+      const json = await res.json()
+      if (json.success) setWhatIfData(json.whatIf)
+      else setWhatIfError(json.error)
+    } catch (e) {
+      setWhatIfError(e.message)
+    } finally {
+      setWhatIfLoading(false)
+    }
+  }
 
   const handleRefreshAll = () => { fetchData(); fetchLivePositions() }
   const handleAsOfChange = (e) => {
@@ -1195,6 +1214,105 @@ export default function OptionsPnLPanel() {
             {livePositions.expiredFiltered} expired contract{livePositions.expiredFiltered !== 1 ? 's' : ''} hidden — re-upload CSV to reconcile
           </div>
         )}
+      </div>
+
+      {/* What-If Analysis */}
+      <div style={{ ...cardStyle, marginTop: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showWhatIf ? '12px' : '0' }}>
+          <div>
+            <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>What If You'd Held?</div>
+            {!showWhatIf && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Compare holding original positions vs actual trades this week</div>}
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {showWhatIf && (
+              <button onClick={fetchWhatIf} disabled={whatIfLoading}
+                style={{ ...btnStyle(false), padding: '4px 12px', fontSize: '11px', opacity: whatIfLoading ? 0.6 : 1 }}>
+                {whatIfLoading ? '…' : '↻ Recalculate'}
+              </button>
+            )}
+            <button onClick={() => { setShowWhatIf(v => !v); if (!whatIfData && !showWhatIf) fetchWhatIf() }}
+              style={{ ...btnStyle(showWhatIf), padding: '4px 12px', fontSize: '11px' }}>
+              {showWhatIf ? 'Hide' : 'Calculate ▶'}
+            </button>
+          </div>
+        </div>
+        {showWhatIf && whatIfError && <div style={{ fontSize: '12px', color: red }}>{whatIfError}</div>}
+        {showWhatIf && whatIfLoading && <div style={{ fontSize: '12px', color: textMid }}>Fetching current marks from Polygon…</div>}
+        {showWhatIf && whatIfData && (() => {
+          if (whatIfData.length === 0) return <div style={{ fontSize: '13px', color: textMid }}>No option trades found for this week.</div>
+          const totalHold = Math.round(whatIfData.reduce((s, r) => s + r.holdPnl, 0) * 100) / 100
+          const totalActual = Math.round(whatIfData.reduce((s, r) => s + r.actualCashFlow, 0) * 100) / 100
+          const diff = Math.round((totalHold - totalActual) * 100) / 100
+          // Group by ticker
+          const byTicker = {}
+          whatIfData.forEach(r => {
+            if (!byTicker[r.ticker]) byTicker[r.ticker] = []
+            byTicker[r.ticker].push(r)
+          })
+          return (
+            <div>
+              {/* Summary */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px', padding: '10px 12px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', border: `1px solid ${border}` }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: textMid, marginBottom: '2px' }}>If Held</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '800', color: totalHold >= 0 ? green : red }}>{totalHold >= 0 ? '+' : ''}{fmt(totalHold)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: textMid, marginBottom: '2px' }}>Actual (cash flow)</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '800', color: totalActual >= 0 ? green : red }}>{totalActual >= 0 ? '+' : ''}{fmt(totalActual)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: textMid, marginBottom: '2px' }}>Difference</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '800', color: diff >= 0 ? green : red }}>{diff >= 0 ? '+' : ''}{fmt(diff)}</div>
+                  <div style={{ fontSize: '10px', color: textMid }}>{diff >= 0 ? 'better to hold' : 'better to trade'}</div>
+                </div>
+              </div>
+              {/* Per-ticker breakdown */}
+              {Object.entries(byTicker).sort(([a], [b]) => a.localeCompare(b)).map(([ticker, rows]) => (
+                <div key={ticker} style={{ marginBottom: '12px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: textMid, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>{ticker}</div>
+                  {rows.map((r, i) => {
+                    const diff = Math.round((r.holdPnl - r.actualCashFlow) * 100) / 100
+                    const expLabel = new Date(r.expiry + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    return (
+                      <div key={i} style={{
+                        display: 'grid', gridTemplateColumns: '1fr 80px 80px 80px',
+                        gap: '6px', alignItems: 'center',
+                        padding: '7px 10px', borderRadius: '6px', marginBottom: '4px', fontSize: '12px',
+                        background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                        border: `1px solid ${border}`
+                      }}>
+                        <div>
+                          <div style={{ fontWeight: '600', color: text }}>
+                            ${r.strike} {r.optionType?.toUpperCase()} · exp {expLabel}
+                            <span style={{ marginLeft: '6px', fontSize: '10px', color: r.isShort ? '#f59e0b' : green }}>{r.isShort ? 'SHORT' : 'LONG'}</span>
+                          </div>
+                          <div style={{ fontSize: '10px', color: textMid, marginTop: '2px' }}>
+                            {r.openContracts}c opened @ {fmt(r.avgOpenPrice)}/c
+                            {r.earlyClosedContracts > 0 && ` · ${r.earlyClosedContracts}c closed early`}
+                            {r.expired ? ' · expired' : r.currentMark > 0 ? ` · mark ${fmt(r.currentMark)}` : ''}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '10px', color: textMid }}>If held</div>
+                          <div style={{ fontWeight: '700', color: r.holdPnl >= 0 ? green : red }}>{r.holdPnl >= 0 ? '+' : ''}{fmt(r.holdPnl)}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '10px', color: textMid }}>Actual</div>
+                          <div style={{ fontWeight: '700', color: r.actualCashFlow >= 0 ? green : red }}>{r.actualCashFlow >= 0 ? '+' : ''}{fmt(r.actualCashFlow)}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '10px', color: textMid }}>Δ</div>
+                          <div style={{ fontWeight: '700', color: diff >= 0 ? green : red }}>{diff >= 0 ? '+' : ''}{fmt(diff)}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          )
+        })()}
       </div>
       </>}
     </div>
