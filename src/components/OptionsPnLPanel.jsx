@@ -190,6 +190,12 @@ export default function OptionsPnLPanel() {
       })
       Object.entries(w.realizedByUnderlying || {}).forEach(([ticker, val]) => {
         realized[ticker] = (realized[ticker] || 0) + val
+        if (!breakdown[ticker]) breakdown[ticker] = []
+        const existing = breakdown[ticker].find(e => e.weekStart === w.weekStart)
+        const calls = w.realizedCallsByUnderlying?.[ticker]
+        const puts = w.realizedPutsByUnderlying?.[ticker]
+        if (existing) { existing.realizedPnl = val; if (calls != null) existing.realizedCalls = calls; if (puts != null) existing.realizedPuts = puts }
+        else breakdown[ticker].push({ weekStart: w.weekStart, optPnl: null, stockPnl: null, realizedPnl: val, realizedCalls: calls ?? null, realizedPuts: puts ?? null })
       })
       Object.entries(w.stockDelta || {}).forEach(([ticker, val]) => {
         stock[ticker] = (stock[ticker] || 0) + val
@@ -531,7 +537,10 @@ export default function OptionsPnLPanel() {
                             return (
                               <div key={wk.weekStart} style={{ padding: '5px 10px', borderBottom: i < wkBreakdown.length - 1 ? `1px solid ${border}` : 'none' }}>
                                 <div style={{ color: textMid, marginBottom: '2px', fontWeight: '600' }}>Wk of {fmtDate(monday)}</div>
-                                {wk.optPnl != null && <div style={{ color: wk.optPnl >= 0 ? green : red }}>Options: {wk.optPnl >= 0 ? '+' : ''}{fmt(wk.optPnl)}</div>}
+                                {wk.optPnl != null && wk.optPnl !== 0 && <div style={{ color: wk.optPnl >= 0 ? green : red }}>Options: {wk.optPnl >= 0 ? '+' : ''}{fmt(wk.optPnl)}</div>}
+                                {wk.realizedPnl != null && (wk.realizedPnl !== 0 || wk.realizedCalls != null || wk.realizedPuts != null) && <div style={{ color: wk.realizedPnl >= 0 ? green : red, fontSize: '11px' }}>↳ Realized: {wk.realizedPnl >= 0 ? '+' : ''}{fmt(wk.realizedPnl)}</div>}
+                                {wk.realizedCalls != null && <div style={{ color: wk.realizedCalls >= 0 ? green : red, fontSize: '11px', paddingLeft: '10px' }}>Calls: {wk.realizedCalls >= 0 ? '+' : ''}{fmt(wk.realizedCalls)}</div>}
+                                {wk.realizedPuts != null && <div style={{ color: wk.realizedPuts >= 0 ? green : red, fontSize: '11px', paddingLeft: '10px' }}>Puts: {wk.realizedPuts >= 0 ? '+' : ''}{fmt(wk.realizedPuts)}</div>}
                                 {wk.stockPnl != null && (
                                   <div style={{ color: wk.stockPnl >= 0 ? green : red }}>
                                     Stock: {wk.stockPnl >= 0 ? '+' : ''}{fmt(wk.stockPnl)}
@@ -686,7 +695,7 @@ export default function OptionsPnLPanel() {
                         {optPnl !== 0 && <div style={{ color: optPnl >= 0 ? green : red }}>
                           Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}
                         </div>}
-                        {realizedPnl != null && realizedPnl !== 0 && (
+                        {realizedPnl != null && (realizedPnl !== 0 || realizedCalls != null || realizedPuts != null) && (
                           <div style={{ color: realizedPnl >= 0 ? green : red, fontSize: '11px' }}>
                             ↳ Realized: {realizedPnl >= 0 ? '+' : ''}{fmt(realizedPnl)}
                           </div>
