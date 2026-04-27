@@ -448,7 +448,7 @@ export default function OptionsPnLPanel() {
           openPositions.forEach(pos => {
             const t = pos.ticker || 'Unknown'
             if (!optsByTicker[t]) optsByTicker[t] = { shortCredit: 0, longCost: 0, contracts: 0 }
-            const amount = Math.round(pos.avgCostPerContract * pos.openContracts * 100 * 100) / 100
+            const amount = Math.round(pos.avgCostPerContract * pos.openContracts * 100) / 100
             if (pos.isLong) optsByTicker[t].longCost += amount
             else optsByTicker[t].shortCredit += amount
             optsByTicker[t].contracts += pos.openContracts
