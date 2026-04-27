@@ -441,6 +441,61 @@ export default function OptionsPnLPanel() {
           </div>
         </div>
 
+        {/* Total Investment strip — open positions grouped by ticker */}
+        {!isHistoricalView && openPositions.length > 0 && (() => {
+          const byTicker = {}
+          openPositions.forEach(pos => {
+            const t = pos.ticker || 'Unknown'
+            if (!byTicker[t]) byTicker[t] = { shortCredit: 0, longCost: 0, contracts: 0 }
+            const amount = Math.round(pos.avgCostPerContract * pos.openContracts * 100 * 100) / 100
+            if (pos.isLong) byTicker[t].longCost += amount
+            else byTicker[t].shortCredit += amount
+            byTicker[t].contracts += pos.openContracts
+          })
+          const totalShort = Object.values(byTicker).reduce((s, v) => s + v.shortCredit, 0)
+          const totalLong = Object.values(byTicker).reduce((s, v) => s + v.longCost, 0)
+          const totalNet = Math.round((totalShort - totalLong) * 100) / 100
+          return (
+            <div style={{ borderTop: `1px solid ${border}`, paddingTop: '10px', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', color: textMid }}>Total Investment (Open Positions)</div>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: totalNet >= 0 ? green : red }}>
+                  Net: {totalNet >= 0 ? '+' : ''}{fmt(totalNet)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {Object.entries(byTicker).sort(([a], [b]) => a.localeCompare(b)).map(([ticker, { shortCredit, longCost, contracts }]) => {
+                  const net = Math.round((shortCredit - longCost) * 100) / 100
+                  return (
+                    <div key={ticker} style={{
+                      padding: '4px 10px', borderRadius: '8px', fontSize: '11px',
+                      background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                      border: `1px solid ${border}`,
+                      display: 'flex', flexDirection: 'column', gap: '1px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                        <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                        <span style={{ color: textMid, fontSize: '10px' }}>{contracts}c</span>
+                        <span style={{ fontWeight: '700', color: net >= 0 ? green : red }}>{net >= 0 ? '+' : ''}{fmt(net)}</span>
+                      </div>
+                      {shortCredit > 0 && longCost > 0 && (
+                        <div style={{ fontSize: '10px', color: textMid }}>
+                          {fmt(shortCredit)} short · {fmt(longCost)} long
+                        </div>
+                      )}
+                      {shortCredit > 0 && longCost === 0 && (
+                        <div style={{ fontSize: '10px', color: textMid }}>{fmt(shortCredit)} short credit</div>
+                      )}
+                      {longCost > 0 && shortCredit === 0 && (
+                        <div style={{ fontSize: '10px', color: textMid }}>{fmt(longCost)} long cost</div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
         {/* Per-underlying breakdown — single week (detailed) or multi-week (options total only) */}
         {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
