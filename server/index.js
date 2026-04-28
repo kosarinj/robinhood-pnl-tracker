@@ -1567,7 +1567,17 @@ app.get('/api/whatif', requireAuth, async (req, res) => {
           const outcome = databaseService.getContractOutcome(userId, cm.symbol)
           if (outcome) {
             outcomeCode = (outcome.trans_code || '').toUpperCase()
-            currentMark = 0 // expired or assigned — treat mark as worthless for holdPnl
+            if (['OASGN', 'OEXC'].includes(outcomeCode) && cm.parsed.strike) {
+              // Assigned/exercised: compute intrinsic value from stock price on that date
+              try {
+                const stockPrice = await priceService.getPriceForDate(cm.parsed.ticker, outcome.trans_date)
+                const strike = cm.parsed.strike
+                currentMark = cm.parsed.type === 'call'
+                  ? Math.max(0, stockPrice - strike)
+                  : Math.max(0, strike - stockPrice)
+              } catch (e) { currentMark = 0 }
+            }
+            // OEXP → currentMark stays 0 (expired worthless)
           }
         } else if (polygonKey) {
           // For current week: fetch live mark from Polygon
