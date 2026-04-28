@@ -1561,8 +1561,17 @@ export class DatabaseService {
   }
 
   // Get option trades for a specific week (for what-if analysis)
-  getOptionTradesForWeek(userId = 1, startDate = '') {
+  getOptionTradesForWeek(userId = 1, startDate = '', endDate = '') {
     try {
+      if (endDate) {
+        return db.prepare(`
+          SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy
+          FROM trades
+          WHERE is_option = 1 AND user_id = ? AND trans_date >= ? AND trans_date < ?
+          GROUP BY trans_date, symbol, trans_code, is_buy, amount
+          ORDER BY trans_date ASC
+        `).all(userId, startDate, endDate)
+      }
       return db.prepare(`
         SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy
         FROM trades
@@ -1573,6 +1582,21 @@ export class DatabaseService {
     } catch (error) {
       console.error('Error getting option trades for week:', error)
       return []
+    }
+  }
+
+  // Find the final outcome (OEXP/OASGN) for a specific option contract
+  getContractOutcome(userId = 1, symbol = '') {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, quantity, amount, is_buy
+        FROM trades
+        WHERE is_option = 1 AND user_id = ? AND symbol = ?
+          AND trans_code IN ('OEXP', 'OASGN', 'OEXC')
+        ORDER BY trans_date ASC LIMIT 1
+      `).get(userId, symbol)
+    } catch (error) {
+      return null
     }
   }
 

@@ -48,6 +48,9 @@ export default function OptionsPnLPanel() {
   const [whatIfLoading, setWhatIfLoading] = useState(false)
   const [whatIfError, setWhatIfError] = useState(null)
   const [showWhatIf, setShowWhatIf] = useState(false)
+  const [whatIfWeek, setWhatIfWeek] = useState(null) // null = current week, or 'YYYY-MM-DD'
+  const [showScenario, setShowScenario] = useState(false)
+  const [scenarioMarks, setScenarioMarks] = useState({})
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -314,11 +317,13 @@ export default function OptionsPnLPanel() {
     return m
   }, {})
 
-  const fetchWhatIf = async () => {
+  const fetchWhatIf = async (overrideWeek) => {
+    const week = overrideWeek !== undefined ? overrideWeek : whatIfWeek
     setWhatIfLoading(true)
     setWhatIfError(null)
     try {
-      const res = await fetch('/api/whatif', { credentials: 'include' })
+      const url = week ? `/api/whatif?week=${week}` : '/api/whatif'
+      const res = await fetch(url, { credentials: 'include' })
       const json = await res.json()
       if (json.success) setWhatIfData(json.whatIf)
       else setWhatIfError(json.error)
@@ -1221,14 +1226,29 @@ export default function OptionsPnLPanel() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showWhatIf ? '12px' : '0' }}>
           <div>
             <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>What If You'd Held?</div>
-            {!showWhatIf && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Compare holding original positions vs actual trades this week</div>}
+            {!showWhatIf && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Compare holding original positions vs actual trades for a selected week</div>}
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             {showWhatIf && (
-              <button onClick={fetchWhatIf} disabled={whatIfLoading}
-                style={{ ...btnStyle(false), padding: '4px 12px', fontSize: '11px', opacity: whatIfLoading ? 0.6 : 1 }}>
-                {whatIfLoading ? '…' : '↻ Recalculate'}
-              </button>
+              <>
+                <select value={whatIfWeek || ''} onChange={e => {
+                  const w = e.target.value || null
+                  setWhatIfWeek(w)
+                  setWhatIfData(null)
+                  fetchWhatIf(w)
+                }} style={{ fontSize: '11px', padding: '3px 6px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text }}>
+                  <option value=''>Current Week</option>
+                  {[...(data?.weeks || [])].sort((a, b) => b.weekStart.localeCompare(a.weekStart)).map(w => (
+                    <option key={w.weekStart} value={w.weekStart}>
+                      {new Date(w.weekStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={() => fetchWhatIf()} disabled={whatIfLoading}
+                  style={{ ...btnStyle(false), padding: '4px 12px', fontSize: '11px', opacity: whatIfLoading ? 0.6 : 1 }}>
+                  {whatIfLoading ? '…' : '↻ Recalculate'}
+                </button>
+              </>
             )}
             <button onClick={() => { setShowWhatIf(v => !v); if (!whatIfData && !showWhatIf) fetchWhatIf() }}
               style={{ ...btnStyle(showWhatIf), padding: '4px 12px', fontSize: '11px' }}>
@@ -1237,7 +1257,7 @@ export default function OptionsPnLPanel() {
           </div>
         </div>
         {showWhatIf && whatIfError && <div style={{ fontSize: '12px', color: red }}>{whatIfError}</div>}
-        {showWhatIf && whatIfLoading && <div style={{ fontSize: '12px', color: textMid }}>Fetching current marks from Polygon…</div>}
+        {showWhatIf && whatIfLoading && <div style={{ fontSize: '12px', color: textMid }}>{whatIfWeek ? 'Looking up historical outcomes…' : 'Fetching current marks from Polygon…'}</div>}
         {showWhatIf && whatIfData && (() => {
           if (whatIfData.length === 0) return <div style={{ fontSize: '13px', color: textMid }}>No option trades found for this week.</div>
           const totalHold = Math.round(whatIfData.reduce((s, r) => s + r.holdPnl, 0) * 100) / 100
@@ -1290,7 +1310,7 @@ export default function OptionsPnLPanel() {
                           <div style={{ fontSize: '10px', color: textMid, marginTop: '2px' }}>
                             {r.openContracts}c opened @ {fmt(r.avgOpenPrice)}/c
                             {r.earlyClosedContracts > 0 && ` · ${r.earlyClosedContracts}c closed early`}
-                            {r.expired ? ' · expired' : r.currentMark > 0 ? ` · mark ${fmt(r.currentMark)}` : ''}
+                            {r.outcomeCode ? ` · ${r.outcomeCode}` : r.expired ? ' · expired' : r.currentMark > 0 ? ` · mark ${fmt(r.currentMark)}` : ''}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
@@ -1314,6 +1334,92 @@ export default function OptionsPnLPanel() {
           )
         })()}
       </div>
+
+      {/* Scenario Calculator */}
+      {openPositions.length > 0 && (
+        <div style={{ ...cardStyle, marginTop: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showScenario ? '12px' : '0' }}>
+            <div>
+              <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Scenario Calculator</div>
+              {!showScenario && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Enter hypothetical mark prices to see net P&L</div>}
+            </div>
+            <button onClick={() => {
+              setShowScenario(v => !v)
+              if (!showScenario) {
+                // Pre-fill with current marks
+                const fills = {}
+                openPositions.forEach(p => { fills[p.symbol] = p.markPrice || 0 })
+                setScenarioMarks(fills)
+              }
+            }} style={{ ...btnStyle(showScenario), padding: '4px 12px', fontSize: '11px' }}>
+              {showScenario ? 'Hide' : 'Open Calculator ▶'}
+            </button>
+          </div>
+          {showScenario && (() => {
+            // Compute scenario P&L per position
+            const rows = openPositions.map(p => {
+              const mark = scenarioMarks[p.symbol] !== undefined ? Number(scenarioMarks[p.symbol]) : (p.markPrice || 0)
+              const currentValue = mark * 100 * p.openContracts
+              const pnl = p.isLong
+                ? currentValue - (p.avgCostPerContract * p.openContracts)
+                : (p.avgCostPerContract * p.openContracts) - currentValue
+              return { ...p, scenarioMark: mark, scenarioPnl: Math.round(pnl * 100) / 100 }
+            })
+            const totalPnl = Math.round(rows.reduce((s, r) => s + r.scenarioPnl, 0) * 100) / 100
+
+            return (
+              <div>
+                {/* Total */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: '8px', marginBottom: '10px', background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', border: `1px solid ${border}` }}>
+                  <div style={{ fontSize: '12px', color: textMid, fontWeight: '600' }}>Scenario Net P&L</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: '800', color: totalPnl >= 0 ? green : red }}>{totalPnl >= 0 ? '+' : ''}{fmt(totalPnl)}</div>
+                </div>
+                {/* Per-position rows */}
+                {rows.sort((a, b) => a.expiry.localeCompare(b.expiry) || a.ticker.localeCompare(b.ticker)).map((r, i) => {
+                  const expLabel = new Date(r.expiry + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  return (
+                    <div key={i} style={{
+                      display: 'grid', gridTemplateColumns: '1fr 110px 90px',
+                      gap: '8px', alignItems: 'center',
+                      padding: '7px 10px', borderRadius: '6px', marginBottom: '4px', fontSize: '12px',
+                      background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                      border: `1px solid ${border}`
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: '600', color: text }}>
+                          {r.ticker} ${r.strike} {r.optionType?.toUpperCase()} · exp {expLabel}
+                          <span style={{ marginLeft: '6px', fontSize: '10px', color: r.isLong ? green : '#f59e0b' }}>{r.isLong ? 'LONG' : 'SHORT'}</span>
+                        </div>
+                        <div style={{ fontSize: '10px', color: textMid, marginTop: '2px' }}>
+                          {r.openContracts}c · cost basis {fmt(r.avgCostPerContract)}/c
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '10px', color: textMid }}>Mark $</span>
+                        <input
+                          type='number'
+                          min='0'
+                          step='0.01'
+                          value={scenarioMarks[r.symbol] !== undefined ? scenarioMarks[r.symbol] : (r.markPrice || 0)}
+                          onChange={e => setScenarioMarks(prev => ({ ...prev, [r.symbol]: e.target.value }))}
+                          style={{
+                            width: '64px', padding: '2px 6px', fontSize: '12px', borderRadius: '4px',
+                            border: `1px solid ${border}`, background: surface, color: text, textAlign: 'right'
+                          }}
+                        />
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '10px', color: textMid }}>P&L</div>
+                        <div style={{ fontWeight: '700', color: r.scenarioPnl >= 0 ? green : red }}>{r.scenarioPnl >= 0 ? '+' : ''}{fmt(r.scenarioPnl)}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+        </div>
+      )}
       </>}
     </div>
   )

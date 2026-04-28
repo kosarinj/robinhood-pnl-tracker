@@ -1486,20 +1486,36 @@ app.get('/api/debug/polygon-options', requireAuth, async (req, res) => {
   }
 })
 
-// What-If analysis: compare hold-to-today vs actual P&L for this week's original opens
+// What-If analysis: compare hold-to-expiry vs actual P&L for a week's original opens
+// Optional ?week=YYYY-MM-DD to analyze a historical week (uses DB outcomes instead of Polygon)
 app.get('/api/whatif', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
     const today = new Date().toISOString().slice(0, 10)
-    const now = new Date()
-    const dow = now.getDay()
-    const monday = new Date(now)
-    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1))
-    monday.setHours(0, 0, 0, 0)
-    const mondayStr = monday.toISOString().slice(0, 10)
 
-    // Pull all option trades for current week with quantity and price
-    const weekTrades = databaseService.getOptionTradesForWeek(userId, mondayStr)
+    // Determine which week to analyze
+    const weekParam = req.query.week || null
+    let mondayStr, nextMondayStr
+
+    if (weekParam) {
+      mondayStr = weekParam
+      const next = new Date(weekParam + 'T12:00:00')
+      next.setDate(next.getDate() + 7)
+      nextMondayStr = next.toISOString().slice(0, 10)
+    } else {
+      const now = new Date()
+      const dow = now.getDay()
+      const monday = new Date(now)
+      monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1))
+      monday.setHours(0, 0, 0, 0)
+      mondayStr = monday.toISOString().slice(0, 10)
+      nextMondayStr = null
+    }
+
+    const isHistorical = weekParam !== null
+
+    // Pull all option trades for the target week
+    const weekTrades = databaseService.getOptionTradesForWeek(userId, mondayStr, nextMondayStr)
 
     // Group by contract symbol — track opens and closes separately
     const contractMap = {}
@@ -1542,23 +1558,34 @@ app.get('/api/whatif', requireAuth, async (req, res) => {
       const earlyClosedContracts = cm.closes.filter(c => !c.isExpiry).reduce((s, c) => s + c.contracts, 0)
       const stillOpenContracts = Math.max(0, totalOpenContracts - cm.closes.reduce((s, c) => s + c.contracts, 0))
 
-      // Fetch Polygon mark for contracts that need it (not expired, and either closed early OR still open)
+      // Determine the current mark price for the "hold" scenario
       let currentMark = 0
-      if (!isExpired && polygonKey) {
-        const polygonTicker = toPolygonTicker(cm.symbol)
-        if (polygonTicker) {
-          try {
-            const url = `https://api.polygon.io/v3/snapshot/options/${cm.parsed.ticker}/${polygonTicker}`
-            const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
-            const snap = resp.data?.results
-            if (snap) {
-              const mid = snap.last_quote?.midpoint ||
-                (snap.last_quote?.bid && snap.last_quote?.ask
-                  ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
-              const fallback = snap.day?.close || snap.last_trade?.price || 0
-              currentMark = Math.max(mid || 0, fallback || 0) || mid || fallback || 0
-            }
-          } catch (e) { /* ignore */ }
+      let outcomeCode = null
+      if (!isExpired) {
+        if (isHistorical) {
+          // For historical weeks: look up the eventual OEXP/OASGN/OEXC outcome in the DB
+          const outcome = databaseService.getContractOutcome(userId, cm.symbol)
+          if (outcome) {
+            outcomeCode = (outcome.trans_code || '').toUpperCase()
+            currentMark = 0 // expired or assigned — treat mark as worthless for holdPnl
+          }
+        } else if (polygonKey) {
+          // For current week: fetch live mark from Polygon
+          const polygonTicker = toPolygonTicker(cm.symbol)
+          if (polygonTicker) {
+            try {
+              const url = `https://api.polygon.io/v3/snapshot/options/${cm.parsed.ticker}/${polygonTicker}`
+              const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
+              const snap = resp.data?.results
+              if (snap) {
+                const mid = snap.last_quote?.midpoint ||
+                  (snap.last_quote?.bid && snap.last_quote?.ask
+                    ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
+                const fallback = snap.day?.close || snap.last_trade?.price || 0
+                currentMark = Math.max(mid || 0, fallback || 0) || mid || fallback || 0
+              }
+            } catch (e) { /* ignore */ }
+          }
         }
       }
 
@@ -1585,12 +1612,13 @@ app.get('/api/whatif', requireAuth, async (req, res) => {
         actualCashFlow,
         earlyClosedContracts,
         stillOpenContracts,
-        expired: isExpired
+        expired: isExpired,
+        outcomeCode
       })
     }
 
     results.sort((a, b) => a.ticker.localeCompare(b.ticker) || a.expiry.localeCompare(b.expiry))
-    res.json({ success: true, whatIf: results })
+    res.json({ success: true, whatIf: results, isHistorical, weekStart: mondayStr })
   } catch (error) {
     console.error('Error in /api/whatif:', error)
     res.status(500).json({ success: false, error: error.message })
