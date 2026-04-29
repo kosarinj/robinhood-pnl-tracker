@@ -219,10 +219,9 @@ export default function OptionsPnLPanel() {
             fromPrice: prices.fromPrice,   // will be updated to oldest week's fromPrice
             toPrice: prices.toPrice,
             shares: prices.shares,
-            recentFromPrice: prices.fromPrice, // most recent week's from (for live price calc)
+            recentFromPrice: prices.fromPrice,
             recentShares: prices.shares,
-            recentWeekStart: w.weekStart,      // which week this entry came from
-            olderWeeksStockPnl: 0              // sum of older weeks using each week's shares
+            olderWeeksStockPnl: 0
           }
         } else {
           // Older week — accumulate its P&L using that week's actual share count
@@ -557,18 +556,19 @@ export default function OptionsPnLPanel() {
                 .map(([ticker, optPnl]) => {
                   const priceRange = cumulativeStockPrices[ticker]
                   const livePrice = stockPriceByTicker[ticker]
-                  // Only use live price for the most recent week if that week is the current
-                  // (incomplete) week — for closed positions the most recent week is already
-                  // a completed historical week and live price would incorrectly include
-                  // post-close movement.
-                  const recentIsCurrentWeek = priceRange?.recentWeekStart === data?.weekStart
-                  const recentToPrice = (recentIsCurrentWeek && livePrice) ? livePrice : priceRange?.toPrice
-                  const stockPnl = priceRange
-                    ? Math.round(((priceRange.olderWeeksStockPnl || 0) +
-                        (recentToPrice - priceRange.recentFromPrice) * priceRange.recentShares
-                      ) * 100) / 100
-                    : cumulativeStockDelta[ticker]
-                  const displayToPrice = recentIsCurrentWeek ? (livePrice ?? priceRange?.toPrice) : priceRange?.toPrice
+                  // Use sum of completed-week stockDeltas so the card matches the per-week
+                  // breakdown exactly. The priceRange formula previously plugged in livePrice
+                  // for the current (incomplete) week, causing the card to diverge from the
+                  // breakdown total and incorrectly including post-close movement for closed
+                  // positions whose most recent entry was a completed historical week.
+                  const stockPnl = cumulativeStockDelta[ticker] !== undefined
+                    ? cumulativeStockDelta[ticker]
+                    : (priceRange
+                        ? Math.round(((priceRange.olderWeeksStockPnl || 0) +
+                            (priceRange.toPrice - priceRange.recentFromPrice) * priceRange.recentShares
+                          ) * 100) / 100
+                        : undefined)
+                  const displayToPrice = livePrice ?? priceRange?.toPrice
                   const unrealizedPnl = unrealizedByTicker[ticker]
                   const realizedPnl = cumulativeRealizedByUnderlying[ticker]
                   const sp = livePrice
