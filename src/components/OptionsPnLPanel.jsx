@@ -531,13 +531,14 @@ export default function OptionsPnLPanel() {
         {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             {(() => {
-              const total = Math.round(
-                Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
-                  const stockPnl = (cumulativeStockDelta[ticker] ?? 0) + (data?.weeklyStockPnL?.[ticker]?.pnl ?? 0)
-                  const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                  return sum + optPnl + unrealizedPnl + stockPnl
+              // Current week: use the same netWeekPnL the 1W view shows so NW Total Net = 1W + 1W ago + ...
+              const histSlice = byUnderlyingWeeks === 0 ? historicalWeeks : historicalWeeks.slice(0, byUnderlyingWeeks - 1)
+              const histContrib = histSlice.reduce((sum, w) => {
+                return sum + Object.entries(w.byUnderlying || {}).reduce((s, [ticker, optPnl]) => {
+                  return s + optPnl + (w.stockDelta?.[ticker] ?? 0)
                 }, 0)
-              * 100) / 100
+              }, 0)
+              const total = Math.round((netWeekPnL + histContrib) * 100) / 100
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
                 Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
               </div>
