@@ -533,10 +533,9 @@ export default function OptionsPnLPanel() {
             {(() => {
               const total = Math.round(
                 Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
-                  const stockPnl = cumulativeStockDelta[ticker] ?? 0
+                  const stockPnl = (cumulativeStockDelta[ticker] ?? 0) + (data?.weeklyStockPnL?.[ticker]?.pnl ?? 0)
                   const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                  const liveStockDelta = data?.weeklyStockPnL?.[ticker]?.pnl ?? 0
-                  return sum + optPnl + unrealizedPnl + stockPnl + liveStockDelta
+                  return sum + optPnl + unrealizedPnl + stockPnl
                 }, 0)
               * 100) / 100
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
@@ -566,16 +565,17 @@ export default function OptionsPnLPanel() {
                   const realizedPnl = cumulativeRealizedByUnderlying[ticker]
                   const sp = livePrice
                   const liveStockEntry = data?.weeklyStockPnL?.[ticker]
-                  const liveStockDelta = liveStockEntry != null ? (liveStockEntry?.pnl ?? 0) : null
+                  // Stock P&L = completed historical weeks (stockDelta) + current week (weeklyStockPnL)
+                  // Every NW view is a literal sum of N individual week P&Ls so totals tie out.
+                  const totalStock = stockPnl !== undefined || liveStockEntry != null
+                    ? (stockPnl ?? 0) + (liveStockEntry?.pnl ?? 0)
+                    : undefined
                   const optTotal = optPnl + (unrealizedPnl ?? 0)
-                  const combined = (stockPnl !== undefined || liveStockDelta !== null)
-                    ? optTotal + (stockPnl ?? 0) + (liveStockDelta ?? 0)
-                    : null
+                  const combined = totalStock !== undefined ? optTotal + totalStock : null
                   const shares = priceRange?.shares ?? liveStockEntry?.shares
                   // Scale only stock P&L to 100sh — options/unrealized are independent of share count
-                  const totalStockForCard = (stockPnl ?? 0) + (liveStockDelta ?? 0)
-                  const combined100 = combined != null && shares && shares !== 100
-                    ? Math.round((combined - totalStockForCard + totalStockForCard * 100 / shares) * 100) / 100
+                  const combined100 = combined != null && shares && shares !== 100 && totalStock !== undefined
+                    ? Math.round((combined - totalStock + totalStock * 100 / shares) * 100) / 100
                     : null
                   const isExpanded = expandedTicker === ticker
                   const wkBreakdown = weeklyBreakdown[ticker] || []
@@ -594,16 +594,10 @@ export default function OptionsPnLPanel() {
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <div style={{ color: optPnl >= 0 ? green : red }}>Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}</div>
-                          {stockPnl !== undefined && (
-                            <div style={{ color: stockPnl >= 0 ? green : red }}>
-                              Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                          {totalStock !== undefined && (
+                            <div style={{ color: totalStock >= 0 ? green : red }}>
+                              Stock: {totalStock >= 0 ? '+' : ''}{fmt(totalStock)}
                               {priceRange && displayToPrice && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${priceRange.fromPrice.toFixed(2)} → ${displayToPrice.toFixed(2)}</span>}
-                            </div>
-                          )}
-                          {liveStockDelta !== null && (
-                            <div style={{ color: liveStockDelta >= 0 ? green : red }}>
-                              Wk Stock: {liveStockDelta >= 0 ? '+' : ''}{fmt(liveStockDelta)}
-                              {liveStockEntry?.fromPrice && liveStockEntry?.toPrice && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${liveStockEntry.fromPrice.toFixed(2)} → ${liveStockEntry.toPrice.toFixed(2)}</span>}
                             </div>
                           )}
                           {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
