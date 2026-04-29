@@ -221,6 +221,7 @@ export default function OptionsPnLPanel() {
             shares: prices.shares,
             recentFromPrice: prices.fromPrice, // most recent week's from (for live price calc)
             recentShares: prices.shares,
+            recentWeekStart: w.weekStart,      // which week this entry came from
             olderWeeksStockPnl: 0              // sum of older weeks using each week's shares
           }
         } else {
@@ -556,13 +557,18 @@ export default function OptionsPnLPanel() {
                 .map(([ticker, optPnl]) => {
                   const priceRange = cumulativeStockPrices[ticker]
                   const livePrice = stockPriceByTicker[ticker]
-                  // Use live price as toPrice so stock P&L reflects current market
+                  // Only use live price for the most recent week if that week is the current
+                  // (incomplete) week — for closed positions the most recent week is already
+                  // a completed historical week and live price would incorrectly include
+                  // post-close movement.
+                  const recentIsCurrentWeek = priceRange?.recentWeekStart === data?.weekStart
+                  const recentToPrice = (recentIsCurrentWeek && livePrice) ? livePrice : priceRange?.toPrice
                   const stockPnl = priceRange
                     ? Math.round(((priceRange.olderWeeksStockPnl || 0) +
-                        ((livePrice ?? priceRange.toPrice) - priceRange.recentFromPrice) * priceRange.recentShares
+                        (recentToPrice - priceRange.recentFromPrice) * priceRange.recentShares
                       ) * 100) / 100
                     : cumulativeStockDelta[ticker]
-                  const displayToPrice = livePrice ?? priceRange?.toPrice
+                  const displayToPrice = recentIsCurrentWeek ? (livePrice ?? priceRange?.toPrice) : priceRange?.toPrice
                   const unrealizedPnl = unrealizedByTicker[ticker]
                   const realizedPnl = cumulativeRealizedByUnderlying[ticker]
                   const sp = livePrice
