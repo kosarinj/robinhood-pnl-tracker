@@ -531,21 +531,16 @@ export default function OptionsPnLPanel() {
         {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             {(() => {
-              // Total = current week + N-1 historical weeks (so 2W = current + 1W ago)
-              const histSlice = byUnderlyingWeeks === 0 ? historicalWeeks : historicalWeeks.slice(0, Math.max(0, byUnderlyingWeeks - 1))
-              const histTotal = histSlice.reduce((sum, w) => {
-                return sum + Object.entries(w.byUnderlying || {}).reduce((s, [ticker, optPnl]) => {
-                  const stockPnl = w.stockDelta?.[ticker] ?? 0
-                  return s + optPnl + stockPnl
+              // Sum exactly the same components each individual card uses so the total
+              // always equals the visible sum: cumulative options + unrealized options +
+              // completed-weeks stock delta.
+              const total = Math.round(
+                Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
+                  const stockPnl = cumulativeStockDelta[ticker] ?? 0
+                  const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
+                  return sum + optPnl + unrealizedPnl + stockPnl
                 }, 0)
-              }, 0)
-              const currentTotal = Object.entries(data?.currentWeekByUnderlying || {}).reduce((sum, [ticker, optPnl]) => {
-                const stockEntry = data?.weeklyStockPnL?.[ticker]
-                const stockPnl = stockEntry != null ? (stockEntry?.pnl ?? stockEntry) : 0
-                const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                return sum + optPnl + stockPnl + unrealizedPnl
-              }, 0)
-              const total = Math.round((histTotal + currentTotal) * 100) / 100
+              * 100) / 100
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
                 Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
               </div>
