@@ -1341,14 +1341,14 @@ export default function OptionsPnLPanel() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showScenario ? '12px' : '0' }}>
             <div>
               <div style={{ fontWeight: '700', fontSize: '14px', color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Scenario Calculator</div>
-              {!showScenario && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Enter hypothetical mark prices to see net P&L</div>}
+              {!showScenario && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Enter a final stock price to estimate total P&L at expiration</div>}
             </div>
             <button onClick={() => {
               setShowScenario(v => !v)
               if (!showScenario) {
-                // Pre-fill with current marks
+                // Pre-fill with current stock prices per ticker
                 const fills = {}
-                openPositions.forEach(p => { fills[p.symbol] = p.markPrice || 0 })
+                openPositions.forEach(p => { if (!(p.ticker in fills)) fills[p.ticker] = stockPriceByTicker[p.ticker] || '' })
                 setScenarioMarks(fills)
               }
             }} style={{ ...btnStyle(showScenario), padding: '4px 12px', fontSize: '11px' }}>
@@ -1356,30 +1356,71 @@ export default function OptionsPnLPanel() {
             </button>
           </div>
           {showScenario && (() => {
-            // Compute scenario P&L per position
+            const tickers = [...new Set(openPositions.map(p => p.ticker))].sort()
+
+            // Compute intrinsic value P&L per open position
             const rows = openPositions.map(p => {
-              const mark = scenarioMarks[p.symbol] !== undefined ? Number(scenarioMarks[p.symbol]) : (p.markPrice || 0)
-              const currentValue = mark * 100 * p.openContracts
+              const stockPrice = Number(scenarioMarks[p.ticker] ?? stockPriceByTicker[p.ticker] ?? 0)
+              const intrinsic = p.optionType === 'call'
+                ? Math.max(0, stockPrice - p.strike)
+                : Math.max(0, p.strike - stockPrice)
+              const currentValue = intrinsic * 100 * p.openContracts
               const pnl = p.isLong
                 ? currentValue - (p.avgCostPerContract * p.openContracts)
                 : (p.avgCostPerContract * p.openContracts) - currentValue
-              return { ...p, scenarioMark: mark, scenarioPnl: Math.round(pnl * 100) / 100 }
+              return { ...p, scenarioIntrinsic: intrinsic, scenarioPnl: Math.round(pnl * 100) / 100 }
             })
-            const totalPnl = Math.round(rows.reduce((s, r) => s + r.scenarioPnl, 0) * 100) / 100
+
+            const openPosPnl = Math.round(rows.reduce((s, r) => s + r.scenarioPnl, 0) * 100) / 100
+            const alreadyRealized = data?.currentWeekRealizedTotal || 0
+            const totalPnl = Math.round((openPosPnl + alreadyRealized) * 100) / 100
 
             return (
               <div>
-                {/* Total */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderRadius: '8px', marginBottom: '10px', background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', border: `1px solid ${border}` }}>
-                  <div style={{ fontSize: '12px', color: textMid, fontWeight: '600' }}>Scenario Net P&L</div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: '800', color: totalPnl >= 0 ? green : red }}>{totalPnl >= 0 ? '+' : ''}{fmt(totalPnl)}</div>
+                {/* Stock price inputs — one per ticker */}
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                  {tickers.map(ticker => (
+                    <div key={ticker} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '700', color: text }}>{ticker}</span>
+                      <span style={{ fontSize: '11px', color: textMid }}>final price $</span>
+                      <input
+                        type='number'
+                        min='0'
+                        step='0.01'
+                        value={scenarioMarks[ticker] !== undefined ? scenarioMarks[ticker] : ''}
+                        onChange={e => setScenarioMarks(prev => ({ ...prev, [ticker]: e.target.value }))}
+                        style={{
+                          width: '80px', padding: '4px 8px', fontSize: '13px', borderRadius: '4px',
+                          border: `1px solid ${border}`, background: surface, color: text, textAlign: 'right',
+                          fontWeight: '700'
+                        }}
+                      />
+                    </div>
+                  ))}
                 </div>
-                {/* Per-position rows */}
+
+                {/* Summary totals */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', border: `1px solid ${border}` }}>
+                    <div style={{ fontSize: '10px', color: textMid, fontWeight: '600', marginBottom: '3px' }}>Already Realized</div>
+                    <div style={{ fontSize: '1rem', fontWeight: '700', color: alreadyRealized >= 0 ? green : red }}>{alreadyRealized >= 0 ? '+' : ''}{fmt(alreadyRealized)}</div>
+                  </div>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', border: `1px solid ${border}` }}>
+                    <div style={{ fontSize: '10px', color: textMid, fontWeight: '600', marginBottom: '3px' }}>Open Positions @ Price</div>
+                    <div style={{ fontSize: '1rem', fontWeight: '700', color: openPosPnl >= 0 ? green : red }}>{openPosPnl >= 0 ? '+' : ''}{fmt(openPosPnl)}</div>
+                  </div>
+                  <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `2px solid ${totalPnl >= 0 ? green : red}` }}>
+                    <div style={{ fontSize: '10px', color: textMid, fontWeight: '600', marginBottom: '3px' }}>Total P&L</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: '800', color: totalPnl >= 0 ? green : red }}>{totalPnl >= 0 ? '+' : ''}{fmt(totalPnl)}</div>
+                  </div>
+                </div>
+
+                {/* Per-position breakdown */}
                 {rows.sort((a, b) => a.expiry.localeCompare(b.expiry) || a.ticker.localeCompare(b.ticker)).map((r, i) => {
                   const expLabel = new Date(r.expiry + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                   return (
                     <div key={i} style={{
-                      display: 'grid', gridTemplateColumns: '1fr 110px 90px',
+                      display: 'grid', gridTemplateColumns: '1fr 80px 90px',
                       gap: '8px', alignItems: 'center',
                       padding: '7px 10px', borderRadius: '6px', marginBottom: '4px', fontSize: '12px',
                       background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
@@ -1394,19 +1435,9 @@ export default function OptionsPnLPanel() {
                           {r.openContracts}c · cost basis {fmt(r.avgCostPerContract)}/c
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ fontSize: '10px', color: textMid }}>Mark $</span>
-                        <input
-                          type='number'
-                          min='0'
-                          step='0.01'
-                          value={scenarioMarks[r.symbol] !== undefined ? scenarioMarks[r.symbol] : (r.markPrice || 0)}
-                          onChange={e => setScenarioMarks(prev => ({ ...prev, [r.symbol]: e.target.value }))}
-                          style={{
-                            width: '64px', padding: '2px 6px', fontSize: '12px', borderRadius: '4px',
-                            border: `1px solid ${border}`, background: surface, color: text, textAlign: 'right'
-                          }}
-                        />
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '10px', color: textMid }}>Intrinsic</div>
+                        <div style={{ fontWeight: '600', color: text }}>{fmt(r.scenarioIntrinsic)}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: '10px', color: textMid }}>P&L</div>
