@@ -531,14 +531,12 @@ export default function OptionsPnLPanel() {
         {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             {(() => {
-              // Sum exactly the same components each individual card uses so the total
-              // always equals the visible sum: cumulative options + unrealized options +
-              // completed-weeks stock delta.
               const total = Math.round(
                 Object.entries(cumulativeByUnderlying).reduce((sum, [ticker, optPnl]) => {
                   const stockPnl = cumulativeStockDelta[ticker] ?? 0
                   const unrealizedPnl = unrealizedByTicker[ticker] ?? 0
-                  return sum + optPnl + unrealizedPnl + stockPnl
+                  const liveStockDelta = data?.weeklyStockPnL?.[ticker]?.pnl ?? 0
+                  return sum + optPnl + unrealizedPnl + stockPnl + liveStockDelta
                 }, 0)
               * 100) / 100
               return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
@@ -567,14 +565,17 @@ export default function OptionsPnLPanel() {
                   const unrealizedPnl = unrealizedByTicker[ticker]
                   const realizedPnl = cumulativeRealizedByUnderlying[ticker]
                   const sp = livePrice
+                  const liveStockEntry = data?.weeklyStockPnL?.[ticker]
+                  const liveStockDelta = liveStockEntry != null ? (liveStockEntry?.pnl ?? 0) : null
                   const optTotal = optPnl + (unrealizedPnl ?? 0)
-                  const combined = stockPnl !== undefined
-                    ? optTotal + stockPnl
+                  const combined = (stockPnl !== undefined || liveStockDelta !== null)
+                    ? optTotal + (stockPnl ?? 0) + (liveStockDelta ?? 0)
                     : null
-                  const shares = priceRange?.shares
+                  const shares = priceRange?.shares ?? liveStockEntry?.shares
                   // Scale only stock P&L to 100sh — options/unrealized are independent of share count
-                  const combined100 = combined != null && shares && shares !== 100 && stockPnl !== undefined
-                    ? Math.round((combined - stockPnl + stockPnl * 100 / shares) * 100) / 100
+                  const totalStockForCard = (stockPnl ?? 0) + (liveStockDelta ?? 0)
+                  const combined100 = combined != null && shares && shares !== 100
+                    ? Math.round((combined - totalStockForCard + totalStockForCard * 100 / shares) * 100) / 100
                     : null
                   const isExpanded = expandedTicker === ticker
                   const wkBreakdown = weeklyBreakdown[ticker] || []
@@ -597,6 +598,12 @@ export default function OptionsPnLPanel() {
                             <div style={{ color: stockPnl >= 0 ? green : red }}>
                               Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
                               {priceRange && displayToPrice && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${priceRange.fromPrice.toFixed(2)} → ${displayToPrice.toFixed(2)}</span>}
+                            </div>
+                          )}
+                          {liveStockDelta !== null && (
+                            <div style={{ color: liveStockDelta >= 0 ? green : red }}>
+                              Wk Stock: {liveStockDelta >= 0 ? '+' : ''}{fmt(liveStockDelta)}
+                              {liveStockEntry?.fromPrice && liveStockEntry?.toPrice && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${liveStockEntry.fromPrice.toFixed(2)} → ${liveStockEntry.toPrice.toFixed(2)}</span>}
                             </div>
                           )}
                           {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
