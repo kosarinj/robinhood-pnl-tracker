@@ -188,12 +188,17 @@ export default function OptionsPnLPanel() {
     const breakdown = {} // ticker → [{ weekStart, optPnl, stockPnl }]
     const stockPrices = {} // ticker → { fromPrice (oldest week), toPrice (newest week), shares }
     slice.forEach((w, i) => {
+      const isCurrentWeek = w.weekStart === currentWeekStart
       Object.entries(w.byUnderlying || {}).forEach(([ticker, val]) => {
-        options[ticker] = (options[ticker] || 0) + val
+        // Current week: byUnderlying includes premiums paid for still-open positions which
+        // are already in unrealizedByTicker — use realizedByUnderlying (closed legs only)
+        // so there's no double-count. Historical weeks are all closed so byUnderlying is correct.
+        const contribution = isCurrentWeek ? (w.realizedByUnderlying?.[ticker] ?? 0) : val
+        options[ticker] = (options[ticker] || 0) + contribution
         if (!breakdown[ticker]) breakdown[ticker] = []
         const existing = breakdown[ticker].find(e => e.weekStart === w.weekStart)
-        if (existing) existing.optPnl = (existing.optPnl || 0) + val
-        else breakdown[ticker].push({ weekStart: w.weekStart, optPnl: val, stockPnl: null })
+        if (existing) existing.optPnl = (existing.optPnl || 0) + contribution
+        else breakdown[ticker].push({ weekStart: w.weekStart, optPnl: contribution, stockPnl: null })
       })
       Object.entries(w.realizedByUnderlying || {}).forEach(([ticker, val]) => {
         realized[ticker] = (realized[ticker] || 0) + val
