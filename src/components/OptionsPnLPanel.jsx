@@ -554,28 +554,26 @@ export default function OptionsPnLPanel() {
                 .map(([ticker, optPnl]) => {
                   const priceRange = cumulativeStockPrices[ticker]
                   const livePrice = stockPriceByTicker[ticker]
-                  // Use sum of completed-week stockDeltas so the card matches the per-week
-                  // breakdown exactly. The priceRange formula previously plugged in livePrice
-                  // for the current (incomplete) week, causing the card to diverge from the
-                  // breakdown total and incorrectly including post-close movement for closed
-                  // positions whose most recent entry was a completed historical week.
-                  const stockPnl = cumulativeStockDelta[ticker] !== undefined
-                    ? cumulativeStockDelta[ticker]
-                    : (priceRange
-                        ? Math.round(((priceRange.olderWeeksStockPnl || 0) +
-                            (priceRange.toPrice - priceRange.recentFromPrice) * priceRange.recentShares
-                          ) * 100) / 100
-                        : undefined)
                   const displayToPrice = livePrice ?? priceRange?.toPrice
                   const unrealizedPnl = unrealizedByTicker[ticker]
                   const realizedPnl = cumulativeRealizedByUnderlying[ticker]
                   const sp = livePrice
                   const liveStockEntry = data?.weeklyStockPnL?.[ticker]
-                  // Stock P&L = completed historical weeks (stockDelta) + current week (weeklyStockPnL)
-                  // Every NW view is a literal sum of N individual week P&Ls so totals tie out.
-                  const totalStock = stockPnl !== undefined || liveStockEntry != null
-                    ? (stockPnl ?? 0) + (liveStockEntry?.pnl ?? 0)
+                  // Stock P&L = sum of each individual week's stock P&L, using the same sources
+                  // as the 1W individual view: historicalWeeks[i].stockDelta for past weeks,
+                  // data.weeklyStockPnL for the current week. This guarantees NW = 1W + 1W ago + ...
+                  const histWeeksForStock = byUnderlyingWeeks === 0
+                    ? historicalWeeks
+                    : historicalWeeks.slice(0, byUnderlyingWeeks - 1)
+                  const histStockSum = histWeeksForStock.reduce((sum, w) => sum + (w.stockDelta?.[ticker] ?? 0), 0)
+                  const hasHistStock = histWeeksForStock.some(w => w.stockDelta?.[ticker] !== undefined)
+                  const totalStock = hasHistStock || liveStockEntry != null
+                    ? Math.round((histStockSum + (liveStockEntry?.pnl ?? 0)) * 100) / 100
                     : undefined
+                  if (byUnderlyingWeeks === 2) {
+                    const breakdown = histWeeksForStock.map(w => `${w.weekStart}:${w.stockDelta?.[ticker] ?? 'n/a'}`).join(', ')
+                    console.log(`[2W stock] ${ticker}: histSum=${histStockSum} (${breakdown}) live=${liveStockEntry?.pnl} cumDelta=${cumulativeStockDelta[ticker]} total=${totalStock}`)
+                  }
                   const optTotal = optPnl + (unrealizedPnl ?? 0)
                   const combined = totalStock !== undefined ? optTotal + totalStock : null
                   const shares = priceRange?.shares ?? liveStockEntry?.shares
