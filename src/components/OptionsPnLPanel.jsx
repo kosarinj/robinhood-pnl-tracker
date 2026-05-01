@@ -653,9 +653,10 @@ export default function OptionsPnLPanel() {
           </div>
         )}
         {byUnderlyingWeeks === 1 && (() => {
-          // Exclude the current week from history — data.weeks[0] is the current week
-          const histWeeks = (data?.weeks || []).filter(w => w.weekStart !== data?.weekStart)
-          const histWk = weekOffset > 0 ? histWeeks[weekOffset - 1] : null
+          // Use the same filtered+sorted historicalWeeks list the multi-week view uses.
+          // data?.weeks includes future expiry weeks (e.g. options expiring next Friday),
+          // which would make histWeeks[0] = next week, not last week, breaking alignment.
+          const histWk = weekOffset > 0 ? historicalWeeks[weekOffset - 1] : null
           const hasData = weekOffset === 0
             ? data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0
             : histWk?.byUnderlying && Object.keys(histWk.byUnderlying).length > 0
@@ -672,7 +673,7 @@ export default function OptionsPnLPanel() {
               }))
             : data.weeklyStockPnL || {}
           const wkLabel = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? '1W Ago' : `${weekOffset}W Ago`
-          const maxOffset = histWeeks.length
+          const maxOffset = historicalWeeks.length
           const wkDateStr = (() => {
             const ws = histWk ? histWk.weekStart : data?.weekStart
             if (!ws) return null
