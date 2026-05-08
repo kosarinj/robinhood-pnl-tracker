@@ -581,6 +581,21 @@ export default function OptionsPnLPanel() {
                   const combined100 = combined != null && shares && shares !== 100 && totalStock !== undefined
                     ? Math.round((combined - totalStock + totalStock * 100 / shares) * 100) / 100
                     : null
+                  const rp = remPremByTicker[ticker]
+                  // Max = combined + stock gain to the lowest short call strike (upside cap)
+                  // Floor = combined + stock change to the highest long put strike (downside floor)
+                  const shortCallStrike = rp?.shortCallPositions?.length > 0
+                    ? Math.min(...rp.shortCallPositions.map(p => p.strike))
+                    : null
+                  const longPutStrike = rp?.longPutPositions?.length > 0
+                    ? Math.max(...rp.longPutPositions.map(p => p.strike))
+                    : null
+                  const maxNet = combined !== null && shortCallStrike != null && livePrice && shares
+                    ? Math.round((combined + (shortCallStrike - livePrice) * shares) * 100) / 100
+                    : null
+                  const floorNet = combined !== null && longPutStrike != null && livePrice && shares
+                    ? Math.round((combined + (longPutStrike - livePrice) * shares) * 100) / 100
+                    : null
                   const isExpanded = expandedTicker === ticker
                   const wkBreakdown = weeklyBreakdown[ticker] || []
                   return (
@@ -618,6 +633,8 @@ export default function OptionsPnLPanel() {
                           {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                           {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
                           {combined100 !== null && <div style={{ color: combined100 >= 0 ? green : red, fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
+                          {maxNet !== null && <div style={{ color: maxNet >= 0 ? green : red, fontSize: '11px' }}>Max: {maxNet >= 0 ? '+' : ''}{fmt(maxNet)}<span style={{ color: textMid }}> @${shortCallStrike}</span></div>}
+                          {floorNet !== null && <div style={{ color: floorNet >= 0 ? green : red, fontSize: '11px' }}>Floor: {floorNet >= 0 ? '+' : ''}{fmt(floorNet)}<span style={{ color: textMid }}> @${longPutStrike}</span></div>}
                         </div>
                       </div>
                       {isExpanded && wkBreakdown.length > 0 && (
@@ -848,6 +865,22 @@ export default function OptionsPnLPanel() {
                               Net + Rem: {netRem >= 0 ? '+' : ''}{fmt(netRem)}
                             </div>
                           )
+                        })()}
+                        {combined !== null && rp?.shortCallPositions?.length > 0 && (() => {
+                          const sc = Math.min(...rp.shortCallPositions.map(p => p.strike))
+                          const sp1w = weekOffset === 0 ? stockPriceByTicker[ticker] : null
+                          const sh = shares1w
+                          if (!sp1w || !sh) return null
+                          const val = Math.round((combined + (sc - sp1w) * sh) * 100) / 100
+                          return <div style={{ color: val >= 0 ? green : red, fontSize: '11px' }}>Max: {val >= 0 ? '+' : ''}{fmt(val)}<span style={{ color: textMid }}> @${sc}</span></div>
+                        })()}
+                        {combined !== null && rp?.longPutPositions?.length > 0 && (() => {
+                          const lp = Math.max(...rp.longPutPositions.map(p => p.strike))
+                          const sp1w = weekOffset === 0 ? stockPriceByTicker[ticker] : null
+                          const sh = shares1w
+                          if (!sp1w || !sh) return null
+                          const val = Math.round((combined + (lp - sp1w) * sh) * 100) / 100
+                          return <div style={{ color: val >= 0 ? green : red, fontSize: '11px' }}>Floor: {val >= 0 ? '+' : ''}{fmt(val)}<span style={{ color: textMid }}> @${lp}</span></div>
                         })()}
                       </div>
                     </div>
