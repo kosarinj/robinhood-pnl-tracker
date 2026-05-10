@@ -174,7 +174,7 @@ export default function OptionsPnLPanel() {
   const allTimeTotal = data?.weeks?.reduce((s, w) => s + w.totalDelta, 0) || 0
 
   // Cumulative by-underlying: sum byUnderlying + stockDelta across the last N weeks (sorted desc)
-  const { cumulativeByUnderlying, cumulativeRealizedByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate, historicalWeeks } = (() => {
+  const { cumulativeByUnderlying, cumulativeRealizedByUnderlying, cumulativeStockDelta, weeklyBreakdown, cumulativeStockPrices, sliceFromDate, sliceToDate, historicalWeeks, numWeeks } = (() => {
     const weeks = data?.weeks || []
     const currentWeekStart = data?.weekStart || ''
     // Only include weeks up to and including the current week — exclude future expiry weeks
@@ -249,13 +249,22 @@ export default function OptionsPnLPanel() {
       const today = new Date(); today.setHours(0,0,0,0)
       return (d <= today ? d : today).toISOString().slice(0, 10)
     })() : null
-    return { cumulativeByUnderlying: options, cumulativeRealizedByUnderlying: realized, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate, historicalWeeks: sorted.filter(w => w.weekStart !== currentWeekStart) }
+    return { cumulativeByUnderlying: options, cumulativeRealizedByUnderlying: realized, cumulativeStockDelta: stock, weeklyBreakdown: breakdown, cumulativeStockPrices: stockPrices, sliceFromDate, sliceToDate, historicalWeeks: sorted.filter(w => w.weekStart !== currentWeekStart), numWeeks: slice.length }
   })()
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   const preMarketPrices = data?.preMarketPrices || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
+  // Short puts are a trading mistake (should always be long) — flag them prominently
+  const shortPutsByTicker = openPositions.reduce((m, p) => {
+    if (!p.isLong && p.optionType === 'put') {
+      if (!m[p.ticker]) m[p.ticker] = []
+      m[p.ticker].push({ strike: p.strike, expiry: p.expiry })
+    }
+    return m
+  }, {})
+  const hasShortPuts = Object.keys(shortPutsByTicker).length > 0
   const hasPrices = openPositions.some(p => p.unrealizedPnl != null)
   const totalUnrealizedPnl = openPositions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
   // When viewing a past week (asOfDate set), unrealized P&L uses today's Polygon prices — not meaningful
@@ -380,6 +389,19 @@ export default function OptionsPnLPanel() {
           }}>{label}</button>
         ))}
       </div>
+      {hasShortPuts && (
+        <div style={{ marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', background: isDark ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.1)', border: '1.5px solid #ef4444', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+          <span style={{ fontSize: '18px', lineHeight: 1 }}>⚠️</span>
+          <div>
+            <div style={{ fontWeight: '700', color: '#ef4444', fontSize: '13px', marginBottom: '2px' }}>SHORT PUT DETECTED — trading mistake?</div>
+            <div style={{ fontSize: '12px', color: isDark ? '#fca5a5' : '#b91c1c' }}>
+              {Object.entries(shortPutsByTicker).map(([ticker, puts]) =>
+                `${ticker}: ${puts.map(p => `$${p.strike} exp ${p.expiry}`).join(', ')}`
+              ).join(' · ')}
+            </div>
+          </div>
+        </div>
+      )}
       {activeTab === 'week' && <>
       {/* This Week Hero Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
@@ -544,8 +566,16 @@ export default function OptionsPnLPanel() {
                 }, 0)
               }, 0)
               const total = Math.round((netWeekPnL + histContrib) * 100) / 100
-              return <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red, marginBottom: '10px' }}>
-                Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
+              const avgPerWk = numWeeks > 0 ? Math.round(total / numWeeks * 100) / 100 : null
+              return <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red }}>
+                  Total Net: {total >= 0 ? '+' : ''}{fmt(total)}
+                </div>
+                {avgPerWk !== null && numWeeks > 1 && (
+                  <div style={{ fontSize: '11px', color: avgPerWk >= 0 ? green : red }}>
+                    avg/wk: {avgPerWk >= 0 ? '+' : ''}{fmt(avgPerWk)}
+                  </div>
+                )}
               </div>
             })()}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
@@ -608,6 +638,7 @@ export default function OptionsPnLPanel() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                           <span style={{ fontWeight: '700', color: text }}>
                             {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
+                            {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
                           </span>
                           <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
                         </div>
@@ -635,6 +666,10 @@ export default function OptionsPnLPanel() {
                           {combined100 !== null && <div style={{ color: combined100 >= 0 ? green : red, fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
                           {maxNet !== null && <div style={{ color: maxNet >= 0 ? green : red, fontSize: '11px' }}>Max: {maxNet >= 0 ? '+' : ''}{fmt(maxNet)}<span style={{ color: textMid }}> @${shortCallStrike}</span></div>}
                           {floorNet !== null && <div style={{ color: floorNet >= 0 ? green : red, fontSize: '11px' }}>Floor: {floorNet >= 0 ? '+' : ''}{fmt(floorNet)}<span style={{ color: textMid }}> @${longPutStrike}</span></div>}
+                          {combined !== null && numWeeks > 1 && (() => {
+                            const avg = Math.round(combined / numWeeks * 100) / 100
+                            return <div style={{ color: textMid, fontSize: '10px' }}>avg/wk: {avg >= 0 ? '+' : ''}{fmt(avg)}</div>
+                          })()}
                         </div>
                       </div>
                       {isExpanded && wkBreakdown.length > 0 && (
@@ -804,6 +839,7 @@ export default function OptionsPnLPanel() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                         <span style={{ fontWeight: '700', color: text }}>
                           {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
+                          {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
                         </span>
                         {trades.length > 0 && <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>}
                       </div>
