@@ -27,3 +27,6 @@ yarn-error.log*
 # CSV files (keep your trade data private)
 *.csv
 !sample-trades.csv
+
+# SQLite database (trade data — never commit)
+*.db
