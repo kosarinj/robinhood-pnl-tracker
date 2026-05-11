@@ -2237,7 +2237,20 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       } else if (tc === 'STO') {
         stacks.short.push({ pricePerContract, remainingContracts: contracts, date: t.trans_date })
       } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
-        const stack = tc === 'BTC' ? stacks.short : stacks.long
+        // BTC closes a short (STO'd) position; STC/OEXC closes a long (BTO'd) position.
+        // OEXP/OASGN can close either: check which stack holds the contract.
+        // Covered calls and short puts (STO) live in stacks.short; long options (BTO) in stacks.long.
+        let closingShort
+        let stack
+        if (tc === 'BTC') {
+          stack = stacks.short; closingShort = true
+        } else if (tc === 'STC' || tc === 'OEXC') {
+          stack = stacks.long; closingShort = false
+        } else {
+          // OEXP / OASGN: the expiring/assigned side is whichever stack has the open position
+          closingShort = stacks.short.length > 0
+          stack = closingShort ? stacks.short : stacks.long
+        }
         let contractsLeft = contracts
         let costBasis = 0
         const matchedLegs = []
@@ -2250,10 +2263,12 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
           top.remainingContracts -= matched
           if (top.remainingContracts === 0) stack.pop()
         }
-        // If contractsLeft > 0, we couldn't find the BTO (not in DB) — don't show P&L
+        // If contractsLeft > 0, we couldn't find the opening trade — skip P&L for this leg
         if (contractsLeft === 0) {
           const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
-          t._realizedPnl = Math.round((tc === 'BTC' ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
+          // Short positions: profit = opening credit (costBasis) − closing cost (proceeds)
+          // Long positions: profit = closing proceeds − opening cost (costBasis)
+          t._realizedPnl = Math.round((closingShort ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
           t._realizedPnlDetail = { costBasis: Math.round(costBasis * 100) / 100, proceeds: Math.round(proceeds * 100) / 100, matchedLegs }
         }
       }
