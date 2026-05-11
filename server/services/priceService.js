@@ -237,11 +237,16 @@ export class PriceService {
   async getPriceForDate(symbol, dateString) {
     try {
       const isToday = dateString === new Date().toISOString().slice(0, 10)
+      // Today's close isn't available via the historical endpoint while the market is open.
+      // Use the live quote instead so the current week's stock P&L reflects today's price.
+      if (isToday) {
+        return this.getPrice(symbol)
+      }
       // Only use DB cache for dates older than 14 days — recent closes can change
       // (intraday caching, API fallbacks) and must always be re-fetched fresh.
       const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
       const isRecent = dateString >= twoWeeksAgo
-      if (this.databaseService && !isToday && !isRecent) {
+      if (this.databaseService && !isRecent) {
         const cachedPrice = this.databaseService.getHistoricalPrice(symbol, dateString)
         if (cachedPrice !== null) {
           console.log(`✓ ${symbol} price for ${dateString} from cache: $${cachedPrice}`)
