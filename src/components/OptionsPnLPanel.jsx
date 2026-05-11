@@ -392,8 +392,6 @@ export default function OptionsPnLPanel() {
   const stockPriceByTicker = {
     // Yahoo Finance prices for the asOf date (or today) for stocks user holds
     ...Object.fromEntries(Object.entries(data?.weeklyStockPnL || {}).filter(([, e]) => (e?.toPrice ?? 0) > 0).map(([sym, e]) => [sym, e.toPrice])),
-    // Also include other stock holdings (option-underlying stocks with no options this week)
-    ...Object.fromEntries(Object.entries(data?.otherStockPnLBySymbol || {}).filter(([, e]) => (e?.toPrice ?? 0) > 0).map(([sym, e]) => [sym, e.toPrice])),
     // Yahoo Finance prices for option-only underlyings
     ...(data?.optionUnderlyingPrices || {}),
     // Polygon live prices only when viewing current week (not historical)
