@@ -2337,6 +2337,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         else if (optionType === 'put') wk.realizedPutsByUnderlying[underlying] = (wk.realizedPutsByUnderlying[underlying] || 0) + realizedAmount
       }
       wk.tradesByUnderlying[underlying].push(...tradeDetails)
+      if (underlying === 'TQQQ') console.log(`[TQQQ opt] week=${weekKey} type=${optionType} netFlow=${Math.round(netFlow*100)/100} hasClosing=${hasClosing} byUnderlying=${Math.round(wk.byUnderlying['TQQQ']*100)/100} realizedByUnderlying=${Math.round(wk.realizedByUnderlying['TQQQ']*100)/100}`, tradeDetails.map(t => `${t.transCode} flow=${t.cashFlow} realized=${t.realizedPnl}`))
     })
 
     const weeks = Object.values(byWeek)
@@ -2414,6 +2415,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols)
       const thisWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, lastFridayStr, todayStr, thisWeekSymbols)
       const lastFriPositions = databaseService.getPositionsAsOf(req.user.userId, lastFridayStr)
+      const tqqqAllPos = allPositions['TQQQ'], tqqqLastFriPos = lastFriPositions['TQQQ']
+      console.log(`[TQQQ stock] allPositions=${tqqqAllPos} lastFriPos=${tqqqLastFriPos} lastFri=${lastFridayStr} lastFriPrice=${lastFridayPrices['TQQQ']} curPrice=${currentPrices['TQQQ']} buys=${JSON.stringify(thisWeekBuys['TQQQ'])} sells=${JSON.stringify(thisWeekSells['TQQQ'])}`)
       thisWeekSymbols.forEach(sym => {
         const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
@@ -2500,8 +2503,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const stockDelta = {}
         allWeekTickers.forEach(ticker => {
           const pos = weekPositions[ticker]
-          const DEBUG = ticker === 'FAS' || ticker === 'AAPL'
-          if (DEBUG) console.log(`[STOCK DEBUG] ${week.weekStart} ${ticker}: pos=${pos}, weekComplete=${weekComplete}, hasPriceData=${!!tickerDateMap[ticker]}, weekBuys=${JSON.stringify(weekBuys[ticker])}`)
+          const DEBUG = ticker === 'TQQQ'
+          if (DEBUG) console.log(`[TQQQ hist] week=${week.weekStart} pos=${pos} prevFri=${prevFriStr} thisFri=${thisFriStr} complete=${weekComplete} prevClose=${findClose(tickerDateMap[ticker] || {}, prevFriStr)} thisClose=${findClose(tickerDateMap[ticker] || {}, thisFriStr)} buys=${JSON.stringify(weekBuys[ticker])}`)
           if (!tickerDateMap[ticker]) return
 
           if (pos && pos >= 100) {
