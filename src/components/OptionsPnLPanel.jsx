@@ -690,7 +690,8 @@ export default function OptionsPnLPanel() {
                   const totalStock = hasHistStock || liveStockEntry != null
                     ? Math.round((histStockSum + (liveStockEntry?.pnl ?? 0)) * 100) / 100
                     : undefined
-const optTotal = optPnl + (unrealizedPnl ?? 0)
+                  const optTotal = optPnl + (unrealizedPnl ?? 0)
+                  if (ticker === 'TQQQ') console.log(`[${byUnderlyingWeeks}W TQQQ] optPnl=${optPnl} unrealized=${unrealizedPnl} histStockSum=${histStockSum} liveStock=${liveStockEntry?.pnl} totalStock=${totalStock} combined=${optTotal + (totalStock ?? 0)}`, {histWeeks: histWeeksForStock.map(w => ({wk: w.weekStart, stock: w.stockDelta?.TQQQ, opt: w.byUnderlying?.TQQQ, realized: w.realizedByUnderlying?.TQQQ}))})
                   const combined = totalStock !== undefined ? optTotal + totalStock : null
                   const shares = priceRange?.shares ?? liveStockEntry?.shares
                   // Scale only stock P&L to 100sh — options/unrealized are independent of share count

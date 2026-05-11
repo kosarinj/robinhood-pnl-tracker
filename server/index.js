@@ -2191,6 +2191,9 @@ app.post('/api/robinhood/download', requireAuth, async (req, res) => {
 app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
   try {
     const trades = databaseService.getOptionTrades(req.user.userId)
+    const tqqqTrades = trades.filter(t => (t.symbol || '').toUpperCase().startsWith('TQQQ'))
+    if (tqqqTrades.length > 0) console.log(`[TQQQ] ${tqqqTrades.length} option trades:`, tqqqTrades.map(t => `${t.trans_date} ${t.trans_code} amt=${t.amount} sym=${t.symbol}`))
+    else console.log('[TQQQ] No option trades found in DB')
 
     // Cash-flow P&L per trade:
     //   sell (STO/STC/OEXP) = +amount (premium received or position closed)
