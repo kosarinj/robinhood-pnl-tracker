@@ -249,17 +249,15 @@ export class PriceService {
         }
       }
 
-      const targetDate = new Date(dateString)
-      targetDate.setHours(0, 0, 0, 0)
+      // Use UTC-based date arithmetic throughout to avoid local-timezone off-by-one.
+      // new Date("YYYY-MM-DD") parses as UTC midnight; mixing with setHours() (local)
+      // shifts the target by the UTC offset and matches the wrong trading day.
+      const [ty, tm, td] = dateString.split('-').map(Number)
+      const targetMs = Date.UTC(ty, tm - 1, td)
 
       // Fetch 1 week of data around the target date to handle weekends/holidays
-      const endDate = new Date(targetDate)
-      endDate.setDate(endDate.getDate() + 3)
-      const startDate = new Date(targetDate)
-      startDate.setDate(startDate.getDate() - 3)
-
-      const period1 = Math.floor(startDate.getTime() / 1000)
-      const period2 = Math.floor(endDate.getTime() / 1000)
+      const period1 = Math.floor((targetMs - 3 * 86400000) / 1000)
+      const period2 = Math.floor((targetMs + 4 * 86400000) / 1000)
 
       const url = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${period1}&period2=${period2}&interval=1d`
       const response = await axios.get(url, { timeout: 6000, headers: YF_HEADERS })
@@ -278,14 +276,14 @@ export class PriceService {
         return 0
       }
 
-      // Find the closest date to our target
+      // Find closest trading day using UTC date strings to avoid timezone drift
       let closestIndex = 0
       let closestDiff = Infinity
 
       timestamps.forEach((ts, i) => {
-        const dataDate = new Date(ts * 1000)
-        dataDate.setHours(0, 0, 0, 0)
-        const diff = Math.abs(dataDate - targetDate)
+        const dataDateStr = new Date(ts * 1000).toISOString().slice(0, 10)
+        const [dy, dm, dd] = dataDateStr.split('-').map(Number)
+        const diff = Math.abs(Date.UTC(dy, dm - 1, dd) - targetMs)
         if (diff < closestDiff && quotes.close[i] !== null) {
           closestDiff = diff
           closestIndex = i
@@ -293,7 +291,7 @@ export class PriceService {
       })
 
       const closingPrice = quotes.close[closestIndex]
-      const actualDate = new Date(timestamps[closestIndex] * 1000).toISOString().split('T')[0]
+      const actualDate = new Date(timestamps[closestIndex] * 1000).toISOString().slice(0, 10)
 
       // Save to DB cache for historical dates only — never cache today's price
       if (this.databaseService && closingPrice && !isToday) {
