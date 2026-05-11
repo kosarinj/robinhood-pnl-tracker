@@ -19,8 +19,24 @@ function rsiLabel(rsi) {
   return 'Bearish'
 }
 
+function stochColor(k) {
+  if (k == null) return '#888'
+  if (k >= 80) return '#ef4444'   // overbought → consider puts
+  if (k <= 20) return '#22c55e'   // oversold
+  return '#94a3b8'
+}
+
+function stochLabel(k, d) {
+  if (k == null) return ''
+  const state = k >= 80 ? 'Overbought' : k <= 20 ? 'Oversold' : 'Neutral'
+  const cross = d != null
+    ? (k > d ? ' ↑ bullish cross' : k < d ? ' ↓ bearish cross' : '')
+    : ''
+  return `${state}${cross}`
+}
+
 export function RSIBadge({ symbol, isDark, onClick }) {
-  const [rsi, setRsi] = useState(null)
+  const [indicators, setIndicators] = useState(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -28,26 +44,42 @@ export function RSIBadge({ symbol, isDark, onClick }) {
     setLoading(true)
     fetch(`/api/stock-indicators/${symbol}`, { credentials: 'include' })
       .then(r => r.json())
-      .then(d => { if (d.success) setRsi(d.rsi) })
+      .then(d => { if (d.success) setIndicators(d) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [symbol])
 
-  const color = rsiColor(rsi)
+  const rsi = indicators?.rsi
+  const stoch = indicators?.stoch
+  const rColor = rsiColor(rsi)
+  const sColor = stochColor(stoch?.k)
+
+  const title = [
+    `RSI ${rsi ?? '?'} · ${rsiLabel(rsi)}`,
+    stoch ? `Stoch K:${stoch.k} D:${stoch.d} · ${stochLabel(stoch.k, stoch.d)}` : '',
+    'Click for intraday chart'
+  ].filter(Boolean).join(' | ')
+
   return (
     <span
       onClick={e => { e.stopPropagation(); onClick && onClick(symbol) }}
-      title={`RSI ${rsi ?? '…'} · ${rsiLabel(rsi)} · Click to view intraday chart`}
+      title={title}
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: '3px',
-        fontSize: '10px', cursor: 'pointer', color,
+        display: 'inline-flex', alignItems: 'center', gap: '4px',
+        fontSize: '10px', cursor: 'pointer',
         background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
-        borderRadius: '4px', padding: '1px 5px', marginLeft: '4px',
-        border: `1px solid ${color}33`, userSelect: 'none'
+        borderRadius: '4px', padding: '1px 6px', marginLeft: '4px',
+        border: `1px solid ${rColor}33`, userSelect: 'none'
       }}
     >
-      {loading ? '…' : `RSI ${rsi ?? '?'}`}
-      {rsi != null && <span style={{ fontSize: '9px', opacity: 0.8 }}>· {rsiLabel(rsi)}</span>}
+      {loading ? <span style={{ color: '#888' }}>…</span> : <>
+        <span style={{ color: rColor }}>RSI {rsi ?? '?'}</span>
+        {stoch?.k != null && <>
+          <span style={{ color: '#555', fontSize: '9px' }}>|</span>
+          <span style={{ color: sColor }}>K{stoch.k}</span>
+          {stoch.d != null && <span style={{ color: sColor, opacity: 0.7, fontSize: '9px' }}>/D{stoch.d}</span>}
+        </>}
+      </>}
     </span>
   )
 }

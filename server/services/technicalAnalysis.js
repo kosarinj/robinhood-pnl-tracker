@@ -46,6 +46,29 @@ export const calculateRSI = (prices, period = 14) => {
   return 100 - (100 / (1 + rs))
 }
 
+// Calculate Stochastic Oscillator (%K fast, %D = EMA of %K)
+// %K = 100 × (Close − LowestLow(N)) / (HighestHigh(N) − LowestLow(N))
+// %D = kPeriod-EMA applied to %K values (less lag than SMA)
+export const calculateStochastic = (highs, lows, closes, kPeriod = 14, dPeriod = 3) => {
+  if (!highs || !lows || closes.length < kPeriod) return null
+
+  const kValues = []
+  for (let i = kPeriod - 1; i < closes.length; i++) {
+    const hi = Math.max(...highs.slice(i - kPeriod + 1, i + 1))
+    const lo = Math.min(...lows.slice(i - kPeriod + 1, i + 1))
+    const range = hi - lo
+    kValues.push(range === 0 ? 50 : 100 * (closes[i] - lo) / range)
+  }
+
+  const k = kValues[kValues.length - 1]
+  const d = calculateEMA(kValues, dPeriod) // EMA smoothing = "stochastic EMA"
+
+  return {
+    k: Math.round(k * 10) / 10,
+    d: d !== null ? Math.round(d * 10) / 10 : null
+  }
+}
+
 // Calculate MACD (Moving Average Convergence Divergence)
 export const calculateMACD = (prices) => {
   const ema12 = calculateEMA(prices, 12)

@@ -19,7 +19,7 @@ import { dirname } from 'path'
 import path from 'path'
 import axios from 'axios'
 import { parseOptionDescription, toPolygonTicker, calcPremiumLeft, toYahooOptionTicker } from './utils/optionUtils.js'
-import { calculateRSI, calculateEMA } from './services/technicalAnalysis.js'
+import { calculateRSI, calculateEMA, calculateStochastic } from './services/technicalAnalysis.js'
 
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
@@ -1936,9 +1936,12 @@ app.get('/api/stock-indicators/:symbol', requireAuth, async (req, res) => {
     ])
 
     const closes = hist.map(d => d.close).filter(Boolean)
+    const dailyHighs = hist.map(d => d.high).filter(Boolean)
+    const dailyLows = hist.map(d => d.low).filter(Boolean)
     const rsi = closes.length >= 15 ? Math.round(calculateRSI(closes) * 10) / 10 : null
     const ema9 = closes.length >= 9 ? Math.round(calculateEMA(closes, 9) * 100) / 100 : null
     const ema21 = closes.length >= 21 ? Math.round(calculateEMA(closes, 21) * 100) / 100 : null
+    const stoch = calculateStochastic(dailyHighs, dailyLows, closes)
     const currentPrice = closes[closes.length - 1] || null
 
     const highs = intraday.map(b => b.high).filter(Boolean)
@@ -1947,7 +1950,41 @@ app.get('/api/stock-indicators/:symbol', requireAuth, async (req, res) => {
     const dayLow = lows.length ? Math.min(...lows) : null
     const currentVwap = intraday.length ? intraday[intraday.length - 1].vwap : null
 
-    res.json({ success: true, symbol: sym, rsi, ema9, ema21, currentPrice, intraday, dayHigh, dayLow, currentVwap })
+    res.json({ success: true, symbol: sym, rsi, ema9, ema21, stoch, currentPrice, intraday, dayHigh, dayLow, currentVwap })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// Market-wide sentiment: VIX (fear gauge) + CBOE equity put/call ratio
+app.get('/api/market-pulse', requireAuth, async (req, res) => {
+  try {
+    const url = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=%5EVIX,%5EPCCE&fields=regularMarketPrice,regularMarketChangePercent,regularMarketPreviousClose'
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    }
+    const response = await axios.get(url, { timeout: 8000, headers })
+    const quotes = response.data?.quoteResponse?.result || []
+    const bySymbol = {}
+    quotes.forEach(q => { bySymbol[q.symbol] = q })
+
+    const vixQ = bySymbol['^VIX']
+    const pcrQ = bySymbol['^PCCE']
+
+    const vix = vixQ ? {
+      price: Math.round((vixQ.regularMarketPrice || 0) * 100) / 100,
+      changePct: Math.round((vixQ.regularMarketChangePercent || 0) * 100) / 100,
+      prevClose: vixQ.regularMarketPreviousClose || null
+    } : null
+
+    const pcr = pcrQ ? {
+      ratio: Math.round((pcrQ.regularMarketPrice || 0) * 100) / 100,
+      changePct: Math.round((pcrQ.regularMarketChangePercent || 0) * 100) / 100,
+      prevClose: pcrQ.regularMarketPreviousClose || null
+    } : null
+
+    res.json({ success: true, vix, pcr })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

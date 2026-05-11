@@ -2,6 +2,95 @@ import React, { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import IntradayChart, { RSIBadge } from './IntradayChart'
 
+// VIX: >30 = high fear, 20-30 = elevated, 15-20 = normal, <15 = complacent
+function vixColor(v) {
+  if (v == null) return '#888'
+  if (v >= 30) return '#ef4444'
+  if (v >= 20) return '#f59e0b'
+  if (v >= 15) return '#94a3b8'
+  return '#22c55e'
+}
+function vixLabel(v) {
+  if (v == null) return ''
+  if (v >= 30) return 'High Fear'
+  if (v >= 20) return 'Elevated'
+  if (v >= 15) return 'Normal'
+  return 'Complacent'
+}
+
+// Equity P/C ratio (^PCCE): >1.0 = heavy put buying (bearish sentiment / good contrarian buy?),
+// 0.6-0.8 = typical, <0.6 = excessive bullishness / complacency
+function pcrColor(r) {
+  if (r == null) return '#888'
+  if (r >= 1.0) return '#ef4444'   // excessive put buying — fear peak, often contrarian bullish
+  if (r >= 0.8) return '#f59e0b'   // elevated protection demand
+  if (r >= 0.6) return '#94a3b8'   // normal
+  return '#22c55e'                  // very low puts — complacent, consider protection
+}
+function pcrLabel(r) {
+  if (r == null) return ''
+  if (r >= 1.0) return 'Fear peak'
+  if (r >= 0.8) return 'Elevated'
+  if (r >= 0.6) return 'Normal'
+  return 'Complacent'
+}
+
+function MarketPulse({ isDark }) {
+  const [pulse, setPulse] = useState(null)
+  const [lastFetch, setLastFetch] = useState(0)
+
+  useEffect(() => {
+    const fetchPulse = () => {
+      fetch('/api/market-pulse', { credentials: 'include' })
+        .then(r => r.json())
+        .then(d => { if (d.success) { setPulse(d); setLastFetch(Date.now()) } })
+        .catch(() => {})
+    }
+    fetchPulse()
+    const iv = setInterval(fetchPulse, 5 * 60 * 1000)
+    return () => clearInterval(iv)
+  }, [])
+
+  const border = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+
+  const vix = pulse?.vix
+  const pcr = pulse?.pcr
+
+  return (
+    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px',
+      padding: '7px 12px', borderRadius: '8px', fontSize: '11px',
+      background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+      border: `1px solid ${border}` }}>
+      <span style={{ color: textMid, fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Market Pulse</span>
+      {vix ? (
+        <span title={`VIX: ${vixLabel(vix.price)} | ${vix.changePct >= 0 ? '+' : ''}${vix.changePct}% today`}>
+          <span style={{ color: textMid }}>VIX </span>
+          <span style={{ color: vixColor(vix.price), fontWeight: '700' }}>{vix.price}</span>
+          <span style={{ color: vix.changePct >= 0 ? '#ef4444' : '#22c55e', marginLeft: '3px', fontSize: '10px' }}>
+            {vix.changePct >= 0 ? '▲' : '▼'}{Math.abs(vix.changePct)}%
+          </span>
+          <span style={{ color: textMid, marginLeft: '4px', fontSize: '10px' }}>({vixLabel(vix.price)})</span>
+        </span>
+      ) : <span style={{ color: textMid }}>VIX —</span>}
+      <span style={{ color: border }}>|</span>
+      {pcr ? (
+        <span title={`Equity Put/Call Ratio: ${pcrLabel(pcr.ratio)} | >1.0 = fear peak, <0.6 = complacent`}>
+          <span style={{ color: textMid }}>Eq P/C </span>
+          <span style={{ color: pcrColor(pcr.ratio), fontWeight: '700' }}>{pcr.ratio}</span>
+          <span style={{ color: pcr.changePct >= 0 ? '#ef4444' : '#22c55e', marginLeft: '3px', fontSize: '10px' }}>
+            {pcr.changePct >= 0 ? '▲' : '▼'}{Math.abs(pcr.changePct)}%
+          </span>
+          <span style={{ color: textMid, marginLeft: '4px', fontSize: '10px' }}>({pcrLabel(pcr.ratio)})</span>
+        </span>
+      ) : <span style={{ color: textMid }}>P/C —</span>}
+      {lastFetch > 0 && <span style={{ color: textMid, marginLeft: 'auto', fontSize: '10px' }}>
+        {new Date(lastFetch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </span>}
+    </div>
+  )
+}
+
 const fmt = (n) => {
   if (n === null || n === undefined || isNaN(n)) return '$0.00'
   const abs = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -402,6 +491,7 @@ export default function OptionsPnLPanel() {
           </div>
         </div>
       )}
+      <MarketPulse isDark={isDark} />
       {activeTab === 'week' && <>
       {/* This Week Hero Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
