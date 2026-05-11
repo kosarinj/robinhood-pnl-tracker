@@ -733,7 +733,11 @@ export default function OptionsPnLPanel() {
                           {totalStock !== undefined && (
                             <div style={{ color: totalStock >= 0 ? green : red }}>
                               Stock: {totalStock >= 0 ? '+' : ''}{fmt(totalStock)}
-                              {priceRange && displayToPrice && <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${priceRange.fromPrice.toFixed(2)} → ${displayToPrice.toFixed(2)}</span>}
+                              {(() => {
+                                const fromP = priceRange?.fromPrice ?? liveStockEntry?.fromPrice
+                                const toP = displayToPrice ?? priceRange?.toPrice
+                                return fromP && toP ? <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${fromP.toFixed(2)} → ${toP.toFixed(2)}</span> : null
+                              })()}
                             </div>
                           )}
                           {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
