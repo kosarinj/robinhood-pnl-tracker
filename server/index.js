@@ -2406,7 +2406,9 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     if (allSymbols.length > 0) {
       const [lastFridayPrices, currentPrices] = await Promise.all([
         priceService.getPricesForDate(allSymbols, lastFridayStr),
-        priceService.getPricesForDate(allSymbols, todayStr)
+        asOf === todayDefault
+          ? priceService.getPrices(allSymbols)
+          : priceService.getPricesForDate(allSymbols, asOf)
       ])
       optionOnlyTickers.forEach(sym => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
