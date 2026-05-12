@@ -1168,7 +1168,12 @@ function AuthenticatedApp({ user }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '14px', fontWeight: '500' }}>👤 {user.username}</span>
         </div>
-        <ThemeToggle />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '11px', opacity: 0.4 }}>
+            {new Date(__BUILD_TIME__).toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <ThemeToggle />
+        </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
