@@ -753,7 +753,7 @@ export default function OptionsPnLPanel() {
                           )}
                           {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                           {combined !== null && <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combined >= 0 ? '+' : ''}{fmt(combined)}</div>}
-                          {combined100 !== null && <div style={{ color: combined100 >= 0 ? green : red, fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
+                          {combined100 !== null && <div style={{ fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
                           {maxNet !== null && <div style={{ color: maxNet >= 0 ? green : red, fontSize: '11px' }}>Max: {maxNet >= 0 ? '+' : ''}{fmt(maxNet)}<span style={{ color: textMid }}> @${shortCallStrike}</span></div>}
                           {floorNet !== null && <div style={{ color: floorNet >= 0 ? green : red, fontSize: '11px' }}>Floor: {floorNet >= 0 ? '+' : ''}{fmt(floorNet)}<span style={{ color: textMid }}> @${longPutStrike}</span></div>}
                           {combined !== null && numWeeks > 1 && (() => {
