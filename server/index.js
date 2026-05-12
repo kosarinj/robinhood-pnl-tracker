@@ -2528,6 +2528,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
             // Use netChange (buys - sells) so quick buy-and-sell same week (e.g. assigned put
             // immediately sold) doesn't produce phantom stock P&L.
             const buys = weekBuys[ticker]
+            const totalShares = (pos || 0) + (buys?.netChange || 0)
             if (buys && buys.netChange >= 100) {
               const shares = buys.netChange
               const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
@@ -2535,7 +2536,19 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
               week.stockPrices[ticker] = { fromPrice: buys.avgPrice, toPrice: thisClose || buys.avgPrice, shares }
               if (weekComplete && thisClose > 0) {
                 stockDelta[ticker] = Math.round((thisClose - buys.avgPrice) * shares * 100) / 100
-                // Ticker held stock this week but had no options expiring — inject with 0 optPnl
+                if (week.byUnderlying[ticker] === undefined) {
+                  week.byUnderlying[ticker] = 0
+                  week.realizedByUnderlying[ticker] = 0
+                }
+              }
+            } else if (pos > 0 && buys && totalShares >= 100) {
+              // Pre-existing small position + mid-week buy together reach 100 shares
+              const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
+              const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
+              if (!week.stockPrices) week.stockPrices = {}
+              week.stockPrices[ticker] = { fromPrice: prevClose || buys.avgPrice, toPrice: thisClose || prevClose || buys.avgPrice, shares: totalShares }
+              if (weekComplete && thisClose > 0 && prevClose > 0) {
+                stockDelta[ticker] = Math.round(((thisClose - prevClose) * pos + (thisClose - buys.avgPrice) * buys.netChange) * 100) / 100
                 if (week.byUnderlying[ticker] === undefined) {
                   week.byUnderlying[ticker] = 0
                   week.realizedByUnderlying[ticker] = 0
