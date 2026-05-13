@@ -850,20 +850,27 @@ export default function OptionsPnLPanel() {
                     ? Math.round((combinedDisplay + (longPutStrike - livePriceForOverride) * shares) * 100) / 100
                     : null
                   const isExpanded = expandedTicker === ticker
+                  const isEditingNW = editingOverride === ticker
+                  const hasOverrideNW = shareOverrides[ticker] !== undefined || priceOverrides[ticker] !== undefined
                   const wkBreakdown = weeklyBreakdown[ticker] || []
                   return (
                     <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                       <div
                         onClick={() => setExpandedTicker(isExpanded ? null : ticker)}
-                        style={{ padding: '8px 12px', borderRadius: isExpanded ? '8px 8px 0 0' : '8px', fontSize: '12px', cursor: 'pointer',
+                        style={{ padding: '8px 12px', borderRadius: isExpanded || isEditingNW ? '8px 8px 0 0' : '8px', fontSize: '12px', cursor: 'pointer',
                           background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                          border: `1px solid ${border}`, borderBottom: isExpanded ? 'none' : undefined }}>
+                          border: `1px solid ${hasOverrideNW ? '#f59e0b' : border}`, borderBottom: (isExpanded || isEditingNW) ? 'none' : undefined }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                           <span style={{ fontWeight: '700', color: text }}>
                             {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
                             {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
                           </span>
-                          <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingOverride(isEditingNW ? null : ticker) }}
+                              title="Override shares / from price"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: hasOverrideNW ? '#f59e0b' : textMid, padding: '0', lineHeight: 1 }}>✎</button>
+                            <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
+                          </div>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <div style={{ color: optPnl >= 0 ? green : red }}>Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}</div>
@@ -900,7 +907,7 @@ export default function OptionsPnLPanel() {
                         </div>
                       </div>
                       {isExpanded && wkBreakdown.length > 0 && (
-                        <div style={{ border: `1px solid ${border}`, borderTop: 'none', borderRadius: '0 0 8px 8px',
+                        <div style={{ border: `1px solid ${hasOverrideNW ? '#f59e0b' : border}`, borderTop: 'none', borderRadius: isEditingNW ? '0' : '0 0 8px 8px',
                           background: isDark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)', fontSize: '11px' }}>
                           {wkBreakdown.map((wk, i) => {
                             const { monday } = getMondayOfWeek(wk.weekStart)
@@ -921,6 +928,33 @@ export default function OptionsPnLPanel() {
                               </div>
                             )
                           })}
+                        </div>
+                      )}
+                      {isEditingNW && (
+                        <div style={{ padding: '8px 10px', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '5px',
+                          background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                          border: `1px solid ${hasOverrideNW ? '#f59e0b' : border}`, borderTop: 'none', borderRadius: '0 0 8px 8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ color: textMid, width: '54px' }}>Shares:</span>
+                            <input type="number" min="0"
+                              defaultValue={shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : (serverShares || '')}
+                              onChange={e => saveShareOverride(ticker, e.target.value)}
+                              style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{ color: textMid, width: '54px' }}>From $:</span>
+                            <input type="number" min="0" step="0.01"
+                              defaultValue={priceOverrides[ticker] !== undefined ? priceOverrides[ticker] : ''}
+                              placeholder="buy price"
+                              onChange={e => savePriceOverride(ticker, e.target.value)}
+                              style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button onClick={() => setEditingOverride(null)}
+                              style={{ fontSize: '10px', color: '#fff', background: '#667eea', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Done</button>
+                            {hasOverrideNW && <button onClick={() => { clearOverrides(ticker); setEditingOverride(null) }}
+                              style={{ fontSize: '10px', color: textMid, background: 'none', border: `1px solid ${border}`, borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Clear</button>}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1046,9 +1080,22 @@ export default function OptionsPnLPanel() {
                     ? optPnl + (unrealizedPnl ?? 0) + (stockPnl ?? 0)
                     : optPnl || null
                 const shares1w = stockEntry?.shares
+                const isEditing1w = editingOverride === ticker
+                const hasOverride1w = shareOverrides[ticker] !== undefined || priceOverrides[ticker] !== undefined
+                const effShares1w = shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : shares1w
+                const fromPriceOverride1w = priceOverrides[ticker]
+                const livePrice1w = weekOffset === 0 ? (stockPriceByTicker[ticker] ?? null) : (stockEntry?.toPrice ?? null)
+                const stockPnlDisplay = fromPriceOverride1w !== undefined && livePrice1w != null && (effShares1w ?? 0) > 0
+                  ? Math.round((livePrice1w - fromPriceOverride1w) * effShares1w * 100) / 100
+                  : stockPnl
+                const combinedDisplay1w = weekOffset === 0
+                  ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0) + (stockPnlDisplay ?? 0)
+                  : stockPnlDisplay !== undefined || unrealizedPnl !== undefined
+                    ? optPnl + (unrealizedPnl ?? 0) + (stockPnlDisplay ?? 0)
+                    : optPnl || null
                 // Scale only stock P&L to 100sh — options/unrealized are independent of share count
-                const combined100 = combined != null && shares1w && shares1w !== 100 && stockPnl !== undefined
-                  ? Math.round((combined - stockPnl + stockPnl * 100 / shares1w) * 100) / 100
+                const combined100 = combinedDisplay1w != null && effShares1w && effShares1w !== 100 && stockPnlDisplay !== undefined
+                  ? Math.round((combinedDisplay1w - (stockPnlDisplay ?? 0) + (stockPnlDisplay ?? 0) * 100 / effShares1w) * 100) / 100
                   : null
                 const isExpanded = expandedTicker === ticker
                 const sp = weekOffset === 0 ? (stockPriceByTicker[ticker] || stockEntry?.toPrice) : stockEntry?.toPrice
@@ -1057,18 +1104,23 @@ export default function OptionsPnLPanel() {
                     <div
                       onClick={() => { setExpandedTicker(isExpanded ? null : ticker); setTradeSearch('') }}
                       style={{
-                        padding: '8px 12px', borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+                        padding: '8px 12px', borderRadius: isExpanded || isEditing1w ? '8px 8px 0 0' : '8px',
                         background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                        border: `1px solid ${border}`,
+                        border: `1px solid ${hasOverride1w ? '#f59e0b' : border}`,
                         fontSize: '12px', cursor: trades.length > 0 ? 'pointer' : 'default',
-                        borderBottom: isExpanded ? 'none' : `1px solid ${border}`
+                        borderBottom: isExpanded || isEditing1w ? 'none' : `1px solid ${hasOverride1w ? '#f59e0b' : border}`
                       }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                         <span style={{ fontWeight: '700', color: text }}>
                           {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
                           {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
                         </span>
-                        {trades.length > 0 && <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <button onClick={(e) => { e.stopPropagation(); setEditingOverride(isEditing1w ? null : ticker) }}
+                            title="Override shares / from price"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: hasOverride1w ? '#f59e0b' : textMid, padding: '0', lineHeight: 1 }}>✎</button>
+                          {trades.length > 0 && <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'} {trades.length} trade{trades.length !== 1 ? 's' : ''}</span>}
+                        </div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         {optPnl !== 0 && <div style={{ color: optPnl >= 0 ? green : red }}>
@@ -1089,9 +1141,15 @@ export default function OptionsPnLPanel() {
                             Puts: {realizedPuts >= 0 ? '+' : ''}{fmt(realizedPuts)}
                           </div>
                         )}
-                        {stockPnl !== undefined && (
-                          <div title={stockTooltip} style={{ color: stockPnl >= 0 ? green : red, cursor: stockTooltip ? 'help' : 'default' }}>
-                            Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}{stockEntry?.fromPrice && stockEntry?.toPrice ? <span style={{ color: textMid, fontWeight: '400' }}> (${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toPrice.toFixed(2)})</span> : stockEntry?.fromPrice ? <span style={{ color: textMid, fontWeight: '400' }}> (${stockEntry.fromPrice.toFixed(2)})</span> : null}
+                        {stockPnlDisplay !== undefined && (
+                          <div title={fromPriceOverride1w === undefined ? stockTooltip : undefined}
+                            style={{ color: stockPnlDisplay >= 0 ? green : red, cursor: stockTooltip && fromPriceOverride1w === undefined ? 'help' : 'default' }}>
+                            Stock: {stockPnlDisplay >= 0 ? '+' : ''}{fmt(stockPnlDisplay)}
+                            {fromPriceOverride1w !== undefined && livePrice1w
+                              ? <span style={{ color: textMid, fontWeight: '400' }}> (${Number(fromPriceOverride1w).toFixed(2)} → ${Number(livePrice1w).toFixed(2)}<span style={{ color: '#f59e0b' }}>✎</span>)</span>
+                              : stockEntry?.fromPrice && stockEntry?.toPrice
+                                ? <span style={{ color: textMid, fontWeight: '400' }}> (${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toPrice.toFixed(2)})</span>
+                                : stockEntry?.fromPrice ? <span style={{ color: textMid, fontWeight: '400' }}> (${stockEntry.fromPrice.toFixed(2)})</span> : null}
                           </div>
                         )}
                         {weekOffset === 0 && preMarketPrices[ticker] && (
@@ -1112,41 +1170,67 @@ export default function OptionsPnLPanel() {
                         {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}{rp.shortCallPositions?.length > 0 && ` (${rp.shortCallPositions.map(x => `$${x.strike} @ $${x.mark}`).join(' / ')})`}</div>}
                         {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}{rp.longPutPositions?.length > 0 && ` (${rp.longPutPositions.map(x => `$${x.strike} @ $${x.mark}`).join(' / ')})`}</div>}
                         {weekOffset === 0 && !isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
-                        {combined !== null && (
-                          <div style={{ color: combined >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
-                            Net: {combined >= 0 ? '+' : ''}{fmt(combined)}
+                        {combinedDisplay1w !== null && (
+                          <div style={{ color: combinedDisplay1w >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                            Net: {combinedDisplay1w >= 0 ? '+' : ''}{fmt(combinedDisplay1w)}
                           </div>
                         )}
                         {combined100 !== null && (
                           <div style={{ color: textMid, fontSize: '10px' }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>
                         )}
-                        {combined !== null && rp != null && (rp.shortCall != null || rp.longPut != null) && (() => {
+                        {combinedDisplay1w !== null && rp != null && (rp.shortCall != null || rp.longPut != null) && (() => {
                           const remTotal = Math.round(((rp.shortCall ?? 0) * 100 - (rp.longPut ?? 0) * 100) * 100) / 100
-                          const netRem = Math.round((combined + remTotal) * 100) / 100
+                          const netRem = Math.round((combinedDisplay1w + remTotal) * 100) / 100
                           return (
                             <div style={{ color: netRem >= 0 ? green : red, fontWeight: '700', fontSize: '11px' }}>
                               Net + Rem: {netRem >= 0 ? '+' : ''}{fmt(netRem)}
                             </div>
                           )
                         })()}
-                        {combined !== null && rp?.shortCallPositions?.length > 0 && (() => {
+                        {combinedDisplay1w !== null && rp?.shortCallPositions?.length > 0 && (() => {
                           const sc = Math.min(...rp.shortCallPositions.map(p => p.strike))
-                          const sp1w = weekOffset === 0 ? stockPriceByTicker[ticker] : null
-                          const sh = shares1w
-                          if (!sp1w || !sh) return null
-                          const val = Math.round((combined + (sc - sp1w) * sh) * 100) / 100
+                          const sp1w = weekOffset === 0 ? (livePrice1w ?? stockPriceByTicker[ticker]) : null
+                          if (!sp1w || !effShares1w) return null
+                          const val = Math.round((combinedDisplay1w + (sc - sp1w) * effShares1w) * 100) / 100
                           return <div style={{ color: val >= 0 ? green : red, fontSize: '11px' }}>Max: {val >= 0 ? '+' : ''}{fmt(val)}<span style={{ color: textMid }}> @${sc}</span></div>
                         })()}
-                        {combined !== null && rp?.longPutPositions?.length > 0 && (() => {
+                        {combinedDisplay1w !== null && rp?.longPutPositions?.length > 0 && (() => {
                           const lp = Math.max(...rp.longPutPositions.map(p => p.strike))
-                          const sp1w = weekOffset === 0 ? stockPriceByTicker[ticker] : null
-                          const sh = shares1w
-                          if (!sp1w || !sh) return null
-                          const val = Math.round((combined + (lp - sp1w) * sh) * 100) / 100
+                          const sp1w = weekOffset === 0 ? (livePrice1w ?? stockPriceByTicker[ticker]) : null
+                          if (!sp1w || !effShares1w) return null
+                          const val = Math.round((combinedDisplay1w + (lp - sp1w) * effShares1w) * 100) / 100
                           return <div style={{ color: val >= 0 ? green : red, fontSize: '11px' }}>Floor: {val >= 0 ? '+' : ''}{fmt(val)}<span style={{ color: textMid }}> @${lp}</span></div>
                         })()}
                       </div>
                     </div>
+                    {isEditing1w && (
+                      <div style={{ padding: '8px 10px', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '5px',
+                        background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                        border: `1px solid ${hasOverride1w ? '#f59e0b' : border}`, borderTop: 'none',
+                        borderRadius: isExpanded ? '0' : '0 0 8px 8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ color: textMid, width: '54px' }}>Shares:</span>
+                          <input type="number" min="0"
+                            defaultValue={shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : (shares1w || '')}
+                            onChange={e => saveShareOverride(ticker, e.target.value)}
+                            style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ color: textMid, width: '54px' }}>From $:</span>
+                          <input type="number" min="0" step="0.01"
+                            defaultValue={priceOverrides[ticker] !== undefined ? priceOverrides[ticker] : ''}
+                            placeholder="buy price"
+                            onChange={e => savePriceOverride(ticker, e.target.value)}
+                            style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button onClick={() => setEditingOverride(null)}
+                            style={{ fontSize: '10px', color: '#fff', background: '#667eea', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Done</button>
+                          {hasOverride1w && <button onClick={() => { clearOverrides(ticker); setEditingOverride(null) }}
+                            style={{ fontSize: '10px', color: textMid, background: 'none', border: `1px solid ${border}`, borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Clear</button>}
+                        </div>
+                      </div>
+                    )}
                     {isExpanded && (
                       <div style={{
                         border: `1px solid ${border}`, borderTop: 'none',
