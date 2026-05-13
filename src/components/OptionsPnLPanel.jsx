@@ -402,6 +402,7 @@ export default function OptionsPnLPanel() {
   const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
 
   // Cumulative totals across last N weeks (0 = all)
+  // Uses the same histContrib algorithm as the bottom Total Net so both always agree
   const cumulativeTotals = (() => {
     if (!data) return { options: 0, stock: 0, other: 0, net: 0, weeks: 0, fromDate: null }
     const curWk = data.weekStart || ''
@@ -409,21 +410,38 @@ export default function OptionsPnLPanel() {
       .filter(w => !curWk || w.weekStart <= curWk)
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
     const slice = cumulativeWeeks === 0 ? allWeeks : allWeeks.slice(0, cumulativeWeeks)
-    let opts = 0, stk = 0, oth = 0, net = 0
-    slice.forEach(w => {
-      if (w.weekStart === curWk) {
-        opts += optionsWeekPnL; stk += totalStockPnL; oth += otherStockPnL
-      } else {
-        opts += Object.values(w.byUnderlying || {}).reduce((s, v) => s + v, 0)
-        stk += Object.values(w.stockDelta || {}).reduce((s, v) => s + v, 0)
-        oth += Object.values(w.otherStockDelta || {}).reduce((s, v) => s + v, 0)
-      }
+    const histSlice = slice.filter(w => w.weekStart !== curWk)
+
+    // Historical contribution — identical to bottom Total Net's histContrib
+    let histOpts = 0, histStk = 0, histOth = 0
+    histSlice.forEach(w => {
+      Object.entries(w.byUnderlying || {}).forEach(([ticker, optPnl]) => {
+        histOpts += optPnl
+        histStk += w.stockDelta?.[ticker] ?? 0
+      })
+      histOth += Object.values(w.otherStockDelta || {}).reduce((s, v) => s + v, 0)
     })
-    net = opts + stk + oth
+
+    // Override adjustment — same logic as bottom, using server Yahoo prices from data
+    let overrideAdj = 0
+    Object.entries(priceOverrides).forEach(([ticker, fromPrice]) => {
+      const liveStockEntry = data?.weeklyStockPnL?.[ticker]
+      const livePrice = data?.optionUnderlyingPrices?.[ticker] ?? liveStockEntry?.toPrice
+      if (livePrice == null) return
+      const effShares = shareOverrides[ticker] !== undefined ? shareOverrides[ticker]
+        : (cumulativeStockPrices[ticker]?.shares ?? liveStockEntry?.shares ?? 0)
+      if (!effShares) return
+      const overridePnl = (livePrice - fromPrice) * effShares
+      const histStockSum = histSlice.reduce((s, w) => s + (w.stockDelta?.[ticker] ?? 0), 0)
+      const serverPnl = histStockSum + (liveStockEntry?.pnl ?? 0)
+      overrideAdj += overridePnl - serverPnl
+    })
+
+    const net = netWeekPnL + histOpts + histStk + histOth + overrideAdj
     return {
-      options: Math.round(opts * 100) / 100,
-      stock: Math.round(stk * 100) / 100,
-      other: Math.round(oth * 100) / 100,
+      options: Math.round((optionsWeekPnL + histOpts) * 100) / 100,
+      stock: Math.round((totalStockPnL + histStk) * 100) / 100,
+      other: Math.round((otherStockPnL + histOth) * 100) / 100,
       net: Math.round(net * 100) / 100,
       weeks: slice.length,
       fromDate: slice[slice.length - 1]?.weekStart || null
