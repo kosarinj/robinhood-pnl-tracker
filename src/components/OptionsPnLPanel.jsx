@@ -785,7 +785,22 @@ export default function OptionsPnLPanel() {
                   return s + optPnl + (w.stockDelta?.[ticker] ?? 0)
                 }, 0)
               }, 0)
-              const total = Math.round((netWeekPnL + histContrib) * 100) / 100
+              // Adjust for any share/price overrides — card values use overrides, so Total Net must too
+              let overrideAdj = 0
+              Object.entries(priceOverrides).forEach(([ticker, fromPrice]) => {
+                const livePrice = stockPriceByTicker[ticker]
+                if (livePrice == null) return
+                const ovShares = shareOverrides[ticker]
+                const liveStockEntry = data?.weeklyStockPnL?.[ticker]
+                const serverShares = cumulativeStockPrices[ticker]?.shares ?? liveStockEntry?.shares ?? 0
+                const effShares = ovShares !== undefined ? ovShares : serverShares
+                if (!effShares) return
+                const overridePnl = (livePrice - fromPrice) * effShares
+                const histStockSum = histSlice.reduce((s, w) => s + (w.stockDelta?.[ticker] ?? 0), 0)
+                const serverPnl = histStockSum + (liveStockEntry?.pnl ?? 0)
+                overrideAdj += overridePnl - serverPnl
+              })
+              const total = Math.round((netWeekPnL + histContrib + overrideAdj) * 100) / 100
               const avgPerWk = numWeeks > 0 ? Math.round(total / numWeeks * 100) / 100 : null
               return <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '12px', fontWeight: '700', color: total >= 0 ? green : red }}>
@@ -1011,8 +1026,20 @@ export default function OptionsPnLPanel() {
               {(() => {
                 // For the current week, use the same calculation as "Wk — Net Total" so they match.
                 // For historical weeks, sum per-ticker cash flow + stock (no unrealized/other stocks).
+                let overrideAdj1w = 0
+                if (weekOffset === 0) {
+                  Object.entries(priceOverrides).forEach(([ticker, fromPrice]) => {
+                    const livePrice = stockPriceByTicker[ticker]
+                    if (livePrice == null) return
+                    const ovShares = shareOverrides[ticker]
+                    const liveStockEntry = data?.weeklyStockPnL?.[ticker]
+                    const effShares = ovShares !== undefined ? ovShares : (liveStockEntry?.shares ?? 0)
+                    if (!effShares) return
+                    overrideAdj1w += (livePrice - fromPrice) * effShares - (liveStockEntry?.pnl ?? 0)
+                  })
+                }
                 const total = weekOffset === 0
-                  ? Math.round(netWeekPnL * 100) / 100
+                  ? Math.round((netWeekPnL + overrideAdj1w) * 100) / 100
                   : Object.entries(wkByUnderlying).reduce((sum, [ticker, optPnl]) => {
                       const stockEntry = wkStockByTicker[ticker]
                       const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
