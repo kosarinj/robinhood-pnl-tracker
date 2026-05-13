@@ -140,6 +140,10 @@ export default function OptionsPnLPanel() {
   const [whatIfWeek, setWhatIfWeek] = useState(null) // null = current week, or 'YYYY-MM-DD'
   const [showScenario, setShowScenario] = useState(false)
   const [scenarioMarks, setScenarioMarks] = useState({})
+  const [cumulativeWeeks, setCumulativeWeeks] = useState(10)
+  const [shareOverrides, setShareOverrides] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('shareOverrides') || '{}') } catch { return {} }
+  })
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -363,6 +367,36 @@ export default function OptionsPnLPanel() {
     ? (data?.currentWeekRealizedTotal || 0) + totalUnrealizedPnl
     : (data?.currentWeekRealizedTotal || data?.currentWeekPnL || 0)
   const netWeekPnL = optionsWeekPnL + totalStockPnL + otherStockPnL
+
+  // Cumulative totals across last N weeks (0 = all)
+  const cumulativeTotals = (() => {
+    if (!data) return { options: 0, stock: 0, other: 0, net: 0, weeks: 0, fromDate: null }
+    const curWk = data.weekStart || ''
+    const allWeeks = [...(data.weeks || [])]
+      .filter(w => !curWk || w.weekStart <= curWk)
+      .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    const slice = cumulativeWeeks === 0 ? allWeeks : allWeeks.slice(0, cumulativeWeeks)
+    let opts = 0, stk = 0, oth = 0, net = 0
+    slice.forEach(w => {
+      if (w.weekStart === curWk) {
+        opts += optionsWeekPnL; stk += totalStockPnL; oth += otherStockPnL; net += netWeekPnL
+      } else {
+        opts += Object.values(w.byUnderlying || {}).reduce((s, v) => s + v, 0)
+        stk += Object.values(w.stockDelta || {}).reduce((s, v) => s + v, 0)
+        oth += Object.values(w.otherStockDelta || {}).reduce((s, v) => s + v, 0)
+        net += (w.totalDelta || 0)
+      }
+    })
+    return {
+      options: Math.round(opts * 100) / 100,
+      stock: Math.round(stk * 100) / 100,
+      other: Math.round(oth * 100) / 100,
+      net: Math.round(net * 100) / 100,
+      weeks: slice.length,
+      fromDate: slice[slice.length - 1]?.weekStart || null
+    }
+  })()
+
   // Next-week unrealized: positions expiring after this Friday and up to next Friday
   const thisWeekFriday = data?.weekStart
     ? (() => { const d = new Date(data.weekStart + 'T12:00:00'); d.setDate(d.getDate() + 4); return d.toISOString().slice(0, 10) })()
@@ -467,6 +501,36 @@ export default function OptionsPnLPanel() {
           {(loading || posLoading) ? '…' : '↻ Refresh All'}
         </button>
       </div>
+      {/* Cumulative P&L section */}
+      <div style={{ ...cardStyle, marginBottom: '16px', borderLeft: `4px solid #667eea` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', color: '#667eea' }}>Cumulative P&L</div>
+            {cumulativeTotals.fromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Since {fmtDate(cumulativeTotals.fromDate)} · {cumulativeTotals.weeks}W</div>}
+          </div>
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            {[[4,4],[8,8],[10,10],[13,13],[0,'All']].map(([val, label]) => (
+              <button key={val} onClick={() => setCumulativeWeeks(val)} style={{ ...btnStyle(cumulativeWeeks === val), padding: '3px 10px', fontSize: '11px' }}>{label === 'All' ? 'All' : `${label}W`}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
+          {[
+            ['Options', cumulativeTotals.options],
+            ['Stock', cumulativeTotals.stock],
+            ['Other Stocks', cumulativeTotals.other],
+            ['Net Total', cumulativeTotals.net],
+          ].map(([label, val]) => (
+            <div key={label} style={{ padding: '10px 14px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${border}` }}>
+              <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', color: textMid, marginBottom: '4px' }}>{label}</div>
+              <div style={{ fontSize: '1.4rem', fontWeight: '800', color: loading ? textMid : val >= 0 ? green : red, lineHeight: 1 }}>
+                {loading ? '…' : (val >= 0 ? '+' : '') + fmt(val)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: `2px solid ${border}`, paddingBottom: '0' }}>
         {[['week', 'This Week'], ['history', 'History']].map(([key, label]) => (
@@ -692,7 +756,8 @@ export default function OptionsPnLPanel() {
                     : undefined
                   const optTotal = optPnl + (unrealizedPnl ?? 0)
                   const combined = totalStock !== undefined ? optTotal + totalStock : null
-                  const shares = priceRange?.shares ?? liveStockEntry?.shares
+                  const serverShares = priceRange?.shares ?? liveStockEntry?.shares
+                  const shares = shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : serverShares
                   // Scale only stock P&L to 100sh — options/unrealized are independent of share count
                   const combined100 = combined != null && shares && shares !== 100 && totalStock !== undefined
                     ? Math.round((combined - totalStock + totalStock * 100 / shares) * 100) / 100
@@ -730,6 +795,35 @@ export default function OptionsPnLPanel() {
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <div style={{ color: optPnl >= 0 ? green : red }}>Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}</div>
+                          {serverShares != null && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: textMid }}>
+                              <span>Shares:</span>
+                              <input
+                                type="number"
+                                value={shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : (serverShares || '')}
+                                onChange={e => {
+                                  const val = e.target.value
+                                  const updated = { ...shareOverrides }
+                                  if (!val || isNaN(Number(val))) delete updated[ticker]
+                                  else updated[ticker] = Number(val)
+                                  setShareOverrides(updated)
+                                  localStorage.setItem('shareOverrides', JSON.stringify(updated))
+                                }}
+                                onClick={e => e.stopPropagation()}
+                                min="0"
+                                style={{ width: '55px', fontSize: '10px', padding: '1px 4px', borderRadius: '3px',
+                                  border: `1px solid ${shareOverrides[ticker] !== undefined ? '#f59e0b' : border}`,
+                                  background: surface, color: text }}
+                              />
+                              {shareOverrides[ticker] !== undefined && (
+                                <button onClick={e => {
+                                  e.stopPropagation()
+                                  const u = { ...shareOverrides }; delete u[ticker]
+                                  setShareOverrides(u); localStorage.setItem('shareOverrides', JSON.stringify(u))
+                                }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: textMid, fontSize: '10px', padding: 0, lineHeight: 1 }}>✕</button>
+                              )}
+                            </div>
+                          )}
                           {totalStock !== undefined && (
                             <div style={{ color: totalStock >= 0 ? green : red }}>
                               Stock: {totalStock >= 0 ? '+' : ''}{fmt(totalStock)}

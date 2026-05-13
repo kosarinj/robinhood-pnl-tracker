@@ -158,6 +158,7 @@ function AuthenticatedApp({ user }) {
   const [searchChartSymbol, setSearchChartSymbol] = useState('') // Symbol to search for chart
   const [showSearchChart, setShowSearchChart] = useState(false) // Whether to show chart search input
   const [displayChartSymbol, setDisplayChartSymbol] = useState(null) // Symbol to display in chart
+  const [activeMainTab, setActiveMainTab] = useState('dashboard')
 
   // Helper function to get dynamic color for Daily PNL
   const getDailyPnLColor = (value) => {
@@ -1164,19 +1165,35 @@ function AuthenticatedApp({ user }) {
 
   return (
     <div className="app-container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '14px', fontWeight: '500' }}>👤 {user.username}</span>
+          {useServer && <span title={connected ? 'Connected' : 'Disconnected'} style={{ fontSize: '13px', color: connected ? '#22c55e' : '#ef4444' }}>●</span>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '11px', opacity: 0.4 }}>
             {new Date(__BUILD_TIME__).toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </span>
+          <label className="upload-button" style={{ margin: 0 }}>
+            📁 Upload CSV
+            <input type="file" accept=".csv" onChange={(e) => { const file = e.target.files[0]; if (file) handleFileUpload(file) }} style={{ display: 'none' }} />
+          </label>
           <ThemeToggle />
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
+      {/* Main tab navigation */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '2px solid #e2e8f0', paddingBottom: '0' }}>
+        {[['dashboard', '📊 Dashboard'], ['analytics', '🔬 Analytics']].map(([key, label]) => (
+          <button key={key} onClick={() => setActiveMainTab(key)} style={{
+            padding: '8px 24px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
+            background: 'none', borderBottom: activeMainTab === key ? '2px solid #667eea' : '2px solid transparent',
+            marginBottom: '-2px', color: activeMainTab === key ? '#667eea' : '#64748b', transition: 'color 0.15s'
+          }}>{label}</button>
+        ))}
+      </div>
+
+      <div style={{ display: activeMainTab === 'analytics' ? 'flex' : 'none', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           {useServer && connected && uploadDates.length > 0 && (
@@ -1374,7 +1391,7 @@ function AuthenticatedApp({ user }) {
       )}
 
       {/* Sale Opportunities View */}
-      {pnlData.length > 0 && (
+      {activeMainTab === 'analytics' && pnlData.length > 0 && (
         <div style={{ marginBottom: '16px' }}>
           <button
             className="upload-button"
@@ -2403,18 +2420,20 @@ function AuthenticatedApp({ user }) {
       )}
 
       {/* Daily P&L Chart */}
-      <DailyPnLChart
-        useServer={useServer}
-        connected={connected}
-        trades={trades}
-        currentPrices={currentPrices}
-      />
+      {activeMainTab === 'analytics' && (
+        <DailyPnLChart
+          useServer={useServer}
+          connected={connected}
+          trades={trades}
+          currentPrices={currentPrices}
+        />
+      )}
 
       {/* Options P&L Weekly Panel */}
-      <OptionsPnLPanel />
+      {activeMainTab === 'dashboard' && <OptionsPnLPanel />}
 
       {/* Support & Resistance Levels */}
-      {connected && (
+      {activeMainTab === 'analytics' && connected && (
         <SupportResistanceLevels
           socket={socketService.socket}
           symbols={stockSymbols}
@@ -2424,8 +2443,8 @@ function AuthenticatedApp({ user }) {
         />
       )}
 
-      {/* Lookup Symbol Signal & Market Analysis - Always visible */}
-      <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+      {/* Lookup Symbol Signal & Market Analysis */}
+      <div style={{ display: activeMainTab === 'analytics' ? 'block' : 'none', textAlign: 'center', marginBottom: '20px' }}>
         <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
           <button
             onClick={() => setShowSymbolLookup(true)}
@@ -2467,7 +2486,7 @@ function AuthenticatedApp({ user }) {
         </p>
       </div>
 
-      {pnlData.length > 0 && !loading && (
+      {activeMainTab === 'analytics' && pnlData.length > 0 && !loading && (
           <>
             {lastPriceUpdate && (
               <div style={{
