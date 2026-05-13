@@ -2488,6 +2488,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const monday = new Date(week.weekStart + 'T12:00:00')
         const prevFriStr = new Date(monday.getTime() - 3 * 86400000).toISOString().slice(0, 10)
         const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
+        const prevPrevFriStr = new Date(monday.getTime() - 10 * 86400000).toISOString().slice(0, 10)
 
         const weekPositions = databaseService.getPositionsAsOf(req.user.userId, prevFriStr)
         const weekComplete = thisFriStr <= todayStr
@@ -2500,17 +2501,37 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
           ? databaseService.getStockBuysInPeriod(req.user.userId, prevFriStr, thisFriStr, allWeekTickers)
           : {}
 
+        // Buys during the PREVIOUS week (prevPrevFri exclusive → prevFri inclusive).
+        // getPositionsAsOf(prevFriStr) is inclusive, so shares bought ON prevFriStr are already
+        // in pos — but weekBuys uses prevFriStr as exclusive lower bound and misses them.
+        // We need prevWeekBuys to detect and correctly price those shares.
+        const prevWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, prevPrevFriStr, prevFriStr, allWeekTickers)
+
         const stockDelta = {}
         allWeekTickers.forEach(ticker => {
           const pos = weekPositions[ticker]
           const DEBUG = ticker === 'TQQQ'
-          if (DEBUG) console.log(`[TQQQ hist] week=${week.weekStart} pos=${pos} prevFri=${prevFriStr} thisFri=${thisFriStr} complete=${weekComplete} prevClose=${findClose(tickerDateMap[ticker] || {}, prevFriStr)} thisClose=${findClose(tickerDateMap[ticker] || {}, thisFriStr)} buys=${JSON.stringify(weekBuys[ticker])}`)
+          if (DEBUG) console.log(`[TQQQ hist] week=${week.weekStart} pos=${pos} prevFri=${prevFriStr} thisFri=${thisFriStr} complete=${weekComplete} rawPrevClose=${findClose(tickerDateMap[ticker] || {}, prevFriStr)} thisClose=${findClose(tickerDateMap[ticker] || {}, thisFriStr)} weekBuys=${JSON.stringify(weekBuys[ticker])} prevWeekBuys=${JSON.stringify(prevWeekBuys[ticker])}`)
           if (!tickerDateMap[ticker]) return
 
           if (pos && pos >= 100) {
             // Normal: had 100+ shares at start of week
-            const prevClose = findClose(tickerDateMap[ticker], prevFriStr)
+            const rawPrevClose = findClose(tickerDateMap[ticker], prevFriStr)
             const thisClose = weekComplete ? findClose(tickerDateMap[ticker], thisFriStr) : 0
+
+            // If large buys happened during the PREVIOUS week they're already included in pos
+            // (getPositionsAsOf is inclusive) but not in weekBuys (exclusive lower bound).
+            // Blend prevClose: old shares use rawPrevClose, recently-bought shares use buy price.
+            // This prevents a price spike on the buy date from inflating the "from" price.
+            const prevBuy = prevWeekBuys[ticker]
+            let prevClose = rawPrevClose
+            if (prevBuy && prevBuy.netChange > 0) {
+              const oldPos = Math.max(0, pos - prevBuy.netChange)
+              prevClose = oldPos > 0
+                ? (rawPrevClose * oldPos + prevBuy.avgPrice * prevBuy.netChange) / pos
+                : prevBuy.avgPrice
+            }
+
             if (prevClose > 0) {
               if (!week.stockPrices) week.stockPrices = {}
               week.stockPrices[ticker] = { fromPrice: prevClose, toPrice: thisClose || prevClose, shares: pos }
