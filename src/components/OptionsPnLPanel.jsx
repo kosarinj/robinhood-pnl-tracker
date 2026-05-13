@@ -148,6 +148,16 @@ export default function OptionsPnLPanel() {
     try { return JSON.parse(localStorage.getItem('priceOverrides') || '{}') } catch { return {} }
   })
   const [editingOverride, setEditingOverride] = useState(null)
+  const [editDraft, setEditDraft] = useState({ shares: '', price: '' })
+
+  useEffect(() => {
+    if (editingOverride) {
+      setEditDraft({
+        shares: shareOverrides[editingOverride] !== undefined ? String(shareOverrides[editingOverride]) : '',
+        price: priceOverrides[editingOverride] !== undefined ? String(priceOverrides[editingOverride]) : ''
+      })
+    }
+  }, [editingOverride])
 
   const saveShareOverride = (ticker, val) => {
     const updated = { ...shareOverrides }
@@ -532,7 +542,7 @@ export default function OptionsPnLPanel() {
             {cumulativeTotals.fromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>Since {fmtDate(cumulativeTotals.fromDate)} · {cumulativeTotals.weeks}W</div>}
           </div>
           <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-            {[[4,4],[8,8],[10,10],[13,13],[0,'All']].map(([val, label]) => (
+            {[[1,1],[2,2],[3,3],[4,4],[5,5],[6,6],[7,7],[8,8],[9,9],[10,10],[0,'All']].map(([val, label]) => (
               <button key={val} onClick={() => setCumulativeWeeks(val)} style={{ ...btnStyle(cumulativeWeeks === val), padding: '3px 10px', fontSize: '11px' }}>{label === 'All' ? 'All' : `${label}W`}</button>
             ))}
           </div>
@@ -747,20 +757,20 @@ export default function OptionsPnLPanel() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <span style={{ fontSize: '10px', color: textMid, width: '58px' }}>Shares:</span>
                             <input type="number" min="0"
-                              defaultValue={ovShares !== undefined ? ovShares : (stockEntry2?.shares || '')}
-                              onChange={e => saveShareOverride(ticker, e.target.value)}
+                              value={editDraft.shares}
+                              onChange={e => setEditDraft(d => ({ ...d, shares: e.target.value }))}
                               style={{ width: '68px', fontSize: '10px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <span style={{ fontSize: '10px', color: textMid, width: '58px' }}>From $:</span>
                             <input type="number" min="0" step="0.01"
-                              defaultValue={ovPrice !== undefined ? ovPrice : ''}
+                              value={editDraft.price}
                               placeholder="buy price"
-                              onChange={e => savePriceOverride(ticker, e.target.value)}
+                              onChange={e => setEditDraft(d => ({ ...d, price: e.target.value }))}
                               style={{ width: '68px', fontSize: '10px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
                           </div>
                           <div style={{ display: 'flex', gap: '6px' }}>
-                            <button onClick={() => setEditingOverride(null)}
+                            <button onClick={() => { saveShareOverride(ticker, editDraft.shares); savePriceOverride(ticker, editDraft.price); setEditingOverride(null) }}
                               style={{ fontSize: '10px', color: '#fff', background: '#667eea', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Done</button>
                             {hasOverride && <button onClick={() => { clearOverrides(ticker); setEditingOverride(null) }}
                               style={{ fontSize: '10px', color: textMid, background: 'none', border: `1px solid ${border}`, borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Clear</button>}
@@ -781,9 +791,11 @@ export default function OptionsPnLPanel() {
               // Current week: use the same netWeekPnL the 1W view shows so NW Total Net = 1W + 1W ago + ...
               const histSlice = byUnderlyingWeeks === 0 ? historicalWeeks : historicalWeeks.slice(0, byUnderlyingWeeks - 1)
               const histContrib = histSlice.reduce((sum, w) => {
-                return sum + Object.entries(w.byUnderlying || {}).reduce((s, [ticker, optPnl]) => {
+                const optStock = Object.entries(w.byUnderlying || {}).reduce((s, [ticker, optPnl]) => {
                   return s + optPnl + (w.stockDelta?.[ticker] ?? 0)
                 }, 0)
+                const otherStock = Object.values(w.otherStockDelta || {}).reduce((s, v) => s + v, 0)
+                return sum + optStock + otherStock
               }, 0)
               // Adjust for any share/price overrides — card values use overrides, so Total Net must too
               let overrideAdj = 0
@@ -952,20 +964,20 @@ export default function OptionsPnLPanel() {
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <span style={{ color: textMid, width: '54px' }}>Shares:</span>
                             <input type="number" min="0"
-                              defaultValue={shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : (serverShares || '')}
-                              onChange={e => saveShareOverride(ticker, e.target.value)}
+                              value={editDraft.shares}
+                              onChange={e => setEditDraft(d => ({ ...d, shares: e.target.value }))}
                               style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                             <span style={{ color: textMid, width: '54px' }}>From $:</span>
                             <input type="number" min="0" step="0.01"
-                              defaultValue={priceOverrides[ticker] !== undefined ? priceOverrides[ticker] : ''}
+                              value={editDraft.price}
                               placeholder="buy price"
-                              onChange={e => savePriceOverride(ticker, e.target.value)}
+                              onChange={e => setEditDraft(d => ({ ...d, price: e.target.value }))}
                               style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
                           </div>
                           <div style={{ display: 'flex', gap: '6px' }}>
-                            <button onClick={() => setEditingOverride(null)}
+                            <button onClick={() => { saveShareOverride(ticker, editDraft.shares); savePriceOverride(ticker, editDraft.price); setEditingOverride(null) }}
                               style={{ fontSize: '10px', color: '#fff', background: '#667eea', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Done</button>
                             {hasOverrideNW && <button onClick={() => { clearOverrides(ticker); setEditingOverride(null) }}
                               style={{ fontSize: '10px', color: textMid, background: 'none', border: `1px solid ${border}`, borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Clear</button>}
@@ -1226,20 +1238,20 @@ export default function OptionsPnLPanel() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                           <span style={{ color: textMid, width: '54px' }}>Shares:</span>
                           <input type="number" min="0"
-                            defaultValue={shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : (shares1w || '')}
-                            onChange={e => saveShareOverride(ticker, e.target.value)}
+                            value={editDraft.shares}
+                            onChange={e => setEditDraft(d => ({ ...d, shares: e.target.value }))}
                             style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                           <span style={{ color: textMid, width: '54px' }}>From $:</span>
                           <input type="number" min="0" step="0.01"
-                            defaultValue={priceOverrides[ticker] !== undefined ? priceOverrides[ticker] : ''}
+                            value={editDraft.price}
                             placeholder="buy price"
-                            onChange={e => savePriceOverride(ticker, e.target.value)}
+                            onChange={e => setEditDraft(d => ({ ...d, price: e.target.value }))}
                             style={{ width: '68px', fontSize: '11px', padding: '2px 4px', borderRadius: '3px', border: `1px solid ${border}`, background: surface, color: text }} />
                         </div>
                         <div style={{ display: 'flex', gap: '6px' }}>
-                          <button onClick={() => setEditingOverride(null)}
+                          <button onClick={() => { saveShareOverride(ticker, editDraft.shares); savePriceOverride(ticker, editDraft.price); setEditingOverride(null) }}
                             style={{ fontSize: '10px', color: '#fff', background: '#667eea', border: 'none', borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Done</button>
                           {hasOverride1w && <button onClick={() => { clearOverrides(ticker); setEditingOverride(null) }}
                             style={{ fontSize: '10px', color: textMid, background: 'none', border: `1px solid ${border}`, borderRadius: '4px', cursor: 'pointer', padding: '2px 8px' }}>Clear</button>}
