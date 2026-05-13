@@ -668,7 +668,7 @@ export default function OptionsPnLPanel() {
         </div>
 
         {/* Total Investment strip — stock value + net options premium per ticker */}
-        {!isHistoricalView && openPositions.length > 0 && (() => {
+        {!isHistoricalView && (openPositions.length > 0 || Object.keys(data?.weeklyStockPnL || {}).length > 0) && (() => {
           // Build options map: shortCredit = premium received, longCost = premium paid
           const optsByTicker = {}
           openPositions.forEach(pos => {
