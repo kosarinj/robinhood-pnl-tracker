@@ -1026,20 +1026,9 @@ export default function OptionsPnLPanel() {
               {(() => {
                 // For the current week, use the same calculation as "Wk — Net Total" so they match.
                 // For historical weeks, sum per-ticker cash flow + stock (no unrealized/other stocks).
-                let overrideAdj1w = 0
-                if (weekOffset === 0) {
-                  Object.entries(priceOverrides).forEach(([ticker, fromPrice]) => {
-                    const livePrice = stockPriceByTicker[ticker]
-                    if (livePrice == null) return
-                    const ovShares = shareOverrides[ticker]
-                    const liveStockEntry = data?.weeklyStockPnL?.[ticker]
-                    const effShares = ovShares !== undefined ? ovShares : (liveStockEntry?.shares ?? 0)
-                    if (!effShares) return
-                    overrideAdj1w += (livePrice - fromPrice) * effShares - (liveStockEntry?.pnl ?? 0)
-                  })
-                }
+                // 1W Total Net uses server values directly — price overrides only apply to 2W+ views
                 const total = weekOffset === 0
-                  ? Math.round((netWeekPnL + overrideAdj1w) * 100) / 100
+                  ? Math.round(netWeekPnL * 100) / 100
                   : Object.entries(wkByUnderlying).reduce((sum, [ticker, optPnl]) => {
                       const stockEntry = wkStockByTicker[ticker]
                       const stockPnl = stockEntry ? (stockEntry?.pnl ?? stockEntry ?? 0) : 0
@@ -1110,11 +1099,10 @@ export default function OptionsPnLPanel() {
                 const isEditing1w = editingOverride === ticker
                 const hasOverride1w = shareOverrides[ticker] !== undefined || priceOverrides[ticker] !== undefined
                 const effShares1w = shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : shares1w
-                const fromPriceOverride1w = priceOverrides[ticker]
+                // 1W uses server's prevClose (last Friday) as the from price — cost-basis overrides only apply to 2W+
+                const fromPriceOverride1w = undefined
                 const livePrice1w = weekOffset === 0 ? (stockPriceByTicker[ticker] ?? null) : (stockEntry?.toPrice ?? null)
-                const stockPnlDisplay = fromPriceOverride1w !== undefined && livePrice1w != null && (effShares1w ?? 0) > 0
-                  ? Math.round((livePrice1w - fromPriceOverride1w) * effShares1w * 100) / 100
-                  : stockPnl
+                const stockPnlDisplay = stockPnl
                 const combinedDisplay1w = weekOffset === 0
                   ? (realizedPnl ?? 0) + (unrealizedPnl ?? 0) + (stockPnlDisplay ?? 0)
                   : stockPnlDisplay !== undefined || unrealizedPnl !== undefined
