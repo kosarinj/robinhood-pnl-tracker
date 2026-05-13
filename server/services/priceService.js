@@ -290,7 +290,10 @@ export class PriceService {
         }
       })
 
-      const closingPrice = quotes.close[closestIndex]
+      // During market hours today's close bar is null — use regularMarketPrice from meta instead
+      const closingPrice = (isToday && quotes.close[closestIndex] == null && result.meta?.regularMarketPrice)
+        ? result.meta.regularMarketPrice
+        : quotes.close[closestIndex]
       const actualDate = new Date(timestamps[closestIndex] * 1000).toISOString().slice(0, 10)
 
       // Save to DB cache for historical dates only — never cache today's price
@@ -365,16 +368,14 @@ export class PriceService {
 
   // Get closing prices for multiple symbols on a specific date
   async getPricesForDate(symbols, dateString) {
-    const isToday = dateString === new Date().toISOString().slice(0, 10)
-    if (isToday) return this.getPrices(symbols)
-
     const prices = {}
     const symbolsToFetch = []
+    const isToday = dateString === new Date().toISOString().slice(0, 10)
 
-    // Skip DB cache for recent dates (last 14 days) — always fetch fresh
+    // Skip DB cache for today or recent dates (last 14 days) — always fetch fresh
     const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
     const isRecent = dateString >= twoWeeksAgo
-    if (this.databaseService && !isRecent) {
+    if (this.databaseService && !isToday && !isRecent) {
       const cachedPrices = this.databaseService.getHistoricalPricesForDate(symbols, dateString)
       Object.assign(prices, cachedPrices)
 

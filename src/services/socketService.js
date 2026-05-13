@@ -348,7 +348,7 @@ class SocketService {
       const timeoutId = setTimeout(() => {
         this.socket.off('trades-loaded', resultHandler)
         reject(new Error('Load trades timeout'))
-      }, 10000)
+      }, 60000)
     })
   }
 
