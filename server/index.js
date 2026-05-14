@@ -2527,9 +2527,14 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
             let prevClose = rawPrevClose
             if (prevBuy && prevBuy.netChange > 0) {
               const oldPos = Math.max(0, pos - prevBuy.netChange)
-              prevClose = oldPos > 0
-                ? (rawPrevClose * oldPos + prevBuy.avgPrice * prevBuy.netChange) / pos
-                : prevBuy.avgPrice
+              // Only blend if old position was already >= 100 shares (normal-path week).
+              // If oldPos < 100, the previous week used the case-3 path which already charged
+              // the buy price as cost basis — blending here would double-count it.
+              if (oldPos >= 100) {
+                prevClose = oldPos > 0
+                  ? (rawPrevClose * oldPos + prevBuy.avgPrice * prevBuy.netChange) / pos
+                  : prevBuy.avgPrice
+              }
             }
 
             if (prevClose > 0) {
