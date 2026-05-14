@@ -527,7 +527,7 @@ export default function OptionsPnLPanel() {
     return m
   }, {})
 
-  // All-time accumulated options P&L by underlying (used for Overall view)
+  // Last 9 weeks accumulated options P&L by underlying (used for Overall view)
   const overallPnLByTicker = (() => {
     if (!data) return {}
     const weeks = data.weeks || []
@@ -535,8 +535,9 @@ export default function OptionsPnLPanel() {
     const sorted = [...weeks]
       .filter(w => !currentWeekStart || w.weekStart <= currentWeekStart)
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    const slice = sorted.slice(0, 9)
     const options = {}
-    sorted.forEach(w => {
+    slice.forEach(w => {
       const isCurrentWeek = w.weekStart === currentWeekStart
       Object.entries(w.byUnderlying || {}).forEach(([ticker, val]) => {
         const contribution = isCurrentWeek ? (w.realizedByUnderlying?.[ticker] ?? 0) : val
@@ -544,6 +545,24 @@ export default function OptionsPnLPanel() {
       })
     })
     return options
+  })()
+
+  // Oldest stockPrices fromPrice per ticker — the week the position first hit ≥100 shares
+  const overallStockFromPrices = (() => {
+    if (!data) return {}
+    const weeks = data.weeks || []
+    const currentWeekStart = data.weekStart || ''
+    const sorted = [...weeks]
+      .filter(w => !currentWeekStart || w.weekStart <= currentWeekStart)
+      .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    const result = {}
+    sorted.forEach(w => {
+      Object.entries(w.stockPrices || {}).forEach(([ticker, prices]) => {
+        // Keep overwriting newest→oldest; final value = oldest week's fromPrice
+        result[ticker] = { fromPrice: prices.fromPrice, weekStart: w.weekStart }
+      })
+    })
+    return result
   })()
 
   const fetchWhatIf = async (overrideWeek) => {
@@ -1492,10 +1511,7 @@ export default function OptionsPnLPanel() {
           </div>
         )}
         {byUnderlyingWeeks === -4 && (() => {
-          const allTickers = [...new Set([
-            ...Object.keys(overallPnLByTicker),
-            ...Object.keys(unrealizedByTicker),
-          ])].sort()
+          const allTickers = Object.keys(overallPnLByTicker).sort()
           if (allTickers.length === 0) return null
           let totalNet = 0
           const rows = allTickers.map(ticker => {
@@ -1503,7 +1519,9 @@ export default function OptionsPnLPanel() {
             const currentUnrealized = unrealizedByTicker[ticker] ?? 0
             const optionsTotal = Math.round((allTimeOptions + currentUnrealized) * 100) / 100
             const currentPrice = stockPriceByTicker[ticker] ?? null
-            const costBasis = priceOverrides[ticker] ?? null
+            const autoCostBasis = overallStockFromPrices[ticker]?.fromPrice ?? null
+            const costBasis = priceOverrides[ticker] ?? autoCostBasis
+            const isAutoPrice = priceOverrides[ticker] == null && autoCostBasis != null
             const liveStockEntry = data?.weeklyStockPnL?.[ticker]
             const serverShares = liveStockEntry?.shares ?? 0
             const effShares = shareOverrides[ticker] !== undefined ? shareOverrides[ticker] : serverShares
@@ -1512,7 +1530,7 @@ export default function OptionsPnLPanel() {
               : null
             const net = stockPnl != null ? Math.round((optionsTotal + stockPnl) * 100) / 100 : null
             if (net != null) totalNet += net
-            return { ticker, optionsTotal, allTimeOptions, currentUnrealized, stockPnl, net, currentPrice, costBasis, effShares }
+            return { ticker, optionsTotal, allTimeOptions, currentUnrealized, stockPnl, net, currentPrice, costBasis, isAutoPrice, effShares }
           })
           totalNet = Math.round(totalNet * 100) / 100
           return (
@@ -1520,14 +1538,14 @@ export default function OptionsPnLPanel() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '8px' }}>
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>Overall Position P&L</div>
-                  <div style={{ fontSize: '10px', color: textMid, marginTop: '2px' }}>Buy price → current · all-time options</div>
+                  <div style={{ fontSize: '10px', color: textMid, marginTop: '2px' }}>Buy price → current · last 9W options</div>
                 </div>
                 {totalNet !== 0 && <div style={{ fontSize: '12px', fontWeight: '700', color: totalNet >= 0 ? green : red }}>
                   Net: {totalNet >= 0 ? '+' : ''}{fmt(totalNet)}
                 </div>}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {rows.map(({ ticker, optionsTotal, allTimeOptions, currentUnrealized, stockPnl, net, currentPrice, costBasis, effShares }) => {
+                {rows.map(({ ticker, optionsTotal, allTimeOptions, currentUnrealized, stockPnl, net, currentPrice, costBasis, isAutoPrice, effShares }) => {
                   const isEditingOv = editingOverride === ticker
                   const hasOverrideOv = shareOverrides[ticker] !== undefined || priceOverrides[ticker] !== undefined
                   return (
@@ -1556,7 +1574,9 @@ export default function OptionsPnLPanel() {
                           {stockPnl != null ? (
                             <div style={{ color: stockPnl >= 0 ? green : red }}>
                               Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
-                              <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${Number(costBasis).toFixed(2)} → ${Number(currentPrice).toFixed(2)}{effShares !== 100 && <span> ×{effShares}sh</span>}</span>
+                              <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>
+                                ${Number(costBasis).toFixed(2)}{isAutoPrice && <span style={{ color: textMid, fontSize: '9px' }}> auto</span>} → ${Number(currentPrice).toFixed(2)}{effShares !== 100 && <span> ×{effShares}sh</span>}
+                              </span>
                             </div>
                           ) : (
                             <div style={{ color: '#f59e0b', fontSize: '11px' }}>Stock: set buy price ✎</div>
