@@ -437,12 +437,14 @@ export default function OptionsPnLPanel() {
       overrideAdj += overridePnl - serverPnl
     })
 
-    const net = netWeekPnL + histOpts + histStk + histOth + overrideAdj
+    const optionsVal = Math.round((optionsWeekPnL + histOpts) * 100) / 100
+    const stockVal = Math.round((totalStockPnL + histStk + overrideAdj) * 100) / 100
+    const otherVal = Math.round((otherStockPnL + histOth) * 100) / 100
     return {
-      options: Math.round((optionsWeekPnL + histOpts) * 100) / 100,
-      stock: Math.round((totalStockPnL + histStk) * 100) / 100,
-      other: Math.round((otherStockPnL + histOth) * 100) / 100,
-      net: Math.round(net * 100) / 100,
+      options: optionsVal,
+      stock: stockVal,
+      other: otherVal,
+      net: Math.round((optionsVal + stockVal + otherVal) * 100) / 100,
       weeks: slice.length,
       fromDate: slice[slice.length - 1]?.weekStart || null
     }
