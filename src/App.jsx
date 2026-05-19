@@ -9,6 +9,7 @@ import DailyPnLChart from './components/DailyPnLChart'
 import SupportResistanceLevels from './components/SupportResistanceLevels'
 import PriceChart from './components/PriceChart'
 import OptionsPnLPanel from './components/OptionsPnLPanel'
+import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
 import StrategyPnLSplit from './components/StrategyPnLSplit'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
@@ -2428,6 +2429,9 @@ function AuthenticatedApp({ user }) {
           currentPrices={currentPrices}
         />
       )}
+
+      {/* Daily Realized P&L Panel */}
+      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={trades} />}
 
       {/* Options P&L Weekly Panel */}
       {activeMainTab === 'dashboard' && <OptionsPnLPanel />}
