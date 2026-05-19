@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts'
+import { useState, useEffect, useCallback } from 'react'
+import { ComposedChart, BarChart, Bar, Cell, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
 const RSI_OVERSOLD = 30
 const RSI_OVERBOUGHT = 70
@@ -21,8 +21,8 @@ function rsiLabel(rsi) {
 
 function stochColor(k) {
   if (k == null) return '#888'
-  if (k >= 80) return '#ef4444'   // overbought → consider puts
-  if (k <= 20) return '#22c55e'   // oversold
+  if (k >= 80) return '#ef4444'
+  if (k <= 20) return '#22c55e'
   return '#94a3b8'
 }
 
@@ -33,6 +33,14 @@ function stochLabel(k, d) {
     ? (k > d ? ' ↑ bullish cross' : k < d ? ' ↓ bearish cross' : '')
     : ''
   return `${state}${cross}`
+}
+
+const fmtVol = (n) => {
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '-' : n > 0 ? '+' : ''
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`
+  return `${sign}${abs}`
 }
 
 export function RSIBadge({ symbol, isDark, onClick }) {
@@ -97,10 +105,42 @@ const CustomTooltip = ({ active, payload, label }) => {
   )
 }
 
+const NetVolTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null
+  const d = payload[0]?.payload
+  if (!d) return null
+  const nv = d.netVolume ?? 0
+  const nvColor = nv >= 0 ? '#22c55e' : '#ef4444'
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '6px', padding: '8px 10px', fontSize: '11px', color: '#e2e8f0' }}>
+      <div style={{ marginBottom: '4px', color: '#94a3b8' }}>{label}</div>
+      {d.open != null && <div>O: <b>${d.open.toFixed(2)}</b> H: <b>${d.high?.toFixed(2)}</b> L: <b>${d.low?.toFixed(2)}</b> C: <b>${d.close?.toFixed(2)}</b></div>}
+      <div style={{ color: '#94a3b8' }}>Vol: {(d.volume / 1000).toFixed(1)}K</div>
+      <div style={{ color: nvColor, fontWeight: '700' }}>Net Vol: {fmtVol(nv)}</div>
+    </div>
+  )
+}
+
+const TF_OPTIONS = [
+  { value: 1, label: '1H' },
+  { value: 2, label: '2H' },
+  { value: 4, label: '4H' },
+  { value: 6, label: '6H' },
+  { value: 24, label: '1D' },
+]
+
 export default function IntradayChart({ symbol, onClose, isDark }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // Net volume state
+  const [netVolTf, setNetVolTf] = useState(4)
+  const [netVolCandlesInput, setNetVolCandlesInput] = useState('12')
+  const [netVolData, setNetVolData] = useState(null)
+  const [netVolLoading, setNetVolLoading] = useState(false)
+
+  const netVolCandles = Math.max(3, Math.min(50, parseInt(netVolCandlesInput) || 12))
 
   useEffect(() => {
     if (!symbol) return
@@ -116,6 +156,18 @@ export default function IntradayChart({ symbol, onClose, isDark }) {
       .finally(() => setLoading(false))
   }, [symbol])
 
+  const fetchNetVol = useCallback(() => {
+    if (!symbol) return
+    setNetVolLoading(true)
+    fetch(`/api/net-volume/${symbol}?tf=${netVolTf}&candles=${netVolCandles}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { if (d.success) setNetVolData(d) })
+      .catch(() => {})
+      .finally(() => setNetVolLoading(false))
+  }, [symbol, netVolTf, netVolCandles])
+
+  useEffect(() => { fetchNetVol() }, [fetchNetVol])
+
   const bg = isDark ? '#0f172a' : '#ffffff'
   const surface = isDark ? '#1e293b' : '#f8fafc'
   const border = isDark ? '#334155' : '#e2e8f0'
@@ -128,7 +180,6 @@ export default function IntradayChart({ symbol, onClose, isDark }) {
   const rsi = data?.rsi
   const rsiCol = rsiColor(rsi)
 
-  // Thin the x-axis labels — show every 60 min
   const intraday = data?.intraday || []
   const tickIndices = new Set()
   intraday.forEach((b, i) => {
@@ -136,12 +187,18 @@ export default function IntradayChart({ symbol, onClose, isDark }) {
     if (min === 0 || min === 30) tickIndices.add(i)
   })
 
-  // Price domain with 0.5% padding
   const closes = intraday.map(b => b.close).filter(Boolean)
   const vwaps = intraday.map(b => b.vwap).filter(Boolean)
   const allPrices = [...closes, ...vwaps]
   const minP = allPrices.length ? Math.min(...allPrices) * 0.998 : 'auto'
   const maxP = allPrices.length ? Math.max(...allPrices) * 1.002 : 'auto'
+
+  // Net volume chart data
+  const nvCandles = netVolData?.candles || []
+  const nvTotal = netVolData?.totalNetVolume ?? 0
+  const nvColor = nvTotal >= 0 ? green : red
+  const nvLabel = nvTotal > 0 ? 'Bullish' : nvTotal < 0 ? 'Bearish' : 'Neutral'
+  const tfLabel = TF_OPTIONS.find(o => o.value === netVolTf)?.label ?? `${netVolTf}H`
 
   return (
     <div style={{
@@ -217,44 +274,30 @@ export default function IntradayChart({ symbol, onClose, isDark }) {
                   width={48}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                {/* VWAP as dashed amber line */}
                 <Line type="monotone" dataKey="vwap" stroke={amber} strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="VWAP" isAnimationActive={false} />
-                {/* Price as solid blue line */}
                 <Line type="monotone" dataKey="close" stroke="#60a5fa" strokeWidth={2} dot={false} name="Price" isAnimationActive={false} />
-                {/* EMA9/21 as reference lines if available */}
                 {data.ema9 && <ReferenceLine y={data.ema9} stroke="#818cf8" strokeDasharray="3 3" strokeWidth={1} label={{ value: `EMA9`, position: 'right', fontSize: 9, fill: '#818cf8' }} />}
                 {data.ema21 && <ReferenceLine y={data.ema21} stroke="#c084fc" strokeDasharray="3 3" strokeWidth={1} label={{ value: `EMA21`, position: 'right', fontSize: 9, fill: '#c084fc' }} />}
               </ComposedChart>
             </ResponsiveContainer>
 
-            {/* RSI chart */}
+            {/* RSI gauge */}
             {rsi != null && (
               <>
                 <div style={{ fontSize: '11px', color: textMid, marginTop: '12px', marginBottom: '4px' }}>
                   RSI (14-day) = <span style={{ color: rsiCol, fontWeight: '700' }}>{rsi}</span>
                   <span style={{ marginLeft: '8px', color: rsiCol }}>{rsiLabel(rsi)}</span>
                 </div>
-                {/* Simple RSI gauge bar */}
                 <div style={{ position: 'relative', height: '20px', background: isDark ? '#1e293b' : '#f1f5f9', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div style={{
-                    position: 'absolute', left: '30%', right: '30%', top: 0, bottom: 0,
-                    background: isDark ? '#334155' : '#e2e8f0'
-                  }} />
-                  <div style={{
-                    position: 'absolute', left: 0, top: '25%', bottom: '25%', width: '1px',
-                    background: red, opacity: 0.5
-                  }} />
-                  <div style={{
-                    position: 'absolute', right: 0, top: '25%', bottom: '25%', width: '1px',
-                    background: green, opacity: 0.5
-                  }} />
+                  <div style={{ position: 'absolute', left: '30%', right: '30%', top: 0, bottom: 0, background: isDark ? '#334155' : '#e2e8f0' }} />
+                  <div style={{ position: 'absolute', left: 0, top: '25%', bottom: '25%', width: '1px', background: red, opacity: 0.5 }} />
+                  <div style={{ position: 'absolute', right: 0, top: '25%', bottom: '25%', width: '1px', background: green, opacity: 0.5 }} />
                   <div style={{
                     position: 'absolute', top: 0, bottom: 0,
                     left: `${Math.min(Math.max(rsi, 0), 100)}%`,
                     transform: 'translateX(-50%)',
                     width: '3px', background: rsiCol, borderRadius: '2px'
                   }} />
-                  {/* Labels */}
                   <span style={{ position: 'absolute', left: '4px', top: '50%', transform: 'translateY(-50%)', fontSize: '9px', color: red, opacity: 0.7 }}>30</span>
                   <span style={{ position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)', fontSize: '9px', color: green, opacity: 0.7 }}>70</span>
                 </div>
@@ -268,6 +311,110 @@ export default function IntradayChart({ symbol, onClose, isDark }) {
             No intraday data available (market may be closed)
           </div>
         )}
+
+        {/* ── Net Volume Section ── */}
+        <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: `1px solid ${border}` }}>
+          {/* Controls row */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ fontSize: '12px', fontWeight: '600', color: text }}>
+              Net Volume
+              {nvCandles.length > 0 && !netVolLoading && (
+                <span style={{
+                  marginLeft: '10px', fontSize: '11px', fontWeight: '700',
+                  color: nvColor, background: `${nvColor}22`,
+                  borderRadius: '4px', padding: '1px 7px'
+                }}>
+                  {fmtVol(nvTotal)} · {nvLabel}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {/* Timeframe selector */}
+              <span style={{ fontSize: '10px', color: textMid }}>TF</span>
+              <div style={{ display: 'flex', gap: '2px' }}>
+                {TF_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setNetVolTf(opt.value)}
+                    style={{
+                      padding: '2px 7px', fontSize: '10px', fontWeight: '600',
+                      border: `1px solid ${netVolTf === opt.value ? '#60a5fa' : border}`,
+                      borderRadius: '4px', cursor: 'pointer',
+                      background: netVolTf === opt.value
+                        ? (isDark ? 'rgba(96,165,250,0.2)' : 'rgba(96,165,250,0.15)')
+                        : 'transparent',
+                      color: netVolTf === opt.value ? '#60a5fa' : textMid
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Candle count */}
+              <span style={{ fontSize: '10px', color: textMid, marginLeft: '6px' }}>Candles</span>
+              <input
+                type="number"
+                value={netVolCandlesInput}
+                min="3" max="50"
+                onChange={e => setNetVolCandlesInput(e.target.value)}
+                onBlur={e => {
+                  const v = Math.max(3, Math.min(50, parseInt(e.target.value) || 12))
+                  setNetVolCandlesInput(String(v))
+                }}
+                style={{
+                  width: '40px', fontSize: '11px', padding: '2px 4px',
+                  borderRadius: '4px', border: `1px solid ${border}`,
+                  background: isDark ? '#1e293b' : '#f8fafc', color: text,
+                  textAlign: 'center'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Chart */}
+          {netVolLoading ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: textMid, fontSize: '12px' }}>Loading…</div>
+          ) : nvCandles.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: textMid, fontSize: '12px' }}>No data available</div>
+          ) : (
+            <>
+              <div style={{ fontSize: '10px', color: textMid, marginBottom: '4px' }}>
+                {tfLabel} candles — last {nvCandles.length} · sign(close−open) × volume
+              </div>
+              <ResponsiveContainer width="100%" height={140}>
+                <BarChart data={nvCandles} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#1e293b' : '#f1f5f9'} vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 9, fill: textMid }}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 9, fill: textMid }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={v => fmtVol(v)}
+                    width={44}
+                  />
+                  <Tooltip content={<NetVolTooltip />} />
+                  <ReferenceLine y={0} stroke={isDark ? '#475569' : '#cbd5e1'} strokeWidth={1} />
+                  <Bar dataKey="netVolume" isAnimationActive={false} radius={[2, 2, 0, 0]}>
+                    {nvCandles.map((c, i) => (
+                      <Cell
+                        key={i}
+                        fill={c.netVolume >= 0 ? green : red}
+                        fillOpacity={0.75}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </>
+          )}
+        </div>
 
         <div style={{ marginTop: '12px', fontSize: '10px', color: textMid, textAlign: 'right' }}>
           Click outside to close · Data via Yahoo Finance

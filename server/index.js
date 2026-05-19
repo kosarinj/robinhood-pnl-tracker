@@ -1956,6 +1956,77 @@ app.get('/api/stock-indicators/:symbol', requireAuth, async (req, res) => {
   }
 })
 
+// Net volume: aggregated OHLCV candles with buy/sell pressure proxy
+// Uses sign(close - open) × volume as a per-candle net-volume approximation.
+app.get('/api/net-volume/:symbol', requireAuth, async (req, res) => {
+  try {
+    const sym = req.params.symbol.toUpperCase()
+    const tfHours = Math.max(1, Math.min(24, parseInt(req.query.tf) || 4))
+    const candleCount = Math.max(3, Math.min(50, parseInt(req.query.candles) || 12))
+
+    // Daily TF uses daily bars; sub-day TF uses 1H bars then aggregates
+    const interval = tfHours >= 24 ? '1d' : '1h'
+    // Each trading day yields ~6.5h / tfHours blocks. Fetch 2× needed days as buffer.
+    const blocksPerDay = tfHours >= 24 ? 1 : Math.max(1, 6.5 / tfHours)
+    const daysNeeded = Math.ceil((candleCount / blocksPerDay) * 2) + 5
+    const range = tfHours >= 24
+      ? `${Math.min(daysNeeded * 2, 200)}d`
+      : `${Math.min(daysNeeded, 59)}d`   // Yahoo Finance caps hourly at 60d
+
+    const bars = await priceService.fetchHistoricalPrices(sym, range, interval)
+    if (!bars || bars.length === 0) {
+      return res.json({ success: true, candles: [], symbol: sym, tfHours, candleCount, totalNetVolume: 0 })
+    }
+
+    // Aggregate 1H bars into tfHours-size blocks keyed by floor(ts / blockMs)
+    const blockMs = tfHours * 3600 * 1000
+    const blockMap = new Map()
+    const blockOrder = []
+
+    bars.forEach(bar => {
+      if (bar.close == null) return
+      const key = Math.floor(bar.timestamp / blockMs)
+      if (!blockMap.has(key)) {
+        blockMap.set(key, {
+          time: bar.timestamp,
+          open: bar.open ?? bar.close,
+          high: bar.high ?? bar.close,
+          low: bar.low ?? bar.close,
+          close: bar.close,
+          volume: bar.volume || 0
+        })
+        blockOrder.push(key)
+      } else {
+        const b = blockMap.get(key)
+        if (bar.high != null) b.high = Math.max(b.high, bar.high)
+        if (bar.low != null) b.low = Math.min(b.low, bar.low)
+        b.close = bar.close
+        b.volume += bar.volume || 0
+      }
+    })
+
+    const candles = blockOrder.map(key => {
+      const b = blockMap.get(key)
+      const dir = b.close > b.open ? 1 : b.close < b.open ? -1 : 0
+      const netVolume = dir * b.volume
+      const dt = new Date(b.time)
+      const label = tfHours >= 24
+        ? dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' })
+        : dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' }) + ' ' +
+          dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' })
+      return { ...b, netVolume, label }
+    })
+
+    const result = candles.slice(-candleCount)
+    const totalNetVolume = result.reduce((s, c) => s + c.netVolume, 0)
+
+    res.json({ success: true, symbol: sym, tfHours, candleCount, candles: result, totalNetVolume })
+  } catch (error) {
+    console.error('net-volume error:', error.message)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 // Market-wide sentiment: VIX (fear gauge) + CBOE equity put/call ratio
 app.get('/api/market-pulse', requireAuth, async (req, res) => {
   try {
