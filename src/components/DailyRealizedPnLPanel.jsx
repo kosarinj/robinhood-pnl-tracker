@@ -11,7 +11,7 @@ const getDateStr = (dateVal) => {
   if (!dateVal) return ''
   if (typeof dateVal === 'string') return dateVal.split('T')[0].split(' ')[0]
   if (dateVal instanceof Date) {
-    return `${dateVal.getFullYear()}-${String(dateVal.getMonth() + 1).padStart(2, '0')}-${String(dateVal.getDate()).padStart(2, '0')}`
+    return dateVal.toISOString().split('T')[0]
   }
   return String(dateVal).split('T')[0]
 }
@@ -53,9 +53,16 @@ function computeTransactions(trades, fromDate, toDate) {
   const results = []
 
   Object.entries(bySymbol).forEach(([symbol, symTrades]) => {
-    const sorted = [...symTrades].sort((a, b) =>
-      new Date(a.date || a.transDate) - new Date(b.date || b.transDate)
-    )
+    const isOpening = (t) => {
+      const tc = (t.transCode || '').toUpperCase()
+      return tc === 'BTO' || tc.includes('BUY') || tc === 'STO'
+    }
+    const sorted = [...symTrades].sort((a, b) => {
+      const dateA = new Date(a.date || a.transDate)
+      const dateB = new Date(b.date || b.transDate)
+      if (dateA.getTime() !== dateB.getTime()) return dateA - dateB
+      return (isOpening(a) ? 0 : 1) - (isOpening(b) ? 0 : 1)
+    })
 
     const buyQueue = []   // long positions
     const sellQueue = []  // short (STO) positions
