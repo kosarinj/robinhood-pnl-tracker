@@ -2093,6 +2093,53 @@ app.get('/api/pre-move-volume/:symbol', requireAuth, async (req, res) => {
       return slice.reduce((s, b) => s + (b.volume || 0), 0) / slice.length
     }
 
+    // Pre-compute moving average arrays (each entry is the MA ending at that bar index)
+    const buildMA = (period) => {
+      const out = new Array(rawBars.length).fill(null)
+      let sum = 0
+      for (let k = 0; k < rawBars.length; k++) {
+        sum += rawBars[k].close || 0
+        if (k >= period) sum -= rawBars[k - period].close || 0
+        if (k >= period - 1) out[k] = sum / period
+      }
+      return out
+    }
+    const ma20 = buildMA(20)
+    const ma50 = buildMA(50)
+    const ma200 = buildMA(200)
+
+    const getTrend = (i) => {
+      const p = rawBars[i].close
+      const m50 = ma50[i]
+      const m200 = ma200[i]
+      if (!m50) return { trend: 'unknown', ma50: null, ma200: null, ma50Slope: null }
+
+      // 10-bar slope of MA50 (percentage)
+      const m50_prev = i >= 10 ? ma50[i - 10] : null
+      const slope = m50_prev ? parseFloat(((m50 - m50_prev) / m50_prev * 100).toFixed(3)) : null
+
+      let trend
+      if (m200) {
+        if (p > m50 && m50 > m200 && slope > 0)       trend = 'uptrend'
+        else if (p < m50 && m50 < m200 && slope < 0)  trend = 'downtrend'
+        else if (p > m50 && m50 > m200)                trend = 'up_mixed'
+        else if (p < m50 && m50 < m200)                trend = 'down_mixed'
+        else                                            trend = 'neutral'
+      } else {
+        // Not enough data for MA200 (less than 200 bars in history)
+        if (p > m50 && slope > 0)       trend = 'uptrend'
+        else if (p < m50 && slope < 0)  trend = 'downtrend'
+        else                            trend = 'neutral'
+      }
+
+      return {
+        trend,
+        ma50: parseFloat(m50.toFixed(2)),
+        ma200: m200 ? parseFloat(m200.toFixed(2)) : null,
+        ma50Slope: slope,
+      }
+    }
+
     const events = []
     const blockedUntil = new Set()
 
@@ -2147,6 +2194,8 @@ app.get('/api/pre-move-volume/:symbol', requireAuth, async (req, res) => {
         }
       })
 
+      const trendData = getTrend(i)
+
       events.push({
         date: new Date(bar.timestamp).toISOString().split('T')[0],
         timestamp: bar.timestamp,
@@ -2157,6 +2206,7 @@ app.get('/api/pre-move-volume/:symbol', requireAuth, async (req, res) => {
         largeSellCount: preBars.filter(b => b.isLargeSell).length,
         largeBuyCount: preBars.filter(b => b.isLargeBuy).length,
         avgPreVol: parseFloat((preBars.reduce((s, b) => s + b.volMultiple, 0) / preBars.length).toFixed(2)),
+        ...trendData,
       })
     }
 

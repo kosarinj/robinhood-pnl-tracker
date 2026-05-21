@@ -30,6 +30,38 @@ function VolumeSparkline({ preBars, isDark }) {
   )
 }
 
+const TREND_CFG = {
+  uptrend:   { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',   label: '↑ Uptrend',   sub: 'P>50MA>200MA ↑' },
+  downtrend: { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',   label: '↓ Downtrend', sub: 'P<50MA<200MA ↓' },
+  up_mixed:  { color: '#84cc16', bg: 'rgba(132,204,18,0.12)',  label: '↑ Mixed',     sub: 'P>50MA>200MA' },
+  down_mixed:{ color: '#f97316', bg: 'rgba(249,115,22,0.12)',  label: '↓ Mixed',     sub: 'P<50MA<200MA' },
+  neutral:   { color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', label: '→ Neutral',   sub: '' },
+  unknown:   { color: '#94a3b8', bg: 'rgba(148,163,184,0.08)', label: '—',           sub: '' },
+}
+
+function TrendCell({ ev, textMid }) {
+  const cfg = TREND_CFG[ev.trend] || TREND_CFG.unknown
+  const slopeSign = ev.ma50Slope > 0 ? '+' : ''
+  return (
+    <div>
+      <span style={{
+        fontSize: '11px', fontWeight: '600', padding: '2px 7px',
+        borderRadius: '4px', background: cfg.bg, color: cfg.color,
+        whiteSpace: 'nowrap',
+      }}>
+        {cfg.label}
+      </span>
+      {ev.ma50 && (
+        <div style={{ fontSize: '10px', color: textMid, marginTop: '3px', lineHeight: 1.5 }}>
+          <span>50MA {ev.close > ev.ma50 ? '▲' : '▼'}{ev.ma50.toFixed(0)}</span>
+          {ev.ma200 && <span style={{ marginLeft: '6px' }}>200MA {ev.close > ev.ma200 ? '▲' : '▼'}{ev.ma200.toFixed(0)}</span>}
+          {ev.ma50Slope != null && <span style={{ marginLeft: '6px', color: ev.ma50Slope > 0 ? '#22c55e' : '#ef4444' }}>{slopeSign}{ev.ma50Slope.toFixed(2)}%/10</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TriggerBadges({ triggers, pnlColor }) {
   const downTriggers = triggers.filter(t => t.dir === 'down')
   const upTriggers = triggers.filter(t => t.dir === 'up')
@@ -85,6 +117,8 @@ export default function PreMoveVolumePanel() {
     singleThreshold: '3', multiThreshold: '5',
     lookAhead: '5', lookBack: '10', volMultiple: '1.5',
   })
+  const [trendFilter, setTrendFilter] = useState('all')
+  const [minSells, setMinSells] = useState('')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -123,7 +157,7 @@ export default function PreMoveVolumePanel() {
     }
   }
 
-  // Summary stats
+  // Summary stats (over raw events, not filtered view)
   const downEvents = useMemo(() => (data?.events || []).filter(e => e.triggers.some(t => t.dir === 'down')), [data])
   const upEvents = useMemo(() => (data?.events || []).filter(e => e.triggers.some(t => t.dir === 'up')), [data])
   const avgSellsDown = downEvents.length > 0
@@ -132,6 +166,25 @@ export default function PreMoveVolumePanel() {
     ? (upEvents.reduce((s, e) => s + e.largeBuyCount, 0) / upEvents.length).toFixed(1) : null
   const avgVolDown = downEvents.length > 0
     ? (downEvents.reduce((s, e) => s + e.avgPreVol, 0) / downEvents.length).toFixed(2) : null
+
+  // Filtered events (trend filter + min sells filter)
+  const visibleEvents = useMemo(() => {
+    let evs = data?.events || []
+    if (trendFilter !== 'all') evs = evs.filter(e => e.trend === trendFilter)
+    const ms = parseInt(minSells)
+    if (!isNaN(ms) && ms > 0) evs = evs.filter(e => e.largeSellCount >= ms)
+    return evs
+  }, [data, trendFilter, minSells])
+
+  // Signal strength breakdown: of down events with ≥N sells, what % followed up?
+  const signalRows = useMemo(() => {
+    if (!downEvents.length) return []
+    return [4, 5, 6, 7].map(n => {
+      const withN = downEvents.filter(e => e.largeSellCount >= n)
+      const uptrend = withN.filter(e => e.trend === 'uptrend' || e.trend === 'up_mixed')
+      return { n, count: withN.length, uptrend: uptrend.length }
+    }).filter(r => r.count > 0)
+  }, [downEvents])
 
   const btnBase = {
     padding: '5px 12px', fontSize: '12px', fontWeight: '600', borderRadius: '6px',
@@ -325,9 +378,10 @@ export default function PreMoveVolumePanel() {
       {/* Summary stats */}
       {data && !loading && (
         <>
+          {/* Stats bar */}
           <div style={{
             display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'center',
-            padding: '10px 14px', marginBottom: '14px',
+            padding: '10px 14px', marginBottom: '10px',
             background: surface2, borderRadius: '8px', border: `1px solid ${border}`,
             fontSize: '13px',
           }}>
@@ -337,24 +391,96 @@ export default function PreMoveVolumePanel() {
             <span style={{ color: textMid }}>{data.eventCount} events{data.eventCount > 200 ? ' (showing 200)' : ''}</span>
             {downEvents.length > 0 && avgSellsDown && (
               <span style={{ color: textMid }}>
-                Avg <span style={{ color: '#ef4444', fontWeight: '600' }}>{avgSellsDown}</span> large sell candles before ↓ moves
+                Avg <span style={{ color: '#ef4444', fontWeight: '600' }}>{avgSellsDown}</span> large sells before ↓
               </span>
             )}
             {upEvents.length > 0 && avgBuysUp && (
               <span style={{ color: textMid }}>
-                Avg <span style={{ color: '#22c55e', fontWeight: '600' }}>{avgBuysUp}</span> large buy candles before ↑ moves
+                Avg <span style={{ color: '#22c55e', fontWeight: '600' }}>{avgBuysUp}</span> large buys before ↑
               </span>
             )}
             {downEvents.length > 0 && avgVolDown && (
               <span style={{ color: textMid }}>
-                Avg pre-vol <span style={{ fontWeight: '600', color: text }}>{avgVolDown}×</span> before ↓
+                Pre-vol avg <span style={{ fontWeight: '600', color: text }}>{avgVolDown}×</span>
               </span>
             )}
           </div>
 
-          {data.events.length === 0 ? (
+          {/* Signal strength table */}
+          {signalRows.length > 0 && (
+            <div style={{
+              display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px',
+              padding: '10px 14px', background: surface2,
+              borderRadius: '8px', border: `1px solid ${border}`, alignItems: 'center',
+            }}>
+              <span style={{ fontSize: '12px', fontWeight: '600', color: textMid, marginRight: '4px' }}>↓ moves with ≥N large sells:</span>
+              {signalRows.map(r => (
+                <div key={r.n} style={{
+                  padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: '600',
+                  background: r.n >= 6
+                    ? 'rgba(239,68,68,0.18)'
+                    : 'rgba(239,68,68,0.08)',
+                  border: `1px solid ${r.n >= 6 ? 'rgba(239,68,68,0.4)' : 'transparent'}`,
+                  color: r.n >= 6 ? '#ef4444' : textMid,
+                }}>
+                  ≥{r.n} sells: <span style={{ color: r.n >= 6 ? '#ef4444' : text }}>{r.count}</span>
+                  {r.uptrend > 0 && (
+                    <span style={{ color: '#22c55e', marginLeft: '6px' }}>
+                      {r.uptrend} uptrend ({Math.round(r.uptrend / r.count * 100)}%)
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Filters row */}
+          <div style={{
+            display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center',
+            marginBottom: '12px', fontSize: '12px',
+          }}>
+            <span style={{ color: textMid, fontWeight: '600' }}>Filter:</span>
+            {/* Trend filter */}
+            <div style={{ display: 'flex', gap: '3px' }}>
+              {[
+                ['all', 'All trends'],
+                ['uptrend', '↑ Uptrend'],
+                ['up_mixed', '↑ Mixed'],
+                ['neutral', '→ Neutral'],
+                ['down_mixed', '↓ Mixed'],
+                ['downtrend', '↓ Downtrend'],
+              ].map(([v, l]) => (
+                <button key={v}
+                  style={trendFilter === v ? activeBtn : inactiveBtn}
+                  onClick={() => setTrendFilter(v)}
+                >{l}</button>
+              ))}
+            </div>
+            {/* Min sells filter */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', color: textMid }}>
+              Min sells
+              <input
+                type="number" min="0" max="20"
+                value={minSells}
+                onChange={e => setMinSells(e.target.value)}
+                placeholder="any"
+                style={{ ...inputStyle, width: '48px' }}
+              />
+            </label>
+            {(trendFilter !== 'all' || minSells) && (
+              <span style={{ color: textMid, fontSize: '12px' }}>
+                {visibleEvents.length} matching
+                <button
+                  onClick={() => { setTrendFilter('all'); setMinSells('') }}
+                  style={{ ...inactiveBtn, marginLeft: '6px', padding: '2px 8px', fontSize: '11px' }}
+                >Clear</button>
+              </span>
+            )}
+          </div>
+
+          {visibleEvents.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '30px 0', color: textMid, fontSize: '14px' }}>
-              No events matched the current thresholds
+              No events match the current filters
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
@@ -367,6 +493,7 @@ export default function PreMoveVolumePanel() {
                       ['Lg Sells Prior', 'center'],
                       ['Lg Buys Prior', 'center'],
                       ['Avg Vol', 'center'],
+                      ['Trend at Event', 'left'],
                       [`Vol (${cfg.lookBack} bars before → event)`, 'left'],
                     ].map(([h, align]) => (
                       <th key={h} style={{ padding: '8px 10px', textAlign: align, color: text, fontWeight: '700', fontSize: '12px', whiteSpace: 'nowrap' }}>{h}</th>
@@ -374,11 +501,17 @@ export default function PreMoveVolumePanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.events.map((ev, i) => {
-                    const primaryDown = ev.triggers.find(t => t.dir === 'down')
-                    const primaryUp = ev.triggers.find(t => t.dir === 'up')
+                  {visibleEvents.map((ev, i) => {
+                    const highSignal = ev.largeSellCount >= 6
+                    const medSignal = ev.largeSellCount >= 4
                     return (
-                      <tr key={i} style={{ background: i % 2 === 1 ? rowAlt : 'transparent', borderBottom: `1px solid ${rowBorder}` }}>
+                      <tr key={i} style={{
+                        background: highSignal
+                          ? (isDark ? 'rgba(239,68,68,0.06)' : 'rgba(239,68,68,0.04)')
+                          : i % 2 === 1 ? rowAlt : 'transparent',
+                        borderBottom: `1px solid ${rowBorder}`,
+                        outline: highSignal ? `1px solid rgba(239,68,68,0.2)` : 'none',
+                      }}>
                         <td style={{ padding: '10px', whiteSpace: 'nowrap', color: textMid, fontSize: '12px' }}>
                           {fmtDate(ev.date)}
                         </td>
@@ -388,9 +521,11 @@ export default function PreMoveVolumePanel() {
                         <td style={{ padding: '10px', textAlign: 'center' }}>
                           <span style={{
                             fontWeight: '700', fontSize: '14px',
-                            color: ev.largeSellCount >= 3 ? '#ef4444' : ev.largeSellCount >= 1 ? '#f97316' : textMid
+                            color: ev.largeSellCount >= 6 ? '#ef4444'
+                              : ev.largeSellCount >= 4 ? '#f97316'
+                              : ev.largeSellCount >= 1 ? textMid : textMid,
                           }}>
-                            {ev.largeSellCount}
+                            {ev.largeSellCount >= 6 ? '🔴' : ev.largeSellCount >= 4 ? '🟠' : ''}{ev.largeSellCount}
                           </span>
                         </td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
@@ -403,6 +538,9 @@ export default function PreMoveVolumePanel() {
                         </td>
                         <td style={{ padding: '10px', textAlign: 'center', color: textMid, fontSize: '12px' }}>
                           {ev.avgPreVol}×
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <TrendCell ev={ev} textMid={textMid} />
                         </td>
                         <td style={{ padding: '8px 10px' }}>
                           <VolumeSparkline preBars={ev.preBars} isDark={isDark} />
