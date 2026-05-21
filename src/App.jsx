@@ -12,6 +12,7 @@ import OptionsPnLPanel from './components/OptionsPnLPanel'
 import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
+import DCAAlertPanel from './components/DCAAlertPanel'
 import StrategyPnLSplit from './components/StrategyPnLSplit'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
@@ -2439,6 +2440,9 @@ function AuthenticatedApp({ user }) {
       {/* Research tab */}
       {activeMainTab === 'research' && <PreMoveVolumePanel />}
       {activeMainTab === 'research' && <ScreenerPanel />}
+
+      {/* DCA Alert Panel */}
+      {activeMainTab === 'dashboard' && <DCAAlertPanel />}
 
       {/* Daily Realized P&L Panel */}
       {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={allTrades.length > 0 ? allTrades : trades} />}

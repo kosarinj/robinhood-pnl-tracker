@@ -387,6 +387,23 @@ try {
   console.error('Migration error:', error)
 }
 
+// Migration: Create DCA schedule table
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS dca_schedule (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      symbol TEXT NOT NULL,
+      next_alert_date TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(user_id, symbol)
+    )
+  `)
+  console.log('✅ dca_schedule table ready')
+} catch (error) {
+  console.error('Migration error (dca_schedule):', error)
+}
+
 // Prepared statements for better performance
 const insertSignalSnapshot = db.prepare(`
   INSERT INTO signal_snapshots (symbol, timestamp, signal, strength, strength_label, price, ema9, ema21, rsi, trend, volume)
@@ -1780,6 +1797,32 @@ export class DatabaseService {
   // Close database connection
   close() {
     db.close()
+  }
+
+  // DCA alert schedule
+  getDCASchedule(userId = 1) {
+    return db.prepare('SELECT * FROM dca_schedule WHERE user_id = ? ORDER BY next_alert_date ASC').all(userId)
+  }
+
+  addDCASymbol(userId = 1, symbol, nextAlertDate) {
+    return db.prepare('INSERT OR IGNORE INTO dca_schedule (user_id, symbol, next_alert_date) VALUES (?, ?, ?)').run(userId, symbol, nextAlertDate)
+  }
+
+  markDCABought(id, nextAlertDate) {
+    return db.prepare('UPDATE dca_schedule SET next_alert_date = ? WHERE id = ?').run(nextAlertDate, id)
+  }
+
+  removeDCASymbol(id) {
+    return db.prepare('DELETE FROM dca_schedule WHERE id = ?').run(id)
+  }
+
+  getStockOnlySymbols(userId = 1) {
+    // Symbols with open stock positions that have NO options trades
+    const optionSymbols = new Set(
+      db.prepare('SELECT DISTINCT symbol FROM trades WHERE is_option = 1 AND user_id = ?').all(userId).map(r => r.symbol)
+    )
+    const stockPositions = this.getAllPositions(userId)
+    return Object.keys(stockPositions).filter(sym => !optionSymbols.has(sym))
   }
 }
 

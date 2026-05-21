@@ -2328,6 +2328,60 @@ app.get('/api/pre-move-volume/:symbol', requireAuth, async (req, res) => {
   }
 })
 
+// DCA schedule endpoints
+app.get('/api/dca-schedule', requireAuth, (req, res) => {
+  try {
+    const userId = req.session?.userId || 1
+    const schedule = databaseService.getDCASchedule(userId)
+    const positions = databaseService.getAllPositions(userId)
+    const stockOnlySymbols = databaseService.getStockOnlySymbols(userId)
+    const today = new Date().toISOString().split('T')[0]
+    const result = schedule.map(s => ({
+      id: s.id,
+      symbol: s.symbol,
+      nextAlertDate: s.next_alert_date,
+      sharesHeld: Math.round((positions[s.symbol] || 0) * 100) / 100,
+      isDue: s.next_alert_date <= today,
+      daysUntil: Math.round((new Date(s.next_alert_date) - new Date(today)) / 86400000),
+    }))
+    res.json({ success: true, schedule: result, suggestions: stockOnlySymbols })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+app.post('/api/dca-schedule', requireAuth, (req, res) => {
+  try {
+    const userId = req.session?.userId || 1
+    const { symbol } = req.body
+    if (!symbol) return res.status(400).json({ success: false, error: 'symbol required' })
+    const nextDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+    databaseService.addDCASymbol(userId, symbol.toUpperCase().trim(), nextDate)
+    res.json({ success: true, nextAlertDate: nextDate })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+app.put('/api/dca-schedule/:id/bought', requireAuth, (req, res) => {
+  try {
+    const nextDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+    databaseService.markDCABought(req.params.id, nextDate)
+    res.json({ success: true, nextAlertDate: nextDate })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+app.delete('/api/dca-schedule/:id', requireAuth, (req, res) => {
+  try {
+    databaseService.removeDCASymbol(req.params.id)
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 // Market-wide sentiment: VIX (fear gauge) + CBOE equity put/call ratio
 app.get('/api/market-pulse', requireAuth, async (req, res) => {
   try {
