@@ -607,6 +607,7 @@ io.on('connection', (socket) => {
     const tickers = SP500
     let processed = 0
     console.log(`🔍 Screener started: ${tickers.length} tickers, lookBack=${lookBack}, volX=${volMultiple}, minCount=${minCount}`)
+    socket.emit('screener-progress', { processed: 0, total: tickers.length })
 
     const analyseTicker = async (sym) => {
       try {

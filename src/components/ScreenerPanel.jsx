@@ -57,14 +57,19 @@ export default function ScreenerPanel() {
   }, [])
 
   const startScan = () => {
-    setHits([])
-    setProgress({ processed: 0, total: 0 })
-    setRunning(true)
-    socketService.runScreener({
-      lookBack: parseInt(lookBack) || 10,
-      volMultiple: parseFloat(volMultiple) || 1.5,
-      minCount: parseInt(minCount) || 6,
-    })
+    try {
+      setHits([])
+      setProgress({ processed: 0, total: 0 })
+      setRunning(true)
+      socketService.runScreener({
+        lookBack: parseInt(lookBack) || 10,
+        volMultiple: parseFloat(volMultiple) || 1.5,
+        minCount: parseInt(minCount) || 6,
+      })
+    } catch (e) {
+      setRunning(false)
+      alert('Not connected to server. Make sure the backend is running on port 3001.')
+    }
   }
 
   const stopScan = () => {
