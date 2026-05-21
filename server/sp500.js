@@ -1,4 +1,4 @@
-// S&P 500 representative ticker list (~200 most liquid components)
+// S&P 500 + NASDAQ representative ticker list
 export const SP500_TICKERS = [
   // Mega-cap tech
   'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','ORCL','CRM',
@@ -15,9 +15,9 @@ export const SP500_TICKERS = [
   'ELV','CI','HUM','CVS','HCA','MCK','ABC','DXCM','IDXX','BDX',
   // Consumer Discretionary
   'HD','LOW','MCD','SBUX','NKE','TGT','COST','CMG','BKNG','ABNB',
-  'AMZN','EBAY','ETSY','DPZ','YUM','TSCO','RH','WSM','ULTA','ROST',
+  'EBAY','ETSY','DPZ','YUM','TSCO','RH','WSM','ULTA','ROST',
   // Consumer Staples
-  'PG','KO','PEP','WMT','COST','PM','MO','CL','MDLZ','GIS',
+  'PG','KO','PEP','WMT','PM','MO','CL','MDLZ','GIS',
   'KHC','SJM','CAG','HSY','MKC','CHD','CLX','KMB','EL','COTY',
   // Industrials
   'GE','HON','CAT','DE','RTX','LMT','NOC','GD','BA','TT',
@@ -25,7 +25,7 @@ export const SP500_TICKERS = [
   'UNP','CSX','NSC','FDX','UPS','ODFL','JBHT','XPO','RXO',
   // Energy
   'XOM','CVX','COP','EOG','MPC','PSX','VLO','OXY','HES','DVN',
-  'BKR','SLB','HAL','FANG','APA','MRO','PXD','CVI','DKS',
+  'BKR','SLB','HAL','FANG','APA','MRO','CVI',
   // Materials
   'LIN','APD','ECL','NEM','FCX','NUE','VMC','MLM','CF','MOS',
   // Utilities
@@ -33,9 +33,29 @@ export const SP500_TICKERS = [
   // Real Estate
   'PLD','AMT','EQIX','WELL','DLR','PSA','EQR','AVB','O','CCI',
   // Communication Services
-  'META','GOOGL','NFLX','DIS','CMCSA','T','VZ','CHTR','TMUS','DISH',
-  // Growth / Recent
-  'UBER','COIN','PLTR','APP','ARM','SMCI','CEG','VST','GEV','ABNB',
+  'NFLX','DIS','CMCSA','T','VZ','CHTR','TMUS','DISH',
+  // Growth / Recent additions
+  'UBER','COIN','PLTR','APP','ARM','SMCI','CEG','VST','GEV',
+
+  // --- NASDAQ 100 (not already above) ---
+  'ASML','MELI','NXPI','MRVL','ON','SWKS','QRVO',
+  'PAYX','FAST','KDP','CSGP','VRSK','ALGN','BIIB','ILMN','MRNA',
+  'GEHC','SBAC','DLTR','SGEN','BMRN','EXAS','PODD','HOLX',
+  'LULU','MNST','CPRT','ODFL',
+  'PSTG','NTNX','ANET','HPE','DELL',
+
+  // --- High-volume NASDAQ growth / fintech / EV ---
+  'SQ','PYPL','SHOP','SE','NU','SOFI','HOOD','AFRM','UPST',
+  'RIVN','LCID','NIO','LI','XPEV',
+  'RBLX','DKNG','PENN','MGAM',
+  'SNOW','CFLT','MNDY','GTLB','BILL','PATH','AI','ZI',
+  'DOCN','ESTC','PD','FROG','S','SMAR',
+  'IONQ','RGTI','QUBT','QBTS',
+  'MSTR','RIOT','MARA','HUT','CLSK',
+
+  // --- NASDAQ biotech / pharma ---
+  'SAVA','SRPT','RARE','FOLD','ACAD','LEGN','KRYS','RCKT',
+  'INSM','ARWR','BEAM','EDIT','NTLA','CRSP','VERV',
 ]
 
 // Deduplicate

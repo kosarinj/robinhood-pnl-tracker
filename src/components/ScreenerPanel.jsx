@@ -128,9 +128,9 @@ export default function ScreenerPanel() {
     <div style={{ background: surface, border: `1px solid ${border}`, borderRadius: '12px', padding: '20px', marginBottom: '20px', color: text }}>
       {/* Header */}
       <div style={{ marginBottom: '16px' }}>
-        <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '700' }}>S&amp;P 500 Volume Screener</h2>
+        <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '700' }}>S&amp;P 500 + NASDAQ Volume Screener</h2>
         <div style={{ fontSize: '12px', color: textMid, marginTop: '3px' }}>
-          Scans ~200 S&amp;P 500 stocks · BUY = seller exhaustion in downtrend · SELL = buyer exhaustion in uptrend/neutral
+          Scans ~300 S&amp;P 500 &amp; NASDAQ stocks · BUY = seller exhaustion in downtrend · SELL = buyer exhaustion in uptrend/neutral
         </div>
       </div>
 
@@ -159,7 +159,7 @@ export default function ScreenerPanel() {
             padding: '7px 22px', fontSize: '13px', fontWeight: '700', borderRadius: '6px',
             cursor: 'pointer', border: 'none', background: '#667eea', color: '#fff',
           }}>
-            Scan S&amp;P 500
+            Scan S&amp;P 500 + NASDAQ
           </button>
         ) : (
           <button onClick={stopScan} style={{
