@@ -10,6 +10,7 @@ import SupportResistanceLevels from './components/SupportResistanceLevels'
 import PriceChart from './components/PriceChart'
 import OptionsPnLPanel from './components/OptionsPnLPanel'
 import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
+import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import StrategyPnLSplit from './components/StrategyPnLSplit'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
@@ -1185,7 +1186,7 @@ function AuthenticatedApp({ user }) {
 
       {/* Main tab navigation */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '2px solid #e2e8f0', paddingBottom: '0' }}>
-        {[['dashboard', '📊 Dashboard'], ['analytics', '🔬 Analytics']].map(([key, label]) => (
+        {[['dashboard', '📊 Dashboard'], ['analytics', '🔬 Analytics'], ['research', '🔍 Research']].map(([key, label]) => (
           <button key={key} onClick={() => setActiveMainTab(key)} style={{
             padding: '8px 24px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
             background: 'none', borderBottom: activeMainTab === key ? '2px solid #667eea' : '2px solid transparent',
@@ -2429,6 +2430,9 @@ function AuthenticatedApp({ user }) {
           currentPrices={currentPrices}
         />
       )}
+
+      {/* Research tab */}
+      {activeMainTab === 'research' && <PreMoveVolumePanel />}
 
       {/* Daily Realized P&L Panel */}
       {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={trades} />}

@@ -2027,6 +2027,140 @@ app.get('/api/net-volume/:symbol', requireAuth, async (req, res) => {
   }
 })
 
+// Pre-move volume analysis: detect significant moves and characterize volume in the preceding N bars
+app.get('/api/pre-move-volume/:symbol', requireAuth, async (req, res) => {
+  try {
+    const sym = req.params.symbol.toUpperCase()
+    const tf = req.query.tf || '1d'              // '4h' | '1d'
+    const period = req.query.period || '1y'      // '1y' | '2y' | '5y'
+    const singleThreshold = Math.abs(parseFloat(req.query.single) || 3)
+    const multiThreshold = Math.abs(parseFloat(req.query.multi) || 5)
+    const lookAhead = Math.min(20, Math.max(1, parseInt(req.query.ahead) || 5))
+    const lookBack = Math.min(20, Math.max(3, parseInt(req.query.back) || 10))
+    const volMultiple = parseFloat(req.query.volX) || 1.5
+    const direction = req.query.dir || 'both'    // 'both' | 'up' | 'down'
+    const singleOn = req.query.single_on !== 'false'
+    const multiOn = req.query.multi_on !== 'false'
+
+    let rawBars
+    if (tf === '4h') {
+      const range = period === '2y' ? '730d' : '365d'
+      const hourBars = await priceService.fetchHistoricalPrices(sym, range, '1h')
+      const blockMs = 4 * 3600 * 1000
+      const blockMap = new Map()
+      const blockOrder = []
+      ;(hourBars || []).forEach(bar => {
+        if (bar.close == null) return
+        const key = Math.floor(bar.timestamp / blockMs)
+        if (!blockMap.has(key)) {
+          blockMap.set(key, { timestamp: key * blockMs, open: bar.open ?? bar.close, high: bar.high ?? bar.close, low: bar.low ?? bar.close, close: bar.close, volume: bar.volume || 0 })
+          blockOrder.push(key)
+        } else {
+          const b = blockMap.get(key)
+          if (bar.high != null) b.high = Math.max(b.high, bar.high)
+          if (bar.low != null) b.low = Math.min(b.low, bar.low)
+          b.close = bar.close
+          b.volume += bar.volume || 0
+        }
+      })
+      rawBars = blockOrder.map(k => blockMap.get(k))
+    } else {
+      const rangeMap = { '1y': '1y', '2y': '2y', '5y': '5y' }
+      rawBars = await priceService.fetchHistoricalPrices(sym, rangeMap[period] || '1y', '1d')
+    }
+
+    if (!rawBars || rawBars.length < lookBack + lookAhead + 10) {
+      return res.json({ success: false, error: 'Insufficient data for the requested period' })
+    }
+
+    // Rolling 20-bar average volume centered before each bar
+    const rollingAvgVol = (i) => {
+      const start = Math.max(0, i - 20)
+      const slice = rawBars.slice(start, i)
+      if (slice.length === 0) return rawBars[i].volume || 1
+      return slice.reduce((s, b) => s + (b.volume || 0), 0) / slice.length
+    }
+
+    const events = []
+    const blockedUntil = new Set()
+
+    for (let i = lookBack; i < rawBars.length - lookAhead; i++) {
+      if (blockedUntil.has(i)) continue
+      const bar = rawBars[i]
+      if (!bar.open || !bar.close) continue
+      const barPct = (bar.close - bar.open) / bar.open * 100
+      const triggers = []
+
+      if (singleOn && Math.abs(barPct) >= singleThreshold) {
+        const dir = barPct < 0 ? 'down' : 'up'
+        if (direction === 'both' || direction === dir) {
+          triggers.push({ type: 'single', dir, pct: parseFloat(barPct.toFixed(2)) })
+        }
+      }
+
+      if (multiOn) {
+        let maxDown = 0, maxUp = 0
+        for (let j = i + 1; j <= i + lookAhead; j++) {
+          if (!rawBars[j]?.close) continue
+          const pct = (rawBars[j].close - bar.close) / bar.close * 100
+          if (pct < maxDown) maxDown = pct
+          if (pct > maxUp) maxUp = pct
+        }
+        if ((direction === 'both' || direction === 'down') && Math.abs(maxDown) >= multiThreshold) {
+          triggers.push({ type: 'multi', dir: 'down', pct: parseFloat(maxDown.toFixed(2)) })
+        }
+        if ((direction === 'both' || direction === 'up') && maxUp >= multiThreshold) {
+          triggers.push({ type: 'multi', dir: 'up', pct: parseFloat(maxUp.toFixed(2)) })
+        }
+      }
+
+      if (triggers.length === 0) continue
+
+      // Block nearby indices to avoid overlapping events from the same move
+      for (let j = i + 1; j <= i + Math.ceil(lookAhead / 2); j++) blockedUntil.add(j)
+
+      const avgVol = rollingAvgVol(i)
+      const preBars = rawBars.slice(i - lookBack, i).map(b => {
+        const vm = avgVol > 0 ? (b.volume || 0) / avgVol : 1
+        const bearish = b.close < b.open
+        return {
+          date: new Date(b.timestamp).toISOString().split('T')[0],
+          open: parseFloat((b.open || 0).toFixed(2)),
+          close: parseFloat((b.close || 0).toFixed(2)),
+          volume: b.volume || 0,
+          volMultiple: parseFloat(vm.toFixed(2)),
+          pct: parseFloat(((b.close - b.open) / (b.open || 1) * 100).toFixed(2)),
+          isLargeSell: bearish && vm >= volMultiple,
+          isLargeBuy: !bearish && vm >= volMultiple,
+        }
+      })
+
+      events.push({
+        date: new Date(bar.timestamp).toISOString().split('T')[0],
+        timestamp: bar.timestamp,
+        open: parseFloat((bar.open || 0).toFixed(2)),
+        close: parseFloat((bar.close || 0).toFixed(2)),
+        triggers,
+        preBars,
+        largeSellCount: preBars.filter(b => b.isLargeSell).length,
+        largeBuyCount: preBars.filter(b => b.isLargeBuy).length,
+        avgPreVol: parseFloat((preBars.reduce((s, b) => s + b.volMultiple, 0) / preBars.length).toFixed(2)),
+      })
+    }
+
+    events.sort((a, b) => b.timestamp - a.timestamp)
+
+    res.json({
+      success: true, symbol: sym, tf, period,
+      eventCount: events.length,
+      events: events.slice(0, 200),
+    })
+  } catch (err) {
+    console.error('pre-move-volume error:', err)
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 // Market-wide sentiment: VIX (fear gauge) + CBOE equity put/call ratio
 app.get('/api/market-pulse', requireAuth, async (req, res) => {
   try {
