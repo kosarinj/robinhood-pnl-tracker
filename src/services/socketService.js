@@ -256,6 +256,31 @@ class SocketService {
     })
   }
 
+  // Get all trades across all upload dates (for FIFO matching in DailyRealizedPnLPanel)
+  getAllTrades() {
+    return new Promise((resolve, reject) => {
+      if (!this.socket || !this.connected) {
+        reject(new Error('Not connected to server'))
+        return
+      }
+
+      const resultHandler = (response) => {
+        this.socket.off('all-trades-result', resultHandler)
+        clearTimeout(timeoutId)
+        if (response.success) resolve(response.trades)
+        else reject(new Error(response.error))
+      }
+
+      this.socket.on('all-trades-result', resultHandler)
+      this.socket.emit('get-all-trades')
+
+      const timeoutId = setTimeout(() => {
+        this.socket.off('all-trades-result', resultHandler)
+        reject(new Error('Get all trades timeout'))
+      }, 15000)
+    })
+  }
+
   // Get latest saved trades
   getLatestTrades() {
     return new Promise((resolve, reject) => {

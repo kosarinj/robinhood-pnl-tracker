@@ -586,6 +586,18 @@ io.on('connection', (socket) => {
     }
   })
 
+  // Get all trades across all upload dates — needed for FIFO matching in DailyRealizedPnLPanel
+  socket.on('get-all-trades', () => {
+    try {
+      const allTrades = databaseService.getAllTradesForUser(user.userId)
+      console.log(`📦 get-all-trades: ${allTrades.length} total trades for user ${user.userId}`)
+      socket.emit('all-trades-result', { success: true, trades: allTrades })
+    } catch (err) {
+      console.error('get-all-trades error:', err)
+      socket.emit('all-trades-result', { success: false, error: err.message })
+    }
+  })
+
   // Get latest saved trades
   socket.on('get-latest-trades', async () => {
     console.log(`📥 Received get-latest-trades request (user: ${user.userId})`)

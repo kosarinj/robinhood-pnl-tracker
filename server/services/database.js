@@ -1145,6 +1145,33 @@ export class DatabaseService {
     }
   }
 
+  // Get all trades for a user across all upload dates (deduped by the save logic — each unique trade lives in exactly one upload_date)
+  getAllTradesForUser(userId = 1) {
+    try {
+      const rows = db.prepare(`
+        SELECT * FROM trades
+        WHERE user_id = ?
+        ORDER BY trans_date ASC, symbol
+      `).all(userId)
+
+      return rows.map(row => ({
+        date: row.trans_date,
+        transDate: row.trans_date,
+        transCode: row.trans_code,
+        symbol: row.symbol,
+        quantity: row.quantity,
+        price: row.price,
+        amount: row.amount,
+        description: row.description,
+        isBuy: row.is_buy === 1,
+        isOption: row.is_option === 1
+      }))
+    } catch (error) {
+      console.error('Error getting all trades:', error)
+      return []
+    }
+  }
+
   // Get the latest saved trades
   getLatestTrades(userId = 1) {
     try {

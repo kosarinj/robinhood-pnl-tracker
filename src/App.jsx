@@ -33,6 +33,7 @@ function App() {
 
 function AuthenticatedApp({ user }) {
   const [trades, setTrades] = useState([])
+  const [allTrades, setAllTrades] = useState([])
   const [pnlData, setPnlData] = useState([])
   const [showOpenOnly, setShowOpenOnly] = useState(true)
   const [symbolFilter, setSymbolFilter] = useState('')
@@ -211,6 +212,7 @@ function AuthenticatedApp({ user }) {
           if (result.success && result.trades && result.trades.length > 0) {
             console.log(`✅ Auto-loaded ${result.trades.length} trades from ${result.uploadDate}`)
             setTrades(result.trades)
+            socketService.getAllTrades().then(setAllTrades).catch(() => {})
             setDeposits(result.deposits || [])
             setTotalPrincipal(result.totalPrincipal || 0)
             // Set historical prices and P&L data
@@ -732,6 +734,7 @@ function AuthenticatedApp({ user }) {
         console.log(`  - P&L data:`, result.pnlData ? result.pnlData.length : 0, 'positions')
 
         setTrades(result.trades)
+        socketService.getAllTrades().then(setAllTrades).catch(() => {})
         setDeposits(result.deposits || [])
         setTotalPrincipal(result.totalPrincipal || 0)
         if (result.currentPrices) {
@@ -889,6 +892,7 @@ function AuthenticatedApp({ user }) {
           const result = await socketService.getLatestTrades()
           if (result.trades && result.trades.length > 0) {
             setTrades(result.trades)
+            socketService.getAllTrades().then(setAllTrades).catch(() => {})
             console.log(`✅ Loaded ${result.trades.length} trades for server session`)
           }
         } catch (err) {
@@ -2435,7 +2439,7 @@ function AuthenticatedApp({ user }) {
       {activeMainTab === 'research' && <PreMoveVolumePanel />}
 
       {/* Daily Realized P&L Panel */}
-      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={trades} />}
+      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={allTrades.length > 0 ? allTrades : trades} />}
 
       {/* Options P&L Weekly Panel */}
       {activeMainTab === 'dashboard' && <OptionsPnLPanel />}
