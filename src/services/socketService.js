@@ -256,6 +256,21 @@ class SocketService {
     })
   }
 
+  // S&P 500 screener
+  runScreener(params = {}) {
+    if (!this.socket || !this.connected) throw new Error('Not connected')
+    this.socket.emit('run-screener', params)
+  }
+  stopScreener() {
+    if (this.socket) this.socket.emit('stop-screener')
+  }
+  onScreenerHit(cb) { if (this.socket) this.socket.on('screener-hit', cb) }
+  offScreenerHit(cb) { if (this.socket) this.socket.off('screener-hit', cb) }
+  onScreenerProgress(cb) { if (this.socket) this.socket.on('screener-progress', cb) }
+  offScreenerProgress(cb) { if (this.socket) this.socket.off('screener-progress', cb) }
+  onScreenerDone(cb) { if (this.socket) this.socket.on('screener-done', cb) }
+  offScreenerDone(cb) { if (this.socket) this.socket.off('screener-done', cb) }
+
   // Get all trades across all upload dates (for FIFO matching in DailyRealizedPnLPanel)
   getAllTrades() {
     return new Promise((resolve, reject) => {

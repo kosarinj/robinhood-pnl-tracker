@@ -13,6 +13,7 @@ import { authService } from './services/auth.js'
 import { supportResistanceService } from './services/supportResistanceService.js'
 import { emaAlertService } from './services/emaAlertService.js'
 import cookieParser from 'cookie-parser'
+import { SP500 } from './sp500.js'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
@@ -597,6 +598,109 @@ io.on('connection', (socket) => {
       socket.emit('all-trades-result', { success: false, error: err.message })
     }
   })
+
+  // S&P 500 volume screener — streams hits back in real time
+  let screenerRunning = false
+  socket.on('run-screener', async ({ lookBack = 10, volMultiple = 1.5, minCount = 6 } = {}) => {
+    if (screenerRunning) return
+    screenerRunning = true
+    const tickers = SP500
+    let processed = 0
+    console.log(`🔍 Screener started: ${tickers.length} tickers, lookBack=${lookBack}, volX=${volMultiple}, minCount=${minCount}`)
+
+    const analyseTicker = async (sym) => {
+      try {
+        const bars = await priceService.fetchHistoricalPrices(sym, '1y', '1d')
+        if (!bars || bars.length < 60) return null
+
+        // Rolling avg volume (30 bars before the look-back window)
+        const windowStart = bars.length - lookBack
+        const avgVolBars = bars.slice(Math.max(0, windowStart - 30), windowStart)
+        const avgVol = avgVolBars.length
+          ? avgVolBars.reduce((s, b) => s + (b.volume || 0), 0) / avgVolBars.length
+          : 1
+
+        // Count large buy / sell candles in the look-back window
+        const window = bars.slice(windowStart)
+        let largeSellCount = 0, largeBuyCount = 0
+        window.forEach(b => {
+          const vm = avgVol > 0 ? (b.volume || 0) / avgVol : 1
+          if (vm < volMultiple) return
+          if (b.close < b.open) largeSellCount++
+          else if (b.close > b.open) largeBuyCount++
+        })
+
+        // Trend at last bar
+        const n = bars.length - 1
+        const maVal = (period) => {
+          if (n < period - 1) return null
+          let s = 0; for (let k = n - period + 1; k <= n; k++) s += bars[k].close || 0
+          return s / period
+        }
+        const ma50 = maVal(50)
+        const ma200 = maVal(200)
+        const ma50_10 = n >= 60 ? (() => {
+          let s = 0; const p = n - 10; for (let k = p - 49; k <= p; k++) s += bars[k]?.close || 0; return s / 50
+        })() : null
+        const slope = ma50 && ma50_10 ? (ma50 - ma50_10) / ma50_10 * 100 : null
+        const price = bars[n].close
+
+        let trend = 'neutral'
+        if (ma50) {
+          const above50 = price > ma50
+          const rising = slope !== null && slope > 0
+          if (ma200) {
+            if (above50 && ma50 > ma200 && rising)      trend = 'uptrend'
+            else if (!above50 && ma50 < ma200 && !rising) trend = 'downtrend'
+            else if (above50 && ma50 > ma200)            trend = 'up_mixed'
+            else if (!above50 && ma50 < ma200)           trend = 'down_mixed'
+          } else {
+            if (above50 && rising)  trend = 'uptrend'
+            else if (!above50 && !rising) trend = 'downtrend'
+          }
+        }
+
+        // Signal logic
+        // SELL: buyers exhausted in uptrend/neutral — price likely to pull back
+        // BUY:  sellers exhausted in downtrend — price likely to bounce
+        const isSell = (trend === 'uptrend' || trend === 'up_mixed' || trend === 'neutral') && largeBuyCount >= minCount
+        const isBuy  = (trend === 'downtrend' || trend === 'down_mixed') && largeSellCount >= minCount
+
+        if (!isBuy && !isSell) return null
+
+        return {
+          sym,
+          signal: isBuy && isSell ? 'BOTH' : isBuy ? 'BUY' : 'SELL',
+          trend,
+          largeSellCount,
+          largeBuyCount,
+          price: parseFloat(price.toFixed(2)),
+          ma50: ma50 ? parseFloat(ma50.toFixed(2)) : null,
+          ma200: ma200 ? parseFloat(ma200.toFixed(2)) : null,
+          slope: slope ? parseFloat(slope.toFixed(3)) : null,
+        }
+      } catch (_) {
+        return null
+      }
+    }
+
+    // Process in batches of 8 with a small delay between batches
+    const BATCH = 8
+    for (let i = 0; i < tickers.length && screenerRunning; i += BATCH) {
+      const batch = tickers.slice(i, i + BATCH)
+      const results = await Promise.all(batch.map(analyseTicker))
+      processed += batch.length
+      results.forEach(r => { if (r) socket.emit('screener-hit', r) })
+      socket.emit('screener-progress', { processed, total: tickers.length })
+      if (i + BATCH < tickers.length) await new Promise(r => setTimeout(r, 150))
+    }
+
+    socket.emit('screener-done', { total: tickers.length, processed })
+    screenerRunning = false
+    console.log(`✅ Screener complete: ${processed}/${tickers.length} tickers`)
+  })
+
+  socket.on('stop-screener', () => { screenerRunning = false })
 
   // Get latest saved trades
   socket.on('get-latest-trades', async () => {
