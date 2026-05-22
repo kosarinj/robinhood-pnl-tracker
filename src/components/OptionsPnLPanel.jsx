@@ -948,14 +948,14 @@ export default function OptionsPnLPanel() {
                   const longPutStrike = rp?.longPutPositions?.length > 0
                     ? Math.max(...rp.longPutPositions.map(p => p.strike))
                     : null
-                  // Remaining option time value: short call extrinsic captured + long put extrinsic lost at expiration
+                  // Max/Floor = remaining potential from NOW to expiration (not including accumulated history)
                   const shortCallRem = rp?.shortCall != null ? rp.shortCall * 100 : 0
                   const longPutRem   = rp?.longPut   != null ? rp.longPut   * 100 : 0
-                  const maxNet = combinedDisplay !== null && shortCallStrike != null && livePriceForOverride && shares
-                    ? Math.round((combinedDisplay + (shortCallStrike - livePriceForOverride) * shares + shortCallRem - longPutRem) * 100) / 100
+                  const maxNet = shortCallStrike != null && livePriceForOverride != null && shares && shortCallRem > 0
+                    ? Math.round(((shortCallStrike - livePriceForOverride) * shares + shortCallRem - longPutRem) * 100) / 100
                     : null
-                  const floorNet = combinedDisplay !== null && longPutStrike != null && livePriceForOverride && shares
-                    ? Math.round((combinedDisplay + (longPutStrike - livePriceForOverride) * shares + shortCallRem - longPutRem) * 100) / 100
+                  const floorNet = longPutStrike != null && livePriceForOverride != null && shares && longPutRem > 0
+                    ? Math.round(((longPutStrike - livePriceForOverride) * shares + shortCallRem - longPutRem) * 100) / 100
                     : null
                   const isExpanded = expandedTicker === ticker
                   const isEditingNW = editingOverride === ticker
@@ -1295,22 +1295,24 @@ export default function OptionsPnLPanel() {
                             </div>
                           )
                         })()}
-                        {combinedDisplay1w !== null && rp?.shortCallPositions?.length > 0 && (() => {
+                        {rp?.shortCallPositions?.length > 0 && (() => {
                           const sc = Math.min(...rp.shortCallPositions.map(p => p.strike))
                           const sp1w = weekOffset === 0 ? (livePrice1w ?? stockPriceByTicker[ticker]) : null
                           if (!sp1w || !effShares1w) return null
                           const scRem = (rp.shortCall ?? 0) * 100
                           const lpRem = (rp.longPut ?? 0) * 100
-                          const val = Math.round((combinedDisplay1w + (sc - sp1w) * effShares1w + scRem - lpRem) * 100) / 100
+                          if (scRem <= 0) return null
+                          const val = Math.round(((sc - sp1w) * effShares1w + scRem - lpRem) * 100) / 100
                           return <div style={{ color: val >= 0 ? green : red, fontSize: '11px' }}>Max: {val >= 0 ? '+' : ''}{fmt(val)}<span style={{ color: textMid }}> @${sc}</span></div>
                         })()}
-                        {combinedDisplay1w !== null && rp?.longPutPositions?.length > 0 && (() => {
+                        {rp?.longPutPositions?.length > 0 && (() => {
                           const lp = Math.max(...rp.longPutPositions.map(p => p.strike))
                           const sp1w = weekOffset === 0 ? (livePrice1w ?? stockPriceByTicker[ticker]) : null
                           if (!sp1w || !effShares1w) return null
                           const scRem = (rp.shortCall ?? 0) * 100
                           const lpRem = (rp.longPut ?? 0) * 100
-                          const val = Math.round((combinedDisplay1w + (lp - sp1w) * effShares1w + scRem - lpRem) * 100) / 100
+                          if (lpRem <= 0) return null
+                          const val = Math.round(((lp - sp1w) * effShares1w + scRem - lpRem) * 100) / 100
                           return <div style={{ color: val >= 0 ? green : red, fontSize: '11px' }}>Floor: {val >= 0 ? '+' : ''}{fmt(val)}<span style={{ color: textMid }}> @${lp}</span></div>
                         })()}
                       </div>
