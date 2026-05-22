@@ -18,21 +18,21 @@ function vixLabel(v) {
   return 'Complacent'
 }
 
-// Equity P/C ratio (^PCCE): >1.0 = heavy put buying (bearish sentiment / good contrarian buy?),
-// 0.6-0.8 = typical, <0.6 = excessive bullishness / complacency
+// CBOE SKEW Index (^SKEW): measures tail risk / demand for downside protection
+// <110 = low tail risk, 110-130 = elevated, >130 = high fear / hedging demand
 function pcrColor(r) {
   if (r == null) return '#888'
-  if (r >= 1.0) return '#ef4444'   // excessive put buying — fear peak, often contrarian bullish
-  if (r >= 0.8) return '#f59e0b'   // elevated protection demand
-  if (r >= 0.6) return '#94a3b8'   // normal
-  return '#22c55e'                  // very low puts — complacent, consider protection
+  if (r >= 130) return '#ef4444'
+  if (r >= 115) return '#f59e0b'
+  if (r >= 100) return '#94a3b8'
+  return '#22c55e'
 }
 function pcrLabel(r) {
   if (r == null) return ''
-  if (r >= 1.0) return 'Fear peak'
-  if (r >= 0.8) return 'Elevated'
-  if (r >= 0.6) return 'Normal'
-  return 'Complacent'
+  if (r >= 130) return 'High tail risk'
+  if (r >= 115) return 'Elevated'
+  if (r >= 100) return 'Normal'
+  return 'Low risk'
 }
 
 function MarketPulse({ isDark }) {
@@ -75,15 +75,15 @@ function MarketPulse({ isDark }) {
       ) : <span style={{ color: textMid }}>VIX —</span>}
       <span style={{ color: border }}>|</span>
       {pcr ? (
-        <span title={`Equity Put/Call Ratio: ${pcrLabel(pcr.ratio)} | >1.0 = fear peak, <0.6 = complacent`}>
-          <span style={{ color: textMid }}>Eq P/C </span>
+        <span title={`CBOE SKEW Index: ${pcrLabel(pcr.ratio)} | >130 = high tail risk, <110 = calm`}>
+          <span style={{ color: textMid }}>SKEW </span>
           <span style={{ color: pcrColor(pcr.ratio), fontWeight: '700' }}>{pcr.ratio}</span>
           <span style={{ color: pcr.changePct >= 0 ? '#ef4444' : '#22c55e', marginLeft: '3px', fontSize: '10px' }}>
             {pcr.changePct >= 0 ? '▲' : '▼'}{Math.abs(pcr.changePct)}%
           </span>
           <span style={{ color: textMid, marginLeft: '4px', fontSize: '10px' }}>({pcrLabel(pcr.ratio)})</span>
         </span>
-      ) : <span style={{ color: textMid }}>P/C —</span>}
+      ) : <span style={{ color: textMid }}>SKEW —</span>}
       {lastFetch > 0 && <span style={{ color: textMid, marginLeft: 'auto', fontSize: '10px' }}>
         {new Date(lastFetch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
       </span>}

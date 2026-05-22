@@ -2382,35 +2382,30 @@ app.delete('/api/dca-schedule/:id', requireAuth, (req, res) => {
   }
 })
 
-// Market-wide sentiment: VIX (fear gauge) + CBOE equity put/call ratio
+// Market-wide sentiment: VIX + CBOE SKEW (replaces ^PCCE which Yahoo retired)
 app.get('/api/market-pulse', requireAuth, async (req, res) => {
+  const YF_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json',
+  }
+  const fetchIndex = async (sym) => {
+    try {
+      const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=5d&interval=1d`
+      const r = await axios.get(url, { timeout: 8000, headers: YF_HEADERS })
+      const meta = r.data?.chart?.result?.[0]?.meta
+      if (!meta) return null
+      const price = meta.regularMarketPrice
+      const prev  = meta.chartPreviousClose
+      const changePct = prev ? Math.round((price - prev) / prev * 10000) / 100 : 0
+      return { price: Math.round(price * 100) / 100, changePct, prevClose: Math.round(prev * 100) / 100 }
+    } catch { return null }
+  }
+
   try {
-    const url = 'https://query2.finance.yahoo.com/v7/finance/quote?symbols=%5EVIX,%5EPCCE&fields=regularMarketPrice,regularMarketChangePercent,regularMarketPreviousClose'
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/json'
-    }
-    const response = await axios.get(url, { timeout: 8000, headers })
-    const quotes = response.data?.quoteResponse?.result || []
-    const bySymbol = {}
-    quotes.forEach(q => { bySymbol[q.symbol] = q })
-
-    const vixQ = bySymbol['^VIX']
-    const pcrQ = bySymbol['^PCCE']
-
-    const vix = vixQ ? {
-      price: Math.round((vixQ.regularMarketPrice || 0) * 100) / 100,
-      changePct: Math.round((vixQ.regularMarketChangePercent || 0) * 100) / 100,
-      prevClose: vixQ.regularMarketPreviousClose || null
-    } : null
-
-    const pcr = pcrQ ? {
-      ratio: Math.round((pcrQ.regularMarketPrice || 0) * 100) / 100,
-      changePct: Math.round((pcrQ.regularMarketChangePercent || 0) * 100) / 100,
-      prevClose: pcrQ.regularMarketPreviousClose || null
-    } : null
-
-    res.json({ success: true, vix, pcr })
+    const [vix, skew] = await Promise.all([fetchIndex('^VIX'), fetchIndex('^SKEW')])
+    // Keep pcr key for frontend compatibility, but now carries SKEW data
+    const pcr = skew ? { ratio: skew.price, changePct: skew.changePct, prevClose: skew.prevClose } : null
+    res.json({ success: true, vix, pcr, skewMode: true })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
