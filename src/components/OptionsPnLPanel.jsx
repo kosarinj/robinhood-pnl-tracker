@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import IntradayChart, { RSIBadge } from './IntradayChart'
 import PutStrikeCalculator from './PutStrikeCalculator'
+import AverageDownCalculator from './AverageDownCalculator'
 
 // VIX: >30 = high fear, 20-30 = elevated, 15-20 = normal, <15 = complacent
 function vixColor(v) {
@@ -679,6 +680,19 @@ export default function OptionsPnLPanel() {
             const unrealized = openPositions.filter(p => p.ticker === ticker).reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
             const totalGain = Math.round((optPnl + unrealized + histStockSum + liveStockPnl) * 100) / 100
             return { ticker, price, shares, totalGain }
+          })
+      } />
+      <AverageDownCalculator tickers={
+        Object.entries(stockPriceByTicker)
+          .filter(([ticker]) => cumulativeByUnderlying[ticker] != null || cumulativeStockPrices[ticker] != null)
+          .map(([ticker, price]) => {
+            const shares = cumulativeStockPrices[ticker]?.shares ?? data?.weeklyStockPnL?.[ticker]?.shares ?? 100
+            const histStockSum = (data?.weeks || []).slice(0, 9).reduce((s, w) => s + (w.stockDelta?.[ticker] ?? 0), 0)
+            const liveStockPnl = data?.weeklyStockPnL?.[ticker]?.pnl ?? 0
+            const optPnl = cumulativeByUnderlying[ticker] ?? 0
+            const unrealized = openPositions.filter(p => p.ticker === ticker).reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
+            const netPnL = Math.round((optPnl + unrealized + histStockSum + liveStockPnl) * 100) / 100
+            return { ticker, price, shares, netPnL }
           })
       } />
       {activeTab === 'week' && <>
