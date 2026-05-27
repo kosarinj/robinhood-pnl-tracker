@@ -382,6 +382,7 @@ export default function OptionsPnLPanel() {
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   const preMarketPrices = data?.preMarketPrices || {}
+  const prevClosePrices = data?.prevClosePrices || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
   // Short puts are a trading mistake (should always be long) — flag them prominently
@@ -1031,6 +1032,15 @@ export default function OptionsPnLPanel() {
                               )}
                             </div>
                           )}
+                          {prevClosePrices[ticker] != null && livePriceForOverride != null && shares && (() => {
+                            const oneDayPnl = Math.round((livePriceForOverride - prevClosePrices[ticker]) * shares * 100) / 100
+                            return (
+                              <div style={{ color: oneDayPnl >= 0 ? green : red, fontSize: '11px' }}>
+                                1D Stock: {oneDayPnl >= 0 ? '+' : ''}{fmt(oneDayPnl)}
+                                <span style={{ color: textMid, fontWeight: '400' }}> (${prevClosePrices[ticker].toFixed(2)} → ${livePriceForOverride.toFixed(2)})</span>
+                              </div>
+                            )
+                          })()}
                           {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                           {combinedDisplay !== null && <div style={{ color: combinedDisplay >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combinedDisplay >= 0 ? '+' : ''}{fmt(combinedDisplay)}</div>}
                           {combined100 !== null && <div style={{ fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
@@ -1298,6 +1308,15 @@ export default function OptionsPnLPanel() {
                             )}
                           </div>
                         )}
+                        {weekOffset === 0 && prevClosePrices[ticker] != null && livePrice1w != null && effShares1w && (() => {
+                          const oneDayPnl = Math.round((livePrice1w - prevClosePrices[ticker]) * effShares1w * 100) / 100
+                          return (
+                            <div style={{ color: oneDayPnl >= 0 ? green : red, fontSize: '11px' }}>
+                              1D Stock: {oneDayPnl >= 0 ? '+' : ''}{fmt(oneDayPnl)}
+                              <span style={{ color: textMid, fontWeight: '400' }}> (${prevClosePrices[ticker].toFixed(2)} → ${livePrice1w.toFixed(2)})</span>
+                            </div>
+                          )
+                        })()}
                         {unrealizedPnl !== undefined && (
                           <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
                             Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
