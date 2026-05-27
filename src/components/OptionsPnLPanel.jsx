@@ -775,7 +775,7 @@ export default function OptionsPnLPanel() {
             {sliceFromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>{fmtDate(sliceFromDate)} – {fmtDate(sliceToDate)}</div>}
           </div>
           <div style={{ display: 'flex', gap: '4px' }}>
-            {[['1W', 1], ['NW', -1], ['NW+1', -2], ['NW+2', -3], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['9W', 9], ['10W', 10], ['All', 0], ['Overall', -4]].map(([label, val]) => (
+            {[['1D', -5], ['1W', 1], ['NW', -1], ['NW+1', -2], ['NW+2', -3], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['9W', 9], ['10W', 10], ['All', 0], ['Overall', -4]].map(([label, val]) => (
               <button key={label} onClick={() => setByUnderlyingWeeks(val)}
                 style={{ ...btnStyle(byUnderlyingWeeks === val), padding: '3px 10px', fontSize: '11px' }}>
                 {label}
@@ -892,7 +892,77 @@ export default function OptionsPnLPanel() {
           )
         })()}
         {/* Per-underlying breakdown — single week (detailed) or multi-week (options total only) */}
-        {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && byUnderlyingWeeks !== -2 && byUnderlyingWeeks !== -3 && byUnderlyingWeeks !== -4 && Object.keys(cumulativeByUnderlying).length > 0 && (
+        {byUnderlyingWeeks === -5 && (() => {
+          const tickers = [...new Set([
+            ...Object.keys(prevClosePrices),
+            ...Object.keys(stockPriceByTicker),
+          ])].filter(t => prevClosePrices[t] != null && stockPriceByTicker[t] != null)
+          if (tickers.length === 0) return <div style={{ padding: '20px 0', textAlign: 'center', color: textMid, fontSize: '13px' }}>No 1D price data available yet</div>
+          const oneDayTotal = tickers.reduce((sum, t) => {
+            const shares = cumulativeStockPrices[t]?.shares ?? data?.weeklyStockPnL?.[t]?.shares ?? 0
+            return sum + Math.round((stockPriceByTicker[t] - prevClosePrices[t]) * shares * 100) / 100
+          }, 0)
+          return (
+            <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>Today by Underlying</div>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: oneDayTotal >= 0 ? green : red }}>
+                  Stock Total 1D: {oneDayTotal >= 0 ? '+' : ''}{fmt(oneDayTotal)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {tickers.sort().map(ticker => {
+                  const shares = cumulativeStockPrices[ticker]?.shares ?? data?.weeklyStockPnL?.[ticker]?.shares ?? 0
+                  const livePrice = stockPriceByTicker[ticker]
+                  const prevClose = prevClosePrices[ticker]
+                  const oneDayPnl = shares > 0 ? Math.round((livePrice - prevClose) * shares * 100) / 100 : null
+                  const oneDayPct = prevClose > 0 ? Math.round((livePrice - prevClose) / prevClose * 10000) / 100 : null
+                  const unrealizedPnl = unrealizedByTicker[ticker]
+                  const rp = remPremByTicker[ticker]
+                  const sp = livePrice
+                  return (
+                    <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                      <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '12px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${border}` }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: '700', color: text }}>
+                            {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
+                          </span>
+                          {oneDayPct != null && (
+                            <span style={{ fontSize: '11px', fontWeight: '700', color: oneDayPct >= 0 ? green : red }}>
+                              {oneDayPct >= 0 ? '+' : ''}{oneDayPct.toFixed(2)}%
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          {oneDayPnl !== null ? (
+                            <div style={{ color: oneDayPnl >= 0 ? green : red }}>
+                              Stock 1D: {oneDayPnl >= 0 ? '+' : ''}{fmt(oneDayPnl)}
+                              <span style={{ color: textMid, fontWeight: '400' }}> (${prevClose.toFixed(2)} → ${livePrice.toFixed(2)})</span>
+                            </div>
+                          ) : (
+                            <div style={{ color: textMid }}>No position</div>
+                          )}
+                          {shares > 0 && shares !== 100 && (
+                            <div style={{ color: textMid, fontSize: '10px' }}>{shares} shares</div>
+                          )}
+                          {unrealizedPnl !== undefined && (
+                            <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
+                              Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                            </div>
+                          )}
+                          {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
+                          {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
+                          {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
+        {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && byUnderlyingWeeks !== -2 && byUnderlyingWeeks !== -3 && byUnderlyingWeeks !== -4 && byUnderlyingWeeks !== -5 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             {(() => {
               // Current week: use the same netWeekPnL the 1W view shows so NW Total Net = 1W + 1W ago + ...
@@ -1032,15 +1102,6 @@ export default function OptionsPnLPanel() {
                               )}
                             </div>
                           )}
-                          {prevClosePrices[ticker] != null && livePriceForOverride != null && shares && (() => {
-                            const oneDayPnl = Math.round((livePriceForOverride - prevClosePrices[ticker]) * shares * 100) / 100
-                            return (
-                              <div style={{ color: oneDayPnl >= 0 ? green : red, fontSize: '11px' }}>
-                                1D Stock: {oneDayPnl >= 0 ? '+' : ''}{fmt(oneDayPnl)}
-                                <span style={{ color: textMid, fontWeight: '400' }}> (${prevClosePrices[ticker].toFixed(2)} → ${livePriceForOverride.toFixed(2)})</span>
-                              </div>
-                            )
-                          })()}
                           {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                           {combinedDisplay !== null && <div style={{ color: combinedDisplay >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>Net: {combinedDisplay >= 0 ? '+' : ''}{fmt(combinedDisplay)}</div>}
                           {combined100 !== null && <div style={{ fontSize: '10px', color: textMid }}>per 100sh: {combined100 >= 0 ? '+' : ''}{fmt(combined100)}</div>}
@@ -1308,15 +1369,6 @@ export default function OptionsPnLPanel() {
                             )}
                           </div>
                         )}
-                        {weekOffset === 0 && prevClosePrices[ticker] != null && livePrice1w != null && effShares1w && (() => {
-                          const oneDayPnl = Math.round((livePrice1w - prevClosePrices[ticker]) * effShares1w * 100) / 100
-                          return (
-                            <div style={{ color: oneDayPnl >= 0 ? green : red, fontSize: '11px' }}>
-                              1D Stock: {oneDayPnl >= 0 ? '+' : ''}{fmt(oneDayPnl)}
-                              <span style={{ color: textMid, fontWeight: '400' }}> (${prevClosePrices[ticker].toFixed(2)} → ${livePrice1w.toFixed(2)})</span>
-                            </div>
-                          )
-                        })()}
                         {unrealizedPnl !== undefined && (
                           <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
                             Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}

@@ -2823,12 +2823,25 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       .filter(t => !allPositions[t])
     const allSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols, ...optionOnlyTickers])]
 
+    const yesterdayStr = (() => {
+      const d = new Date(todayStr + 'T12:00:00Z')
+      const dow = d.getUTCDay() // 0=Sun,1=Mon,...,6=Sat
+      const daysBack = dow === 1 ? 3 : dow === 0 ? 2 : 1
+      d.setUTCDate(d.getUTCDate() - daysBack)
+      return d.toISOString().slice(0, 10)
+    })()
+
     const optionUnderlyingPrices = {}
+    let prevClosePrices = {}
     if (allSymbols.length > 0) {
-      const [lastFridayPrices, currentPrices] = await Promise.all([
+      const [lastFridayPrices, currentPrices, yesterdayPrices] = await Promise.all([
         priceService.getPricesForDate(allSymbols, lastFridayStr),
-        priceService.getPricesForDate(allSymbols, todayStr)
+        priceService.getPricesForDate(allSymbols, todayStr),
+        yesterdayStr === lastFridayStr
+          ? Promise.resolve(null)
+          : priceService.getPricesForDate(allSymbols, yesterdayStr),
       ])
+      prevClosePrices = yesterdayStr === lastFridayStr ? lastFridayPrices : (yesterdayPrices || {})
       optionOnlyTickers.forEach(sym => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
       })
@@ -3069,7 +3082,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       ...Object.keys(otherStockPnLBySymbol),
     ])]
     const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
-    const prevClosePrices = priceService.getPreviousClose(allStockSymbols)
 
     res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices })
   } catch (error) {
