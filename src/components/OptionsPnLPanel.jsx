@@ -893,39 +893,60 @@ export default function OptionsPnLPanel() {
         })()}
         {/* Per-underlying breakdown — single week (detailed) or multi-week (options total only) */}
         {byUnderlyingWeeks === -5 && (() => {
-          const tickers = [...new Set([
-            ...Object.keys(prevClosePrices),
-            ...Object.keys(stockPriceByTicker),
-          ])].filter(t => prevClosePrices[t] != null && stockPriceByTicker[t] != null)
-          if (tickers.length === 0) return <div style={{ padding: '20px 0', textAlign: 'center', color: textMid, fontSize: '13px' }}>No 1D price data available yet</div>
-          const oneDayTotal = tickers.reduce((sum, t) => {
+          // Only tickers with open options (unrealized or this-week activity)
+          const optTickers = [...new Set([
+            ...Object.keys(unrealizedByTicker),
+            ...Object.keys(data?.currentWeekByUnderlying || {}),
+          ])].sort()
+          if (optTickers.length === 0) return <div style={{ padding: '20px 0', textAlign: 'center', color: textMid, fontSize: '13px' }}>No open options positions</div>
+          const oneDayNetTotal = optTickers.reduce((sum, t) => {
             const shares = cumulativeStockPrices[t]?.shares ?? data?.weeklyStockPnL?.[t]?.shares ?? 0
-            return sum + Math.round((stockPriceByTicker[t] - prevClosePrices[t]) * shares * 100) / 100
+            const stockPnl1d = (prevClosePrices[t] != null && stockPriceByTicker[t] != null && shares > 0)
+              ? Math.round((stockPriceByTicker[t] - prevClosePrices[t]) * shares * 100) / 100 : 0
+            const realizedPnl = data?.currentWeekRealizedByUnderlying?.[t] ?? 0
+            const unrealizedPnl = unrealizedByTicker[t] ?? 0
+            return sum + realizedPnl + unrealizedPnl + stockPnl1d
           }, 0)
           return (
             <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>Today by Underlying</div>
-                <div style={{ fontSize: '12px', fontWeight: '700', color: oneDayTotal >= 0 ? green : red }}>
-                  Stock Total 1D: {oneDayTotal >= 0 ? '+' : ''}{fmt(oneDayTotal)}
+                <div style={{ fontSize: '12px', fontWeight: '700', color: oneDayNetTotal >= 0 ? green : red }}>
+                  Total Net: {oneDayNetTotal >= 0 ? '+' : ''}{fmt(oneDayNetTotal)}
                 </div>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {tickers.sort().map(ticker => {
+                {optTickers.map(ticker => {
                   const shares = cumulativeStockPrices[ticker]?.shares ?? data?.weeklyStockPnL?.[ticker]?.shares ?? 0
                   const livePrice = stockPriceByTicker[ticker]
                   const prevClose = prevClosePrices[ticker]
-                  const oneDayPnl = shares > 0 ? Math.round((livePrice - prevClose) * shares * 100) / 100 : null
-                  const oneDayPct = prevClose > 0 ? Math.round((livePrice - prevClose) / prevClose * 10000) / 100 : null
+                  const oneDayPct = prevClose > 0 && livePrice ? Math.round((livePrice - prevClose) / prevClose * 10000) / 100 : null
+                  const stockPnl1d = prevClose != null && livePrice != null && shares > 0
+                    ? Math.round((livePrice - prevClose) * shares * 100) / 100 : null
+                  const realizedPnl = data?.currentWeekRealizedByUnderlying?.[ticker]
+                  const realizedCalls = data?.currentWeekRealizedCallsByUnderlying?.[ticker]
+                  const realizedPuts = data?.currentWeekRealizedPutsByUnderlying?.[ticker]
                   const unrealizedPnl = unrealizedByTicker[ticker]
+                  const optPnl = (realizedPnl ?? 0) + (unrealizedPnl ?? 0)
+                  const netTotal = optPnl + (stockPnl1d ?? 0)
                   const rp = remPremByTicker[ticker]
-                  const sp = livePrice
+                  const scRem = (rp?.shortCall ?? 0) * 100
+                  const lpRem = (rp?.longPut ?? 0) * 100
+                  const netRem = Math.round((netTotal + scRem - lpRem) * 100) / 100
+                  const shortCallStrike = rp?.shortCallPositions?.length > 0 ? Math.min(...rp.shortCallPositions.map(p => p.strike)) : null
+                  const longPutStrike = rp?.longPutPositions?.length > 0 ? Math.max(...rp.longPutPositions.map(p => p.strike)) : null
+                  const maxVal = shortCallStrike != null && livePrice != null && shares > 0 && scRem > 0
+                    ? Math.round(((shortCallStrike - livePrice) * shares + scRem - lpRem) * 100) / 100 : null
+                  const floorVal = longPutStrike != null && livePrice != null && shares > 0 && lpRem > 0
+                    ? Math.round(((longPutStrike - livePrice) * shares + scRem - lpRem) * 100) / 100 : null
                   return (
                     <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
-                      <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '12px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${border}` }}>
+                      <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '12px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${shortPutsByTicker[ticker] ? '#ef4444' : border}` }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
                           <span style={{ fontWeight: '700', color: text }}>
-                            {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
+                            {ticker}
+                            {livePrice ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(livePrice)}</span> : null}
+                            {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
                           </span>
                           {oneDayPct != null && (
                             <span style={{ fontSize: '11px', fontWeight: '700', color: oneDayPct >= 0 ? green : red }}>
@@ -934,25 +955,32 @@ export default function OptionsPnLPanel() {
                           )}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          {oneDayPnl !== null ? (
-                            <div style={{ color: oneDayPnl >= 0 ? green : red }}>
-                              Stock 1D: {oneDayPnl >= 0 ? '+' : ''}{fmt(oneDayPnl)}
+                          {optPnl !== 0 && <div style={{ color: optPnl >= 0 ? green : red }}>Options: {optPnl >= 0 ? '+' : ''}{fmt(optPnl)}</div>}
+                          {realizedPnl != null && (realizedPnl !== 0 || realizedCalls != null || realizedPuts != null) && (
+                            <div style={{ color: realizedPnl >= 0 ? green : red, fontSize: '11px' }}>↳ Realized: {realizedPnl >= 0 ? '+' : ''}{fmt(realizedPnl)}</div>
+                          )}
+                          {realizedCalls != null && <div style={{ color: realizedCalls >= 0 ? green : red, fontSize: '11px', paddingLeft: '10px' }}>Calls: {realizedCalls >= 0 ? '+' : ''}{fmt(realizedCalls)}</div>}
+                          {realizedPuts != null && <div style={{ color: realizedPuts >= 0 ? green : red, fontSize: '11px', paddingLeft: '10px' }}>Puts: {realizedPuts >= 0 ? '+' : ''}{fmt(realizedPuts)}</div>}
+                          {unrealizedPnl !== undefined && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}</div>}
+                          {stockPnl1d !== null ? (
+                            <div style={{ color: stockPnl1d >= 0 ? green : red }}>
+                              Stock: {stockPnl1d >= 0 ? '+' : ''}{fmt(stockPnl1d)}
                               <span style={{ color: textMid, fontWeight: '400' }}> (${prevClose.toFixed(2)} → ${livePrice.toFixed(2)})</span>
                             </div>
-                          ) : (
-                            <div style={{ color: textMid }}>No position</div>
-                          )}
-                          {shares > 0 && shares !== 100 && (
-                            <div style={{ color: textMid, fontSize: '10px' }}>{shares} shares</div>
-                          )}
-                          {unrealizedPnl !== undefined && (
-                            <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
-                              Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                          ) : shares > 0 ? <div style={{ color: textMid, fontSize: '11px' }}>Stock: no prev close</div> : null}
+                          {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}{rp.shortCallPositions?.length > 0 && ` (${rp.shortCallPositions.map(x => `$${x.strike} @ $${x.mark}`).join(' / ')})`}</div>}
+                          {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}{rp.longPutPositions?.length > 0 && ` (${rp.longPutPositions.map(x => `$${x.strike} @ $${x.mark}`).join(' / ')})`}</div>}
+                          {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
+                          <div style={{ color: netTotal >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                            Net: {netTotal >= 0 ? '+' : ''}{fmt(netTotal)}
+                          </div>
+                          {(scRem > 0 || lpRem > 0) && (
+                            <div style={{ color: netRem >= 0 ? green : red, fontWeight: '700', fontSize: '11px' }}>
+                              Net + Rem: {netRem >= 0 ? '+' : ''}{fmt(netRem)}
                             </div>
                           )}
-                          {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}</div>}
-                          {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}</div>}
-                          {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
+                          {maxVal !== null && <div style={{ color: maxVal >= 0 ? green : red, fontSize: '11px' }}>Max: {maxVal >= 0 ? '+' : ''}{fmt(maxVal)}<span style={{ color: textMid }}> @${shortCallStrike}</span></div>}
+                          {floorVal !== null && <div style={{ color: floorVal >= 0 ? green : red, fontSize: '11px' }}>Floor: {floorVal >= 0 ? '+' : ''}{fmt(floorVal)}<span style={{ color: textMid }}> @${longPutStrike}</span></div>}
                         </div>
                       </div>
                     </div>
