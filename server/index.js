@@ -3084,43 +3084,34 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       console.error('Error fetching open option positions:', e.message)
     }
 
-    // Compute 1D option P&L delta per ticker: fetch yesterday + today marks from Yahoo Finance
+    // Compute 1D option P&L delta per ticker using Polygon daily aggs (prev close → today close)
     const oneDayOptionPnL = {}
-    try {
-      const YF_HEADERS_OPT = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-      }
+    if (polygonKey && openOptionPositions.length > 0) {
+      const fromDate = dayBeforeYesterdayStr  // fetch last 2 trading days
+      const toDate = todayStr
       await Promise.all(openOptionPositions.map(async (pos) => {
-        const yhSym = toYahooOptionTicker(pos.symbol)
-        if (!yhSym) return
+        const polyTicker = toPolygonTicker(pos.symbol)
+        if (!polyTicker) return
         try {
-          const url = `https://query2.finance.yahoo.com/v8/finance/chart/${yhSym}?range=5d&interval=1d`
-          const r = await axios.get(url, { timeout: 8000, headers: YF_HEADERS_OPT })
-          const result = r.data?.chart?.result?.[0]
-          if (!result) return
-          const timestamps = result.timestamp || []
-          const closes = result.indicators?.quote?.[0]?.closes || result.indicators?.quote?.[0]?.close || []
-          if (timestamps.length < 2) return
-          // Get the last two valid closes
-          const valid = []
-          for (let i = timestamps.length - 1; i >= 0 && valid.length < 2; i--) {
-            if (closes[i] != null) valid.push(closes[i])
-          }
-          if (valid.length < 2) return
-          const [todayMark, yesterdayMark] = valid  // valid[0]=most recent, valid[1]=previous
+          const url = `https://api.polygon.io/v2/aggs/ticker/${polyTicker}/range/1/day/${fromDate}/${toDate}`
+          const r = await axios.get(url, { params: { apiKey: polygonKey, limit: 5 }, timeout: 8000 })
+          const results = r.data?.results
+          if (!results || results.length < 1) return
+          // results are sorted ascending by date; grab last two closing prices
+          const last = results[results.length - 1]
+          const prev = results.length >= 2 ? results[results.length - 2] : null
+          const todayClose = last?.c ?? last?.vw ?? null
+          const prevClose  = prev?.c ?? prev?.vw ?? null
+          if (todayClose == null || prevClose == null) return
           const contracts = pos.openContracts
-          // Long positions gain when mark goes up; short positions gain when mark goes down
           const delta = pos.isLong
-            ? Math.round((todayMark - yesterdayMark) * contracts * 100 * 100) / 100
-            : Math.round((yesterdayMark - todayMark) * contracts * 100 * 100) / 100
-          oneDayOptionPnL[pos.ticker] = (oneDayOptionPnL[pos.ticker] || 0) + delta
+            ? Math.round((todayClose - prevClose) * contracts * 100 * 100) / 100
+            : Math.round((prevClose - todayClose) * contracts * 100 * 100) / 100
+          oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
         } catch (e) {
-          // ignore individual option fetch errors
+          // ignore individual fetch errors
         }
       }))
-    } catch (e) {
-      console.error('Error fetching 1D option deltas:', e.message)
     }
 
     // Gather pre-market prices for all tracked stock symbols
