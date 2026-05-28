@@ -1887,12 +1887,15 @@ app.get('/api/debug/positions', requireAuth, async (req, res) => {
   try {
     const positions = databaseService.getAllPositions(req.user.userId)
     const symbols = Object.keys(positions)
+    const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
+    const optionUnderlyings = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
+    const optionUnderlyingsWithStock = optionUnderlyings.filter(t => positions[t])
     let prices = {}
     if (symbols.length > 0) {
       const todayStr = new Date().toISOString().slice(0, 10)
       prices = await priceService.getPricesForDate(symbols, todayStr)
     }
-    res.json({ positions, prices, symbolCount: symbols.length })
+    res.json({ positions, prices, symbolCount: symbols.length, optionUnderlyings, optionUnderlyingsWithStock, optionTradeCount: allOptionTrades.length })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
