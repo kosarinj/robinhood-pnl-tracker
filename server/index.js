@@ -2840,16 +2840,17 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     let prevClosePrices = {}
     let prevPrevClosePrices = {}
     if (allSymbols.length > 0) {
-      const [lastFridayPrices, currentPrices, yesterdayPrices, dayBeforePrices] = await Promise.all([
+      // Only 2 fetches (same as before) — no extra Yahoo Finance calls to avoid rate limiting
+      const [lastFridayPrices, currentPrices, yesterdayPrices] = await Promise.all([
         priceService.getPricesForDate(allSymbols, lastFridayStr),
         priceService.getPricesForDate(allSymbols, todayStr),
         yesterdayStr === lastFridayStr
           ? Promise.resolve(null)
           : priceService.getPricesForDate(allSymbols, yesterdayStr),
-        priceService.getPricesForDate(allSymbols, dayBeforeYesterdayStr),
       ])
       prevClosePrices = yesterdayStr === lastFridayStr ? lastFridayPrices : (yesterdayPrices || {})
-      prevPrevClosePrices = dayBeforePrices || {}
+      // Use lastFridayPrices as the pre-market fallback baseline — already fetched, no extra calls
+      prevPrevClosePrices = lastFridayPrices || {}
       optionOnlyTickers.forEach(sym => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
       })
@@ -3084,25 +3085,24 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       console.error('Error fetching open option positions:', e.message)
     }
 
-    // Compute 1D option P&L delta per ticker using Polygon daily aggs (prev close → today close)
+    // Compute 1D option P&L delta per ticker using Polygon daily aggs (sequential to respect rate limit)
     const oneDayOptionPnL = {}
     if (polygonKey && openOptionPositions.length > 0) {
-      const fromDate = dayBeforeYesterdayStr  // fetch last 2 trading days
+      const fromDate = dayBeforeYesterdayStr
       const toDate = todayStr
-      await Promise.all(openOptionPositions.map(async (pos) => {
+      for (const pos of openOptionPositions) {
         const polyTicker = toPolygonTicker(pos.symbol)
-        if (!polyTicker) return
+        if (!polyTicker) continue
         try {
           const url = `https://api.polygon.io/v2/aggs/ticker/${polyTicker}/range/1/day/${fromDate}/${toDate}`
           const r = await axios.get(url, { params: { apiKey: polygonKey, limit: 5 }, timeout: 8000 })
           const results = r.data?.results
-          if (!results || results.length < 1) return
-          // results are sorted ascending by date; grab last two closing prices
+          if (!results || results.length < 2) continue
           const last = results[results.length - 1]
-          const prev = results.length >= 2 ? results[results.length - 2] : null
+          const prev = results[results.length - 2]
           const todayClose = last?.c ?? last?.vw ?? null
           const prevClose  = prev?.c ?? prev?.vw ?? null
-          if (todayClose == null || prevClose == null) return
+          if (todayClose == null || prevClose == null) continue
           const contracts = pos.openContracts
           const delta = pos.isLong
             ? Math.round((todayClose - prevClose) * contracts * 100 * 100) / 100
@@ -3111,7 +3111,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         } catch (e) {
           // ignore individual fetch errors
         }
-      }))
+        await new Promise(r => setTimeout(r, 120)) // ~5 req/s, within free-tier limit
+      }
     }
 
     // Gather pre-market prices for all tracked stock symbols
