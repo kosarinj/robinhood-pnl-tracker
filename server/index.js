@@ -3163,6 +3163,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       ])
     }
 
+    console.log(`[weeklyStockPnL] keys=${Object.keys(weeklyStockPnL).join(',') || 'EMPTY'} sample=${JSON.stringify(Object.entries(weeklyStockPnL).slice(0,2))}`)
+
     // Gather pre-market prices for all tracked stock symbols
     const allStockSymbols = [...new Set([
       ...Object.keys(weeklyStockPnL),
