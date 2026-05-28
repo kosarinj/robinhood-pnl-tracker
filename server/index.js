@@ -2857,7 +2857,10 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
     const optionOnlyTickers = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
       .filter(t => !allPositions[t])
-    const allSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols, ...optionOnlyTickers])]
+    // Stock symbols only for getPricesForDate — excluding optionOnlyTickers prevents ~60 concurrent
+    // Yahoo chart requests that cause rate limiting and return 0 for stock prices
+    const stockSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols])]
+    const allSymbols = [...new Set([...stockSymbols, ...optionOnlyTickers])]
 
     const prevTradingDay = (dateStr, n = 1) => {
       const d = new Date(dateStr + 'T12:00:00Z')
@@ -2876,18 +2879,22 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     let prevClosePrices = {}
     let prevPrevClosePrices = {}
     if (allSymbols.length > 0) {
-      // Restore the original 2-call structure that was working
+      // Use stockSymbols (not allSymbols) to avoid 60+ concurrent Yahoo chart requests
       const [lastFridayPrices, currentPrices] = await Promise.all([
-        priceService.getPricesForDate(allSymbols, lastFridayStr),
-        priceService.getPricesForDate(allSymbols, todayStr)
+        priceService.getPricesForDate(stockSymbols, lastFridayStr),
+        priceService.getPricesForDate(stockSymbols, todayStr)
       ])
       // prevClosePrices: read from the prevCloseCache populated by background fetchPrices refresh — no extra HTTP call
       prevClosePrices = priceService.getPreviousClose(allSymbols)
       // prevPrevClosePrices: use lastFridayPrices (already fetched) as pre-market baseline
       prevPrevClosePrices = lastFridayPrices || {}
-      optionOnlyTickers.forEach(sym => {
-        if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
-      })
+      // Fetch option-only underlying prices via bulk endpoint (fast, no rate-limiting)
+      if (optionOnlyTickers.length > 0) {
+        const optPrices = await priceService.getPrices(optionOnlyTickers)
+        optionOnlyTickers.forEach(sym => {
+          if ((optPrices[sym] || 0) > 0) optionUnderlyingPrices[sym] = optPrices[sym]
+        })
+      }
 
       const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols)
       const thisWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, lastFridayStr, todayStr, thisWeekSymbols)
