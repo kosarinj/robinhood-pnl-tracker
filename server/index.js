@@ -1890,12 +1890,19 @@ app.get('/api/debug/positions', requireAuth, async (req, res) => {
     const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
     const optionUnderlyings = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
     const optionUnderlyingsWithStock = optionUnderlyings.filter(t => positions[t])
-    let prices = {}
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const lastFridayStr = (() => {
+      const d = new Date(todayStr + 'T12:00:00Z')
+      // Go back to most recent Friday
+      while (d.getUTCDay() !== 5) d.setUTCDate(d.getUTCDate() - 1)
+      return d.toISOString().slice(0, 10)
+    })()
+    let prices = {}, lastFridayPrices = {}
     if (symbols.length > 0) {
-      const todayStr = new Date().toISOString().slice(0, 10)
       prices = await priceService.getPricesForDate(symbols, todayStr)
+      lastFridayPrices = await priceService.getPricesForDate(symbols, lastFridayStr)
     }
-    res.json({ positions, prices, symbolCount: symbols.length, optionUnderlyings, optionUnderlyingsWithStock, optionTradeCount: allOptionTrades.length })
+    res.json({ positions, prices, lastFridayPrices, lastFridayStr, symbolCount: symbols.length, optionUnderlyings, optionUnderlyingsWithStock, optionTradeCount: allOptionTrades.length })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
