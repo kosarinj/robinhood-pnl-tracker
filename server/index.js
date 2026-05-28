@@ -3070,8 +3070,10 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     ])]
     const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
 
-    // 1D: previous-close prices (read from in-memory cache — no extra HTTP calls)
+    // 1D: previous-close prices and regular-market prices (read from in-memory cache — no extra HTTP calls)
     const prevClosePrices = priceService.getPreviousClose(allSymbols)
+    const regularMarketPrices = priceService.getRegularMarketPrices(allSymbols)
+    const stockPositions = allPositions
 
     // 1D option P&L via Polygon daily aggs (sequential loop, 4s overall cap)
     const oneDayOptionPnL = {}
@@ -3112,7 +3114,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       ])
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL, regularMarketPrices, stockPositions })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

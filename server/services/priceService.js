@@ -15,6 +15,7 @@ export class PriceService {
     this.preMarketCache = new Map() // symbol → { price, changePercent }
     this.marketStateCache = new Map() // symbol → marketState
     this.prevCloseCache = new Map() // symbol → previousClose
+    this.regularMarketPriceCache = new Map() // symbol → regularMarketPrice (actual close, not pre/post adjusted)
     this.trackedSymbols = new Set()
     this.lastUpdate = null
     this.databaseService = databaseService
@@ -49,6 +50,16 @@ export class PriceService {
       prices[symbol] = price
     })
     return prices
+  }
+
+  // Get regular market prices (actual close, not pre/post adjusted) for given symbols
+  getRegularMarketPrices(symbols) {
+    const result = {}
+    symbols.forEach(sym => {
+      const p = this.regularMarketPriceCache.get(sym)
+      if (p != null) result[sym] = p
+    })
+    return result
   }
 
   // Get previous close prices for given symbols (from cache)
@@ -138,7 +149,7 @@ export class PriceService {
         const symbolList = batch.join(',')
 
         try {
-          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbolList}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`
+          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbolList}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState,regularMarketPreviousClose`
           const response = await axios.get(url, { timeout: 10000, headers })
 
           const quotes = response.data?.quoteResponse?.result || []
@@ -146,6 +157,7 @@ export class PriceService {
             // Cache market state for all quotes
             if (q.marketState) this.marketStateCache.set(q.symbol, q.marketState)
             if (q.regularMarketPreviousClose) this.prevCloseCache.set(q.symbol, q.regularMarketPreviousClose)
+            if (q.regularMarketPrice) this.regularMarketPriceCache.set(q.symbol, q.regularMarketPrice)
 
             // Cache pre-market price + change when available
             if (q.preMarketPrice) {

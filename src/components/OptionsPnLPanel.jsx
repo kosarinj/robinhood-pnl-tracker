@@ -384,6 +384,8 @@ export default function OptionsPnLPanel() {
   const preMarketPrices = data?.preMarketPrices || {}
   const prevClosePrices = data?.prevClosePrices || {}
   const oneDayOptionPnL = data?.oneDayOptionPnL || {}
+  const regularMarketPrices = data?.regularMarketPrices || {}
+  const stockPositions = data?.stockPositions || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
   // Short puts are a trading mistake (should always be long) — flag them prominently
@@ -906,11 +908,11 @@ export default function OptionsPnLPanel() {
           // stock 1D: live price vs yesterday's close
           // If market hasn't moved yet (live ≈ prevClose), show 0 rather than hiding
           const stockPnl1d = (ticker) => {
-            const live = stockPriceByTicker[ticker]
-            const prev = prevClosePrices[ticker]
-            const shares = cumulativeStockPrices[ticker]?.shares ?? data?.weeklyStockPnL?.[ticker]?.shares ?? 0
-            if (!live || !prev || !shares) return null
-            return Math.round((live - prev) * shares * 100) / 100
+            const toPrice = regularMarketPrices[ticker]   // actual EOD close (not pre/post adjusted)
+            const fromPrice = prevClosePrices[ticker]      // yesterday's EOD close
+            const shares = stockPositions[ticker] ?? 0
+            if (!toPrice || !fromPrice || !shares) return null
+            return Math.round((toPrice - fromPrice) * shares * 100) / 100
           }
           const total1d = tickers.reduce((s, t) => s + (oneDayOptionPnL[t] ?? 0) + (stockPnl1d(t) ?? 0), 0)
           return (
@@ -926,7 +928,7 @@ export default function OptionsPnLPanel() {
                   const sp = stockPnl1d(ticker)
                   const op = oneDayOptionPnL[ticker]
                   const net = (op ?? 0) + (sp ?? 0)
-                  const live = stockPriceByTicker[ticker]
+                  const live = regularMarketPrices[ticker] || stockPriceByTicker[ticker]
                   const prev = prevClosePrices[ticker]
                   const pct = live && prev ? Math.round((live - prev) / prev * 10000) / 100 : null
                   return (
