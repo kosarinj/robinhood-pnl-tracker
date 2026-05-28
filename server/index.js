@@ -1883,42 +1883,6 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 })
 
 // Debug endpoint to check option trades in database
-app.get('/api/debug/positions', requireAuth, async (req, res) => {
-  try {
-    const positions = databaseService.getAllPositions(req.user.userId)
-    const symbols = Object.keys(positions)
-    const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
-    const optionUnderlyings = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
-    const optionUnderlyingsWithStock = optionUnderlyings.filter(t => positions[t])
-    const todayStr = new Date().toISOString().slice(0, 10)
-    const lastFridayStr = (() => {
-      const d = new Date(todayStr + 'T12:00:00Z')
-      while (d.getUTCDay() !== 5) d.setUTCDate(d.getUTCDate() - 1)
-      return d.toISOString().slice(0, 10)
-    })()
-    let prices = {}, lastFridayPrices = {}
-    if (symbols.length > 0) {
-      prices = await priceService.getPricesForDate(symbols, todayStr)
-      lastFridayPrices = await priceService.getPricesForDate(symbols, lastFridayStr)
-    }
-    // Compute weeklyStockPnL the same way the main handler does
-    const weeklyStockPnL = {}
-    optionUnderlyingsWithStock.forEach(sym => {
-      const pos = positions[sym]
-      const lastClose = lastFridayPrices[sym]
-      const curPrice = prices[sym]
-      if (curPrice && lastClose) {
-        weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, shares: pos, fromPrice: lastClose, toPrice: curPrice }
-      } else {
-        weeklyStockPnL[sym] = { pnl: null, shares: pos, curPrice: curPrice || 0, lastClose: lastClose || 0 }
-      }
-    })
-    res.json({ positions, prices, lastFridayPrices, lastFridayStr, weeklyStockPnL, symbolCount: symbols.length, optionUnderlyings, optionUnderlyingsWithStock, optionTradeCount: allOptionTrades.length })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
 app.get('/api/debug/option-trades', requireAuth, (req, res) => {
   try {
     const all = databaseService.getOptionTrades(req.user.userId)
@@ -2857,8 +2821,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
     const optionOnlyTickers = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
       .filter(t => !allPositions[t])
-    // Stock symbols only for getPricesForDate — excluding optionOnlyTickers prevents ~60 concurrent
-    // Yahoo chart requests that cause rate limiting and return 0 for stock prices
+    // stockSymbols excludes optionOnlyTickers to keep the Yahoo Finance chart requests small
     const stockSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols])]
     const allSymbols = [...new Set([...stockSymbols, ...optionOnlyTickers])]
 
@@ -2879,16 +2842,13 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     let prevClosePrices = {}
     let prevPrevClosePrices = {}
     if (allSymbols.length > 0) {
-      // Use stockSymbols (not allSymbols) to avoid 60+ concurrent Yahoo chart requests
       const [lastFridayPrices, currentPrices] = await Promise.all([
         priceService.getPricesForDate(stockSymbols, lastFridayStr),
         priceService.getPricesForDate(stockSymbols, todayStr)
       ])
-      // prevClosePrices: read from the prevCloseCache populated by background fetchPrices refresh — no extra HTTP call
       prevClosePrices = priceService.getPreviousClose(allSymbols)
-      // prevPrevClosePrices: use lastFridayPrices (already fetched) as pre-market baseline
       prevPrevClosePrices = lastFridayPrices || {}
-      // Fetch option-only underlying prices via bulk endpoint (fast, no rate-limiting)
+      // Fetch option-only underlying prices via bulk endpoint (avoids per-symbol chart requests)
       if (optionOnlyTickers.length > 0) {
         const optPrices = await priceService.getPrices(optionOnlyTickers)
         optionOnlyTickers.forEach(sym => {
@@ -2920,25 +2880,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
           if (sharesSold > 0) {
             weeklyStockPnL[sym] = { pnl: Math.round((avgPrice - lastClose) * sharesSold * 100) / 100, fromPrice: lastClose, toPrice: avgPrice, fromDate: lastFridayStr, toDate: todayStr, shares: sharesSold }
           }
-        }
-      })
-
-      // Also include stocks where options expire in future/other weeks — these fall through to
-      // otherSymbols normally, but their shares need to appear in weeklyStockPnL so the
-      // underlying cards and Total Investment panel show the correct position.
-      const allOptionUnderlyings = [...new Set(
-        allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean)
-      )]
-      allOptionUnderlyings.forEach(sym => {
-        if (weeklyStockPnL[sym]) return // already handled above
-        const pos = allPositions[sym]
-        if (!pos) return
-        const lastClose = lastFridayPrices[sym]
-        const curPrice = currentPrices[sym]
-        if (curPrice && lastClose) {
-          weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
-        } else if (curPrice) {
-          weeklyStockPnL[sym] = { pnl: 0, fromPrice: curPrice, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
         }
       })
 
