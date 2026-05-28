@@ -1193,17 +1193,17 @@ export default function OptionsPnLPanel() {
               Object.keys(data?.weeklyStockPnL || {}).length > 0
             : histWk?.byUnderlying && Object.keys(histWk.byUnderlying).length > 0
           if (!hasData) return null
-          const wkByUnderlying = histWk ? histWk.byUnderlying : data.currentWeekByUnderlying
-          const wkRealized = histWk ? histWk.realizedByUnderlying : data.currentWeekRealizedByUnderlying
-          const wkCalls = histWk ? histWk.realizedCallsByUnderlying : data.currentWeekRealizedCallsByUnderlying
-          const wkPuts = histWk ? histWk.realizedPutsByUnderlying : data.currentWeekRealizedPutsByUnderlying
-          const wkTrades = histWk ? histWk.tradesByUnderlying : data.currentWeekTradesByUnderlying
+          const wkByUnderlying = histWk ? histWk.byUnderlying : (data?.currentWeekByUnderlying || {})
+          const wkRealized = histWk ? histWk.realizedByUnderlying : (data?.currentWeekRealizedByUnderlying || {})
+          const wkCalls = histWk ? histWk.realizedCallsByUnderlying : (data?.currentWeekRealizedCallsByUnderlying || {})
+          const wkPuts = histWk ? histWk.realizedPutsByUnderlying : (data?.currentWeekRealizedPutsByUnderlying || {})
+          const wkTrades = histWk ? histWk.tradesByUnderlying : (data?.currentWeekTradesByUnderlying || {})
           const wkStockByTicker = histWk
             ? Object.fromEntries(Object.entries(histWk.stockDelta || {}).map(([sym, pnl]) => {
                 const sp = histWk.stockPrices?.[sym]
                 return [sym, { pnl, fromPrice: sp?.fromPrice, toPrice: sp?.toPrice, shares: sp?.shares }]
               }))
-            : data.weeklyStockPnL || {}
+            : (data?.weeklyStockPnL || {})
           const wkLabel = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? '1W Ago' : `${weekOffset}W Ago`
           const maxOffset = historicalWeeks.length
           const wkDateStr = (() => {
