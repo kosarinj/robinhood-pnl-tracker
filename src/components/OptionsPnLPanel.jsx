@@ -1188,7 +1188,9 @@ export default function OptionsPnLPanel() {
           // which would make histWeeks[0] = next week, not last week, breaking alignment.
           const histWk = weekOffset > 0 ? historicalWeeks[weekOffset - 1] : null
           const hasData = weekOffset === 0
-            ? data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0
+            ? (data?.currentWeekByUnderlying && Object.keys(data.currentWeekByUnderlying).length > 0) ||
+              Object.keys(unrealizedByTicker).length > 0 ||
+              Object.keys(data?.weeklyStockPnL || {}).length > 0
             : histWk?.byUnderlying && Object.keys(histWk.byUnderlying).length > 0
           if (!hasData) return null
           const wkByUnderlying = histWk ? histWk.byUnderlying : data.currentWeekByUnderlying
@@ -1254,34 +1256,52 @@ export default function OptionsPnLPanel() {
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {/* Tickers with open positions but no current-week trades (current week only) */}
-              {weekOffset === 0 && Object.entries(unrealizedByTicker)
-                .filter(([ticker]) => !data.currentWeekByUnderlying[ticker])
-                .map(([ticker, unrealizedPnl]) => {
+              {weekOffset === 0 && (() => {
+                // Tickers with open positions OR stock in weeklyStockPnL but no current-week trades
+                const openTickers = [...new Set([
+                  ...Object.keys(unrealizedByTicker),
+                  ...Object.keys(data?.weeklyStockPnL || {})
+                ])].filter(t => !data?.currentWeekByUnderlying?.[t]).sort()
+                return openTickers.map(ticker => {
+                  const unrealizedPnl = unrealizedByTicker[ticker]
                   const rp = remPremByTicker[ticker]
                   const sp = stockPriceByTicker[ticker]
+                  const stockEntry = data?.weeklyStockPnL?.[ticker]
+                  const stockPnl = stockEntry?.pnl
+                  const netPnl = (unrealizedPnl ?? 0) + (stockPnl ?? 0)
                   return (
                     <div key={`open-${ticker}`} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                       <div style={{
                         padding: '8px 12px', borderRadius: '8px',
                         background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                        border: `1px solid ${border}`, fontSize: '12px'
+                        border: `1px solid ${shortPutsByTicker[ticker] ? '#ef4444' : border}`, fontSize: '12px'
                       }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-                          <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                          <span style={{ fontWeight: '700', color: text }}>
+                            {ticker}
+                            {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
+                          </span>
                           {sp && <span style={{ fontSize: '11px', color: textMid }}>{fmt(sp)}</span>}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
+                          {unrealizedPnl != null && <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
                             Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
-                          </div>
+                          </div>}
+                          {stockPnl != null && <div style={{ color: stockPnl >= 0 ? green : red }}>
+                            Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                            {stockEntry?.fromPrice && stockEntry?.toPrice && <span style={{ color: textMid, fontWeight: '400' }}> (${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toPrice.toFixed(2)})</span>}
+                          </div>}
                           {rp?.shortCall != null && <div style={{ color: '#f59e0b' }}>Rem Short Call: {fmt(rp.shortCall)}{rp.shortCallPositions?.length > 0 && ` (${rp.shortCallPositions.map(x => `$${x.strike} @ $${x.mark}`).join(' / ')})`}</div>}
                           {rp?.longPut != null && <div style={{ color: '#f59e0b' }}>Rem Long Put: {fmt(rp.longPut)}{rp.longPutPositions?.length > 0 && ` (${rp.longPutPositions.map(x => `$${x.strike} @ $${x.mark}`).join(' / ')})`}</div>}
+                          {(unrealizedPnl != null || stockPnl != null) && <div style={{ color: netPnl >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                            Net: {netPnl >= 0 ? '+' : ''}{fmt(netPnl)}
+                          </div>}
                         </div>
                       </div>
                     </div>
                   )
                 })
-              }
+              })()}
               {Object.entries(wkByUnderlying).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, optPnl]) => {
                 const stockEntry = wkStockByTicker[ticker]
                 const stockPnl = stockEntry !== undefined ? (stockEntry?.pnl ?? stockEntry) : undefined
@@ -1758,19 +1778,34 @@ export default function OptionsPnLPanel() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
               {Object.entries(nextWeekUnrealizedByTicker).sort((a, b) => a[0].localeCompare(b[0])).map(([ticker, unrealizedPnl]) => {
                 const sp = stockPriceByTicker[ticker]
+                const stockEntry = data?.weeklyStockPnL?.[ticker]
+                const stockPnl = stockEntry?.pnl
+                const netPnl = unrealizedPnl + (stockPnl ?? 0)
                 return (
                   <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
                     <div style={{
                       padding: '8px 12px', borderRadius: '8px',
                       background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                      border: `1px solid ${border}`, fontSize: '12px'
+                      border: `1px solid ${shortPutsByTicker[ticker] ? '#ef4444' : border}`, fontSize: '12px'
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-                        <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                        <span style={{ fontWeight: '700', color: text }}>
+                          {ticker}
+                          {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
+                        </span>
                         {sp && <span style={{ fontSize: '11px', color: textMid }}>{fmt(sp)}</span>}
                       </div>
-                      <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
-                        Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ color: unrealizedPnl >= 0 ? green : red }}>
+                          Unrealized: {unrealizedPnl >= 0 ? '+' : ''}{fmt(unrealizedPnl)}
+                        </div>
+                        {stockPnl != null && <div style={{ color: stockPnl >= 0 ? green : red }}>
+                          Stock: {stockPnl >= 0 ? '+' : ''}{fmt(stockPnl)}
+                          {stockEntry?.fromPrice && stockEntry?.toPrice && <span style={{ color: textMid, fontWeight: '400' }}> (${stockEntry.fromPrice.toFixed(2)} → ${stockEntry.toPrice.toFixed(2)})</span>}
+                        </div>}
+                        {stockPnl != null && <div style={{ color: netPnl >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                          Net: {netPnl >= 0 ? '+' : ''}{fmt(netPnl)}
+                        </div>}
                       </div>
                     </div>
                   </div>
