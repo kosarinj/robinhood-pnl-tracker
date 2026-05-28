@@ -2840,16 +2840,14 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     let prevClosePrices = {}
     let prevPrevClosePrices = {}
     if (allSymbols.length > 0) {
-      // Sequential fetches to avoid overwhelming Yahoo Finance with parallel requests.
-      // Current prices use the v7 bulk endpoint (all symbols in 1-2 requests).
-      // Historical dates use v8 per-symbol but are DB-cached after the first call.
-      const lastFridayPrices = await priceService.getPricesForDate(allSymbols, lastFridayStr)
-      const currentPrices = await priceService.fetchPrices(allSymbols)
-      const yesterdayPrices = yesterdayStr === lastFridayStr
-        ? null
-        : await priceService.getPricesForDate(allSymbols, yesterdayStr)
-      prevClosePrices = yesterdayStr === lastFridayStr ? lastFridayPrices : (yesterdayPrices || {})
-      // Use lastFridayPrices as the pre-market fallback baseline — already fetched, no extra calls
+      // Restore the original 2-call structure that was working
+      const [lastFridayPrices, currentPrices] = await Promise.all([
+        priceService.getPricesForDate(allSymbols, lastFridayStr),
+        priceService.getPricesForDate(allSymbols, todayStr)
+      ])
+      // prevClosePrices: read from the prevCloseCache populated by background fetchPrices refresh — no extra HTTP call
+      prevClosePrices = priceService.getPreviousClose(allSymbols)
+      // prevPrevClosePrices: use lastFridayPrices (already fetched) as pre-market baseline
       prevPrevClosePrices = lastFridayPrices || {}
       optionOnlyTickers.forEach(sym => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
