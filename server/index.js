@@ -3086,33 +3086,39 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     }
 
     // Compute 1D option P&L delta per ticker using Polygon daily aggs (sequential to respect rate limit)
+    // Capped at 4s total so slow/rate-limited Polygon calls don't block the main response
     const oneDayOptionPnL = {}
     if (polygonKey && openOptionPositions.length > 0) {
       const fromDate = dayBeforeYesterdayStr
       const toDate = todayStr
-      for (const pos of openOptionPositions) {
-        const polyTicker = toPolygonTicker(pos.symbol)
-        if (!polyTicker) continue
-        try {
-          const url = `https://api.polygon.io/v2/aggs/ticker/${polyTicker}/range/1/day/${fromDate}/${toDate}`
-          const r = await axios.get(url, { params: { apiKey: polygonKey, limit: 5 }, timeout: 8000 })
-          const results = r.data?.results
-          if (!results || results.length < 2) continue
-          const last = results[results.length - 1]
-          const prev = results[results.length - 2]
-          const todayClose = last?.c ?? last?.vw ?? null
-          const prevClose  = prev?.c ?? prev?.vw ?? null
-          if (todayClose == null || prevClose == null) continue
-          const contracts = pos.openContracts
-          const delta = pos.isLong
-            ? Math.round((todayClose - prevClose) * contracts * 100 * 100) / 100
-            : Math.round((prevClose - todayClose) * contracts * 100 * 100) / 100
-          oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
-        } catch (e) {
-          // ignore individual fetch errors
-        }
-        await new Promise(r => setTimeout(r, 120)) // ~5 req/s, within free-tier limit
-      }
+      await Promise.race([
+        (async () => {
+          for (const pos of openOptionPositions) {
+            const polyTicker = toPolygonTicker(pos.symbol)
+            if (!polyTicker) continue
+            try {
+              const url = `https://api.polygon.io/v2/aggs/ticker/${polyTicker}/range/1/day/${fromDate}/${toDate}`
+              const r = await axios.get(url, { params: { apiKey: polygonKey, limit: 5 }, timeout: 3000 })
+              const results = r.data?.results
+              if (!results || results.length < 2) continue
+              const last = results[results.length - 1]
+              const prev = results[results.length - 2]
+              const todayClose = last?.c ?? last?.vw ?? null
+              const prevClose  = prev?.c ?? prev?.vw ?? null
+              if (todayClose == null || prevClose == null) continue
+              const contracts = pos.openContracts
+              const delta = pos.isLong
+                ? Math.round((todayClose - prevClose) * contracts * 100 * 100) / 100
+                : Math.round((prevClose - todayClose) * contracts * 100 * 100) / 100
+              oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
+            } catch (e) {
+              // ignore individual fetch errors
+            }
+            await new Promise(r => setTimeout(r, 120))
+          }
+        })(),
+        new Promise(r => setTimeout(r, 4000)), // 4s cap — don't block cumulative P&L
+      ])
     }
 
     // Gather pre-market prices for all tracked stock symbols
