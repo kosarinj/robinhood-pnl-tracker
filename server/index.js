@@ -3070,7 +3070,49 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     ])]
     const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices })
+    // 1D: previous-close prices (read from in-memory cache — no extra HTTP calls)
+    const prevClosePrices = priceService.getPreviousClose(allSymbols)
+
+    // 1D option P&L via Polygon daily aggs (sequential loop, 4s overall cap)
+    const oneDayOptionPnL = {}
+    const polygonKey1d = process.env.POLYGON_API_KEY || ''
+    if (polygonKey1d && openOptionPositions.length > 0) {
+      const prevDay = (() => {
+        const d = new Date(asOf + 'T12:00:00Z')
+        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
+        return d.toISOString().slice(0, 10)
+      })()
+      const twoDaysAgo = (() => {
+        const d = new Date(prevDay + 'T12:00:00Z')
+        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
+        return d.toISOString().slice(0, 10)
+      })()
+      await Promise.race([
+        (async () => {
+          for (const pos of openOptionPositions) {
+            const polyTicker = toPolygonTicker(pos.symbol)
+            if (!polyTicker) continue
+            try {
+              const url = `https://api.polygon.io/v2/aggs/ticker/${polyTicker}/range/1/day/${twoDaysAgo}/${asOf}`
+              const r = await axios.get(url, { params: { apiKey: polygonKey1d, limit: 5 }, timeout: 3000 })
+              const results = r.data?.results
+              if (!results || results.length < 2) continue
+              const last = results[results.length - 1]
+              const prev = results[results.length - 2]
+              if (last?.c == null || prev?.c == null) continue
+              const delta = pos.isLong
+                ? Math.round((last.c - prev.c) * pos.openContracts * 100 * 100) / 100
+                : Math.round((prev.c - last.c) * pos.openContracts * 100 * 100) / 100
+              oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
+            } catch (e) { /* ignore individual errors */ }
+            await new Promise(r => setTimeout(r, 120))
+          }
+        })(),
+        new Promise(r => setTimeout(r, 4000)),
+      ])
+    }
+
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

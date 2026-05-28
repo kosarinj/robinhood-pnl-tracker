@@ -382,6 +382,8 @@ export default function OptionsPnLPanel() {
   const totalStockPnL = Object.values(data?.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl ?? v), 0)
   const otherStockPnL = data?.otherStockPnL || 0
   const preMarketPrices = data?.preMarketPrices || {}
+  const prevClosePrices = data?.prevClosePrices || {}
+  const oneDayOptionPnL = data?.oneDayOptionPnL || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
   // Short puts are a trading mistake (should always be long) — flag them prominently
@@ -774,7 +776,7 @@ export default function OptionsPnLPanel() {
             {sliceFromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>{fmtDate(sliceFromDate)} – {fmtDate(sliceToDate)}</div>}
           </div>
           <div style={{ display: 'flex', gap: '4px' }}>
-            {[['1W', 1], ['NW', -1], ['NW+1', -2], ['NW+2', -3], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['9W', 9], ['10W', 10], ['All', 0], ['Overall', -4]].map(([label, val]) => (
+            {[['1D', -5], ['1W', 1], ['NW', -1], ['NW+1', -2], ['NW+2', -3], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['9W', 9], ['10W', 10], ['All', 0], ['Overall', -4]].map(([label, val]) => (
               <button key={label} onClick={() => setByUnderlyingWeeks(val)}
                 style={{ ...btnStyle(byUnderlyingWeeks === val), padding: '3px 10px', fontSize: '11px' }}>
                 {label}
@@ -890,8 +892,69 @@ export default function OptionsPnLPanel() {
             </div>
           )
         })()}
+        {/* 1D view — yesterday close → today for options (Polygon) + stock */}
+        {byUnderlyingWeeks === -5 && (() => {
+          const tickers = [...new Set([
+            ...Object.keys(oneDayOptionPnL),
+            ...Object.keys(unrealizedByTicker),
+          ])].sort()
+          if (tickers.length === 0) return (
+            <div style={{ padding: '20px 0', textAlign: 'center', color: textMid, fontSize: '13px' }}>
+              No 1D data yet — Polygon prices load within a minute of opening the app
+            </div>
+          )
+          // stock 1D: live price vs yesterday's close
+          // If market hasn't moved yet (live ≈ prevClose), show 0 rather than hiding
+          const stockPnl1d = (ticker) => {
+            const live = stockPriceByTicker[ticker]
+            const prev = prevClosePrices[ticker]
+            const shares = cumulativeStockPrices[ticker]?.shares ?? data?.weeklyStockPnL?.[ticker]?.shares ?? 0
+            if (!live || !prev || !shares) return null
+            return Math.round((live - prev) * shares * 100) / 100
+          }
+          const total1d = tickers.reduce((s, t) => s + (oneDayOptionPnL[t] ?? 0) + (stockPnl1d(t) ?? 0), 0)
+          return (
+            <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>Today by Underlying</div>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: total1d >= 0 ? green : red }}>
+                  Total 1D: {total1d >= 0 ? '+' : ''}{fmt(total1d)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {tickers.map(ticker => {
+                  const sp = stockPnl1d(ticker)
+                  const op = oneDayOptionPnL[ticker]
+                  const net = (op ?? 0) + (sp ?? 0)
+                  const live = stockPriceByTicker[ticker]
+                  const prev = prevClosePrices[ticker]
+                  const pct = live && prev ? Math.round((live - prev) / prev * 10000) / 100 : null
+                  return (
+                    <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '240px' }}>
+                      <div style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '12px',
+                        background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+                        border: `1px solid ${border}` }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                          {live && <span style={{ fontSize: '11px', color: textMid }}>{fmt(live)}{pct != null && <span style={{ marginLeft: '4px', color: pct >= 0 ? green : red }}>{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</span>}</span>}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          {op != null && <div style={{ color: op >= 0 ? green : red }}>Options: {op >= 0 ? '+' : ''}{fmt(op)}</div>}
+                          {sp != null && <div style={{ color: sp >= 0 ? green : red }}>Stock: {sp >= 0 ? '+' : ''}{fmt(sp)}{prev && live && <span style={{ color: textMid, fontWeight: '400' }}> (${prev.toFixed(2)} → ${live.toFixed(2)})</span>}</div>}
+                          <div style={{ color: net >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                            Net: {net >= 0 ? '+' : ''}{fmt(net)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
         {/* Per-underlying breakdown — single week (detailed) or multi-week (options total only) */}
-        {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && byUnderlyingWeeks !== -2 && byUnderlyingWeeks !== -3 && byUnderlyingWeeks !== -4 && Object.keys(cumulativeByUnderlying).length > 0 && (
+        {byUnderlyingWeeks !== 1 && byUnderlyingWeeks !== -1 && byUnderlyingWeeks !== -2 && byUnderlyingWeeks !== -3 && byUnderlyingWeeks !== -4 && byUnderlyingWeeks !== -5 && Object.keys(cumulativeByUnderlying).length > 0 && (
           <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
             {(() => {
               // Current week: use the same netWeekPnL the 1W view shows so NW Total Net = 1W + 1W ago + ...
