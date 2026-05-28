@@ -1893,7 +1893,6 @@ app.get('/api/debug/positions', requireAuth, async (req, res) => {
     const todayStr = new Date().toISOString().slice(0, 10)
     const lastFridayStr = (() => {
       const d = new Date(todayStr + 'T12:00:00Z')
-      // Go back to most recent Friday
       while (d.getUTCDay() !== 5) d.setUTCDate(d.getUTCDate() - 1)
       return d.toISOString().slice(0, 10)
     })()
@@ -1902,7 +1901,19 @@ app.get('/api/debug/positions', requireAuth, async (req, res) => {
       prices = await priceService.getPricesForDate(symbols, todayStr)
       lastFridayPrices = await priceService.getPricesForDate(symbols, lastFridayStr)
     }
-    res.json({ positions, prices, lastFridayPrices, lastFridayStr, symbolCount: symbols.length, optionUnderlyings, optionUnderlyingsWithStock, optionTradeCount: allOptionTrades.length })
+    // Compute weeklyStockPnL the same way the main handler does
+    const weeklyStockPnL = {}
+    optionUnderlyingsWithStock.forEach(sym => {
+      const pos = positions[sym]
+      const lastClose = lastFridayPrices[sym]
+      const curPrice = prices[sym]
+      if (curPrice && lastClose) {
+        weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, shares: pos, fromPrice: lastClose, toPrice: curPrice }
+      } else {
+        weeklyStockPnL[sym] = { pnl: null, shares: pos, curPrice: curPrice || 0, lastClose: lastClose || 0 }
+      }
+    })
+    res.json({ positions, prices, lastFridayPrices, lastFridayStr, weeklyStockPnL, symbolCount: symbols.length, optionUnderlyings, optionUnderlyingsWithStock, optionTradeCount: allOptionTrades.length })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -3162,8 +3173,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         new Promise(r => setTimeout(r, 4000)), // 4s cap — don't block cumulative P&L
       ])
     }
-
-    console.log(`[weeklyStockPnL] keys=${Object.keys(weeklyStockPnL).join(',') || 'EMPTY'} sample=${JSON.stringify(Object.entries(weeklyStockPnL).slice(0,2))}`)
 
     // Gather pre-market prices for all tracked stock symbols
     const allStockSymbols = [...new Set([
