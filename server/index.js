@@ -2823,25 +2823,33 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       .filter(t => !allPositions[t])
     const allSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols, ...optionOnlyTickers])]
 
-    const yesterdayStr = (() => {
-      const d = new Date(todayStr + 'T12:00:00Z')
-      const dow = d.getUTCDay() // 0=Sun,1=Mon,...,6=Sat
-      const daysBack = dow === 1 ? 3 : dow === 0 ? 2 : 1
-      d.setUTCDate(d.getUTCDate() - daysBack)
+    const prevTradingDay = (dateStr, n = 1) => {
+      const d = new Date(dateStr + 'T12:00:00Z')
+      let skipped = 0
+      while (skipped < n) {
+        d.setUTCDate(d.getUTCDate() - 1)
+        const dow = d.getUTCDay()
+        if (dow !== 0 && dow !== 6) skipped++
+      }
       return d.toISOString().slice(0, 10)
-    })()
+    }
+    const yesterdayStr = prevTradingDay(todayStr, 1)
+    const dayBeforeYesterdayStr = prevTradingDay(todayStr, 2)
 
     const optionUnderlyingPrices = {}
     let prevClosePrices = {}
+    let prevPrevClosePrices = {}
     if (allSymbols.length > 0) {
-      const [lastFridayPrices, currentPrices, yesterdayPrices] = await Promise.all([
+      const [lastFridayPrices, currentPrices, yesterdayPrices, dayBeforePrices] = await Promise.all([
         priceService.getPricesForDate(allSymbols, lastFridayStr),
         priceService.getPricesForDate(allSymbols, todayStr),
         yesterdayStr === lastFridayStr
           ? Promise.resolve(null)
           : priceService.getPricesForDate(allSymbols, yesterdayStr),
+        priceService.getPricesForDate(allSymbols, dayBeforeYesterdayStr),
       ])
       prevClosePrices = yesterdayStr === lastFridayStr ? lastFridayPrices : (yesterdayPrices || {})
+      prevPrevClosePrices = dayBeforePrices || {}
       optionOnlyTickers.forEach(sym => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
       })
@@ -3122,7 +3130,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     ])]
     const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, prevPrevClosePrices, oneDayOptionPnL })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

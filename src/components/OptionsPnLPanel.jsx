@@ -383,6 +383,7 @@ export default function OptionsPnLPanel() {
   const otherStockPnL = data?.otherStockPnL || 0
   const preMarketPrices = data?.preMarketPrices || {}
   const prevClosePrices = data?.prevClosePrices || {}
+  const prevPrevClosePrices = data?.prevPrevClosePrices || {}
   const oneDayOptionPnL = data?.oneDayOptionPnL || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
@@ -898,12 +899,22 @@ export default function OptionsPnLPanel() {
           const optTickers = [...new Set([
             ...Object.keys(oneDayOptionPnL),
             ...Object.keys(unrealizedByTicker),
-          ])].filter(t => stockPriceByTicker[t] != null || prevClosePrices[t] != null).sort()
-          if (optTickers.length === 0) return <div style={{ padding: '20px 0', textAlign: 'center', color: textMid, fontSize: '13px' }}>No 1D data available yet — reload after market opens</div>
+          ])].filter(t => prevClosePrices[t] != null).sort()
+          if (optTickers.length === 0) return <div style={{ padding: '20px 0', textAlign: 'center', color: textMid, fontSize: '13px' }}>No 1D data available yet</div>
+          // Before market open: live price === yesterday's close, so show yesterday vs day-before instead
+          const stockFrom1D = (ticker) => {
+            const live = stockPriceByTicker[ticker]
+            const prev = prevClosePrices[ticker]
+            const prevprev = prevPrevClosePrices[ticker]
+            const marketMoved = live != null && prev != null && Math.abs(live - prev) > 0.001
+            if (marketMoved) return { from: prev, to: live, label: null }
+            if (prev != null && prevprev != null) return { from: prevprev, to: prev, label: 'EOD' }
+            return null
+          }
           const oneDayNetTotal = optTickers.reduce((sum, t) => {
             const shares = cumulativeStockPrices[t]?.shares ?? data?.weeklyStockPnL?.[t]?.shares ?? 0
-            const stockPnl1d = (prevClosePrices[t] != null && stockPriceByTicker[t] != null && shares > 0)
-              ? Math.round((stockPriceByTicker[t] - prevClosePrices[t]) * shares * 100) / 100 : 0
+            const s = stockFrom1D(t)
+            const stockPnl1d = s && shares > 0 ? Math.round((s.to - s.from) * shares * 100) / 100 : 0
             const optDelta = oneDayOptionPnL[t] ?? 0
             return sum + optDelta + stockPnl1d
           }, 0)
@@ -918,11 +929,9 @@ export default function OptionsPnLPanel() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                 {optTickers.map(ticker => {
                   const shares = cumulativeStockPrices[ticker]?.shares ?? data?.weeklyStockPnL?.[ticker]?.shares ?? 0
-                  const livePrice = stockPriceByTicker[ticker]
-                  const prevClose = prevClosePrices[ticker]
-                  const oneDayPct = prevClose > 0 && livePrice ? Math.round((livePrice - prevClose) / prevClose * 10000) / 100 : null
-                  const stockPnl1d = prevClose != null && livePrice != null && shares > 0
-                    ? Math.round((livePrice - prevClose) * shares * 100) / 100 : null
+                  const s = stockFrom1D(ticker)
+                  const oneDayPct = s ? Math.round((s.to - s.from) / s.from * 10000) / 100 : null
+                  const stockPnl1d = s && shares > 0 ? Math.round((s.to - s.from) * shares * 100) / 100 : null
                   const optDelta = oneDayOptionPnL[ticker]
                   const netTotal = (optDelta ?? 0) + (stockPnl1d ?? 0)
                   return (
@@ -931,7 +940,7 @@ export default function OptionsPnLPanel() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
                           <span style={{ fontWeight: '700', color: text }}>
                             {ticker}
-                            {livePrice ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(livePrice)}</span> : null}
+                            {s?.to ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(s.to)}</span> : null}
                             {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
                           </span>
                           {oneDayPct != null && (
@@ -948,10 +957,10 @@ export default function OptionsPnLPanel() {
                           )}
                           {stockPnl1d !== null ? (
                             <div style={{ color: stockPnl1d >= 0 ? green : red }}>
-                              Stock 1D: {stockPnl1d >= 0 ? '+' : ''}{fmt(stockPnl1d)}
-                              <span style={{ color: textMid, fontWeight: '400' }}> (${prevClose.toFixed(2)} → ${livePrice.toFixed(2)})</span>
+                              Stock{s.label ? ` (${s.label})` : ''}: {stockPnl1d >= 0 ? '+' : ''}{fmt(stockPnl1d)}
+                              <span style={{ color: textMid, fontWeight: '400' }}> (${s.from.toFixed(2)} → ${s.to.toFixed(2)})</span>
                             </div>
-                          ) : shares > 0 ? <div style={{ color: textMid, fontSize: '11px' }}>Stock: no prev close</div> : null}
+                          ) : shares > 0 ? <div style={{ color: textMid, fontSize: '11px' }}>Stock: no price data</div> : null}
                           {!isHistoricalView && <RSIBadge symbol={ticker} isDark={isDark} onClick={setChartTicker} />}
                           <div style={{ color: netTotal >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
                             Net 1D: {netTotal >= 0 ? '+' : ''}{fmt(netTotal)}
