@@ -2895,6 +2895,25 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         }
       })
 
+      // Also include stocks where options expire in future/other weeks — these fall through to
+      // otherSymbols normally, but their shares need to appear in weeklyStockPnL so the
+      // underlying cards and Total Investment panel show the correct position.
+      const allOptionUnderlyings = [...new Set(
+        allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean)
+      )]
+      allOptionUnderlyings.forEach(sym => {
+        if (weeklyStockPnL[sym]) return // already handled above
+        const pos = allPositions[sym]
+        if (!pos) return
+        const lastClose = lastFridayPrices[sym]
+        const curPrice = currentPrices[sym]
+        if (curPrice && lastClose) {
+          weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
+        } else if (curPrice) {
+          weeklyStockPnL[sym] = { pnl: 0, fromPrice: curPrice, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
+        }
+      })
+
       otherSymbols.forEach(sym => {
         const pos = allPositions[sym]
         const lastClose = lastFridayPrices[sym]
