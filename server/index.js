@@ -2821,40 +2821,17 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
     const optionOnlyTickers = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
       .filter(t => !allPositions[t])
-    // stockSymbols excludes optionOnlyTickers to keep the Yahoo Finance chart requests small
-    const stockSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols])]
-    const allSymbols = [...new Set([...stockSymbols, ...optionOnlyTickers])]
-
-    const prevTradingDay = (dateStr, n = 1) => {
-      const d = new Date(dateStr + 'T12:00:00Z')
-      let skipped = 0
-      while (skipped < n) {
-        d.setUTCDate(d.getUTCDate() - 1)
-        const dow = d.getUTCDay()
-        if (dow !== 0 && dow !== 6) skipped++
-      }
-      return d.toISOString().slice(0, 10)
-    }
-    const yesterdayStr = prevTradingDay(todayStr, 1)
-    const dayBeforeYesterdayStr = prevTradingDay(todayStr, 2)
+    const allSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols, ...optionOnlyTickers])]
 
     const optionUnderlyingPrices = {}
-    let prevClosePrices = {}
-    let prevPrevClosePrices = {}
     if (allSymbols.length > 0) {
       const [lastFridayPrices, currentPrices] = await Promise.all([
-        priceService.getPricesForDate(stockSymbols, lastFridayStr),
-        priceService.getPricesForDate(stockSymbols, todayStr)
+        priceService.getPricesForDate(allSymbols, lastFridayStr),
+        priceService.getPricesForDate(allSymbols, todayStr)
       ])
-      prevClosePrices = priceService.getPreviousClose(allSymbols)
-      prevPrevClosePrices = lastFridayPrices || {}
-      // Fetch option-only underlying prices via bulk endpoint (avoids per-symbol chart requests)
-      if (optionOnlyTickers.length > 0) {
-        const optPrices = await priceService.getPrices(optionOnlyTickers)
-        optionOnlyTickers.forEach(sym => {
-          if ((optPrices[sym] || 0) > 0) optionUnderlyingPrices[sym] = optPrices[sym]
-        })
-      }
+      optionOnlyTickers.forEach(sym => {
+        if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
+      })
 
       const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols)
       const thisWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, lastFridayStr, todayStr, thisWeekSymbols)
@@ -2880,23 +2857,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
           if (sharesSold > 0) {
             weeklyStockPnL[sym] = { pnl: Math.round((avgPrice - lastClose) * sharesSold * 100) / 100, fromPrice: lastClose, toPrice: avgPrice, fromDate: lastFridayStr, toDate: todayStr, shares: sharesSold }
           }
-        }
-      })
-
-      // Include stocks for options expiring in future weeks (not just this week)
-      const allOptionUnderlyings = [...new Set(
-        allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean)
-      )]
-      allOptionUnderlyings.forEach(sym => {
-        if (weeklyStockPnL[sym]) return
-        const pos = allPositions[sym]
-        if (!pos) return
-        const lastClose = lastFridayPrices[sym]
-        const curPrice = currentPrices[sym]
-        if (curPrice && lastClose) {
-          weeklyStockPnL[sym] = { pnl: Math.round((curPrice - lastClose) * pos * 100) / 100, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
-        } else if (curPrice) {
-          weeklyStockPnL[sym] = { pnl: 0, fromPrice: curPrice, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
         }
       })
 
@@ -3103,42 +3063,6 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       console.error('Error fetching open option positions:', e.message)
     }
 
-    // Compute 1D option P&L delta per ticker using Polygon daily aggs (sequential to respect rate limit)
-    // Capped at 4s total so slow/rate-limited Polygon calls don't block the main response
-    const oneDayOptionPnL = {}
-    if (polygonKey && openOptionPositions.length > 0) {
-      const fromDate = dayBeforeYesterdayStr
-      const toDate = todayStr
-      await Promise.race([
-        (async () => {
-          for (const pos of openOptionPositions) {
-            const polyTicker = toPolygonTicker(pos.symbol)
-            if (!polyTicker) continue
-            try {
-              const url = `https://api.polygon.io/v2/aggs/ticker/${polyTicker}/range/1/day/${fromDate}/${toDate}`
-              const r = await axios.get(url, { params: { apiKey: polygonKey, limit: 5 }, timeout: 3000 })
-              const results = r.data?.results
-              if (!results || results.length < 2) continue
-              const last = results[results.length - 1]
-              const prev = results[results.length - 2]
-              const todayClose = last?.c ?? last?.vw ?? null
-              const prevClose  = prev?.c ?? prev?.vw ?? null
-              if (todayClose == null || prevClose == null) continue
-              const contracts = pos.openContracts
-              const delta = pos.isLong
-                ? Math.round((todayClose - prevClose) * contracts * 100 * 100) / 100
-                : Math.round((prevClose - todayClose) * contracts * 100 * 100) / 100
-              oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
-            } catch (e) {
-              // ignore individual fetch errors
-            }
-            await new Promise(r => setTimeout(r, 120))
-          }
-        })(),
-        new Promise(r => setTimeout(r, 4000)), // 4s cap — don't block cumulative P&L
-      ])
-    }
-
     // Gather pre-market prices for all tracked stock symbols
     const allStockSymbols = [...new Set([
       ...Object.keys(weeklyStockPnL),
@@ -3146,7 +3070,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     ])]
     const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, prevPrevClosePrices, oneDayOptionPnL })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
