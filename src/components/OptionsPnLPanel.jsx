@@ -908,8 +908,8 @@ export default function OptionsPnLPanel() {
           // stock 1D: live price vs yesterday's close
           // If market hasn't moved yet (live ≈ prevClose), show 0 rather than hiding
           const stockPnl1d = (ticker) => {
-            const toPrice = regularMarketPrices[ticker]   // actual EOD close (not pre/post adjusted)
-            const fromPrice = prevClosePrices[ticker]      // yesterday's EOD close
+            const toPrice = regularMarketPrices[ticker] || stockPriceByTicker[ticker]
+            const fromPrice = prevClosePrices[ticker]
             const shares = stockPositions[ticker] ?? 0
             if (!toPrice || !fromPrice || !shares) return null
             return Math.round((toPrice - fromPrice) * shares * 100) / 100
