@@ -3114,27 +3114,37 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       ])
     }
 
-    // 1D stock P&L: fetch previous-day closes from Polygon for all stock positions
-    const stockPrevClosePrices = {}
+    // 1D stock P&L: fetch two EOD closes from Polygon (parallel — each ticker has its own timeout)
+    const stockPrevClosePrices = {}   // yesterday's EOD close
+    const stockTwoDaysAgoClose = {}   // two trading days ago EOD close (for pre-market 1D)
     if (polygonKey1d && Object.keys(allPositions).length > 0) {
-      await Promise.race([
-        (async () => {
-          for (const ticker of Object.keys(allPositions)) {
-            try {
-              const r = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev`, {
-                params: { apiKey: polygonKey1d }, timeout: 3000
-              })
-              const c = r.data?.results?.[0]?.c
-              if (c != null) stockPrevClosePrices[ticker] = c
-            } catch (e) { /* ignore */ }
-            await new Promise(r => setTimeout(r, 120))
+      const prevDay1d = (() => {
+        const d = new Date(asOf + 'T12:00:00Z')
+        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
+        return d.toISOString().slice(0, 10)
+      })()
+      const twoDaysAgo1d = (() => {
+        const d = new Date(prevDay1d + 'T12:00:00Z')
+        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
+        return d.toISOString().slice(0, 10)
+      })()
+      await Promise.all(Object.keys(allPositions).map(async (ticker) => {
+        try {
+          const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${twoDaysAgo1d}/${prevDay1d}`
+          const r = await axios.get(url, { params: { apiKey: polygonKey1d, limit: 2 }, timeout: 4000 })
+          const results = r.data?.results
+          if (!results || results.length < 1) return
+          const last = results[results.length - 1]
+          if (last?.c != null) stockPrevClosePrices[ticker] = last.c
+          if (results.length >= 2) {
+            const prev = results[results.length - 2]
+            if (prev?.c != null) stockTwoDaysAgoClose[ticker] = prev.c
           }
-        })(),
-        new Promise(r => setTimeout(r, 3000)),
-      ])
+        } catch (e) { /* ignore */ }
+      }))
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL, regularMarketPrices, stockPositions, stockPrevClosePrices })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL, regularMarketPrices, stockPositions, stockPrevClosePrices, stockTwoDaysAgoClose })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }

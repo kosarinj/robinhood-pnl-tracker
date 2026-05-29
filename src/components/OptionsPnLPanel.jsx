@@ -387,6 +387,7 @@ export default function OptionsPnLPanel() {
   const regularMarketPrices = data?.regularMarketPrices || {}
   const stockPositions = data?.stockPositions || {}
   const stockPrevClosePrices = data?.stockPrevClosePrices || {}
+  const stockTwoDaysAgoClose = data?.stockTwoDaysAgoClose || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
   // Short puts are a trading mistake (should always be long) — flag them prominently
@@ -908,11 +909,23 @@ export default function OptionsPnLPanel() {
           )
           // stock 1D: live price vs yesterday's close
           // If market hasn't moved yet (live ≈ prevClose), show 0 rather than hiding
+          const isMarketOpen = (() => {
+            const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
+            const day = et.getDay()
+            if (day === 0 || day === 6) return false
+            const mins = et.getHours() * 60 + et.getMinutes()
+            return mins >= 570 && mins < 960  // 9:30 AM–4:00 PM ET
+          })()
           const stockPnl1d = (ticker) => {
-            const toPrice = regularMarketPrices[ticker] || stockPriceByTicker[ticker]
-            const fromPrice = stockPrevClosePrices[ticker] || prevClosePrices[ticker]
             const shares = stockPositions[ticker] ?? 0
-            if (!toPrice || !fromPrice || !shares) return null
+            if (!shares) return null
+            const toPrice = isMarketOpen
+              ? (regularMarketPrices[ticker] || stockPriceByTicker[ticker])
+              : stockPrevClosePrices[ticker]
+            const fromPrice = isMarketOpen
+              ? stockPrevClosePrices[ticker]
+              : stockTwoDaysAgoClose[ticker]
+            if (!toPrice || !fromPrice) return null
             return Math.round((toPrice - fromPrice) * shares * 100) / 100
           }
           const total1d = tickers.reduce((s, t) => s + (oneDayOptionPnL[t] ?? 0) + (stockPnl1d(t) ?? 0), 0)
@@ -929,8 +942,10 @@ export default function OptionsPnLPanel() {
                   const sp = stockPnl1d(ticker)
                   const op = oneDayOptionPnL[ticker]
                   const net = (op ?? 0) + (sp ?? 0)
-                  const live = regularMarketPrices[ticker] || stockPriceByTicker[ticker]
-                  const prev = stockPrevClosePrices[ticker] || prevClosePrices[ticker]
+                  const live = isMarketOpen
+                    ? (regularMarketPrices[ticker] || stockPriceByTicker[ticker])
+                    : stockPrevClosePrices[ticker]
+                  const prev = isMarketOpen ? stockPrevClosePrices[ticker] : stockTwoDaysAgoClose[ticker]
                   const pct = live && prev ? Math.round((live - prev) / prev * 10000) / 100 : null
                   return (
                     <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '240px' }}>
