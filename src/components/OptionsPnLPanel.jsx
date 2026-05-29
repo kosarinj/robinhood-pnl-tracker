@@ -909,22 +909,11 @@ export default function OptionsPnLPanel() {
           )
           // stock 1D: live price vs yesterday's close
           // If market hasn't moved yet (live ≈ prevClose), show 0 rather than hiding
-          const isMarketOpen = (() => {
-            const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
-            const day = et.getDay()
-            if (day === 0 || day === 6) return false
-            const mins = et.getHours() * 60 + et.getMinutes()
-            return mins >= 570 && mins < 960  // 9:30 AM–4:00 PM ET
-          })()
           const stockPnl1d = (ticker) => {
             const shares = stockPositions[ticker] ?? 0
             if (!shares) return null
-            const toPrice = isMarketOpen
-              ? (regularMarketPrices[ticker] || stockPriceByTicker[ticker])
-              : (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
-            const fromPrice = isMarketOpen
-              ? (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
-              : (stockTwoDaysAgoClose[ticker] || prevClosePrices[ticker])
+            const toPrice = stockPriceByTicker[ticker]
+            const fromPrice = prevClosePrices[ticker]
             if (!toPrice || !fromPrice) return null
             return Math.round((toPrice - fromPrice) * shares * 100) / 100
           }
@@ -942,12 +931,8 @@ export default function OptionsPnLPanel() {
                   const sp = stockPnl1d(ticker)
                   const op = oneDayOptionPnL[ticker]
                   const net = (op ?? 0) + (sp ?? 0)
-                  const live = isMarketOpen
-                    ? (regularMarketPrices[ticker] || stockPriceByTicker[ticker])
-                    : (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
-                  const prev = isMarketOpen
-                    ? (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
-                    : (stockTwoDaysAgoClose[ticker] || prevClosePrices[ticker])
+                  const live = stockPriceByTicker[ticker]
+                  const prev = prevClosePrices[ticker]
                   const pct = live && prev ? Math.round((live - prev) / prev * 10000) / 100 : null
                   return (
                     <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '240px' }}>

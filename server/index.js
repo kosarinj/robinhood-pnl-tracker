@@ -3075,74 +3075,33 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     const regularMarketPrices = priceService.getRegularMarketPrices(allSymbols)
     const stockPositions = allPositions
 
-    // 1D option P&L via Polygon daily aggs (sequential loop, 4s overall cap)
+    // 1D option P&L via Polygon options snapshot (day.previous_close vs day.close/markPrice)
+    // Using snapshot instead of daily aggs — options snapshot always has previous_close even
+    // when the option didn't trade that day, which is common for thinly-traded contracts.
     const oneDayOptionPnL = {}
     const polygonKey1d = process.env.POLYGON_API_KEY || ''
     if (polygonKey1d && openOptionPositions.length > 0) {
-      const prevDay = (() => {
-        const d = new Date(asOf + 'T12:00:00Z')
-        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
-        return d.toISOString().slice(0, 10)
-      })()
-      const twoDaysAgo = (() => {
-        const d = new Date(prevDay + 'T12:00:00Z')
-        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
-        return d.toISOString().slice(0, 10)
-      })()
-      await Promise.race([
-        (async () => {
-          for (const pos of openOptionPositions) {
-            const polyTicker = toPolygonTicker(pos.symbol)
-            if (!polyTicker) continue
-            try {
-              const url = `https://api.polygon.io/v2/aggs/ticker/${polyTicker}/range/1/day/${twoDaysAgo}/${asOf}`
-              const r = await axios.get(url, { params: { apiKey: polygonKey1d, limit: 5 }, timeout: 3000 })
-              const results = r.data?.results
-              if (!results || results.length < 2) continue
-              const last = results[results.length - 1]
-              const prev = results[results.length - 2]
-              if (last?.c == null || prev?.c == null) continue
-              const delta = pos.isLong
-                ? Math.round((last.c - prev.c) * pos.openContracts * 100 * 100) / 100
-                : Math.round((prev.c - last.c) * pos.openContracts * 100 * 100) / 100
-              oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
-            } catch (e) { /* ignore individual errors */ }
-            await new Promise(r => setTimeout(r, 120))
-          }
-        })(),
-        new Promise(r => setTimeout(r, 4000)),
-      ])
-    }
-
-    // 1D stock P&L: fetch two EOD closes from Polygon (parallel — each ticker has its own timeout)
-    const stockPrevClosePrices = {}   // yesterday's EOD close
-    const stockTwoDaysAgoClose = {}   // two trading days ago EOD close (for pre-market 1D)
-    if (polygonKey1d && Object.keys(allPositions).length > 0) {
-      const prevDay1d = (() => {
-        const d = new Date(asOf + 'T12:00:00Z')
-        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
-        return d.toISOString().slice(0, 10)
-      })()
-      const twoDaysAgo1d = (() => {
-        const d = new Date(prevDay1d + 'T12:00:00Z')
-        do { d.setUTCDate(d.getUTCDate() - 1) } while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
-        return d.toISOString().slice(0, 10)
-      })()
-      await Promise.all(Object.keys(allPositions).map(async (ticker) => {
+      await Promise.all(openOptionPositions.map(async (pos) => {
+        const polyTicker = toPolygonTicker(pos.symbol)
+        if (!polyTicker) return
         try {
-          const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${twoDaysAgo1d}/${prevDay1d}`
-          const r = await axios.get(url, { params: { apiKey: polygonKey1d, limit: 2 }, timeout: 4000 })
-          const results = r.data?.results
-          if (!results || results.length < 1) return
-          const last = results[results.length - 1]
-          if (last?.c != null) stockPrevClosePrices[ticker] = last.c
-          if (results.length >= 2) {
-            const prev = results[results.length - 2]
-            if (prev?.c != null) stockTwoDaysAgoClose[ticker] = prev.c
-          }
+          const url = `https://api.polygon.io/v3/snapshot/options/${pos.ticker}/${polyTicker}`
+          const r = await axios.get(url, { params: { apiKey: polygonKey1d }, timeout: 4000 })
+          const snap = r.data?.results
+          const prevClose = snap?.day?.previous_close
+          const todayPrice = snap?.day?.close ?? pos.markPrice
+          if (prevClose == null || todayPrice == null) return
+          const delta = pos.isLong
+            ? Math.round((todayPrice - prevClose) * pos.openContracts * 100 * 100) / 100
+            : Math.round((prevClose - todayPrice) * pos.openContracts * 100 * 100) / 100
+          oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
         } catch (e) { /* ignore */ }
       }))
     }
+
+    // 1D stock P&L uses prevClosePrices (Yahoo) + live stockPrices on the frontend — no extra fetches
+    const stockPrevClosePrices = {}
+    const stockTwoDaysAgoClose = {}
 
     res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL, regularMarketPrices, stockPositions, stockPrevClosePrices, stockTwoDaysAgoClose })
   } catch (error) {
