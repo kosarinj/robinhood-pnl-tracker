@@ -3070,40 +3070,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     ])]
     const preMarketPrices = priceService.getPreMarketPrices(allStockSymbols)
 
-    // 1D: previous-close prices and regular-market prices (read from in-memory cache — no extra HTTP calls)
-    const prevClosePrices = priceService.getPreviousClose(allSymbols)
-    const regularMarketPrices = priceService.getRegularMarketPrices(allSymbols)
-    const stockPositions = allPositions
-
-    // 1D option P&L via Polygon options snapshot (day.previous_close vs day.close/markPrice)
-    // Using snapshot instead of daily aggs — options snapshot always has previous_close even
-    // when the option didn't trade that day, which is common for thinly-traded contracts.
-    const oneDayOptionPnL = {}
-    const polygonKey1d = process.env.POLYGON_API_KEY || ''
-    if (polygonKey1d && openOptionPositions.length > 0) {
-      await Promise.all(openOptionPositions.map(async (pos) => {
-        const polyTicker = toPolygonTicker(pos.symbol)
-        if (!polyTicker) return
-        try {
-          const url = `https://api.polygon.io/v3/snapshot/options/${pos.ticker}/${polyTicker}`
-          const r = await axios.get(url, { params: { apiKey: polygonKey1d }, timeout: 4000 })
-          const snap = r.data?.results
-          const prevClose = snap?.day?.previous_close
-          const todayPrice = snap?.day?.close ?? pos.markPrice
-          if (prevClose == null || todayPrice == null) return
-          const delta = pos.isLong
-            ? Math.round((todayPrice - prevClose) * pos.openContracts * 100 * 100) / 100
-            : Math.round((prevClose - todayPrice) * pos.openContracts * 100 * 100) / 100
-          oneDayOptionPnL[pos.ticker] = Math.round(((oneDayOptionPnL[pos.ticker] || 0) + delta) * 100) / 100
-        } catch (e) { /* ignore */ }
-      }))
-    }
-
-    // 1D stock P&L uses prevClosePrices (Yahoo) + live stockPrices on the frontend — no extra fetches
-    const stockPrevClosePrices = {}
-    const stockTwoDaysAgoClose = {}
-
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL, regularMarketPrices, stockPositions, stockPrevClosePrices, stockTwoDaysAgoClose })
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
