@@ -3114,7 +3114,27 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       ])
     }
 
-    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL, regularMarketPrices, stockPositions })
+    // 1D stock P&L: fetch previous-day closes from Polygon for all stock positions
+    const stockPrevClosePrices = {}
+    if (polygonKey1d && Object.keys(allPositions).length > 0) {
+      await Promise.race([
+        (async () => {
+          for (const ticker of Object.keys(allPositions)) {
+            try {
+              const r = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${ticker}/prev`, {
+                params: { apiKey: polygonKey1d }, timeout: 3000
+              })
+              const c = r.data?.results?.[0]?.c
+              if (c != null) stockPrevClosePrices[ticker] = c
+            } catch (e) { /* ignore */ }
+            await new Promise(r => setTimeout(r, 120))
+          }
+        })(),
+        new Promise(r => setTimeout(r, 3000)),
+      ])
+    }
+
+    res.json({ success: true, weeks, currentWeekPnL, currentWeekRealizedTotal, currentWeekByUnderlying, currentWeekRealizedByUnderlying, currentWeekRealizedCallsByUnderlying, currentWeekRealizedPutsByUnderlying, currentWeekTradesByUnderlying, weeklyStockPnL, otherStockPnL, otherStockPnLBySymbol, otherStockCount: otherSymbols.length, weekStart: mondayStr, openOptionPositions, optionUnderlyingPrices, preMarketPrices, prevClosePrices, oneDayOptionPnL, regularMarketPrices, stockPositions, stockPrevClosePrices })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
