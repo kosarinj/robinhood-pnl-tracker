@@ -921,10 +921,10 @@ export default function OptionsPnLPanel() {
             if (!shares) return null
             const toPrice = isMarketOpen
               ? (regularMarketPrices[ticker] || stockPriceByTicker[ticker])
-              : stockPrevClosePrices[ticker]
+              : (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
             const fromPrice = isMarketOpen
-              ? stockPrevClosePrices[ticker]
-              : stockTwoDaysAgoClose[ticker]
+              ? (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
+              : (stockTwoDaysAgoClose[ticker] || prevClosePrices[ticker])
             if (!toPrice || !fromPrice) return null
             return Math.round((toPrice - fromPrice) * shares * 100) / 100
           }
@@ -944,8 +944,10 @@ export default function OptionsPnLPanel() {
                   const net = (op ?? 0) + (sp ?? 0)
                   const live = isMarketOpen
                     ? (regularMarketPrices[ticker] || stockPriceByTicker[ticker])
-                    : stockPrevClosePrices[ticker]
-                  const prev = isMarketOpen ? stockPrevClosePrices[ticker] : stockTwoDaysAgoClose[ticker]
+                    : (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
+                  const prev = isMarketOpen
+                    ? (stockPrevClosePrices[ticker] || prevClosePrices[ticker])
+                    : (stockTwoDaysAgoClose[ticker] || prevClosePrices[ticker])
                   const pct = live && prev ? Math.round((live - prev) / prev * 10000) / 100 : null
                   return (
                     <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '240px' }}>
