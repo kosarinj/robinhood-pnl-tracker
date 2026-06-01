@@ -151,6 +151,9 @@ export default function OptionsPnLPanel() {
   })
   const [editingOverride, setEditingOverride] = useState(null)
   const [editDraft, setEditDraft] = useState({ shares: '', price: '' })
+  const [dailySnapshot, setDailySnapshot] = useState(null)
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
+  const [snapshotDate, setSnapshotDate] = useState(null)
 
   useEffect(() => {
     if (editingOverride) {
@@ -186,6 +189,25 @@ export default function OptionsPnLPanel() {
   const textMid = isDark ? '#94a3b8' : '#64748b'
   const green = '#22c55e'
   const red = '#ef4444'
+
+  const fetchDailySnapshot = async (force = false) => {
+    setSnapshotLoading(true)
+    try {
+      const url = force ? '/api/daily-snapshot?force=true' : '/api/daily-snapshot'
+      const res = await fetch(url, { credentials: 'include' })
+      const json = await res.json()
+      if (json.success) { setDailySnapshot(json.snapshot); setSnapshotDate(json.date) }
+    } catch (e) {
+      console.warn('Failed to fetch daily snapshot:', e.message)
+    } finally {
+      setSnapshotLoading(false)
+    }
+  }
+
+  // Fetch snapshot whenever 1D tab is selected
+  useEffect(() => {
+    if (byUnderlyingWeeks === -10 && !dailySnapshot && !snapshotLoading) fetchDailySnapshot()
+  }, [byUnderlyingWeeks])
 
   const fetchData = async (overrideAsOf) => {
     setLoading(true)
@@ -774,7 +796,7 @@ export default function OptionsPnLPanel() {
             {sliceFromDate && <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>{fmtDate(sliceFromDate)} – {fmtDate(sliceToDate)}</div>}
           </div>
           <div style={{ display: 'flex', gap: '4px' }}>
-            {[['1W', 1], ['NW', -1], ['NW+1', -2], ['NW+2', -3], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['9W', 9], ['10W', 10], ['All', 0], ['Overall', -4]].map(([label, val]) => (
+            {[['1D', -10], ['1W', 1], ['NW', -1], ['NW+1', -2], ['NW+2', -3], ['2W', 2], ['3W', 3], ['4W', 4], ['5W', 5], ['6W', 6], ['7W', 7], ['8W', 8], ['9W', 9], ['10W', 10], ['All', 0], ['Overall', -4]].map(([label, val]) => (
               <button key={label} onClick={() => setByUnderlyingWeeks(val)}
                 style={{ ...btnStyle(byUnderlyingWeeks === val), padding: '3px 10px', fontSize: '11px' }}>
                 {label}
@@ -1099,6 +1121,110 @@ export default function OptionsPnLPanel() {
             </div>
           </div>
         )}
+        {byUnderlyingWeeks === -10 && (() => {
+          if (snapshotLoading) return <div style={{ padding: '20px', color: textMid, fontSize: '13px' }}>Loading snapshot...</div>
+          if (!dailySnapshot) return (
+            <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}`, color: textMid, fontSize: '13px' }}>
+              <div>No daily snapshot available yet.</div>
+              <div style={{ fontSize: '11px', marginTop: '4px' }}>Snapshots are taken automatically Mon–Fri at 4:05pm ET.</div>
+              <button onClick={() => fetchDailySnapshot(true)}
+                style={{ marginTop: '8px', padding: '4px 12px', fontSize: '11px', borderRadius: '6px', border: `1px solid ${border}`, background: 'transparent', color: textMid, cursor: 'pointer' }}>
+                Take Snapshot Now
+              </button>
+            </div>
+          )
+
+          const snap = dailySnapshot
+          // All stock positions: combine option-underlyings (have shares) + other stocks (have shares now)
+          const stockPnl1D = {}
+          const allStockEntries = { ...Object.fromEntries(Object.entries(data?.weeklyStockPnL || {}).map(([sym, e]) => [sym, e?.shares])), ...Object.fromEntries(Object.entries(data?.otherStockPnLBySymbol || {}).map(([sym, e]) => [sym, e?.shares])) }
+          Object.entries(allStockEntries).forEach(([sym, shares]) => {
+            if (!shares) return
+            const snapPrice = snap.stocks?.[sym]
+            const curPrice = stockPriceByTicker[sym]
+            if (snapPrice > 0 && curPrice > 0) {
+              stockPnl1D[sym] = { pnl: Math.round((curPrice - snapPrice) * shares * 100) / 100, snapPrice, curPrice, shares }
+            }
+          })
+
+          // 1D option P&L grouped by underlying ticker
+          const optPnl1D = {}
+          openPositions.forEach(pos => {
+            const snapEntry = snap.options?.[pos.symbol]
+            if (snapEntry == null || !pos.markPrice) return
+            const sign = pos.isLong ? 1 : -1
+            optPnl1D[pos.ticker] = (optPnl1D[pos.ticker] || 0) + sign * (pos.markPrice - snapEntry.price) * pos.openContracts * 100
+          })
+          Object.keys(optPnl1D).forEach(k => { optPnl1D[k] = Math.round(optPnl1D[k] * 100) / 100 })
+
+          const all1DTickers = [...new Set([...Object.keys(stockPnl1D), ...Object.keys(optPnl1D)])].sort()
+          const total1D = Math.round([...Object.values(stockPnl1D).map(s => s.pnl), ...Object.values(optPnl1D)].reduce((a, b) => a + b, 0) * 100) / 100
+
+          if (all1DTickers.length === 0) return (
+            <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}`, color: textMid, fontSize: '13px' }}>
+              Snapshot found for {snapshotDate} but no matching open positions found.
+              <div style={{ fontSize: '11px', marginTop: '4px' }}>Snapshot has {Object.keys(snap.stocks || {}).length} stock · {Object.keys(snap.options || {}).length} option prices.</div>
+            </div>
+          )
+
+          return (
+            <div style={{ paddingTop: '12px', borderTop: `1px solid ${border}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.03em', color: textMid }}>
+                    1D P&L vs {snapshotDate} EOD Snapshot
+                  </div>
+                  <div style={{ fontSize: '10px', color: textMid, marginTop: '1px' }}>
+                    {Object.keys(snap.stocks || {}).length} stock · {Object.keys(snap.options || {}).length} option prices snapped
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: total1D >= 0 ? green : red }}>
+                    Total: {total1D >= 0 ? '+' : ''}{fmt(total1D)}
+                  </div>
+                  <button onClick={() => fetchDailySnapshot(true)}
+                    title="Refresh snapshot with current prices"
+                    style={{ padding: '2px 8px', fontSize: '10px', borderRadius: '4px', border: `1px solid ${border}`, background: 'transparent', color: textMid, cursor: 'pointer' }}>↺</button>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {all1DTickers.map(ticker => {
+                  const st = stockPnl1D[ticker]
+                  const optP = optPnl1D[ticker]
+                  const stP = st?.pnl
+                  const net = Math.round(((stP ?? 0) + (optP ?? 0)) * 100) / 100
+                  const sp = stockPriceByTicker[ticker]
+                  return (
+                    <div key={ticker} style={{ minWidth: '140px', flex: '1 1 140px', maxWidth: '260px' }}>
+                      <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${border}`, fontSize: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: '700', color: text }}>{ticker}</span>
+                          {sp != null && <span style={{ fontWeight: '400', color: textMid }}>{fmt(sp)}</span>}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          {stP !== undefined && (
+                            <div style={{ color: stP >= 0 ? green : red }}>
+                              Stock: {stP >= 0 ? '+' : ''}{fmt(stP)}
+                              <span style={{ color: textMid, fontSize: '10px', marginLeft: '5px' }}>${st.snapPrice.toFixed(2)} → ${st.curPrice.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {optP !== undefined && (
+                            <div style={{ color: optP >= 0 ? green : red }}>Options: {optP >= 0 ? '+' : ''}{fmt(optP)}</div>
+                          )}
+                          {stP !== undefined && optP !== undefined && (
+                            <div style={{ color: net >= 0 ? green : red, fontWeight: '700', borderTop: `1px solid ${border}`, paddingTop: '2px', marginTop: '2px' }}>
+                              Net: {net >= 0 ? '+' : ''}{fmt(net)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
         {byUnderlyingWeeks === 1 && (() => {
           // Use the same filtered+sorted historicalWeeks list the multi-week view uses.
           // data?.weeks includes future expiry weeks (e.g. options expiring next Friday),

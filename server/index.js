@@ -1882,6 +1882,37 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
   }
 })
 
+// Get daily EOD price snapshot for a specific date (default: most recent trading day)
+app.get('/api/daily-snapshot', requireAuth, async (req, res) => {
+  try {
+    const { date, force } = req.query
+    // Resolve date: use provided date, or infer last trading day (Mon-Fri; on Mon use Friday)
+    let targetDate = date
+    if (!targetDate) {
+      const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
+      const day = et.getDay()
+      const offset = day === 0 ? 2 : day === 1 ? 3 : 1  // Sun→Fri, Mon→Fri, else yesterday
+      et.setDate(et.getDate() - offset)
+      targetDate = et.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    }
+
+    // If force=true, re-run snapshot for today (manual trigger)
+    if (force === 'true') {
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+      if (targetDate === today) {
+        await takeEODSnapshot(req.user.userId, true)
+      }
+    }
+
+    const snapshot = databaseService.getDailyPriceSnapshot(req.user.userId, targetDate)
+    const dates = databaseService.getDailySnapshotDates(req.user.userId, 10)
+    res.json({ success: true, date: targetDate, snapshot, availableDates: dates })
+  } catch (e) {
+    console.error('Error in /api/daily-snapshot:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Debug endpoint to check option trades in database
 app.get('/api/debug/option-trades', requireAuth, (req, res) => {
   try {
@@ -2878,7 +2909,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const curPrice = currentPrices[sym]
         if (pos && lastClose && curPrice) {
           const pnl = Math.round((curPrice - lastClose) * pos * 100) / 100
-          otherStockPnLBySymbol[sym] = { pnl, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr }
+          otherStockPnLBySymbol[sym] = { pnl, fromPrice: lastClose, toPrice: curPrice, fromDate: lastFridayStr, toDate: todayStr, shares: pos }
           otherStockPnL += pnl
         }
       })
@@ -3208,6 +3239,82 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason)
 })
+
+// ─── Daily EOD price snapshot ────────────────────────────────────────────────
+
+async function takeEODSnapshot(userId, force = false) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  if (!force && databaseService.hasDailyPriceSnapshot(userId, today)) return  // already done today
+
+  console.log(`📸 Taking EOD price snapshot for user ${userId} on ${today}`)
+  const entries = []
+
+  // Stock prices: all held positions + option underlyings
+  const allPositions = databaseService.getAllPositions(userId)
+  const allOptionTrades = databaseService.getOptionTrades(userId)
+  const optionTickers = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
+  const stockSymbols = [...new Set([...Object.keys(allPositions), ...optionTickers])]
+
+  if (stockSymbols.length > 0) {
+    const prices = await priceService.fetchPrices(stockSymbols)
+    stockSymbols.forEach(sym => { if (prices[sym] > 0) entries.push({ symbol: sym, closePrice: prices[sym], isOption: false, contracts: null }) })
+  }
+
+  // Option prices: open contracts via Polygon snapshot
+  const polygonKey = process.env.POLYGON_API_KEY || ''
+  if (polygonKey) {
+    const openOpts = databaseService.getOpenOptionPositions(userId)
+    const activeOpts = openOpts.filter(pos => {
+      const parsed = parseOptionDescription(pos.symbol)
+      if (!parsed) return false
+      return `${parsed.year}-${parsed.month}-${parsed.day}` >= today
+    })
+    for (const pos of activeOpts) {
+      const polygonTicker = toPolygonTicker(pos.symbol)
+      const parsed = parseOptionDescription(pos.symbol)
+      if (!polygonTicker || !parsed) continue
+      try {
+        const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+        const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 8000 })
+        const snap = resp.data?.results
+        if (snap) {
+          const mid = snap.last_quote?.midpoint || (snap.last_quote?.bid && snap.last_quote?.ask ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
+          const fallback = snap.day?.close || snap.last_trade?.price || 0
+          const best = Math.max(mid || 0, fallback || 0) || mid || fallback || 0
+          if (best > 0) {
+            const contracts = pos.net_long > 0 ? pos.net_long : -pos.net_short
+            entries.push({ symbol: pos.symbol, closePrice: best, isOption: true, contracts })
+          }
+        }
+      } catch (e) {
+        console.warn(`  Polygon snapshot failed for ${pos.symbol}:`, e.message)
+      }
+    }
+  }
+
+  if (entries.length > 0) {
+    databaseService.saveDailyPriceSnapshot(userId, today, entries)
+    console.log(`✓ EOD snapshot saved: ${entries.length} prices for ${today} (user ${userId})`)
+  }
+}
+
+// Check every 5 minutes; trigger snapshot Mon-Fri between 4:05-4:30pm ET
+setInterval(async () => {
+  try {
+    const etDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    const day = etDate.getDay()
+    const hour = etDate.getHours()
+    const minute = etDate.getMinutes()
+    if (day < 1 || day > 5) return              // weekend
+    if (hour !== 16 || minute < 5 || minute > 30) return  // outside 4:05-4:30pm ET
+    const users = databaseService.getAllUsers()
+    for (const user of users) await takeEODSnapshot(user.id)
+  } catch (e) {
+    console.error('EOD snapshot job error:', e.message)
+  }
+}, 5 * 60 * 1000)
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 console.log('🔧 Starting HTTP server...')
 console.log(`   PORT: ${PORT}`)

@@ -220,6 +220,26 @@ db.exec(`
     ON historical_prices(symbol, price_date DESC);
 `)
 
+// Daily EOD price snapshot table — created via migration so it works on existing DBs
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_price_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      symbol TEXT NOT NULL,
+      price_date TEXT NOT NULL,
+      close_price REAL NOT NULL,
+      is_option INTEGER NOT NULL DEFAULT 0,
+      contracts INTEGER,
+      captured_at INTEGER DEFAULT (strftime('%s', 'now')),
+      UNIQUE(user_id, symbol, price_date)
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_price_snapshots_date ON daily_price_snapshots(user_id, price_date DESC)`)
+} catch (e) {
+  console.error('daily_price_snapshots migration error:', e.message)
+}
+
 console.log(`Database initialized at: ${dbPath}`)
 
 // Migration: Drop the trades dedup unique index that incorrectly prevents identical legitimate trades
@@ -1823,6 +1843,45 @@ export class DatabaseService {
     )
     const stockPositions = this.getAllPositions(userId)
     return Object.keys(stockPositions).filter(sym => !optionSymbols.has(sym))
+  }
+
+  getAllUsers() {
+    return db.prepare('SELECT id, username FROM users ORDER BY id').all()
+  }
+
+  // Save EOD price snapshot entries. entries: [{ symbol, closePrice, isOption, contracts }]
+  saveDailyPriceSnapshot(userId, dateStr, entries) {
+    const stmt = db.prepare(`
+      INSERT INTO daily_price_snapshots (user_id, symbol, price_date, close_price, is_option, contracts)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, symbol, price_date) DO UPDATE SET
+        close_price = excluded.close_price,
+        contracts = excluded.contracts,
+        captured_at = strftime('%s', 'now')
+    `)
+    const run = db.transaction((rows) => { for (const e of rows) stmt.run(userId, e.symbol, dateStr, e.closePrice, e.isOption ? 1 : 0, e.contracts ?? null) })
+    run(entries)
+  }
+
+  // Returns { stocks: { SYM: price }, options: { contractSym: { price, contracts } } }
+  getDailyPriceSnapshot(userId, dateStr) {
+    const rows = db.prepare(`SELECT symbol, close_price, is_option, contracts FROM daily_price_snapshots WHERE user_id = ? AND price_date = ?`).all(userId, dateStr)
+    const stocks = {}
+    const options = {}
+    rows.forEach(r => {
+      if (r.is_option) options[r.symbol] = { price: r.close_price, contracts: r.contracts }
+      else stocks[r.symbol] = r.close_price
+    })
+    return { stocks, options }
+  }
+
+  hasDailyPriceSnapshot(userId, dateStr) {
+    return db.prepare(`SELECT 1 FROM daily_price_snapshots WHERE user_id = ? AND price_date = ? LIMIT 1`).get(userId, dateStr) != null
+  }
+
+  // Returns list of dates (desc) that have daily price snapshots for a given user
+  getDailySnapshotDates(userId, limit = 30) {
+    return db.prepare(`SELECT DISTINCT price_date FROM daily_price_snapshots WHERE user_id = ? ORDER BY price_date DESC LIMIT ?`).all(userId, limit).map(r => r.price_date)
   }
 }
 
