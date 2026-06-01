@@ -2783,6 +2783,18 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       }))
       .sort((a, b) => b.weekStart.localeCompare(a.weekStart))
 
+    // Ensure the current week is always in the weeks array so multi-week tabs (2W, NW, etc.)
+    // anchor the cumulative stock fromPrice correctly even when there's no options activity yet.
+    if (!weeks.find(w => w.weekStart === mondayStr)) {
+      weeks.push({
+        weekStart: mondayStr,
+        totalDelta: 0, realizedDelta: 0, tradeCount: 0,
+        byUnderlying: {}, realizedByUnderlying: {}, realizedCallsByUnderlying: {},
+        realizedPutsByUnderlying: {}, tradesByUnderlying: {}
+      })
+      weeks.sort((a, b) => b.weekStart.localeCompare(a.weekStart))
+    }
+
     // Hero card: current expiry week only
     const cw = byWeek[mondayStr] || { totalDelta: 0, realizedDelta: 0, byUnderlying: {}, realizedByUnderlying: {}, realizedCallsByUnderlying: {}, realizedPutsByUnderlying: {}, tradesByUnderlying: {} }
     const currentWeekPnL = Math.round(cw.totalDelta * 100) / 100
