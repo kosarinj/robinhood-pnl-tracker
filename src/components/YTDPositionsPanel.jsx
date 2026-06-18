@@ -36,6 +36,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const [editDraft, setEditDraft] = useState('')
   const [sortField, setSortField] = useState('totalRealized')
   const [sortDir, setSortDir] = useState('desc')
+  const [livePrices, setLivePrices] = useState({})
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates) => {
     setLoading(true)
@@ -57,6 +58,16 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   }, [globalStart, symbolDates])
 
   useEffect(() => { fetchData() }, [])
+
+  // Fetch live stock prices whenever the underlying data changes
+  useEffect(() => {
+    const tickers = data?.byUnderlying?.map(r => r.ticker).filter(Boolean)
+    if (!tickers?.length) return
+    fetch(`/api/current-prices?symbols=${tickers.join(',')}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(json => { if (json.success) setLivePrices(json.prices || {}) })
+      .catch(() => {})
+  }, [data])
 
   const applyGlobalStart = (date) => {
     setGlobalStart(date)
@@ -118,7 +129,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
 
   const totals = rows.reduce((acc, r) => {
     const fb = pnlLookup[r.ticker]
-    const stockPnL = r.stockUnrealizedPnL ?? fb?.unrealizedPnL ?? 0
+    const pos = (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
+    const avgCost = (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
+    const price = livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null
+    const stockPnL = (pos > 0 && avgCost > 0 && price > 0)
+      ? Math.round(pos * (price - avgCost) * 100) / 100
+      : 0
     return {
       realizedShortCalls: acc.realizedShortCalls + (r.realizedShortCalls || 0),
       realizedLongCalls: acc.realizedLongCalls + (r.realizedLongCalls || 0),
@@ -287,13 +303,18 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
                       <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
                     </td>
-                    {/* Stock columns: server-side data preferred, pnlData (dashboard) as fallback */}
+                    {/* Stock columns: pnlData for pos/avgCost, livePrices for current price */}
                     {(() => {
                       const fb = pnlLookup[row.ticker]
-                      const pos = row.stockPosition ?? fb?.position ?? null
-                      const avgCost = row.stockAvgCost ?? fb?.avgCost ?? null
-                      const price = row.stockCurrentPrice ?? fb?.currentPrice ?? null
-                      const pnl = row.stockUnrealizedPnL ?? fb?.unrealizedPnL ?? null
+                      // Prefer pnlData for position + avg cost (computed by P&L engine from all trades)
+                      const pos = (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
+                      const avgCost = (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
+                      // Always use fresh live price; never fall back to stale pnlData price
+                      const price = livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null
+                      // Only compute P&L when all three are valid non-zero values
+                      const pnl = (pos > 0 && avgCost > 0 && price > 0)
+                        ? Math.round(pos * (price - avgCost) * 100) / 100
+                        : null
                       return (<>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
                           {pos != null && pos > 0 ? pos.toLocaleString() : '—'}
