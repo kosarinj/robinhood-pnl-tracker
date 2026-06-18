@@ -1838,6 +1838,18 @@ export class DatabaseService {
   }
 
   // Returns all option trades (including contracts count) without GROUP BY dedup for accurate LIFO
+  getRawStockTrades(userId = 1) {
+    try {
+      return db.prepare(`
+        SELECT symbol, trans_code, quantity, price, amount, is_buy, is_option
+        FROM trades WHERE user_id = ? AND (is_option = 0 OR is_option IS NULL)
+        ORDER BY trans_date DESC LIMIT 20
+      `).all(userId)
+    } catch (e) {
+      return [{ error: e.message }]
+    }
+  }
+
   getStockPositionsWithCost(userId = 1) {
     try {
       // Use COALESCE so NULL quantity/amount don't silently zero out rows

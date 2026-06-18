@@ -2438,6 +2438,17 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
   }
 })
 
+// Debug: show raw stock trades from DB so we can diagnose position query issues
+app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
+  try {
+    const userId = req.session?.userId || 1
+    const rows = databaseService.getRawStockTrades(userId)
+    res.json({ success: true, userId, rows })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Get fresh current prices for multiple symbols (bypasses cache)
 app.get('/api/current-prices', requireAuth, async (req, res) => {
   try {

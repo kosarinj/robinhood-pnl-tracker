@@ -202,13 +202,16 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
         <span style={{ fontSize: '12px', color: textMid }}>
           Click a date cell to set a per-symbol start date
         </span>
+        {stockDebug && (
+          <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px',
+            background: stockDebug.holdings?.length > 0 ? '#22c55e22' : '#f59e0b22',
+            color: stockDebug.holdings?.length > 0 ? '#22c55e' : '#f59e0b' }}>
+            Stock: {stockDebug.holdings?.length > 0
+              ? `${stockDebug.holdings.length} holdings loaded`
+              : `0 holdings — ${JSON.stringify(stockDebug.debug || stockDebug.error || 'no data').slice(0,120)}`}
+          </span>
+        )}
       </div>
-
-      {stockDebug && (stockDebug.error || !stockDebug.holdings?.length) && (
-        <div style={{ padding: '10px 14px', borderRadius: '8px', background: isDark ? '#1a1a2e' : '#fef3c7', border: `1px solid ${isDark ? '#f59e0b44' : '#f59e0b'}`, color: isDark ? '#fbbf24' : '#92400e', marginBottom: '12px', fontSize: '12px', fontFamily: 'monospace' }}>
-          <strong>Stock debug:</strong> {JSON.stringify(stockDebug, null, 2).slice(0, 500)}
-        </div>
-      )}
 
       {error && (
         <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#fee2e2', color: '#991b1b', marginBottom: '12px', fontSize: '13px' }}>
