@@ -2040,8 +2040,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         })
       } catch (e) {
         console.warn('YTD YF price fetch failed:', e.message)
+        const cached = priceService.getCurrentPrices()
+        allTickers.forEach(t => { if (cached[t] > 0) stockPrices[t] = cached[t] })
       }
     }
+
+    // Also fill any missing prices from the in-memory cache (populated by dashboard refresh)
+    const cachedPrices = priceService.getCurrentPrices()
+    allTickers.forEach(t => { if (!stockPrices[t] && cachedPrices[t] > 0) stockPrices[t] = cachedPrices[t] })
+    const pricesFetched = Object.keys(stockPrices).filter(t => stockPrices[t] > 0).length
+    console.log(`YTD: ${Object.keys(stockPositions).length} stock positions, ${allTickers.length} tickers, ${pricesFetched} prices fetched`)
 
     const r2 = n => Math.round(n * 100) / 100
     const result = Object.values(byUnderlying)
