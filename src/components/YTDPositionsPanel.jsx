@@ -37,6 +37,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const [sortField, setSortField] = useState('totalRealized')
   const [sortDir, setSortDir] = useState('desc')
   const [livePrices, setLivePrices] = useState({})
+  const [stockHoldings, setStockHoldings] = useState({})
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates) => {
     setLoading(true)
@@ -59,15 +60,24 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
 
   useEffect(() => { fetchData() }, [])
 
-  // Fetch live stock prices whenever the underlying data changes
-  useEffect(() => {
-    const tickers = data?.byUnderlying?.map(r => r.ticker).filter(Boolean)
-    if (!tickers?.length) return
-    fetch(`/api/current-prices?symbols=${tickers.join(',')}`, { credentials: 'include' })
+  // Fetch stock holdings (position, avg cost, live price) from dedicated endpoint
+  const fetchStockHoldings = () => {
+    fetch('/api/stock-positions-with-prices', { credentials: 'include' })
       .then(r => r.json())
-      .then(json => { if (json.success) setLivePrices(json.prices || {}) })
+      .then(json => {
+        if (json.success) {
+          const map = {}
+          json.holdings.forEach(h => { map[h.symbol] = h })
+          setStockHoldings(map)
+          const prices = {}
+          json.holdings.forEach(h => { if (h.currentPrice > 0) prices[h.symbol] = h.currentPrice })
+          setLivePrices(prices)
+        }
+      })
       .catch(() => {})
-  }, [data])
+  }
+
+  useEffect(() => { fetchStockHoldings() }, [])
 
   const applyGlobalStart = (date) => {
     setGlobalStart(date)
@@ -128,12 +138,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   })
 
   const totals = rows.reduce((acc, r) => {
+    const sh = stockHoldings[r.ticker]
     const fb = pnlLookup[r.ticker]
-    const pos = (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
-    const avgCost = (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
-    const price = (livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null)
-      ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
-      ?? (fb?.currentPrice > 0 ? fb.currentPrice : null)
+    const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
+    const avgCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
+    const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
     const stockPnL = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
       : 0
@@ -178,7 +187,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
             }}
           />
           <button
-            onClick={() => fetchData()}
+            onClick={() => { fetchData(); fetchStockHoldings() }}
             style={{
               padding: '5px 12px', borderRadius: '6px', border: 'none',
               background: '#3b82f6', color: 'white', fontSize: '12px',
@@ -276,16 +285,13 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
                       <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
                     </td>
-                    {/* Stock columns: pnlData for pos/avgCost, livePrices for current price */}
+                    {/* Stock columns — from /api/stock-positions-with-prices (primary) with fallbacks */}
                     {(() => {
+                      const sh = stockHoldings[row.ticker]
                       const fb = pnlLookup[row.ticker]
-                      // Prefer pnlData for position + avg cost (computed by P&L engine from all trades)
-                      const pos = (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
-                      const avgCost = (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
-                      const price = (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null)
-                        ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
-                        ?? (fb?.currentPrice > 0 ? fb.currentPrice : null)
-                      // Only compute P&L when all three are valid non-zero values
+                      const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
+                      const avgCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
+                      const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
                       const pnl = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
                         : null

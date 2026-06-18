@@ -2386,6 +2386,66 @@ app.get('/api/tracked-symbols', (req, res) => {
   }
 })
 
+// Stock positions with avg cost and live prices — used by YTD Positions panel
+app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session?.userId || 1
+    // getAllPositions is proven to work; get net position per symbol
+    const positions = databaseService.getAllPositions(userId)
+    const symbols = Object.keys(positions)
+    if (symbols.length === 0) return res.json({ success: true, holdings: [] })
+
+    // Separate query for weighted avg cost (total buy dollars / total shares bought)
+    const placeholders = symbols.map(() => '?').join(',')
+    const costRows = db.prepare(`
+      SELECT symbol,
+        SUM(CASE WHEN is_buy = 1 THEN ABS(amount) ELSE 0 END) AS total_cost,
+        SUM(CASE WHEN is_buy = 1 THEN quantity ELSE 0 END) AS total_bought
+      FROM trades
+      WHERE is_option = 0 AND user_id = ? AND symbol IN (${placeholders})
+      GROUP BY symbol
+    `).all(userId, ...symbols)
+    const costMap = {}
+    costRows.forEach(r => {
+      costMap[r.symbol] = r.total_bought > 0 ? r.total_cost / r.total_bought : 0
+    })
+
+    // Fetch live prices via Yahoo Finance directly
+    let prices = {}
+    try {
+      const yfResp = await axios.get(
+        `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`,
+        { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' } }
+      )
+      ;(yfResp.data?.quoteResponse?.result || []).forEach(q => {
+        let price = q.regularMarketPrice
+        if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
+        else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
+        if (price > 0) prices[q.symbol] = price
+      })
+    } catch (e) {
+      console.warn('stock-positions YF fetch failed:', e.message)
+      const cached = priceService.getCurrentPrices()
+      symbols.forEach(s => { if (cached[s] > 0) prices[s] = cached[s] })
+    }
+
+    const holdings = symbols.map(sym => {
+      const pos = positions[sym]
+      const avgCost = Math.round((costMap[sym] || 0) * 100) / 100
+      const currentPrice = prices[sym] || null
+      const unrealizedPnL = (pos > 0 && avgCost > 0 && currentPrice)
+        ? Math.round(pos * (currentPrice - avgCost) * 100) / 100
+        : null
+      return { symbol: sym, position: pos, avgCost, currentPrice, unrealizedPnL }
+    })
+    console.log(`/api/stock-positions-with-prices: ${holdings.length} holdings, ${Object.keys(prices).length} prices`)
+    res.json({ success: true, holdings })
+  } catch (error) {
+    console.error('Error in /api/stock-positions-with-prices:', error.message)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 // Get fresh current prices for multiple symbols (bypasses cache)
 app.get('/api/current-prices', requireAuth, async (req, res) => {
   try {
