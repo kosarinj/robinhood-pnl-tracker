@@ -213,7 +213,6 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
             <thead>
               <tr>
                 <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default' }}>Ticker</th>
-                <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default' }}>Start Date</th>
                 <th style={thStyle('realizedShortCalls')} onClick={() => toggleSort('realizedShortCalls')} title="Realized P&L from short calls (covered calls sold)">
                   Short Calls<SortIcon field="realizedShortCalls" />
                 </th>
@@ -239,6 +238,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <th style={{ ...thStyle('stockPnL'), borderRight: 'none' }} onClick={() => toggleSort('stockPnL')}>
                   Stock P&L<SortIcon field="stockPnL" />
                 </th>
+                <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default', borderLeft: `1px solid ${border}` }}>Start Date</th>
               </tr>
             </thead>
             <tbody>
@@ -255,35 +255,6 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                   >
                     <td style={{ padding: '10px 12px', fontWeight: '700', color: text, letterSpacing: '0.03em' }}>
                       {row.ticker}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                      {isEditing ? (
-                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                          <input
-                            type="date"
-                            value={editDraft}
-                            onChange={e => setEditDraft(e.target.value)}
-                            autoFocus
-                            style={{ padding: '3px 6px', borderRadius: '4px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '12px', width: '120px' }}
-                          />
-                          <button onClick={() => saveSymbolDate(row.ticker, editDraft)} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#22c55e', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✓</button>
-                          <button onClick={() => { setEditingSymbol(null) }} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#94a3b8', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✗</button>
-                          {hasOverride && <button onClick={() => { clearSymbolDate(row.ticker); setEditingSymbol(null) }} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#ef4444', color: 'white', fontSize: '11px', cursor: 'pointer' }}>Reset</button>}
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => { setEditingSymbol(row.ticker); setEditDraft(effectiveDate) }}
-                          style={{
-                            padding: '3px 10px', borderRadius: '4px', border: `1px solid ${hasOverride ? '#3b82f6' : border}`,
-                            background: hasOverride ? (isDark ? '#1e3a5f' : '#eff6ff') : 'transparent',
-                            color: hasOverride ? '#3b82f6' : textMid, fontSize: '12px', cursor: 'pointer',
-                            fontWeight: hasOverride ? '600' : '400'
-                          }}
-                          title={hasOverride ? `Custom: ${effectiveDate} (click to change)` : `Using global: ${effectiveDate} (click to override)`}
-                        >
-                          {fmtDate(effectiveDate)}{hasOverride ? ' ✎' : ''}
-                        </button>
-                      )}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortCalls, isDark), fontWeight: '600' }}>
                       {fmt(row.realizedShortCalls)}
@@ -331,14 +302,43 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                         </td>
                       </>)
                     })()}
+                    <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: `1px solid ${border}` }}>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                          <input
+                            type="date"
+                            value={editDraft}
+                            onChange={e => setEditDraft(e.target.value)}
+                            autoFocus
+                            style={{ padding: '3px 6px', borderRadius: '4px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '12px', width: '120px' }}
+                          />
+                          <button onClick={() => saveSymbolDate(row.ticker, editDraft)} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#22c55e', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✓</button>
+                          <button onClick={() => { setEditingSymbol(null) }} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#94a3b8', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✗</button>
+                          {hasOverride && <button onClick={() => { clearSymbolDate(row.ticker); setEditingSymbol(null) }} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#ef4444', color: 'white', fontSize: '11px', cursor: 'pointer' }}>Reset</button>}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setEditingSymbol(row.ticker); setEditDraft(effectiveDate) }}
+                          style={{
+                            padding: '3px 10px', borderRadius: '4px', border: `1px solid ${hasOverride ? '#3b82f6' : border}`,
+                            background: hasOverride ? (isDark ? '#1e3a5f' : '#eff6ff') : 'transparent',
+                            color: hasOverride ? '#3b82f6' : textMid, fontSize: '12px', cursor: 'pointer',
+                            fontWeight: hasOverride ? '600' : '400'
+                          }}
+                          title={hasOverride ? `Custom: ${effectiveDate} (click to change)` : `Using global: ${effectiveDate} (click to override)`}
+                        >
+                          {fmtDate(effectiveDate)}{hasOverride ? ' ✎' : ''}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${border}`, background: headerBg }}>
-                <td colSpan={2} style={{ padding: '10px 12px', fontWeight: '700', color: text, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Total ({rows.length} underlyings)
+                <td style={{ padding: '10px 12px', fontWeight: '700', color: text, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Total ({rows.length})
                 </td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortCalls)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongCalls)}</td>
@@ -348,6 +348,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
                 <td colSpan={3} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
+                <td style={{ borderLeft: `1px solid ${border}` }} />
               </tr>
             </tfoot>
           </table>
