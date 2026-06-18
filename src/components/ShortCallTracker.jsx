@@ -101,9 +101,9 @@ export default function ShortCallTracker() {
   }
 
   const entries = data?.entries || []
-  const filtered = entries.filter(e => showClosed ? true : !e.isExpired)
-  const openEntries = filtered.filter(e => e.isOpen)
-  const closedEntries = filtered.filter(e => !e.isOpen)
+  const openEntries = entries.filter(e => e.isOpen)
+  const closedEntries = entries.filter(e => !e.isOpen)
+  const filtered = showClosed ? entries : openEntries
 
   const thStyle = {
     padding: '9px 10px', textAlign: 'right', fontSize: '11px', fontWeight: '600',
@@ -189,7 +189,7 @@ export default function ShortCallTracker() {
           </button>
           <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: textMid, cursor: 'pointer' }}>
             <input type="checkbox" checked={showClosed} onChange={e => setShowClosed(e.target.checked)} />
-            Show expired
+            Show closed/expired
           </label>
         </div>
         {rebuildMsg && <span style={{ fontSize: '12px', color: '#22c55e' }}>{rebuildMsg}</span>}
@@ -226,12 +226,10 @@ export default function ShortCallTracker() {
               </tr>
             </thead>
             <tbody>
-              {openEntries.length > 0 && openEntries.map((e, i) => renderRow(e, i))}
-              {closedEntries.length > 0 && (
+              {openEntries.map((e, i) => renderRow(e, i))}
+              {showClosed && closedEntries.length > 0 && (
                 <>
-                  {openEntries.length > 0 && (
-                    <tr><td colSpan={12} style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '600', color: textMid, background: headerBg, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Closed / Expired</td></tr>
-                  )}
+                  <tr><td colSpan={12} style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '600', color: textMid, background: headerBg, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Closed / Expired</td></tr>
                   {closedEntries.map((e, i) => renderRow(e, openEntries.length + i))}
                 </>
               )}

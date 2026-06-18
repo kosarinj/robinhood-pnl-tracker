@@ -22,7 +22,7 @@ const pnlColor = (n, isDark) => {
   return n > 0 ? '#22c55e' : '#ef4444'
 }
 
-export default function YTDPositionsPanel() {
+export default function YTDPositionsPanel({ pnlData = [] }) {
   const { isDark } = useTheme()
 
   const [globalStart, setGlobalStart] = useState(() => localStorage.getItem(LS_GLOBAL_KEY) || DEFAULT_GLOBAL_START)
@@ -97,18 +97,40 @@ export default function YTDPositionsPanel() {
   const headerBg = isDark ? '#151929' : '#f8fafc'
   const rowHover = isDark ? '#252d3d' : '#f8fafc'
 
+  // Build a lookup from pnlData for stock positions (non-option rows only)
+  const stockLookup = {}
+  pnlData.forEach(p => {
+    if (!p.isOption && p.symbol) {
+      const pos = p.real?.position ?? p.avgCost?.position ?? 0
+      const avgCost = p.real?.avgCostBasis ?? p.avgCost?.avgCostBasis ?? 0
+      const currentPrice = p.currentPrice ?? 0
+      const unrealizedPnL = p.real?.unrealizedPnL ?? 0
+      stockLookup[p.symbol] = { pos, avgCost, currentPrice, unrealizedPnL }
+    }
+  })
+
   const rows = data?.byUnderlying || []
   const sorted = [...rows].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
+    // stock P&L sorts need the enriched value
+    if (sortField === 'stockPnL') {
+      const aVal = stockLookup[a.ticker]?.unrealizedPnL ?? 0
+      const bVal = stockLookup[b.ticker]?.unrealizedPnL ?? 0
+      return mul * (aVal - bVal)
+    }
     return mul * ((a[sortField] ?? 0) - (b[sortField] ?? 0))
   })
 
-  const totals = rows.reduce((acc, r) => ({
-    realizedCalls: acc.realizedCalls + (r.realizedCalls || 0),
-    realizedPuts: acc.realizedPuts + (r.realizedPuts || 0),
-    totalRealized: acc.totalRealized + (r.totalRealized || 0),
-    openPremium: acc.openPremium + (r.openPremium || 0)
-  }), { realizedCalls: 0, realizedPuts: 0, totalRealized: 0, openPremium: 0 })
+  const totals = rows.reduce((acc, r) => {
+    const stock = stockLookup[r.ticker]
+    return {
+      realizedCalls: acc.realizedCalls + (r.realizedCalls || 0),
+      realizedPuts: acc.realizedPuts + (r.realizedPuts || 0),
+      totalRealized: acc.totalRealized + (r.totalRealized || 0),
+      openPremium: acc.openPremium + (r.openPremium || 0),
+      stockPnL: acc.stockPnL + (stock?.unrealizedPnL || 0)
+    }
+  }, { realizedCalls: 0, realizedPuts: 0, totalRealized: 0, openPremium: 0, stockPnL: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -185,10 +207,17 @@ export default function YTDPositionsPanel() {
                   Puts Realized<SortIcon field="realizedPuts" />
                 </th>
                 <th style={thStyle('totalRealized')} onClick={() => toggleSort('totalRealized')}>
-                  Total Realized<SortIcon field="totalRealized" />
+                  Options Total<SortIcon field="totalRealized" />
                 </th>
-                <th style={{ ...thStyle('openPremium'), borderRight: 'none' }} onClick={() => toggleSort('openPremium')}>
+                <th style={thStyle('openPremium')} onClick={() => toggleSort('openPremium')}
+                    title="Net premium in currently-open positions (all time — not filtered by start date)">
                   Open Premium<SortIcon field="openPremium" />
+                </th>
+                <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>
+                <th style={{ ...thStyle(null), cursor: 'default' }} title="Average cost per share">Avg Cost</th>
+                <th style={{ ...thStyle(null), cursor: 'default' }} title="Current stock price">Stock Price</th>
+                <th style={{ ...thStyle('stockPnL'), borderRight: 'none' }} onClick={() => toggleSort('stockPnL')}>
+                  Stock P&L<SortIcon field="stockPnL" />
                 </th>
               </tr>
             </thead>
@@ -197,6 +226,7 @@ export default function YTDPositionsPanel() {
                 const isEditing = editingSymbol === row.ticker
                 const effectiveDate = symbolDates[row.ticker] || globalStart
                 const hasOverride = !!symbolDates[row.ticker]
+                const stock = stockLookup[row.ticker]
                 return (
                   <tr
                     key={row.ticker}
@@ -246,7 +276,21 @@ export default function YTDPositionsPanel() {
                       {fmt(row.totalRealized)}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
-                      <span title="Net premium in open (unmatched) positions">{fmt(row.openPremium)}</span>
+                      <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
+                    </td>
+                    {/* Stock position columns */}
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
+                      {stock?.pos ? stock.pos.toLocaleString() : '—'}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid }}>
+                      {stock?.avgCost ? fmt(stock.avgCost) : '—'}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
+                      {stock?.currentPrice ? fmt(stock.currentPrice) : '—'}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(stock?.unrealizedPnL, isDark) }}
+                        title={stock ? `${stock.pos} shares × ($${stock.currentPrice?.toFixed(2)} − $${stock.avgCost?.toFixed(2)})` : ''}>
+                      {stock?.unrealizedPnL != null ? fmt(stock.unrealizedPnL) : '—'}
                     </td>
                   </tr>
                 )

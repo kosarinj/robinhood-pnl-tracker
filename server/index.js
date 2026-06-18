@@ -1962,7 +1962,26 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       }
     })
 
-    // Group by underlying, applying per-symbol or global start date filter
+    // Compute open premium per underlying from ALL currently-open positions (not date-filtered).
+    // This reflects current exposure regardless of when the position was opened.
+    const allOpenPositions = databaseService.getOpenOptionPositions(userId)
+    const openPremiumByTicker = {}
+    allOpenPositions.forEach(pos => {
+      const parsed = parseOptionDescription(pos.symbol)
+      const ticker = parsed?.ticker || (pos.symbol || '').split(' ')[0].toUpperCase()
+      if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
+      if (!openPremiumByTicker[ticker]) openPremiumByTicker[ticker] = 0
+      // Short positions: avg STO price × open contracts (credit received, positive)
+      if (pos.net_short > 0 && pos.sto_contracts > 0) {
+        openPremiumByTicker[ticker] += (pos.total_received / pos.sto_contracts) * pos.net_short
+      }
+      // Long positions: avg BTO price × open contracts (debit paid, negative)
+      if (pos.net_long > 0 && pos.bto_contracts > 0) {
+        openPremiumByTicker[ticker] -= (pos.total_paid / pos.bto_contracts) * pos.net_long
+      }
+    })
+
+    // Group realized P&L by underlying, filtered by per-symbol or global start date
     const byUnderlying = {}
     allTrades.forEach(t => {
       const parsed = parseOptionDescription(t.symbol || '')
@@ -1970,23 +1989,26 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
       const effectiveStart = perSymbolDates[ticker] || globalStart
       if (!byUnderlying[ticker]) {
-        byUnderlying[ticker] = { ticker, startDate: effectiveStart, realizedCalls: 0, realizedPuts: 0, totalRealized: 0, openPremium: 0, tradeCount: 0 }
+        byUnderlying[ticker] = { ticker, startDate: effectiveStart, realizedCalls: 0, realizedPuts: 0, totalRealized: 0, tradeCount: 0 }
       }
       const entry = byUnderlying[ticker]
-      // Update startDate if it changed via perSymbolDates
       entry.startDate = perSymbolDates[ticker] || globalStart
       if (t.trans_date < effectiveStart) return
       const tc = (t.trans_code || '').toUpperCase()
       const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
-      const cashFlow = t.is_buy ? -Math.abs(t.amount) : Math.abs(t.amount)
       const optionType = parsed?.type || null
       entry.tradeCount++
       if (isClosing && t._realizedPnl != null) {
         entry.totalRealized += t._realizedPnl
         if (optionType === 'call') entry.realizedCalls += t._realizedPnl
         else if (optionType === 'put') entry.realizedPuts += t._realizedPnl
-      } else if (!isClosing) {
-        entry.openPremium += cashFlow
+      }
+    })
+
+    // Merge in open premium and any tickers that only have open positions (no realized in date range)
+    Object.entries(openPremiumByTicker).forEach(([ticker, op]) => {
+      if (!byUnderlying[ticker]) {
+        byUnderlying[ticker] = { ticker, startDate: perSymbolDates[ticker] || globalStart, realizedCalls: 0, realizedPuts: 0, totalRealized: 0, tradeCount: 0 }
       }
     })
 
@@ -1996,7 +2018,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         realizedCalls: Math.round(e.realizedCalls * 100) / 100,
         realizedPuts: Math.round(e.realizedPuts * 100) / 100,
         totalRealized: Math.round(e.totalRealized * 100) / 100,
-        openPremium: Math.round(e.openPremium * 100) / 100
+        openPremium: Math.round((openPremiumByTicker[e.ticker] || 0) * 100) / 100
       }))
       .sort((a, b) => b.totalRealized - a.totalRealized)
 
@@ -2044,16 +2066,17 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       }
     }
 
-    // For tickers without Polygon price, try the existing price service
+    // For tickers without Polygon price, fetch live from Yahoo Finance
     const missingTickers = [...new Set(entries.map(e => e.ticker))].filter(t => !polygonStockPrices[t])
     if (missingTickers.length > 0) {
       try {
-        const priceResp = await new Promise((resolve) => {
-          const prices = priceService.getCurrentPrices()
-          resolve(prices)
-        })
-        missingTickers.forEach(t => { if (priceResp[t]) polygonStockPrices[t] = priceResp[t] })
-      } catch (e) { /* skip */ }
+        const fetched = await priceService.fetchPrices(missingTickers)
+        Object.assign(polygonStockPrices, fetched)
+      } catch (e) {
+        // fall back to in-memory cache
+        const cached = priceService.getCurrentPrices()
+        missingTickers.forEach(t => { if (cached[t]) polygonStockPrices[t] = cached[t] })
+      }
     }
 
     const today = new Date().toISOString().slice(0, 10)
