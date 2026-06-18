@@ -2390,25 +2390,18 @@ app.get('/api/tracked-symbols', (req, res) => {
 app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
   try {
     const userId = req.session?.userId || 1
-    // getAllPositions is proven to work; get net position per symbol
-    const positions = databaseService.getAllPositions(userId)
-    const symbols = Object.keys(positions)
-    if (symbols.length === 0) return res.json({ success: true, holdings: [] })
+    // getStockPositionsWithCost lives in database.js where db is in scope
+    const stockData = databaseService.getStockPositionsWithCost(userId)
+    const symbols = Object.keys(stockData)
+    console.log(`/api/stock-positions-with-prices: getStockPositionsWithCost returned ${symbols.length} symbols: ${symbols.join(', ')}`)
 
-    // Separate query for weighted avg cost (total buy dollars / total shares bought)
-    const placeholders = symbols.map(() => '?').join(',')
-    const costRows = db.prepare(`
-      SELECT symbol,
-        SUM(CASE WHEN is_buy = 1 THEN ABS(amount) ELSE 0 END) AS total_cost,
-        SUM(CASE WHEN is_buy = 1 THEN quantity ELSE 0 END) AS total_bought
-      FROM trades
-      WHERE is_option = 0 AND user_id = ? AND symbol IN (${placeholders})
-      GROUP BY symbol
-    `).all(userId, ...symbols)
-    const costMap = {}
-    costRows.forEach(r => {
-      costMap[r.symbol] = r.total_bought > 0 ? r.total_cost / r.total_bought : 0
-    })
+    if (symbols.length === 0) {
+      // Fallback: try raw getAllPositions to diagnose
+      const rawPos = databaseService.getAllPositions(userId)
+      const rawSymbols = Object.keys(rawPos)
+      console.log(`  getAllPositions fallback: ${rawSymbols.length} symbols: ${rawSymbols.join(', ')}`)
+      return res.json({ success: true, holdings: [], debug: { stockDataEmpty: true, rawPositions: rawPos } })
+    }
 
     // Fetch live prices via Yahoo Finance directly
     let prices = {}
@@ -2430,15 +2423,14 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
     }
 
     const holdings = symbols.map(sym => {
-      const pos = positions[sym]
-      const avgCost = Math.round((costMap[sym] || 0) * 100) / 100
+      const d = stockData[sym]
       const currentPrice = prices[sym] || null
-      const unrealizedPnL = (pos > 0 && avgCost > 0 && currentPrice)
-        ? Math.round(pos * (currentPrice - avgCost) * 100) / 100
+      const unrealizedPnL = (d.position > 0 && d.avgCost > 0 && currentPrice)
+        ? Math.round(d.position * (currentPrice - d.avgCost) * 100) / 100
         : null
-      return { symbol: sym, position: pos, avgCost, currentPrice, unrealizedPnL }
+      return { symbol: sym, position: d.position, avgCost: d.avgCost, currentPrice, unrealizedPnL }
     })
-    console.log(`/api/stock-positions-with-prices: ${holdings.length} holdings, ${Object.keys(prices).length} prices`)
+    console.log(`  prices fetched: ${Object.keys(prices).length}/${symbols.length}`)
     res.json({ success: true, holdings })
   } catch (error) {
     console.error('Error in /api/stock-positions-with-prices:', error.message)

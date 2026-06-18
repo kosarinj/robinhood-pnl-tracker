@@ -38,6 +38,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const [sortDir, setSortDir] = useState('desc')
   const [livePrices, setLivePrices] = useState({})
   const [stockHoldings, setStockHoldings] = useState({})
+  const [stockDebug, setStockDebug] = useState(null)
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates) => {
     setLoading(true)
@@ -65,7 +66,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     fetch('/api/stock-positions-with-prices', { credentials: 'include' })
       .then(r => r.json())
       .then(json => {
-        if (json.success) {
+        setStockDebug(json)
+        if (json.success && json.holdings.length > 0) {
           const map = {}
           json.holdings.forEach(h => { map[h.symbol] = h })
           setStockHoldings(map)
@@ -74,7 +76,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
           setLivePrices(prices)
         }
       })
-      .catch(() => {})
+      .catch(e => setStockDebug({ error: e.message }))
   }
 
   useEffect(() => { fetchStockHoldings() }, [])
@@ -201,6 +203,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
           Click a date cell to set a per-symbol start date
         </span>
       </div>
+
+      {stockDebug && (stockDebug.error || !stockDebug.holdings?.length) && (
+        <div style={{ padding: '10px 14px', borderRadius: '8px', background: isDark ? '#1a1a2e' : '#fef3c7', border: `1px solid ${isDark ? '#f59e0b44' : '#f59e0b'}`, color: isDark ? '#fbbf24' : '#92400e', marginBottom: '12px', fontSize: '12px', fontFamily: 'monospace' }}>
+          <strong>Stock debug:</strong> {JSON.stringify(stockDebug, null, 2).slice(0, 500)}
+        </div>
+      )}
 
       {error && (
         <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#fee2e2', color: '#991b1b', marginBottom: '12px', fontSize: '13px' }}>
