@@ -2427,9 +2427,11 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
       }
     } catch (e) {
       console.warn('stock-positions price fetch failed:', e.message)
-      const cached = priceService.getCurrentPrices()
-      symbols.forEach(s => { if (cached[s] > 0) prices[s] = cached[s] })
     }
+    // Always fill missing prices from in-memory cache (populated by dashboard refresh)
+    const cached = priceService.getCurrentPrices()
+    symbols.forEach(s => { if (!(prices[s] > 0) && cached[s] > 0) prices[s] = cached[s] })
+    console.log(`  prices: ${Object.values(prices).filter(p => p > 0).length}/${symbols.length} non-zero`)
 
     const holdings = symbols.map(sym => {
       const d = stockData[sym]
