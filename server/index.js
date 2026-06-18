@@ -301,6 +301,35 @@ io.on('connection', (socket) => {
         console.error('Error saving trades:', error)
       }
 
+      // Populate short_call_entries for STO-call trades in background
+      const stoCallTrades = trades.filter(t =>
+        t.transCode?.toUpperCase() === 'STO' && t.isOption &&
+        (t.symbol || t.description || '').toLowerCase().includes('call')
+      )
+      if (stoCallTrades.length > 0) {
+        setImmediate(async () => {
+          for (const trade of stoCallTrades) {
+            const parsed = parseOptionDescription(trade.symbol || trade.description || '')
+            if (!parsed) continue
+            const saleDate = new Date(trade.date).toISOString().split('T')[0]
+            const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+            let underlyingClose = null
+            try { underlyingClose = await priceService.getPriceForDate(parsed.ticker, saleDate) } catch (e) { /* leave null */ }
+            databaseService.upsertShortCallEntry(user.userId, {
+              symbol: trade.symbol || trade.description,
+              ticker: parsed.ticker,
+              strike: parsed.strike,
+              expiry,
+              contracts: trade.contracts || trade.quantity || 1,
+              premium: Math.abs(trade.price),
+              saleDate,
+              underlyingClose
+            })
+          }
+          console.log(`📝 Populated ${stoCallTrades.length} short call entries`)
+        })
+      }
+
       // Use any cached prices we already have; emit csv-processed immediately
       const cachedPrices = priceService.getCurrentPrices()
       const initialPrices = {}
@@ -1878,6 +1907,223 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
     })
   } catch (e) {
     console.error('Error in /api/options-pnl/open-positions:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// GET /api/options-pnl/ytd — options P&L per underlying from a configurable start date
+app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const globalStart = req.query.startDate || '2000-01-01'
+    const perSymbolDates = req.query.symbolDates ? JSON.parse(req.query.symbolDates) : {}
+
+    const allTrades = databaseService.getOptionTradesForYTD(userId)
+
+    // LIFO pass over ALL trades (same logic as /api/options-pnl/history)
+    const lifoStacks = {}
+    const isOpening = tc => ['BTO', 'STO'].includes((tc || '').toUpperCase())
+    const sortedTrades = [...allTrades].sort((a, b) =>
+      a.trans_date.localeCompare(b.trans_date) ||
+      (isOpening(a.trans_code) ? 0 : 1) - (isOpening(b.trans_code) ? 0 : 1)
+    )
+    sortedTrades.forEach(t => {
+      const tc = (t.trans_code || '').toUpperCase()
+      const parsed = parseOptionDescription(t.symbol || '')
+      const sym = parsed
+        ? `${parsed.ticker}|${parsed.year}${parsed.month}${parsed.day}|${parsed.type}|${parsed.strike}`
+        : (t.symbol || '')
+      const contracts = Math.abs(t.contracts || 1)
+      const amount = Math.abs(t.amount)
+      const ppc = contracts > 0 ? amount / contracts : amount
+      if (!lifoStacks[sym]) lifoStacks[sym] = { long: [], short: [] }
+      const stacks = lifoStacks[sym]
+      if (tc === 'BTO') {
+        stacks.long.push({ ppc, remaining: contracts })
+      } else if (tc === 'STO') {
+        stacks.short.push({ ppc, remaining: contracts })
+      } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+        let closingShort, stack
+        if (tc === 'BTC') { stack = stacks.short; closingShort = true }
+        else if (tc === 'STC' || tc === 'OEXC') { stack = stacks.long; closingShort = false }
+        else { closingShort = stacks.short.length > 0; stack = closingShort ? stacks.short : stacks.long }
+        let left = contracts; let costBasis = 0
+        while (left > 0 && stack.length > 0) {
+          const top = stack[stack.length - 1]
+          const matched = Math.min(left, top.remaining)
+          costBasis += matched * top.ppc
+          left -= matched; top.remaining -= matched
+          if (top.remaining === 0) stack.pop()
+        }
+        if (left === 0) {
+          const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
+          t._realizedPnl = Math.round((closingShort ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
+        }
+      }
+    })
+
+    // Group by underlying, applying per-symbol or global start date filter
+    const byUnderlying = {}
+    allTrades.forEach(t => {
+      const parsed = parseOptionDescription(t.symbol || '')
+      const ticker = parsed?.ticker || (t.symbol || '').split(' ')[0].toUpperCase()
+      if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
+      const effectiveStart = perSymbolDates[ticker] || globalStart
+      if (!byUnderlying[ticker]) {
+        byUnderlying[ticker] = { ticker, startDate: effectiveStart, realizedCalls: 0, realizedPuts: 0, totalRealized: 0, openPremium: 0, tradeCount: 0 }
+      }
+      const entry = byUnderlying[ticker]
+      // Update startDate if it changed via perSymbolDates
+      entry.startDate = perSymbolDates[ticker] || globalStart
+      if (t.trans_date < effectiveStart) return
+      const tc = (t.trans_code || '').toUpperCase()
+      const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
+      const cashFlow = t.is_buy ? -Math.abs(t.amount) : Math.abs(t.amount)
+      const optionType = parsed?.type || null
+      entry.tradeCount++
+      if (isClosing && t._realizedPnl != null) {
+        entry.totalRealized += t._realizedPnl
+        if (optionType === 'call') entry.realizedCalls += t._realizedPnl
+        else if (optionType === 'put') entry.realizedPuts += t._realizedPnl
+      } else if (!isClosing) {
+        entry.openPremium += cashFlow
+      }
+    })
+
+    const result = Object.values(byUnderlying)
+      .map(e => ({
+        ...e,
+        realizedCalls: Math.round(e.realizedCalls * 100) / 100,
+        realizedPuts: Math.round(e.realizedPuts * 100) / 100,
+        totalRealized: Math.round(e.totalRealized * 100) / 100,
+        openPremium: Math.round(e.openPremium * 100) / 100
+      }))
+      .sort((a, b) => b.totalRealized - a.totalRealized)
+
+    res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates })
+  } catch (e) {
+    console.error('Error in /api/options-pnl/ytd:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// GET /api/short-calls — short call positions with current prices
+app.get('/api/short-calls', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const entries = databaseService.getShortCallEntries(userId)
+
+    // Get open short option positions for status determination
+    const openPositions = databaseService.getOpenOptionPositions(userId)
+    const openShortSymbols = new Set(
+      openPositions.filter(p => p.net_short > 0).map(p => p.symbol)
+    )
+
+    // Fetch current option prices via Polygon for open positions
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    const optionPrices = {}
+    const polygonStockPrices = {}
+    if (polygonKey) {
+      for (const entry of entries) {
+        if (!openShortSymbols.has(entry.symbol)) continue
+        const polygonTicker = toPolygonTicker(entry.symbol)
+        const parsed = parseOptionDescription(entry.symbol)
+        if (!polygonTicker || !parsed) continue
+        try {
+          const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+          const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
+          const snap = resp.data?.results
+          if (snap) {
+            const mid = snap.last_quote?.midpoint || (snap.last_quote?.bid && snap.last_quote?.ask ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
+            const fallback = snap.day?.close || snap.last_trade?.price || 0
+            optionPrices[entry.symbol] = Math.max(mid || 0, fallback || 0)
+            const underlyingPrice = snap.underlying_asset?.price
+            if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
+          }
+        } catch (e) { /* skip */ }
+      }
+    }
+
+    // For tickers without Polygon price, try the existing price service
+    const missingTickers = [...new Set(entries.map(e => e.ticker))].filter(t => !polygonStockPrices[t])
+    if (missingTickers.length > 0) {
+      try {
+        const priceResp = await new Promise((resolve) => {
+          const prices = priceService.getCurrentPrices()
+          resolve(prices)
+        })
+        missingTickers.forEach(t => { if (priceResp[t]) polygonStockPrices[t] = priceResp[t] })
+      } catch (e) { /* skip */ }
+    }
+
+    const today = new Date().toISOString().slice(0, 10)
+    const result = entries.map(entry => {
+      const currentStock = polygonStockPrices[entry.ticker] || null
+      const currentOptionPrice = optionPrices[entry.symbol] || null
+      const isOpen = openShortSymbols.has(entry.symbol)
+      const expiryMs = new Date(entry.expiry + 'T00:00:00Z').getTime()
+      const todayMs = new Date(today + 'T00:00:00Z').getTime()
+      const daysToExpiry = Math.round((expiryMs - todayMs) / (1000 * 60 * 60 * 24))
+      const isExpired = daysToExpiry < 0
+      return {
+        ...entry,
+        currentStock,
+        currentOptionPrice,
+        isOpen,
+        isExpired,
+        daysToExpiry,
+        stockMove: (currentStock != null && entry.underlying_close != null) ? Math.round((currentStock - entry.underlying_close) * 100) / 100 : null,
+        thetaGain: (currentOptionPrice != null) ? Math.round((entry.premium - currentOptionPrice) * 100) / 100 : null
+      }
+    })
+
+    res.json({ success: true, entries: result, polygonEnabled: !!polygonKey })
+  } catch (e) {
+    console.error('Error in /api/short-calls:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// PUT /api/short-calls/:id/underlying-close — manually set underlying close for a short call entry
+app.put('/api/short-calls/:id/underlying-close', requireAuth, (req, res) => {
+  try {
+    const { id } = req.params
+    const { underlyingClose } = req.body
+    databaseService.updateShortCallUnderlyingClose(parseInt(id), parseFloat(underlyingClose))
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// POST /api/short-calls/rebuild — retroactively populate short_call_entries from existing trades
+app.post('/api/short-calls/rebuild', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const stoCallTrades = databaseService.getStoCallTrades(userId)
+    let populated = 0; let skipped = 0
+    for (const trade of stoCallTrades) {
+      const parsed = parseOptionDescription(trade.symbol)
+      if (!parsed) { skipped++; continue }
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      let underlyingClose = null
+      try {
+        underlyingClose = await priceService.getPriceForDate(parsed.ticker, trade.trans_date)
+      } catch (e) { /* leave null */ }
+      databaseService.upsertShortCallEntry(userId, {
+        symbol: trade.symbol,
+        ticker: parsed.ticker,
+        strike: parsed.strike,
+        expiry,
+        contracts: trade.contracts || 1,
+        premium: Math.abs(trade.price),
+        saleDate: trade.trans_date,
+        underlyingClose
+      })
+      populated++
+    }
+    res.json({ success: true, populated, skipped })
+  } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
 })

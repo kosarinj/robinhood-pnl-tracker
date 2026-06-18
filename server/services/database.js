@@ -240,6 +240,29 @@ try {
   console.error('daily_price_snapshots migration error:', e.message)
 }
 
+// Migration: short_call_entries — tracks underlying close price when a short call was sold
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS short_call_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      symbol TEXT NOT NULL,
+      ticker TEXT NOT NULL,
+      strike REAL NOT NULL,
+      expiry TEXT NOT NULL,
+      contracts INTEGER NOT NULL DEFAULT 1,
+      premium REAL NOT NULL,
+      sale_date TEXT NOT NULL,
+      underlying_close REAL,
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      UNIQUE(user_id, symbol, sale_date)
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_short_call_entries_user ON short_call_entries(user_id, sale_date DESC)`)
+} catch (e) {
+  console.error('short_call_entries migration error:', e.message)
+}
+
 console.log(`Database initialized at: ${dbPath}`)
 
 // Migration: Drop the trades dedup unique index that incorrectly prevents identical legitimate trades
@@ -1812,6 +1835,74 @@ export class DatabaseService {
         last_trade_date: r.last_trade_date
       }))
       .filter(r => r.net_long > 0 || r.net_short > 0)
+  }
+
+  // Returns all option trades (including contracts count) without GROUP BY dedup for accurate LIFO
+  getOptionTradesForYTD(userId = 1) {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy, COALESCE(contracts, 1) as contracts
+        FROM trades
+        WHERE is_option = 1 AND user_id = ?
+        GROUP BY trans_date, symbol, trans_code, is_buy, amount
+        ORDER BY trans_date ASC, id ASC
+      `).all(userId)
+    } catch (e) {
+      console.error('Error getting option trades for YTD:', e)
+      return []
+    }
+  }
+
+  // Short call entry helpers
+  getShortCallEntries(userId = 1) {
+    try {
+      return db.prepare(`
+        SELECT * FROM short_call_entries WHERE user_id = ? ORDER BY sale_date DESC, ticker ASC
+      `).all(userId)
+    } catch (e) {
+      console.error('Error getting short call entries:', e)
+      return []
+    }
+  }
+
+  upsertShortCallEntry(userId, { symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose }) {
+    try {
+      return db.prepare(`
+        INSERT INTO short_call_entries (user_id, symbol, ticker, strike, expiry, contracts, premium, sale_date, underlying_close)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, symbol, sale_date) DO UPDATE SET
+          underlying_close = COALESCE(excluded.underlying_close, short_call_entries.underlying_close),
+          premium = excluded.premium,
+          contracts = excluded.contracts
+      `).run(userId, symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose ?? null)
+    } catch (e) {
+      console.error('Error upserting short call entry:', e)
+    }
+  }
+
+  updateShortCallUnderlyingClose(id, underlyingClose) {
+    try {
+      return db.prepare(`UPDATE short_call_entries SET underlying_close = ? WHERE id = ?`).run(underlyingClose, id)
+    } catch (e) {
+      console.error('Error updating short call underlying close:', e)
+    }
+  }
+
+  // Returns all STO-call trades from trades table (for rebuilding short_call_entries)
+  getStoCallTrades(userId = 1) {
+    try {
+      return db.prepare(`
+        SELECT trans_date, symbol, COALESCE(contracts, 1) as contracts, price, amount
+        FROM trades
+        WHERE is_option = 1 AND user_id = ? AND trans_code = 'STO'
+          AND (symbol LIKE '%Call%' OR description LIKE '%Call%')
+        GROUP BY trans_date, symbol, price, amount
+        ORDER BY trans_date ASC
+      `).all(userId)
+    } catch (e) {
+      console.error('Error getting STO call trades:', e)
+      return []
+    }
   }
 
   // Close database connection

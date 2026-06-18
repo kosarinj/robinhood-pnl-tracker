@@ -14,6 +14,8 @@ import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
 import DCAAlertPanel from './components/DCAAlertPanel'
 import StrategyPnLSplit from './components/StrategyPnLSplit'
+import YTDPositionsPanel from './components/YTDPositionsPanel'
+import ShortCallTracker from './components/ShortCallTracker'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -1192,7 +1194,7 @@ function AuthenticatedApp({ user }) {
 
       {/* Main tab navigation */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '2px solid #e2e8f0', paddingBottom: '0' }}>
-        {[['dashboard', '📊 Dashboard'], ['analytics', '🔬 Analytics'], ['research', '🔍 Research']].map(([key, label]) => (
+        {[['dashboard', '📊 Dashboard'], ['positions', '📈 Positions'], ['analytics', '🔬 Analytics'], ['research', '🔍 Research']].map(([key, label]) => (
           <button key={key} onClick={() => setActiveMainTab(key)} style={{
             padding: '8px 24px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
             background: 'none', borderBottom: activeMainTab === key ? '2px solid #667eea' : '2px solid transparent',
@@ -2435,6 +2437,14 @@ function AuthenticatedApp({ user }) {
           trades={trades}
           currentPrices={currentPrices}
         />
+      )}
+
+      {/* Positions tab */}
+      {activeMainTab === 'positions' && (
+        <div style={{ padding: '8px 0' }}>
+          <YTDPositionsPanel />
+          <ShortCallTracker />
+        </div>
       )}
 
       {/* Research tab */}
