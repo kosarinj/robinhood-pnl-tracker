@@ -2066,22 +2066,35 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       }
     }
 
-    // For tickers without Polygon price, fetch live from Yahoo Finance
-    const missingTickers = [...new Set(entries.map(e => e.ticker))].filter(t => !polygonStockPrices[t])
+    // Fetch stock prices for all tickers not already obtained from Polygon
+    const allTickers = [...new Set(entries.map(e => e.ticker))]
+    const missingTickers = allTickers.filter(t => !polygonStockPrices[t])
     if (missingTickers.length > 0) {
       try {
-        const fetched = await priceService.fetchPrices(missingTickers)
-        Object.assign(polygonStockPrices, fetched)
+        const yfUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${missingTickers.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`
+        const yfResp = await axios.get(yfUrl, {
+          timeout: 8000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'application/json' }
+        })
+        const quotes = yfResp.data?.quoteResponse?.result || []
+        quotes.forEach(q => {
+          let price = q.regularMarketPrice
+          if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
+          else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
+          if (price > 0) polygonStockPrices[q.symbol] = price
+        })
+        console.log(`Short-calls: fetched ${quotes.filter(q => q.regularMarketPrice > 0).length}/${missingTickers.length} stock prices from YF`)
       } catch (e) {
-        // fall back to in-memory cache
+        console.warn('Short-calls YF price fetch failed:', e.message)
+        // Last resort: in-memory cache
         const cached = priceService.getCurrentPrices()
-        missingTickers.forEach(t => { if (cached[t]) polygonStockPrices[t] = cached[t] })
+        missingTickers.forEach(t => { if (cached[t] > 0) polygonStockPrices[t] = cached[t] })
       }
     }
 
     const today = new Date().toISOString().slice(0, 10)
     const result = entries.map(entry => {
-      const currentStock = polygonStockPrices[entry.ticker] || null
+      const currentStock = polygonStockPrices[entry.ticker] > 0 ? polygonStockPrices[entry.ticker] : null
       const currentOptionPrice = optionPrices[entry.symbol] || null
       const isOpen = openShortSymbols.has(entry.symbol)
       const expiryMs = new Date(entry.expiry + 'T00:00:00Z').getTime()
