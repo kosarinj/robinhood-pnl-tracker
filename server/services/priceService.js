@@ -132,77 +132,77 @@ export class PriceService {
     return prices
   }
 
-  // Fetch prices from Yahoo Finance using bulk quote endpoint (fewer requests = less rate limiting)
+  // Fetch prices — tries Polygon first (if key set), falls back to Yahoo Finance
   async fetchPrices(symbols) {
     const prices = {}
+    const POLYGON_KEY = process.env.POLYGON_API_KEY
+
+    if (POLYGON_KEY) {
+      // Polygon snapshot — up to 250 tickers per call, no rate-limit issues with paid key
+      try {
+        const batchSize = 250
+        for (let i = 0; i < symbols.length; i += batchSize) {
+          const batch = symbols.slice(i, i + batchSize)
+          const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${batch.join(',')}&apiKey=${POLYGON_KEY}`
+          const resp = await axios.get(url, { timeout: 10000 })
+          const tickers = resp.data?.tickers || []
+          tickers.forEach(t => {
+            // Use lastTrade.p, fallback to day.c (intraday close), then prevDay.c
+            const price = t.lastTrade?.p || t.day?.c || t.prevDay?.c || 0
+            if (price > 0) {
+              prices[t.ticker] = price
+              this._cachePrice(t.ticker, price)
+              if (t.prevDay?.c) this.prevCloseCache.set(t.ticker, t.prevDay.c)
+            }
+          })
+          // Fill any missing symbols with 0
+          batch.forEach(sym => { if (prices[sym] === undefined) { prices[sym] = 0; this._cachePrice(sym, 0) } })
+        }
+        const got = Object.values(prices).filter(p => p > 0).length
+        console.log(`fetchPrices (Polygon): ${got}/${symbols.length} prices`)
+        return prices
+      } catch (e) {
+        console.warn('Polygon fetchPrices failed, falling back to Yahoo Finance:', e.message)
+      }
+    }
+
+    // Yahoo Finance fallback
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'application/json',
-      'Accept-Language': 'en-US,en;q=0.9',
     }
-
     try {
-      // Use bulk quote endpoint — fetch up to 50 symbols per request instead of 1 per request
       const batchSize = 50
       for (let i = 0; i < symbols.length; i += batchSize) {
         const batch = symbols.slice(i, i + batchSize)
-        const symbolList = batch.join(',')
-
         try {
-          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbolList}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState,regularMarketPreviousClose`
+          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${batch.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState,regularMarketPreviousClose`
           const response = await axios.get(url, { timeout: 10000, headers })
-
           const quotes = response.data?.quoteResponse?.result || []
           quotes.forEach(q => {
-            // Cache market state for all quotes
             if (q.marketState) this.marketStateCache.set(q.symbol, q.marketState)
             if (q.regularMarketPreviousClose) this.prevCloseCache.set(q.symbol, q.regularMarketPreviousClose)
             if (q.regularMarketPrice) this.regularMarketPriceCache.set(q.symbol, q.regularMarketPrice)
-
-            // Cache pre-market price + change when available
             if (q.preMarketPrice) {
-              const change = q.regularMarketPrice
-                ? Math.round((q.preMarketPrice - q.regularMarketPrice) * 100) / 100
-                : null
-              const changePct = q.regularMarketPrice
-                ? Math.round((q.preMarketPrice - q.regularMarketPrice) / q.regularMarketPrice * 10000) / 100
-                : null
+              const change = q.regularMarketPrice ? Math.round((q.preMarketPrice - q.regularMarketPrice) * 100) / 100 : null
+              const changePct = q.regularMarketPrice ? Math.round((q.preMarketPrice - q.regularMarketPrice) / q.regularMarketPrice * 10000) / 100 : null
               this.preMarketCache.set(q.symbol, { price: q.preMarketPrice, change, changePct })
             }
-
             let price = q.regularMarketPrice
             if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
             else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
-            if (price) {
-              prices[q.symbol] = price
-              this._cachePrice(q.symbol, price)
-            }
+            if (price) { prices[q.symbol] = price; this._cachePrice(q.symbol, price) }
           })
-
-          // Mark any symbols that didn't come back as 0
-          batch.forEach(symbol => {
-            if (prices[symbol] === undefined) {
-              console.warn(`No price data for ${symbol}`)
-              prices[symbol] = 0
-              this._cachePrice(symbol, 0)
-            }
-          })
-        } catch (error) {
-          console.error(`Error fetching bulk prices (batch ${i / batchSize + 1}):`, error.message)
-          batch.forEach(symbol => {
-            prices[symbol] = 0
-            this._cachePrice(symbol, 0)
-          })
+          batch.forEach(sym => { if (prices[sym] === undefined) { prices[sym] = 0; this._cachePrice(sym, 0) } })
+        } catch (err) {
+          console.error(`Yahoo batch ${i / batchSize + 1} failed:`, err.message)
+          batch.forEach(sym => { prices[sym] = 0; this._cachePrice(sym, 0) })
         }
-
-        if (i + batchSize < symbols.length) {
-          await new Promise(resolve => setTimeout(resolve, 1000))
-        }
+        if (i + batchSize < symbols.length) await new Promise(r => setTimeout(r, 1000))
       }
     } catch (error) {
-      console.error('Error in fetchPrices:', error)
+      console.error('Error in fetchPrices (Yahoo):', error)
     }
-
     return prices
   }
 

@@ -2403,21 +2403,30 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
       return res.json({ success: true, holdings: [], debug: { stockDataEmpty: true, rawPositions: rawPos } })
     }
 
-    // Fetch live prices via Yahoo Finance directly
+    // Fetch live prices — Polygon if key set, otherwise Yahoo Finance
     let prices = {}
     try {
-      const yfResp = await axios.get(
-        `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`,
+      const resp = await axios.get(
+        process.env.POLYGON_API_KEY
+          ? `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${symbols.join(',')}&apiKey=${process.env.POLYGON_API_KEY}`
+          : `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`,
         { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' } }
       )
-      ;(yfResp.data?.quoteResponse?.result || []).forEach(q => {
-        let price = q.regularMarketPrice
-        if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
-        else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
-        if (price > 0) prices[q.symbol] = price
-      })
+      if (process.env.POLYGON_API_KEY) {
+        ;(resp.data?.tickers || []).forEach(t => {
+          const price = t.lastTrade?.p || t.day?.c || t.prevDay?.c || 0
+          if (price > 0) prices[t.ticker] = price
+        })
+      } else {
+        ;(resp.data?.quoteResponse?.result || []).forEach(q => {
+          let price = q.regularMarketPrice
+          if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
+          else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
+          if (price > 0) prices[q.symbol] = price
+        })
+      }
     } catch (e) {
-      console.warn('stock-positions YF fetch failed:', e.message)
+      console.warn('stock-positions price fetch failed:', e.message)
       const cached = priceService.getCurrentPrices()
       symbols.forEach(s => { if (cached[s] > 0) prices[s] = cached[s] })
     }
