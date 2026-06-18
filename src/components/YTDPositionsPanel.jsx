@@ -155,9 +155,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
       totalRealized: acc.totalRealized + (r.totalRealized || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
-      stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL
+      stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
+      net: acc.net + (r.totalRealized || 0) + (r.openPremium || 0) + stockPnL
     }
-  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, stockUnrealizedPnL: 0 })
+  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, stockUnrealizedPnL: 0, net: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -234,7 +235,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: surface, borderRadius: '10px', overflow: 'hidden', border: `1px solid ${border}` }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default' }}>Ticker</th>
+                <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default', width: '55px', minWidth: '55px' }}>Ticker</th>
                 <th style={thStyle('realizedShortCalls')} onClick={() => toggleSort('realizedShortCalls')} title="Realized P&L from short calls (covered calls sold)">
                   Short Calls<SortIcon field="realizedShortCalls" />
                 </th>
@@ -257,8 +258,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Average cost per share">Avg Cost</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Current stock price">Stock Price</th>
-                <th style={{ ...thStyle('stockPnL'), borderRight: 'none' }} onClick={() => toggleSort('stockPnL')}>
+                <th style={{ ...thStyle('stockPnL') }} onClick={() => toggleSort('stockPnL')}>
                   Stock P&L<SortIcon field="stockPnL" />
+                </th>
+                <th style={{ ...thStyle('net'), borderLeft: `2px solid ${border}` }} onClick={() => toggleSort('net')}
+                    title="Options Total + Open Premium + Stock P&L">
+                  Net<SortIcon field="net" />
                 </th>
                 <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default', borderLeft: `1px solid ${border}` }}>Start Date</th>
               </tr>
@@ -275,7 +280,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     onMouseEnter={e => e.currentTarget.style.background = rowHover}
                     onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')}
                   >
-                    <td style={{ padding: '10px 12px', fontWeight: '700', color: text, letterSpacing: '0.03em' }}>
+                    <td style={{ padding: '10px 6px', fontWeight: '700', color: text, letterSpacing: '0.03em', width: '55px', maxWidth: '55px', overflow: 'hidden' }}>
                       {row.ticker}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortCalls, isDark), fontWeight: '600' }}>
@@ -296,16 +301,17 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
                       <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
                     </td>
-                    {/* Stock columns — from /api/stock-positions-with-prices (primary) with fallbacks */}
+                    {/* Stock columns + Net */}
                     {(() => {
                       const sh = stockHoldings[row.ticker]
                       const fb = pnlLookup[row.ticker]
                       const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
                       const avgCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
                       const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
-                      const pnl = (pos > 0 && avgCost > 0 && price > 0)
+                      const stockPnl = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
                         : null
+                      const net = Math.round(((row.totalRealized || 0) + (row.openPremium || 0) + (stockPnl || 0)) * 100) / 100
                       return (<>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
                           {pos != null && pos > 0 ? pos.toLocaleString() : '—'}
@@ -316,9 +322,13 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
                           {price ? fmt(price) : '—'}
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(pnl, isDark) }}
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(stockPnl, isDark) }}
                             title={pos && price && avgCost ? `${pos} shares × ($${price.toFixed(2)} − $${avgCost.toFixed(2)})` : ''}>
-                          {pnl != null ? fmt(pnl) : '—'}
+                          {stockPnl != null ? fmt(stockPnl) : '—'}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(net, isDark), borderLeft: `2px solid ${border}` }}
+                            title="Options Total + Open Premium + Stock P&L">
+                          {fmt(net)}
                         </td>
                       </>)
                     })()}
@@ -368,6 +378,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
                 <td colSpan={3} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>
                 <td style={{ borderLeft: `1px solid ${border}` }} />
               </tr>
             </tfoot>
