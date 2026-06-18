@@ -2442,7 +2442,7 @@ function AuthenticatedApp({ user }) {
       {/* Positions tab */}
       {activeMainTab === 'positions' && (
         <div style={{ padding: '8px 0' }}>
-          <YTDPositionsPanel />
+          <YTDPositionsPanel pnlData={pnlData} />
           <ShortCallTracker />
         </div>
       )}

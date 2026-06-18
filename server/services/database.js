@@ -1840,17 +1840,20 @@ export class DatabaseService {
   // Returns all option trades (including contracts count) without GROUP BY dedup for accurate LIFO
   getStockPositionsWithCost(userId = 1) {
     try {
+      // Use COALESCE so NULL quantity/amount don't silently zero out rows
       const rows = db.prepare(`
         SELECT
           symbol,
-          SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS position,
-          SUM(CASE WHEN is_buy = 1 THEN ABS(amount) ELSE 0 END) AS total_cost,
-          SUM(CASE WHEN is_buy = 1 THEN quantity ELSE 0 END) AS total_bought
+          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE -COALESCE(quantity,0) END) AS position,
+          SUM(CASE WHEN is_buy = 1 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_cost,
+          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought
         FROM trades
-        WHERE is_option = 0 AND user_id = ?
+        WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
         GROUP BY symbol
         HAVING position > 0
       `).all(userId)
+      console.log(`getStockPositionsWithCost: ${rows.length} stock positions for user ${userId}`)
+      if (rows.length > 0) console.log('  sample:', JSON.stringify(rows.slice(0,3)))
       const result = {}
       rows.forEach(r => {
         result[r.symbol] = {

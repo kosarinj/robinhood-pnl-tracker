@@ -22,7 +22,7 @@ const pnlColor = (n, isDark) => {
   return n > 0 ? '#22c55e' : '#ef4444'
 }
 
-export default function YTDPositionsPanel() {
+export default function YTDPositionsPanel({ pnlData = [] }) {
   const { isDark } = useTheme()
 
   const [globalStart, setGlobalStart] = useState(() => localStorage.getItem(LS_GLOBAL_KEY) || DEFAULT_GLOBAL_START)
@@ -97,7 +97,18 @@ export default function YTDPositionsPanel() {
   const headerBg = isDark ? '#151929' : '#f8fafc'
   const rowHover = isDark ? '#252d3d' : '#f8fafc'
 
-  // Stock data comes from the API response (computed server-side from trades + live prices)
+  // Build a fallback stock lookup from pnlData (dashboard data) for when server-side data is missing
+  const pnlLookup = {}
+  pnlData.forEach(p => {
+    if (!p.isOption && p.symbol) {
+      pnlLookup[p.symbol] = {
+        position: p.real?.position ?? p.avgCost?.position ?? 0,
+        avgCost: p.real?.avgCostBasis ?? p.avgCost?.avgCostBasis ?? 0,
+        currentPrice: p.currentPrice ?? 0,
+        unrealizedPnL: p.real?.unrealizedPnL ?? 0
+      }
+    }
+  })
 
   const rows = data?.byUnderlying || []
   const sorted = [...rows].sort((a, b) => {
@@ -105,15 +116,19 @@ export default function YTDPositionsPanel() {
     return mul * ((a[sortField] ?? 0) - (b[sortField] ?? 0))
   })
 
-  const totals = rows.reduce((acc, r) => ({
-    realizedShortCalls: acc.realizedShortCalls + (r.realizedShortCalls || 0),
-    realizedLongCalls: acc.realizedLongCalls + (r.realizedLongCalls || 0),
-    realizedShortPuts: acc.realizedShortPuts + (r.realizedShortPuts || 0),
-    realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
-    totalRealized: acc.totalRealized + (r.totalRealized || 0),
-    openPremium: acc.openPremium + (r.openPremium || 0),
-    stockUnrealizedPnL: acc.stockUnrealizedPnL + (r.stockUnrealizedPnL || 0)
-  }), { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, stockUnrealizedPnL: 0 })
+  const totals = rows.reduce((acc, r) => {
+    const fb = pnlLookup[r.ticker]
+    const stockPnL = r.stockUnrealizedPnL ?? fb?.unrealizedPnL ?? 0
+    return {
+      realizedShortCalls: acc.realizedShortCalls + (r.realizedShortCalls || 0),
+      realizedLongCalls: acc.realizedLongCalls + (r.realizedLongCalls || 0),
+      realizedShortPuts: acc.realizedShortPuts + (r.realizedShortPuts || 0),
+      realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
+      totalRealized: acc.totalRealized + (r.totalRealized || 0),
+      openPremium: acc.openPremium + (r.openPremium || 0),
+      stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL
+    }
+  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, stockUnrealizedPnL: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -272,20 +287,29 @@ export default function YTDPositionsPanel() {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
                       <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
                     </td>
-                    {/* Stock position columns — data from server (trades + live prices) */}
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
-                      {row.stockPosition != null ? row.stockPosition.toLocaleString() : '—'}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid }}>
-                      {row.stockAvgCost != null ? fmt(row.stockAvgCost) : '—'}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
-                      {row.stockCurrentPrice != null ? fmt(row.stockCurrentPrice) : '—'}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.stockUnrealizedPnL, isDark) }}
-                        title={row.stockPosition != null ? `${row.stockPosition} shares × ($${row.stockCurrentPrice?.toFixed(2)} − $${row.stockAvgCost?.toFixed(2)})` : ''}>
-                      {row.stockUnrealizedPnL != null ? fmt(row.stockUnrealizedPnL) : '—'}
-                    </td>
+                    {/* Stock columns: server-side data preferred, pnlData (dashboard) as fallback */}
+                    {(() => {
+                      const fb = pnlLookup[row.ticker]
+                      const pos = row.stockPosition ?? fb?.position ?? null
+                      const avgCost = row.stockAvgCost ?? fb?.avgCost ?? null
+                      const price = row.stockCurrentPrice ?? fb?.currentPrice ?? null
+                      const pnl = row.stockUnrealizedPnL ?? fb?.unrealizedPnL ?? null
+                      return (<>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
+                          {pos != null && pos > 0 ? pos.toLocaleString() : '—'}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid }}>
+                          {avgCost ? fmt(avgCost) : '—'}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
+                          {price ? fmt(price) : '—'}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(pnl, isDark) }}
+                            title={pos && price && avgCost ? `${pos} shares × ($${price.toFixed(2)} − $${avgCost.toFixed(2)})` : ''}>
+                          {pnl != null ? fmt(pnl) : '—'}
+                        </td>
+                      </>)
+                    })()}
                   </tr>
                 )
               })}
