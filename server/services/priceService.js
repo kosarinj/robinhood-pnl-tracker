@@ -8,6 +8,44 @@ const YF_HEADERS = {
 
 const PRICE_CACHE_TTL_MS = 4 * 60 * 1000 // 4 minutes
 
+// Cached Polygon grouped daily bars (one fetch covers all stocks)
+let polygonGroupedCache = null       // Map: ticker → close price
+let polygonGroupedCacheDate = null   // date string the cache was loaded for
+let polygonGroupedCacheTime = 0      // epoch ms when loaded
+
+async function fetchPolygonGrouped(apiKey) {
+  const now = Date.now()
+  // Reuse cache if loaded in the last 30 minutes
+  if (polygonGroupedCache && (now - polygonGroupedCacheTime) < 30 * 60 * 1000) {
+    return polygonGroupedCache
+  }
+  // Try today, fall back to yesterday if no results yet
+  const tryDates = []
+  for (let d = 0; d <= 5; d++) {
+    const dt = new Date(now - d * 86400000)
+    const iso = dt.toISOString().slice(0, 10)
+    tryDates.push(iso)
+  }
+  for (const date of tryDates) {
+    try {
+      const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${date}?adjusted=true&apiKey=${apiKey}`
+      const resp = await axios.get(url, { timeout: 15000 })
+      if ((resp.data?.resultsCount || 0) > 0) {
+        const map = new Map()
+        ;(resp.data.results || []).forEach(r => { if (r.T && r.c > 0) map.set(r.T, r.c) })
+        polygonGroupedCache = map
+        polygonGroupedCacheDate = date
+        polygonGroupedCacheTime = now
+        console.log(`Polygon grouped prices loaded: ${map.size} symbols for ${date}`)
+        return map
+      }
+    } catch (e) {
+      console.warn(`Polygon grouped fetch for ${date} failed:`, e.message)
+    }
+  }
+  return polygonGroupedCache || new Map()
+}
+
 export class PriceService {
   constructor(databaseService = null) {
     this.priceCache = new Map()   // symbol → price
@@ -132,37 +170,24 @@ export class PriceService {
     return prices
   }
 
-  // Fetch prices — tries Polygon first (if key set), falls back to Yahoo Finance
+  // Fetch prices — tries Polygon grouped daily bars first (if key set), falls back to Yahoo Finance
   async fetchPrices(symbols) {
     const prices = {}
     const POLYGON_KEY = process.env.POLYGON_API_KEY
 
     if (POLYGON_KEY) {
-      // Polygon snapshot — up to 250 tickers per call, no rate-limit issues with paid key
       try {
-        const batchSize = 250
-        for (let i = 0; i < symbols.length; i += batchSize) {
-          const batch = symbols.slice(i, i + batchSize)
-          const url = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers?tickers=${batch.join(',')}&apiKey=${POLYGON_KEY}`
-          const resp = await axios.get(url, { timeout: 10000 })
-          const tickers = resp.data?.tickers || []
-          tickers.forEach(t => {
-            // Use lastTrade.p, fallback to day.c (intraday close), then prevDay.c
-            const price = t.lastTrade?.p || t.day?.c || t.prevDay?.c || 0
-            if (price > 0) {
-              prices[t.ticker] = price
-              this._cachePrice(t.ticker, price)
-              if (t.prevDay?.c) this.prevCloseCache.set(t.ticker, t.prevDay.c)
-            }
-          })
-          // Fill any missing symbols with 0
-          batch.forEach(sym => { if (prices[sym] === undefined) { prices[sym] = 0; this._cachePrice(sym, 0) } })
-        }
-        const got = Object.values(prices).filter(p => p > 0).length
-        console.log(`fetchPrices (Polygon): ${got}/${symbols.length} prices`)
+        const grouped = await fetchPolygonGrouped(POLYGON_KEY)
+        symbols.forEach(sym => {
+          const price = grouped.get(sym) || 0
+          prices[sym] = price
+          this._cachePrice(sym, price)
+        })
+        const got = symbols.filter(s => prices[s] > 0).length
+        console.log(`fetchPrices (Polygon grouped/${polygonGroupedCacheDate}): ${got}/${symbols.length}`)
         return prices
       } catch (e) {
-        console.warn('Polygon fetchPrices failed, falling back to Yahoo Finance:', e.message)
+        console.warn('Polygon grouped fetchPrices failed, falling back to Yahoo Finance:', e.message)
       }
     }
 
