@@ -22,7 +22,7 @@ const pnlColor = (n, isDark) => {
   return n > 0 ? '#22c55e' : '#ef4444'
 }
 
-export default function YTDPositionsPanel({ pnlData = [] }) {
+export default function YTDPositionsPanel() {
   const { isDark } = useTheme()
 
   const [globalStart, setGlobalStart] = useState(() => localStorage.getItem(LS_GLOBAL_KEY) || DEFAULT_GLOBAL_START)
@@ -97,40 +97,23 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const headerBg = isDark ? '#151929' : '#f8fafc'
   const rowHover = isDark ? '#252d3d' : '#f8fafc'
 
-  // Build a lookup from pnlData for stock positions (non-option rows only)
-  const stockLookup = {}
-  pnlData.forEach(p => {
-    if (!p.isOption && p.symbol) {
-      const pos = p.real?.position ?? p.avgCost?.position ?? 0
-      const avgCost = p.real?.avgCostBasis ?? p.avgCost?.avgCostBasis ?? 0
-      const currentPrice = p.currentPrice ?? 0
-      const unrealizedPnL = p.real?.unrealizedPnL ?? 0
-      stockLookup[p.symbol] = { pos, avgCost, currentPrice, unrealizedPnL }
-    }
-  })
+  // Stock data comes from the API response (computed server-side from trades + live prices)
 
   const rows = data?.byUnderlying || []
   const sorted = [...rows].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
-    // stock P&L sorts need the enriched value
-    if (sortField === 'stockPnL') {
-      const aVal = stockLookup[a.ticker]?.unrealizedPnL ?? 0
-      const bVal = stockLookup[b.ticker]?.unrealizedPnL ?? 0
-      return mul * (aVal - bVal)
-    }
     return mul * ((a[sortField] ?? 0) - (b[sortField] ?? 0))
   })
 
-  const totals = rows.reduce((acc, r) => {
-    const stock = stockLookup[r.ticker]
-    return {
-      realizedCalls: acc.realizedCalls + (r.realizedCalls || 0),
-      realizedPuts: acc.realizedPuts + (r.realizedPuts || 0),
-      totalRealized: acc.totalRealized + (r.totalRealized || 0),
-      openPremium: acc.openPremium + (r.openPremium || 0),
-      stockPnL: acc.stockPnL + (stock?.unrealizedPnL || 0)
-    }
-  }, { realizedCalls: 0, realizedPuts: 0, totalRealized: 0, openPremium: 0, stockPnL: 0 })
+  const totals = rows.reduce((acc, r) => ({
+    realizedShortCalls: acc.realizedShortCalls + (r.realizedShortCalls || 0),
+    realizedLongCalls: acc.realizedLongCalls + (r.realizedLongCalls || 0),
+    realizedShortPuts: acc.realizedShortPuts + (r.realizedShortPuts || 0),
+    realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
+    totalRealized: acc.totalRealized + (r.totalRealized || 0),
+    openPremium: acc.openPremium + (r.openPremium || 0),
+    stockUnrealizedPnL: acc.stockUnrealizedPnL + (r.stockUnrealizedPnL || 0)
+  }), { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, stockUnrealizedPnL: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -200,11 +183,17 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
               <tr>
                 <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default' }}>Ticker</th>
                 <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default' }}>Start Date</th>
-                <th style={thStyle('realizedCalls')} onClick={() => toggleSort('realizedCalls')}>
-                  Calls Realized<SortIcon field="realizedCalls" />
+                <th style={thStyle('realizedShortCalls')} onClick={() => toggleSort('realizedShortCalls')} title="Realized P&L from short calls (covered calls sold)">
+                  Short Calls<SortIcon field="realizedShortCalls" />
                 </th>
-                <th style={thStyle('realizedPuts')} onClick={() => toggleSort('realizedPuts')}>
-                  Puts Realized<SortIcon field="realizedPuts" />
+                <th style={thStyle('realizedLongCalls')} onClick={() => toggleSort('realizedLongCalls')} title="Realized P&L from long calls (calls bought)">
+                  Long Calls<SortIcon field="realizedLongCalls" />
+                </th>
+                <th style={thStyle('realizedShortPuts')} onClick={() => toggleSort('realizedShortPuts')} title="Realized P&L from short puts (cash-secured puts)">
+                  Short Puts<SortIcon field="realizedShortPuts" />
+                </th>
+                <th style={thStyle('realizedLongPuts')} onClick={() => toggleSort('realizedLongPuts')} title="Realized P&L from long puts (protective puts bought)">
+                  Long Puts<SortIcon field="realizedLongPuts" />
                 </th>
                 <th style={thStyle('totalRealized')} onClick={() => toggleSort('totalRealized')}>
                   Options Total<SortIcon field="totalRealized" />
@@ -226,7 +215,6 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 const isEditing = editingSymbol === row.ticker
                 const effectiveDate = symbolDates[row.ticker] || globalStart
                 const hasOverride = !!symbolDates[row.ticker]
-                const stock = stockLookup[row.ticker]
                 return (
                   <tr
                     key={row.ticker}
@@ -266,11 +254,17 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                         </button>
                       )}
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedCalls, isDark), fontWeight: '600' }}>
-                      {fmt(row.realizedCalls)}
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortCalls, isDark), fontWeight: '600' }}>
+                      {fmt(row.realizedShortCalls)}
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedPuts, isDark), fontWeight: '600' }}>
-                      {fmt(row.realizedPuts)}
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedLongCalls, isDark), fontWeight: '600' }}>
+                      {fmt(row.realizedLongCalls)}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortPuts, isDark), fontWeight: '600' }}>
+                      {fmt(row.realizedShortPuts)}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedLongPuts, isDark), fontWeight: '600' }}>
+                      {fmt(row.realizedLongPuts)}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.totalRealized, isDark), fontWeight: '700', fontSize: '14px' }}>
                       {fmt(row.totalRealized)}
@@ -278,19 +272,19 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
                       <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
                     </td>
-                    {/* Stock position columns */}
+                    {/* Stock position columns — data from server (trades + live prices) */}
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
-                      {stock?.pos ? stock.pos.toLocaleString() : '—'}
+                      {row.stockPosition != null ? row.stockPosition.toLocaleString() : '—'}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid }}>
-                      {stock?.avgCost ? fmt(stock.avgCost) : '—'}
+                      {row.stockAvgCost != null ? fmt(row.stockAvgCost) : '—'}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
-                      {stock?.currentPrice ? fmt(stock.currentPrice) : '—'}
+                      {row.stockCurrentPrice != null ? fmt(row.stockCurrentPrice) : '—'}
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(stock?.unrealizedPnL, isDark) }}
-                        title={stock ? `${stock.pos} shares × ($${stock.currentPrice?.toFixed(2)} − $${stock.avgCost?.toFixed(2)})` : ''}>
-                      {stock?.unrealizedPnL != null ? fmt(stock.unrealizedPnL) : '—'}
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.stockUnrealizedPnL, isDark) }}
+                        title={row.stockPosition != null ? `${row.stockPosition} shares × ($${row.stockCurrentPrice?.toFixed(2)} − $${row.stockAvgCost?.toFixed(2)})` : ''}>
+                      {row.stockUnrealizedPnL != null ? fmt(row.stockUnrealizedPnL) : '—'}
                     </td>
                   </tr>
                 )
@@ -301,18 +295,14 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td colSpan={2} style={{ padding: '10px 12px', fontWeight: '700', color: text, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Total ({rows.length} underlyings)
                 </td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedCalls, isDark), fontWeight: '700' }}>
-                  {fmt(totals.realizedCalls)}
-                </td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedPuts, isDark), fontWeight: '700' }}>
-                  {fmt(totals.realizedPuts)}
-                </td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.totalRealized, isDark), fontWeight: '700', fontSize: '15px' }}>
-                  {fmt(totals.totalRealized)}
-                </td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>
-                  {fmt(totals.openPremium)}
-                </td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortCalls)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongCalls)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortPuts, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortPuts)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongPuts, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongPuts)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.totalRealized, isDark), fontWeight: '700', fontSize: '15px' }}>{fmt(totals.totalRealized)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
+                <td colSpan={3} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
               </tr>
             </tfoot>
           </table>

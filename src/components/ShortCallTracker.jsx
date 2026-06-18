@@ -161,6 +161,13 @@ export default function ShortCallTracker() {
         <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', color: pnlColor(entry.thetaGain, isDark) }}>
           {entry.thetaGain != null ? (entry.thetaGain >= 0 ? '+' : '') + fmt(entry.thetaGain) : '—'}
         </td>
+        <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', borderLeft: `1px solid ${border}`,
+          color: (entry.stockMove != null && entry.thetaGain != null) ? pnlColor(entry.stockMove + entry.thetaGain, isDark) : (isDark ? '#94a3b8' : '#64748b') }}
+          title="Stock Δ + Theta Gain — net per-share performance of the covered call position">
+          {entry.stockMove != null && entry.thetaGain != null
+            ? ((entry.stockMove + entry.thetaGain) >= 0 ? '+' : '') + fmt(entry.stockMove + entry.thetaGain)
+            : '—'}
+        </td>
         <td style={{ padding: '9px 10px', textAlign: 'center' }}>
           <span style={{
             padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '600',
@@ -220,8 +227,11 @@ export default function ShortCallTracker() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', background: surface, borderRadius: '10px', overflow: 'hidden', border: `1px solid ${border}` }}>
             <thead>
               <tr>
-                {['Ticker', 'Strike', 'Expiry', 'DTE', 'Qty', 'Sold/Share', 'Stock @ Sale', 'Current Stock', 'Current Call', 'Stock Δ', 'Theta Gain', 'Status'].map((h, i) => (
-                  <th key={h} style={{ ...thStyle, textAlign: i <= 1 || i === 4 || i === 11 ? (i === 0 ? 'left' : 'center') : 'right' }}>{h}</th>
+                {['Ticker', 'Strike', 'Expiry', 'DTE', 'Qty', 'Sold/Share', 'Stock @ Sale', 'Current Stock', 'Current Call', 'Stock Δ', 'Theta Gain', 'Net/Share', 'Status'].map((h, i) => (
+                  <th key={h} style={{ ...thStyle, textAlign: i === 0 ? 'left' : [3,4,12].includes(i) ? 'center' : 'right',
+                    ...(h === 'Net/Share' ? { background: isDark ? '#1a2035' : '#f0f4ff', borderLeft: `1px solid ${border}` } : {}) }}
+                    title={h === 'Net/Share' ? 'Stock Δ + Theta Gain: combined per-share performance of this covered call position' : undefined}
+                  >{h}</th>
                 ))}
               </tr>
             </thead>
@@ -229,7 +239,7 @@ export default function ShortCallTracker() {
               {openEntries.map((e, i) => renderRow(e, i))}
               {showClosed && closedEntries.length > 0 && (
                 <>
-                  <tr><td colSpan={12} style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '600', color: textMid, background: headerBg, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Closed / Expired</td></tr>
+                  <tr><td colSpan={13} style={{ padding: '6px 10px', fontSize: '11px', fontWeight: '600', color: textMid, background: headerBg, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Closed / Expired</td></tr>
                   {closedEntries.map((e, i) => renderRow(e, openEntries.length + i))}
                 </>
               )}

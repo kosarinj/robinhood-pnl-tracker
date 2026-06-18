@@ -1920,7 +1920,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
     const allTrades = databaseService.getOptionTradesForYTD(userId)
 
-    // LIFO pass over ALL trades (same logic as /api/options-pnl/history)
+    // LIFO pass over ALL trades
     const lifoStacks = {}
     const isOpening = tc => ['BTO', 'STO'].includes((tc || '').toUpperCase())
     const sortedTrades = [...allTrades].sort((a, b) =>
@@ -1958,30 +1958,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         if (left === 0) {
           const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
           t._realizedPnl = Math.round((closingShort ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
+          t._closingShort = closingShort
         }
       }
     })
 
-    // Compute open premium per underlying from ALL currently-open positions (not date-filtered).
-    // This reflects current exposure regardless of when the position was opened.
-    const allOpenPositions = databaseService.getOpenOptionPositions(userId)
+    // Open premium from LIFO stack residuals — only what's genuinely still open.
+    // Using stack residuals is correct because OEXP (expired short) reduces the short stack,
+    // so anything remaining is truly unclosed.
     const openPremiumByTicker = {}
-    allOpenPositions.forEach(pos => {
-      const parsed = parseOptionDescription(pos.symbol)
-      const ticker = parsed?.ticker || (pos.symbol || '').split(' ')[0].toUpperCase()
+    Object.entries(lifoStacks).forEach(([sym, stacks]) => {
+      const ticker = sym.split('|')[0]
       if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
       if (!openPremiumByTicker[ticker]) openPremiumByTicker[ticker] = 0
-      // Short positions: avg STO price × open contracts (credit received, positive)
-      if (pos.net_short > 0 && pos.sto_contracts > 0) {
-        openPremiumByTicker[ticker] += (pos.total_received / pos.sto_contracts) * pos.net_short
-      }
-      // Long positions: avg BTO price × open contracts (debit paid, negative)
-      if (pos.net_long > 0 && pos.bto_contracts > 0) {
-        openPremiumByTicker[ticker] -= (pos.total_paid / pos.bto_contracts) * pos.net_long
-      }
+      stacks.short.forEach(lot => { if (lot.remaining > 0) openPremiumByTicker[ticker] += lot.remaining * lot.ppc })
+      stacks.long.forEach(lot => { if (lot.remaining > 0) openPremiumByTicker[ticker] -= lot.remaining * lot.ppc })
     })
 
-    // Group realized P&L by underlying, filtered by per-symbol or global start date
+    // Group realized P&L by underlying, split by short/long x call/put, date-filtered
     const byUnderlying = {}
     allTrades.forEach(t => {
       const parsed = parseOptionDescription(t.symbol || '')
@@ -1989,7 +1983,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
       const effectiveStart = perSymbolDates[ticker] || globalStart
       if (!byUnderlying[ticker]) {
-        byUnderlying[ticker] = { ticker, startDate: effectiveStart, realizedCalls: 0, realizedPuts: 0, totalRealized: 0, tradeCount: 0 }
+        byUnderlying[ticker] = {
+          ticker, startDate: effectiveStart,
+          realizedShortCalls: 0, realizedLongCalls: 0,
+          realizedShortPuts: 0, realizedLongPuts: 0,
+          totalRealized: 0, tradeCount: 0
+        }
       }
       const entry = byUnderlying[ticker]
       entry.startDate = perSymbolDates[ticker] || globalStart
@@ -2000,26 +1999,69 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       entry.tradeCount++
       if (isClosing && t._realizedPnl != null) {
         entry.totalRealized += t._realizedPnl
-        if (optionType === 'call') entry.realizedCalls += t._realizedPnl
-        else if (optionType === 'put') entry.realizedPuts += t._realizedPnl
+        if (optionType === 'call') {
+          if (t._closingShort) entry.realizedShortCalls += t._realizedPnl
+          else entry.realizedLongCalls += t._realizedPnl
+        } else if (optionType === 'put') {
+          if (t._closingShort) entry.realizedShortPuts += t._realizedPnl
+          else entry.realizedLongPuts += t._realizedPnl
+        }
       }
     })
 
-    // Merge in open premium and any tickers that only have open positions (no realized in date range)
-    Object.entries(openPremiumByTicker).forEach(([ticker, op]) => {
+    // Include tickers with only open positions (no realized trades in date range)
+    Object.keys(openPremiumByTicker).forEach(ticker => {
       if (!byUnderlying[ticker]) {
-        byUnderlying[ticker] = { ticker, startDate: perSymbolDates[ticker] || globalStart, realizedCalls: 0, realizedPuts: 0, totalRealized: 0, tradeCount: 0 }
+        byUnderlying[ticker] = {
+          ticker, startDate: perSymbolDates[ticker] || globalStart,
+          realizedShortCalls: 0, realizedLongCalls: 0,
+          realizedShortPuts: 0, realizedLongPuts: 0,
+          totalRealized: 0, tradeCount: 0
+        }
       }
     })
 
+    // Stock positions + live prices — fetched server-side so frontend doesn't need pnlData
+    const stockPositions = databaseService.getStockPositionsWithCost(userId)
+    const allTickers = [...new Set([...Object.keys(byUnderlying), ...Object.keys(stockPositions)])]
+    const stockPrices = {}
+    if (allTickers.length > 0) {
+      try {
+        const yfUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${allTickers.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`
+        const yfResp = await axios.get(yfUrl, {
+          timeout: 8000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'application/json' }
+        })
+        ;(yfResp.data?.quoteResponse?.result || []).forEach(q => {
+          let price = q.regularMarketPrice
+          if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
+          else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
+          if (price > 0) stockPrices[q.symbol] = price
+        })
+      } catch (e) {
+        console.warn('YTD YF price fetch failed:', e.message)
+      }
+    }
+
+    const r2 = n => Math.round(n * 100) / 100
     const result = Object.values(byUnderlying)
-      .map(e => ({
-        ...e,
-        realizedCalls: Math.round(e.realizedCalls * 100) / 100,
-        realizedPuts: Math.round(e.realizedPuts * 100) / 100,
-        totalRealized: Math.round(e.totalRealized * 100) / 100,
-        openPremium: Math.round((openPremiumByTicker[e.ticker] || 0) * 100) / 100
-      }))
+      .map(e => {
+        const sp = stockPositions[e.ticker]
+        const cp = stockPrices[e.ticker] || null
+        return {
+          ...e,
+          realizedShortCalls: r2(e.realizedShortCalls),
+          realizedLongCalls: r2(e.realizedLongCalls),
+          realizedShortPuts: r2(e.realizedShortPuts),
+          realizedLongPuts: r2(e.realizedLongPuts),
+          totalRealized: r2(e.totalRealized),
+          openPremium: r2(openPremiumByTicker[e.ticker] || 0),
+          stockPosition: sp?.position ?? null,
+          stockAvgCost: sp?.avgCost ?? null,
+          stockCurrentPrice: cp,
+          stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null
+        }
+      })
       .sort((a, b) => b.totalRealized - a.totalRealized)
 
     res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates })

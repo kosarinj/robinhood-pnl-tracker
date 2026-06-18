@@ -1838,6 +1838,33 @@ export class DatabaseService {
   }
 
   // Returns all option trades (including contracts count) without GROUP BY dedup for accurate LIFO
+  getStockPositionsWithCost(userId = 1) {
+    try {
+      const rows = db.prepare(`
+        SELECT
+          symbol,
+          SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS position,
+          SUM(CASE WHEN is_buy = 1 THEN ABS(amount) ELSE 0 END) AS total_cost,
+          SUM(CASE WHEN is_buy = 1 THEN quantity ELSE 0 END) AS total_bought
+        FROM trades
+        WHERE is_option = 0 AND user_id = ?
+        GROUP BY symbol
+        HAVING position > 0
+      `).all(userId)
+      const result = {}
+      rows.forEach(r => {
+        result[r.symbol] = {
+          position: r.position,
+          avgCost: r.total_bought > 0 ? Math.round(r.total_cost / r.total_bought * 100) / 100 : 0
+        }
+      })
+      return result
+    } catch (e) {
+      console.error('Error getting stock positions with cost:', e)
+      return {}
+    }
+  }
+
   getOptionTradesForYTD(userId = 1) {
     try {
       return db.prepare(`
