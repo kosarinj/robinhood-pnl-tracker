@@ -131,7 +131,9 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     const fb = pnlLookup[r.ticker]
     const pos = (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
     const avgCost = (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
-    const price = livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null
+    const price = (livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null)
+      ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
+      ?? (fb?.currentPrice > 0 ? fb.currentPrice : null)
     const stockPnL = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
       : 0
@@ -280,8 +282,9 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       // Prefer pnlData for position + avg cost (computed by P&L engine from all trades)
                       const pos = (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
                       const avgCost = (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
-                      // Always use fresh live price; never fall back to stale pnlData price
-                      const price = livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null
+                      const price = (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null)
+                        ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
+                        ?? (fb?.currentPrice > 0 ? fb.currentPrice : null)
                       // Only compute P&L when all three are valid non-zero values
                       const pnl = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
