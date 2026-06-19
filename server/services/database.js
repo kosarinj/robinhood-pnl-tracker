@@ -263,6 +263,22 @@ try {
   console.error('short_call_entries migration error:', e.message)
 }
 
+// Migration: stock cost overrides — manual avg cost per symbol for YTD panel
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_cost_overrides (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      symbol TEXT NOT NULL,
+      avg_cost REAL NOT NULL,
+      updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+      UNIQUE(user_id, symbol)
+    )
+  `)
+} catch (e) {
+  console.error('stock_cost_overrides migration error:', e.message)
+}
+
 console.log(`Database initialized at: ${dbPath}`)
 
 // Migration: Drop the trades dedup unique index that incorrectly prevents identical legitimate trades
@@ -1878,6 +1894,28 @@ export class DatabaseService {
       console.error('Error getting stock positions with cost:', e)
       return {}
     }
+  }
+
+  getCostOverrides(userId = 1) {
+    try {
+      const rows = db.prepare(`SELECT symbol, avg_cost FROM stock_cost_overrides WHERE user_id = ?`).all(userId)
+      return Object.fromEntries(rows.map(r => [r.symbol, r.avg_cost]))
+    } catch (e) {
+      console.error('Error getting cost overrides:', e)
+      return {}
+    }
+  }
+
+  setCostOverride(userId = 1, symbol, avgCost) {
+    db.prepare(`
+      INSERT INTO stock_cost_overrides (user_id, symbol, avg_cost, updated_at)
+      VALUES (?, ?, ?, strftime('%s','now'))
+      ON CONFLICT(user_id, symbol) DO UPDATE SET avg_cost = excluded.avg_cost, updated_at = excluded.updated_at
+    `).run(userId, symbol.toUpperCase(), avgCost)
+  }
+
+  deleteCostOverride(userId = 1, symbol) {
+    db.prepare(`DELETE FROM stock_cost_overrides WHERE user_id = ? AND symbol = ?`).run(userId, symbol.toUpperCase())
   }
 
   getOptionTradesForYTD(userId = 1) {

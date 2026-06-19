@@ -2434,6 +2434,39 @@ app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
   }
 })
 
+// Stock avg cost overrides — permanent per-user storage for manual cost basis corrections
+app.get('/api/stock-cost-overrides', requireAuth, (req, res) => {
+  try {
+    const userId = req.session?.userId || 1
+    res.json({ success: true, overrides: databaseService.getCostOverrides(userId) })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.put('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
+  try {
+    const userId = req.session?.userId || 1
+    const symbol = req.params.symbol.toUpperCase()
+    const avgCost = parseFloat(req.body.avgCost)
+    if (!avgCost || avgCost <= 0) return res.status(400).json({ success: false, error: 'Invalid avgCost' })
+    databaseService.setCostOverride(userId, symbol, avgCost)
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.delete('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
+  try {
+    const userId = req.session?.userId || 1
+    databaseService.deleteCostOverride(userId, req.params.symbol)
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Get fresh current prices for multiple symbols (bypasses cache)
 app.get('/api/current-prices', requireAuth, async (req, res) => {
   try {

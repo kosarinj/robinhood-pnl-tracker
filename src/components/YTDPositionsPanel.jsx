@@ -67,7 +67,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
 
   useEffect(() => { fetchData() }, [])
 
-  // Fetch stock holdings (position, avg cost, live price) from dedicated endpoint
+  // Fetch stock holdings + cost overrides from server on mount
   const fetchStockHoldings = () => {
     fetch('/api/stock-positions-with-prices', { credentials: 'include' })
       .then(r => r.json())
@@ -85,7 +85,19 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       .catch(e => setStockDebug({ error: e.message }))
   }
 
-  useEffect(() => { fetchStockHoldings() }, [])
+  const fetchCostOverrides = () => {
+    fetch('/api/stock-cost-overrides', { credentials: 'include' })
+      .then(r => r.json())
+      .then(json => {
+        if (json.success) {
+          setCostOverrides(json.overrides)
+          localStorage.setItem(LS_COST_KEY, JSON.stringify(json.overrides))
+        }
+      })
+      .catch(() => {})
+  }
+
+  useEffect(() => { fetchStockHoldings(); fetchCostOverrides() }, [])
 
   const applyGlobalStart = (date) => {
     setGlobalStart(date)
@@ -114,21 +126,36 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     fetchData(globalStart, updated)
   }
 
-  const saveCostOverride = (ticker, value) => {
+  const saveCostOverride = async (ticker, value) => {
     const num = parseFloat(value)
     if (!num || num <= 0) return
-    const updated = { ...costOverrides, [ticker]: Math.round(num * 100) / 100 }
+    const rounded = Math.round(num * 100) / 100
+    const updated = { ...costOverrides, [ticker]: rounded }
     setCostOverrides(updated)
     localStorage.setItem(LS_COST_KEY, JSON.stringify(updated))
     setEditingCost(null)
+    try {
+      await fetch(`/api/stock-cost-overrides/${ticker}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ avgCost: rounded })
+      })
+    } catch (e) {
+      console.error('Failed to persist cost override:', e)
+    }
   }
 
-  const clearCostOverride = (ticker) => {
+  const clearCostOverride = async (ticker) => {
     const updated = { ...costOverrides }
     delete updated[ticker]
     setCostOverrides(updated)
     localStorage.setItem(LS_COST_KEY, JSON.stringify(updated))
     setEditingCost(null)
+    try {
+      await fetch(`/api/stock-cost-overrides/${ticker}`, { method: 'DELETE', credentials: 'include' })
+    } catch (e) {
+      console.error('Failed to delete cost override:', e)
+    }
   }
 
   const toggleSort = (field) => {
