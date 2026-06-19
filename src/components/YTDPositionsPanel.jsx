@@ -235,7 +235,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: surface, borderRadius: '10px', overflow: 'hidden', border: `1px solid ${border}` }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default', width: '55px', minWidth: '55px' }}>Ticker</th>
+                <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default', width: '48px', minWidth: '48px', padding: '10px 4px' }}>Ticker</th>
                 <th style={thStyle('realizedShortCalls')} onClick={() => toggleSort('realizedShortCalls')} title="Realized P&L from short calls (covered calls sold)">
                   Short Calls<SortIcon field="realizedShortCalls" />
                 </th>
@@ -280,7 +280,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     onMouseEnter={e => e.currentTarget.style.background = rowHover}
                     onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')}
                   >
-                    <td style={{ padding: '10px 6px', fontWeight: '700', color: text, letterSpacing: '0.03em', width: '55px', maxWidth: '55px', overflow: 'hidden' }}>
+                    <td style={{ padding: '10px 4px', fontWeight: '700', color: text, letterSpacing: '0.03em', width: '48px', maxWidth: '48px' }}>
                       {row.ticker}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortCalls, isDark), fontWeight: '600' }}>
@@ -367,7 +367,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${border}`, background: headerBg }}>
-                <td style={{ padding: '10px 12px', fontWeight: '700', color: text, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <td style={{ padding: '10px 4px', fontWeight: '700', color: text, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '48px' }}>
                   Total ({rows.length})
                 </td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortCalls)}</td>
