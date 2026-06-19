@@ -282,11 +282,14 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       )}
 
       {!loading && rows.length > 0 && (
-        <div style={{ overflowX: 'auto', position: 'relative' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', background: surface, borderRadius: '10px', overflow: 'hidden', border: `1px solid ${border}` }}>
+        <div style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
+          <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface, tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '50px' }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default', width: '42px', minWidth: '42px', padding: '10px 3px', position: 'sticky', left: 0, zIndex: 2, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>Ticker</th>
+                <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default', padding: '10px 4px', position: 'sticky', left: 0, zIndex: 2, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>Ticker</th>
                 <th style={thStyle('realizedShortCalls')} onClick={() => toggleSort('realizedShortCalls')} title="Realized P&L from short calls (covered calls sold)">
                   Short Calls<SortIcon field="realizedShortCalls" />
                 </th>
@@ -331,7 +334,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     onMouseEnter={e => e.currentTarget.style.background = rowHover}
                     onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')}
                   >
-                    <td style={{ padding: '10px 3px', fontWeight: '700', color: text, letterSpacing: '0.03em', width: '42px', maxWidth: '42px', position: 'sticky', left: 0, zIndex: 1, background: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'), boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
+                    <td style={{ padding: '10px 4px', fontWeight: '700', color: text, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'), boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
                       {row.ticker}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortCalls, isDark), fontWeight: '600' }}>
@@ -444,7 +447,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${border}`, background: headerBg }}>
-                <td style={{ padding: '10px 3px', fontWeight: '700', color: text, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '42px', position: 'sticky', left: 0, zIndex: 1, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
+                <td style={{ padding: '10px 4px', fontWeight: '700', color: text, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
                   Total ({rows.length})
                 </td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortCalls)}</td>
