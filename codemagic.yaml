@@ -1,0 +1,49 @@
+workflows:
+  ios-release:
+    name: iOS Release (TestFlight)
+    max_build_duration: 60
+    integrations:
+      app_store_connect: Apple Developer  # name of the API key you add in Codemagic settings
+
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.jeffkosarin.rhpnl
+      node: 20.x.x
+      xcode: 16.x
+      cocoapods: default
+
+    scripts:
+      - name: Install dependencies
+        script: npm ci
+
+      - name: Build web assets
+        script: npm run build
+
+      - name: Add or sync iOS platform
+        script: |
+          if [ ! -d "ios" ]; then
+            npx cap add ios
+          else
+            npx cap sync ios
+          fi
+
+      - name: Apply code signing profiles
+        script: xcode-project use-profiles
+
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace ios/App/App.xcworkspace \
+            --scheme App
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          - My Testers  # or delete this line — TestFlight adds you automatically
