@@ -86,12 +86,26 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   }
 
   const fetchCostOverrides = () => {
+    const localData = (() => { try { return JSON.parse(localStorage.getItem(LS_COST_KEY) || '{}') } catch { return {} } })()
     fetch('/api/stock-cost-overrides', { credentials: 'include' })
       .then(r => r.json())
       .then(json => {
-        if (json.success) {
-          setCostOverrides(json.overrides)
-          localStorage.setItem(LS_COST_KEY, JSON.stringify(json.overrides))
+        if (!json.success) return
+        const serverData = json.overrides || {}
+        if (Object.keys(serverData).length > 0) {
+          // Server has data — use it as source of truth
+          setCostOverrides(serverData)
+          localStorage.setItem(LS_COST_KEY, JSON.stringify(serverData))
+        } else if (Object.keys(localData).length > 0) {
+          // Server empty (e.g. after redeploy) but localStorage has data — restore to server
+          setCostOverrides(localData)
+          Object.entries(localData).forEach(([symbol, avgCost]) => {
+            fetch(`/api/stock-cost-overrides/${symbol}`, {
+              method: 'PUT', credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ avgCost })
+            }).catch(() => {})
+          })
         }
       })
       .catch(() => {})
