@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/ThemeContext'
 const DEFAULT_GLOBAL_START = '2026-03-15'
 const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
 const LS_SYMBOL_KEY = 'ytdPanel_symbolDates'
+const LS_COST_KEY = 'ytdPanel_costOverrides'
 
 const fmt = (n) => {
   if (n == null || isNaN(n)) return '—'
@@ -34,6 +35,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const [error, setError] = useState(null)
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [editDraft, setEditDraft] = useState('')
+  const [costOverrides, setCostOverrides] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LS_COST_KEY) || '{}') } catch { return {} }
+  })
+  const [editingCost, setEditingCost] = useState(null)
+  const [costDraft, setCostDraft] = useState('')
   const [sortField, setSortField] = useState('totalRealized')
   const [sortDir, setSortDir] = useState('desc')
   const [livePrices, setLivePrices] = useState({})
@@ -108,6 +114,23 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     fetchData(globalStart, updated)
   }
 
+  const saveCostOverride = (ticker, value) => {
+    const num = parseFloat(value)
+    if (!num || num <= 0) return
+    const updated = { ...costOverrides, [ticker]: Math.round(num * 100) / 100 }
+    setCostOverrides(updated)
+    localStorage.setItem(LS_COST_KEY, JSON.stringify(updated))
+    setEditingCost(null)
+  }
+
+  const clearCostOverride = (ticker) => {
+    const updated = { ...costOverrides }
+    delete updated[ticker]
+    setCostOverrides(updated)
+    localStorage.setItem(LS_COST_KEY, JSON.stringify(updated))
+    setEditingCost(null)
+  }
+
   const toggleSort = (field) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('desc') }
@@ -143,7 +166,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     const sh = stockHoldings[r.ticker]
     const fb = pnlLookup[r.ticker]
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
-    const avgCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
+    const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
+    const avgCost = costOverrides[r.ticker] || computedCost
     const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
     const stockPnL = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
@@ -306,18 +330,44 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const sh = stockHoldings[row.ticker]
                       const fb = pnlLookup[row.ticker]
                       const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
-                      const avgCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
+                      const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
+                      const hasManualCost = !!costOverrides[row.ticker]
+                      const avgCost = costOverrides[row.ticker] || computedCost
                       const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
                       const stockPnl = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
                         : null
                       const net = Math.round(((row.totalRealized || 0) + (row.openPremium || 0) + (stockPnl || 0)) * 100) / 100
+                      const isCostEditing = editingCost === row.ticker
                       return (<>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
                           {pos != null && pos > 0 ? pos.toLocaleString() : '—'}
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid }}>
-                          {avgCost ? fmt(avgCost) : '—'}
+                        <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                          {isCostEditing ? (
+                            <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                              <input
+                                type="number" step="0.01" value={costDraft}
+                                onChange={e => setCostDraft(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') saveCostOverride(row.ticker, costDraft); if (e.key === 'Escape') setEditingCost(null) }}
+                                autoFocus
+                                style={{ width: '72px', padding: '2px 5px', borderRadius: '4px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '12px', textAlign: 'right' }}
+                              />
+                              <button onClick={() => saveCostOverride(row.ticker, costDraft)} style={{ padding: '2px 6px', borderRadius: '4px', border: 'none', background: '#22c55e', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✓</button>
+                              <button onClick={() => setEditingCost(null)} style={{ padding: '2px 6px', borderRadius: '4px', border: 'none', background: '#94a3b8', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✗</button>
+                              {hasManualCost && <button onClick={() => clearCostOverride(row.ticker)} style={{ padding: '2px 6px', borderRadius: '4px', border: 'none', background: '#ef4444', color: 'white', fontSize: '11px', cursor: 'pointer' }}>Reset</button>}
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setEditingCost(row.ticker); setCostDraft(avgCost?.toFixed(2) || '') }}
+                              style={{ background: 'transparent', border: `1px solid ${hasManualCost ? '#f59e0b' : 'transparent'}`,
+                                padding: '2px 6px', borderRadius: '4px', cursor: 'pointer',
+                                color: hasManualCost ? '#f59e0b' : textMid, fontSize: '12px', fontWeight: hasManualCost ? '600' : '400' }}
+                              title={hasManualCost ? `Manual override: $${avgCost} (click to edit, Reset to clear)` : `Computed: $${avgCost?.toFixed(2) || '—'} (click to override)`}
+                            >
+                              {avgCost ? fmt(avgCost) : '—'}{hasManualCost ? ' ✎' : ''}
+                            </button>
+                          )}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
                           {price ? fmt(price) : '—'}
