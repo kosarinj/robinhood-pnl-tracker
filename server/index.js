@@ -2151,15 +2151,24 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       const todayMs = new Date(today + 'T00:00:00Z').getTime()
       const daysToExpiry = Math.round((expiryMs - todayMs) / (1000 * 60 * 60 * 24))
       const isExpired = daysToExpiry < 0
+      // entry.premium is stored as the TOTAL dollars received for the whole position
+      // (CSV parser sets option price = amount). Convert to per-share so it's
+      // comparable to currentOptionPrice (which Polygon returns per share).
+      const shares = (entry.contracts || 1) * 100
+      const premiumPerShare = shares > 0 ? entry.premium / shares : entry.premium
+      const callGainPerShare = (currentOptionPrice != null) ? (premiumPerShare - currentOptionPrice) : null
       return {
         ...entry,
+        premium: Math.round(premiumPerShare * 100) / 100,
+        premiumTotal: Math.round(entry.premium * 100) / 100,
         currentStock,
         currentOptionPrice,
         isOpen,
         isExpired,
         daysToExpiry,
         stockMove: (currentStock != null && entry.underlying_close != null) ? Math.round((currentStock - entry.underlying_close) * 100) / 100 : null,
-        thetaGain: (currentOptionPrice != null) ? Math.round((entry.premium - currentOptionPrice) * 100) / 100 : null
+        thetaGain: callGainPerShare != null ? Math.round(callGainPerShare * 100) / 100 : null,
+        callGainTotal: callGainPerShare != null ? Math.round(callGainPerShare * shares * 100) / 100 : null
       }
     })
 

@@ -158,7 +158,8 @@ export default function ShortCallTracker() {
         <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '600', color: stockMoveColor(entry.stockMove, isDark) }}>
           {entry.stockMove != null ? (entry.stockMove >= 0 ? '+' : '') + fmt(entry.stockMove) : '—'}
         </td>
-        <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', color: pnlColor(entry.thetaGain, isDark) }}>
+        <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', color: pnlColor(entry.thetaGain, isDark) }}
+          title={entry.callGainTotal != null ? `Total across ${entry.contracts} contract(s): ${(entry.callGainTotal >= 0 ? '+' : '') + fmt(entry.callGainTotal)}` : ''}>
           {entry.thetaGain != null ? (entry.thetaGain >= 0 ? '+' : '') + fmt(entry.thetaGain) : '—'}
         </td>
         <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', borderLeft: `1px solid ${border}`,
@@ -208,8 +209,8 @@ export default function ShortCallTracker() {
       </div>
 
       <p style={{ margin: '0 0 12px', fontSize: '12px', color: textMid }}>
-        Tracks the underlying stock price when you sell a short call. Compare current vs. sale-day price to see how theta decay is working.
-        <strong style={{ color: pnlColor(1, isDark) }}> Theta Gain</strong> = what you sold it for − current call price.
+        Tracks the underlying stock price when you sell a short call. Compare current vs. sale-day price to see how the position is working.
+        <strong style={{ color: pnlColor(1, isDark) }}> Call Gain/Sh</strong> = premium you sold for − current call price (per share). It's positive when the call is cheaper to buy back than you sold it for — driven by both time decay and the stock falling. Hover the value for the dollar total across all contracts.
       </p>
 
       {error && (
@@ -227,10 +228,11 @@ export default function ShortCallTracker() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', background: surface, borderRadius: '10px', overflow: 'hidden', border: `1px solid ${border}` }}>
             <thead>
               <tr>
-                {['Ticker', 'Strike', 'Expiry', 'DTE', 'Qty', 'Sold/Share', 'Stock @ Sale', 'Current Stock', 'Current Call', 'Stock Δ', 'Theta Gain', 'Net/Share', 'Status'].map((h, i) => (
+                {['Ticker', 'Strike', 'Expiry', 'DTE', 'Qty', 'Sold/Share', 'Stock @ Sale', 'Current Stock', 'Current Call', 'Stock Δ', 'Call Gain/Sh', 'Net/Share', 'Status'].map((h, i) => (
                   <th key={h} style={{ ...thStyle, textAlign: i === 0 ? 'left' : [3,4,12].includes(i) ? 'center' : 'right',
                     ...(h === 'Net/Share' ? { background: isDark ? '#1a2035' : '#f0f4ff', borderLeft: `1px solid ${border}` } : {}) }}
-                    title={h === 'Net/Share' ? 'Stock Δ + Theta Gain: combined per-share performance of this covered call position' : undefined}
+                    title={h === 'Net/Share' ? 'Stock Δ + Call Gain: combined per-share performance of this covered call position'
+                      : h === 'Call Gain/Sh' ? 'Per-share gain on the short call = premium sold − current call price. Positive means the call is cheaper to buy back than you sold it for. Includes both time decay AND stock movement, not pure theta.' : undefined}
                   >{h}</th>
                 ))}
               </tr>
