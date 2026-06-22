@@ -162,13 +162,18 @@ export default function ShortCallTracker() {
           title={entry.callGainTotal != null ? `Total across ${entry.contracts} contract(s): ${(entry.callGainTotal >= 0 ? '+' : '') + fmt(entry.callGainTotal)}` : ''}>
           {entry.thetaGain != null ? (entry.thetaGain >= 0 ? '+' : '') + fmt(entry.thetaGain) : '—'}
         </td>
-        <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', borderLeft: `1px solid ${border}`,
-          color: (entry.stockMove != null && entry.thetaGain != null) ? pnlColor(entry.stockMove + entry.thetaGain, isDark) : (isDark ? '#94a3b8' : '#64748b') }}
-          title="Stock Δ + Theta Gain — net per-share performance of the covered call position">
-          {entry.stockMove != null && entry.thetaGain != null
-            ? ((entry.stockMove + entry.thetaGain) >= 0 ? '+' : '') + fmt(entry.stockMove + entry.thetaGain)
-            : '—'}
-        </td>
+        {(() => {
+          const netDollars = (entry.stockMove != null && entry.thetaGain != null)
+            ? (entry.stockMove + entry.thetaGain) * 100 * (entry.contracts || 1)
+            : null
+          return (
+            <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', borderLeft: `1px solid ${border}`,
+              color: netDollars != null ? pnlColor(netDollars, isDark) : (isDark ? '#94a3b8' : '#64748b') }}
+              title={`(Stock Δ + Call Gain) × 100 × ${entry.contracts || 1} contract(s) — total dollar performance of the covered call position`}>
+              {netDollars != null ? (netDollars >= 0 ? '+' : '') + fmt(netDollars) : '—'}
+            </td>
+          )
+        })()}
         <td style={{ padding: '9px 10px', textAlign: 'center' }}>
           <span style={{
             padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '600',
@@ -228,10 +233,10 @@ export default function ShortCallTracker() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', background: surface, borderRadius: '10px', overflow: 'hidden', border: `1px solid ${border}` }}>
             <thead>
               <tr>
-                {['Ticker', 'Strike', 'Expiry', 'DTE', 'Qty', 'Sold/Share', 'Stock @ Sale', 'Current Stock', 'Current Call', 'Stock Δ', 'Call Gain/Sh', 'Net/Share', 'Status'].map((h, i) => (
+                {['Ticker', 'Strike', 'Expiry', 'DTE', 'Qty', 'Sold/Share', 'Stock @ Sale', 'Current Stock', 'Current Call', 'Stock Δ', 'Call Gain/Sh', 'Net $', 'Status'].map((h, i) => (
                   <th key={h} style={{ ...thStyle, textAlign: i === 0 ? 'left' : [3,4,12].includes(i) ? 'center' : 'right',
-                    ...(h === 'Net/Share' ? { background: isDark ? '#1a2035' : '#f0f4ff', borderLeft: `1px solid ${border}` } : {}) }}
-                    title={h === 'Net/Share' ? 'Stock Δ + Call Gain: combined per-share performance of this covered call position'
+                    ...(h === 'Net $' ? { background: isDark ? '#1a2035' : '#f0f4ff', borderLeft: `1px solid ${border}` } : {}) }}
+                    title={h === 'Net $' ? '(Stock Δ + Call Gain) × 100 × contracts: total dollar performance of this covered call position'
                       : h === 'Call Gain/Sh' ? 'Per-share gain on the short call = premium sold − current call price. Positive means the call is cheaper to buy back than you sold it for. Includes both time decay AND stock movement, not pure theta.' : undefined}
                   >{h}</th>
                 ))}
