@@ -188,64 +188,67 @@ export class PriceService {
     return prices
   }
 
-  // Fetch prices — tries Polygon grouped daily bars first (if key set), falls back to Yahoo Finance
+  // Fetch CURRENT prices — Yahoo "spark" bulk endpoint first (intraday, works from datacenter
+  // IPs without a crumb), then Polygon grouped daily bars as an end-of-day fallback.
+  // NOTE: Yahoo's v7/finance/quote endpoint now returns 401 (requires crumb/cookie auth), which
+  // is why prices stopped updating; the spark + v8 chart endpoints still work.
   async fetchPrices(symbols) {
     const prices = {}
-    const POLYGON_KEY = process.env.POLYGON_API_KEY
+    if (symbols.length === 0) return prices
 
-    if (POLYGON_KEY) {
-      try {
-        const grouped = await fetchPolygonGrouped(POLYGON_KEY)
-        symbols.forEach(sym => {
-          const price = grouped.get(sym) || 0
-          prices[sym] = price
-          this._cachePrice(sym, price)
-        })
-        const got = symbols.filter(s => prices[s] > 0).length
-        console.log(`fetchPrices (Polygon grouped/${polygonGroupedCacheDate}): ${got}/${symbols.length}`)
-        return prices
-      } catch (e) {
-        console.warn('Polygon grouped fetchPrices failed, falling back to Yahoo Finance:', e.message)
-      }
-    }
-
-    // Yahoo Finance fallback
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'application/json',
     }
-    try {
-      const batchSize = 50
-      for (let i = 0; i < symbols.length; i += batchSize) {
-        const batch = symbols.slice(i, i + batchSize)
-        try {
-          const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${batch.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState,regularMarketPreviousClose`
-          const response = await axios.get(url, { timeout: 10000, headers })
-          const quotes = response.data?.quoteResponse?.result || []
-          quotes.forEach(q => {
-            if (q.marketState) this.marketStateCache.set(q.symbol, q.marketState)
-            if (q.regularMarketPreviousClose) this.prevCloseCache.set(q.symbol, q.regularMarketPreviousClose)
-            if (q.regularMarketPrice) this.regularMarketPriceCache.set(q.symbol, q.regularMarketPrice)
-            if (q.preMarketPrice) {
-              const change = q.regularMarketPrice ? Math.round((q.preMarketPrice - q.regularMarketPrice) * 100) / 100 : null
-              const changePct = q.regularMarketPrice ? Math.round((q.preMarketPrice - q.regularMarketPrice) / q.regularMarketPrice * 10000) / 100 : null
-              this.preMarketCache.set(q.symbol, { price: q.preMarketPrice, change, changePct })
-            }
-            let price = q.regularMarketPrice
-            if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
-            else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
-            if (price) { prices[q.symbol] = price; this._cachePrice(q.symbol, price) }
-          })
-          batch.forEach(sym => { if (prices[sym] === undefined) { prices[sym] = 0; this._cachePrice(sym, 0) } })
-        } catch (err) {
-          console.error(`Yahoo batch ${i / batchSize + 1} failed:`, err.message)
-          batch.forEach(sym => { prices[sym] = 0; this._cachePrice(sym, 0) })
-        }
-        if (i + batchSize < symbols.length) await new Promise(r => setTimeout(r, 1000))
+
+    const batchSize = 50
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      const batch = symbols.slice(i, i + batchSize)
+      try {
+        const url = `https://query1.finance.yahoo.com/v7/finance/spark?symbols=${batch.join(',')}&range=1d&interval=5m`
+        const response = await axios.get(url, { timeout: 12000, headers })
+        const results = response.data?.spark?.result || []
+        results.forEach(item => {
+          const sym = item.symbol
+          const resp0 = item.response?.[0]
+          const meta = resp0?.meta || {}
+          // meta.regularMarketPrice is the live/intraday price; fall back to last non-null close
+          let price = meta.regularMarketPrice
+          if (!(price > 0)) {
+            const closes = resp0?.indicators?.quote?.[0]?.close || []
+            for (let k = closes.length - 1; k >= 0; k--) { if (closes[k] != null) { price = closes[k]; break } }
+          }
+          if (meta.chartPreviousClose) this.prevCloseCache.set(sym, meta.chartPreviousClose)
+          if (meta.regularMarketPrice) this.regularMarketPriceCache.set(sym, meta.regularMarketPrice)
+          if (price > 0) { prices[sym] = price; this._cachePrice(sym, price) }
+        })
+      } catch (err) {
+        console.warn(`Yahoo spark batch ${i / batchSize + 1} failed:`, err.response?.status || err.message)
       }
-    } catch (error) {
-      console.error('Error in fetchPrices (Yahoo):', error)
+      if (i + batchSize < symbols.length) await new Promise(r => setTimeout(r, 400))
     }
+
+    const gotYahoo = symbols.filter(s => prices[s] > 0).length
+    console.log(`fetchPrices (Yahoo spark): ${gotYahoo}/${symbols.length} intraday`)
+
+    // Fill any gaps (Yahoo missed/blocked) with Polygon end-of-day closes
+    const missing = symbols.filter(s => !(prices[s] > 0))
+    if (missing.length > 0 && process.env.POLYGON_API_KEY) {
+      try {
+        const grouped = await fetchPolygonGrouped(process.env.POLYGON_API_KEY)
+        missing.forEach(sym => {
+          const price = grouped.get(sym) || 0
+          if (price > 0) { prices[sym] = price; this._cachePrice(sym, price) }
+        })
+        const filled = missing.filter(s => prices[s] > 0).length
+        console.log(`fetchPrices (Polygon grouped/${polygonGroupedCacheDate} fallback): filled ${filled}/${missing.length}`)
+      } catch (e) {
+        console.warn('Polygon grouped fallback failed:', e.message)
+      }
+    }
+
+    // Ensure every requested symbol has an entry (0 = unknown)
+    symbols.forEach(sym => { if (prices[sym] === undefined) { prices[sym] = 0; this._cachePrice(sym, 0) } })
     return prices
   }
 
