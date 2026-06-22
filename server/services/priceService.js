@@ -13,20 +13,26 @@ let polygonGroupedCache = null       // Map: ticker → close price
 let polygonGroupedCacheDate = null   // date string the cache was loaded for
 let polygonGroupedCacheTime = 0      // epoch ms when loaded
 
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
 async function fetchPolygonGrouped(apiKey) {
   const now = Date.now()
   // Reuse cache if loaded in the last 30 minutes
   if (polygonGroupedCache && (now - polygonGroupedCacheTime) < 30 * 60 * 1000) {
     return polygonGroupedCache
   }
-  // Try today, fall back to yesterday if no results yet
+  // Build candidate dates: today back up to 7 days, skipping weekends (no data on Sat/Sun).
+  // This plan returns the most recent COMPLETED trading day — today is often 403 (not entitled
+  // to the current day) and holidays return 0 results, so we walk back to the latest real close.
   const tryDates = []
-  for (let d = 0; d <= 5; d++) {
+  for (let d = 0; d <= 7 && tryDates.length < 5; d++) {
     const dt = new Date(now - d * 86400000)
-    const iso = dt.toISOString().slice(0, 10)
-    tryDates.push(iso)
+    const dow = dt.getUTCDay()
+    if (dow === 0 || dow === 6) continue // skip Sun/Sat
+    tryDates.push(dt.toISOString().slice(0, 10))
   }
-  for (const date of tryDates) {
+  for (let i = 0; i < tryDates.length; i++) {
+    const date = tryDates[i]
     try {
       const url = `https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/${date}?adjusted=true&apiKey=${apiKey}`
       const resp = await axios.get(url, { timeout: 15000 })
@@ -39,9 +45,21 @@ async function fetchPolygonGrouped(apiKey) {
         console.log(`Polygon grouped prices loaded: ${map.size} symbols for ${date}`)
         return map
       }
+      // resultsCount 0 = market holiday; fall through to the previous day
     } catch (e) {
-      console.warn(`Polygon grouped fetch for ${date} failed:`, e.message)
+      const status = e.response?.status
+      if (status === 429) {
+        // Rate limited — wait and retry the same date (don't skip a valid trading day)
+        console.warn(`Polygon grouped ${date}: rate limited (429), waiting 13s to retry`)
+        await sleep(13000)
+        i--
+        continue
+      }
+      // 403 = not entitled to that day (expected for the current trading day); just try the prior day
+      if (status !== 403) console.warn(`Polygon grouped fetch for ${date} failed:`, status, e.message)
     }
+    // Space out calls to avoid tripping Polygon's burst rate limit
+    await sleep(1200)
   }
   return polygonGroupedCache || new Map()
 }
