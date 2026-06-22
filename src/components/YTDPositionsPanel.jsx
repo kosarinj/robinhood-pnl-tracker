@@ -45,6 +45,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const [livePrices, setLivePrices] = useState({})
   const [stockHoldings, setStockHoldings] = useState({})
   const [stockDebug, setStockDebug] = useState(null)
+  const [search, setSearch] = useState('')
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates) => {
     setLoading(true)
@@ -197,7 +198,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     }
   })
 
-  const rows = data?.byUnderlying || []
+  const q = search.trim().toUpperCase()
+  const rows = (data?.byUnderlying || []).filter(r => !q || (r.ticker || '').toUpperCase().includes(q))
   const sorted = [...rows].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
     return mul * ((a[sortField] ?? 0) - (b[sortField] ?? 0))
@@ -221,7 +223,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       totalRealized: acc.totalRealized + (r.totalRealized || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
-      net: acc.net + (r.totalRealized || 0) + (r.openPremium || 0) + stockPnL
+      net: acc.net + (r.totalRealized || 0) + stockPnL
     }
   }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, stockUnrealizedPnL: 0, net: 0 })
 
@@ -264,6 +266,23 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
           >
             Refresh
           </button>
+        </div>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Search ticker…"
+            style={{
+              padding: '5px 26px 5px 10px', borderRadius: '6px', border: `1px solid ${border}`,
+              background: surface, color: text, fontSize: '13px', width: '160px'
+            }}
+          />
+          {search && (
+            <button onClick={() => setSearch('')} title="Clear"
+              style={{ position: 'absolute', right: '6px', border: 'none', background: 'transparent',
+                color: textMid, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}>×</button>
+          )}
         </div>
         <span style={{ fontSize: '12px', color: textMid }}>
           Click a date cell to set a per-symbol start date
@@ -330,7 +349,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                   Stock P&L<SortIcon field="stockPnL" />
                 </th>
                 <th style={{ ...thStyle('net'), borderLeft: `2px solid ${border}` }} onClick={() => toggleSort('net')}
-                    title="Options Total + Open Premium + Stock P&L">
+                    title="Options Total (realized) + Stock P&L. Open Premium is excluded — it isn't marked to market.">
                   Net<SortIcon field="net" />
                 </th>
                 <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default', borderLeft: `1px solid ${border}` }}>Start Date</th>
@@ -381,7 +400,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const stockPnl = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
                         : null
-                      const net = Math.round(((row.totalRealized || 0) + (row.openPremium || 0) + (stockPnl || 0)) * 100) / 100
+                      const net = Math.round(((row.totalRealized || 0) + (stockPnl || 0)) * 100) / 100
                       const isCostEditing = editingCost === row.ticker
                       return (<>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
@@ -421,7 +440,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                           {stockPnl != null ? fmt(stockPnl) : '—'}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(net, isDark), borderLeft: `2px solid ${border}` }}
-                            title="Options Total + Open Premium + Stock P&L">
+                            title="Options Total (realized) + Stock P&L">
                           {fmt(net)}
                         </td>
                       </>)

@@ -38,6 +38,7 @@ export default function ShortCallTracker() {
   const [rebuilding, setRebuilding] = useState(false)
   const [rebuildMsg, setRebuildMsg] = useState(null)
   const [showClosed, setShowClosed] = useState(false)
+  const [search, setSearch] = useState('')
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -100,7 +101,8 @@ export default function ShortCallTracker() {
     }
   }
 
-  const entries = data?.entries || []
+  const sq = search.trim().toUpperCase()
+  const entries = (data?.entries || []).filter(e => !sq || (e.ticker || '').toUpperCase().includes(sq))
   const openEntries = entries.filter(e => e.isOpen)
   const closedEntries = entries.filter(e => !e.isOpen)
   const filtered = showClosed ? entries : openEntries
@@ -204,6 +206,19 @@ export default function ShortCallTracker() {
             <input type="checkbox" checked={showClosed} onChange={e => setShowClosed(e.target.checked)} />
             Show closed/expired
           </label>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 Search ticker…"
+              style={{ padding: '5px 24px 5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '12px', width: '150px' }}
+            />
+            {search && (
+              <button onClick={() => setSearch('')} title="Clear"
+                style={{ position: 'absolute', right: '6px', border: 'none', background: 'transparent', color: textMid, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}>×</button>
+            )}
+          </div>
         </div>
         {rebuildMsg && <span style={{ fontSize: '12px', color: '#22c55e' }}>{rebuildMsg}</span>}
         {!data?.polygonEnabled && (

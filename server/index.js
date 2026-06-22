@@ -2009,16 +2009,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       }
     })
 
-    // Include tickers with only open positions (no realized trades in date range)
-    Object.keys(openPremiumByTicker).forEach(ticker => {
-      if (!byUnderlying[ticker]) {
-        byUnderlying[ticker] = {
-          ticker, startDate: perSymbolDates[ticker] || globalStart,
-          realizedShortCalls: 0, realizedLongCalls: 0,
-          realizedShortPuts: 0, realizedLongPuts: 0,
-          totalRealized: 0, tradeCount: 0
-        }
-      }
+    // Only keep tickers with at least one option trade on/after the effective start date.
+    // tradeCount is incremented only for trades that pass the start-date filter above, so
+    // this drops anything not traded after the start date (including open-premium-only tickers).
+    Object.keys(byUnderlying).forEach(ticker => {
+      if (!(byUnderlying[ticker].tradeCount > 0)) delete byUnderlying[ticker]
     })
 
     // Stock positions + live prices — fetched server-side so frontend doesn't need pnlData
@@ -2027,19 +2022,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const stockPrices = {}
     if (allTickers.length > 0) {
       try {
-        const yfUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${allTickers.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`
-        const yfResp = await axios.get(yfUrl, {
-          timeout: 8000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'application/json' }
-        })
-        ;(yfResp.data?.quoteResponse?.result || []).forEach(q => {
-          let price = q.regularMarketPrice
-          if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
-          else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
-          if (price > 0) stockPrices[q.symbol] = price
-        })
+        const fetched = await priceService.fetchPrices(allTickers)
+        allTickers.forEach(t => { if (fetched[t] > 0) stockPrices[t] = fetched[t] })
       } catch (e) {
-        console.warn('YTD YF price fetch failed:', e.message)
+        console.warn('YTD price fetch failed:', e.message)
         const cached = priceService.getCurrentPrices()
         allTickers.forEach(t => { if (cached[t] > 0) stockPrices[t] = cached[t] })
       }
