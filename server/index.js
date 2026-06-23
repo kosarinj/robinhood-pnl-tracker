@@ -2107,21 +2107,13 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
     const missingTickers = allTickers.filter(t => !polygonStockPrices[t])
     if (missingTickers.length > 0) {
       try {
-        const yfUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${missingTickers.join(',')}&fields=regularMarketPrice,preMarketPrice,postMarketPrice,marketState`
-        const yfResp = await axios.get(yfUrl, {
-          timeout: 8000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'application/json' }
-        })
-        const quotes = yfResp.data?.quoteResponse?.result || []
-        quotes.forEach(q => {
-          let price = q.regularMarketPrice
-          if (q.marketState === 'PRE' && q.preMarketPrice) price = q.preMarketPrice
-          else if ((q.marketState === 'POST' || q.marketState === 'CLOSED') && q.postMarketPrice) price = q.postMarketPrice
-          if (price > 0) polygonStockPrices[q.symbol] = price
-        })
-        console.log(`Short-calls: fetched ${quotes.filter(q => q.regularMarketPrice > 0).length}/${missingTickers.length} stock prices from YF`)
+        // Use priceService (Yahoo spark) — the old v7/finance/quote endpoint now 401s,
+        // which is why Current Stock stopped updating here.
+        const fetched = await priceService.fetchPrices(missingTickers)
+        missingTickers.forEach(t => { if (fetched[t] > 0) polygonStockPrices[t] = fetched[t] })
+        console.log(`Short-calls: fetched ${missingTickers.filter(t => polygonStockPrices[t] > 0).length}/${missingTickers.length} stock prices`)
       } catch (e) {
-        console.warn('Short-calls YF price fetch failed:', e.message)
+        console.warn('Short-calls price fetch failed:', e.message)
         // Last resort: in-memory cache
         const cached = priceService.getCurrentPrices()
         missingTickers.forEach(t => { if (cached[t] > 0) polygonStockPrices[t] = cached[t] })
