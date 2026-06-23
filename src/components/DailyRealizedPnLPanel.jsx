@@ -341,7 +341,7 @@ export default function DailyRealizedPnLPanel({ trades }) {
                 ].map(([h, align]) => (
                   <th key={h} style={{
                     padding: '8px 10px', textAlign: align,
-                    color: text, fontWeight: '700', fontSize: '13px', whiteSpace: 'nowrap'
+                    color: '#ffffff', fontWeight: '700', fontSize: '13px', whiteSpace: 'nowrap'
                   }}>{h}</th>
                 ))}
               </tr>
