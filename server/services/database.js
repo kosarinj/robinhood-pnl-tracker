@@ -1951,7 +1951,10 @@ export class DatabaseService {
         INSERT INTO short_call_entries (user_id, symbol, ticker, strike, expiry, contracts, premium, sale_date, underlying_close)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, symbol, sale_date) DO UPDATE SET
-          underlying_close = COALESCE(excluded.underlying_close, short_call_entries.underlying_close),
+          -- Keep the stored value (incl. manual overrides) if present; only fill from the
+          -- auto-fetched price when nothing is stored yet. Otherwise a CSV re-upload would
+          -- wipe the user's manual "Stock @ Sale" edit.
+          underlying_close = COALESCE(short_call_entries.underlying_close, excluded.underlying_close),
           premium = excluded.premium,
           contracts = excluded.contracts
       `).run(userId, symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose ?? null)
