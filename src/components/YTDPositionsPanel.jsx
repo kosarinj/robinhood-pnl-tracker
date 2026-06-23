@@ -318,7 +318,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
         <div style={{ overflowX: 'scroll', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
           <table style={{ minWidth: '1300px', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
             <colgroup>
-              <col style={{ width: '50px' }} />
+              <col style={{ width: '44px' }} />
             </colgroup>
             <thead>
               <tr>
@@ -480,8 +480,9 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${border}`, background: headerBg }}>
-                <td style={{ padding: '10px 4px', fontWeight: '700', color: text, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
-                  Total ({rows.length})
+                <td style={{ padding: '10px 4px', fontWeight: '700', color: text, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}
+                    title={`Total (${rows.length})`}>
+                  Σ {rows.length}
                 </td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortCalls)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongCalls)}</td>
