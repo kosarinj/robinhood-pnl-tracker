@@ -119,7 +119,7 @@ export default function ShortCallTracker() {
 
     return (
       <tr key={entry.id} style={{ borderBottom: `1px solid ${border}`, background: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff') }}>
-        <td style={{ padding: '9px 6px', fontWeight: '700', color: text, position: 'sticky', left: 0, zIndex: 1, width: '52px', minWidth: '52px', maxWidth: '52px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'), boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>{entry.ticker}</td>
+        <td style={{ padding: '9px 8px', fontWeight: '700', color: text, position: 'sticky', left: 0, zIndex: 1, width: '60px', minWidth: '60px', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'), boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>{entry.ticker}</td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: text }}>${entry.strike}</td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: textMid }}>{fmtDate(entry.expiry)}</td>
         <td style={{ padding: '9px 10px', textAlign: 'center' }}>
@@ -247,13 +247,13 @@ export default function ShortCallTracker() {
         <div style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
           <table className="sc-tracker-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '12px', background: surface }}>
             <colgroup>
-              <col style={{ width: '52px' }} />
+              <col style={{ width: '60px' }} />
             </colgroup>
             <thead>
               <tr>
                 {['Ticker', 'Strike', 'Expiry', 'DTE', 'Qty', 'Sold/Share', 'Stock @ Sale', 'Current Stock', 'Current Call', 'Stock Δ', 'Call Gain/Sh', 'Net $', 'Status'].map((h, i) => (
                   <th key={h} style={{ ...thStyle, textAlign: i === 0 ? 'left' : [3,4,12].includes(i) ? 'center' : 'right',
-                    ...(i === 0 ? { position: 'sticky', left: 0, zIndex: 2, width: '52px', minWidth: '52px', maxWidth: '52px', overflow: 'hidden', padding: '9px 6px', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` } : {}),
+                    ...(i === 0 ? { position: 'sticky', left: 0, zIndex: 2, width: '60px', minWidth: '60px', maxWidth: '60px', overflow: 'hidden', padding: '9px 8px', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` } : {}),
                     ...(h === 'Net $' ? { background: isDark ? '#1a2035' : '#f0f4ff', borderLeft: `1px solid ${border}` } : {}) }}
                     title={h === 'Net $' ? '(Stock Δ + Call Gain) × 100 × contracts: total dollar performance of this covered call position'
                       : h === 'Call Gain/Sh' ? 'Per-share gain on the short call = premium sold − current call price. Positive means the call is cheaper to buy back than you sold it for. Includes both time decay AND stock movement, not pure theta.' : undefined}
