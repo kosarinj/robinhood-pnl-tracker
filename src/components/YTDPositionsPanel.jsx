@@ -315,8 +315,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       )}
 
       {!loading && rows.length > 0 && (
-        <div style={{ overflowX: 'scroll', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
-          <table style={{ minWidth: '1300px', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
+        <div style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
+          <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
             <colgroup>
               <col style={{ width: '44px' }} />
             </colgroup>
