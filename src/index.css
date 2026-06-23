@@ -341,6 +341,22 @@ table.ytd-panel-table { min-width: 0; }
   width: auto;
 }
 
+/* Short Call Tracker: same opt-out — only the ticker (col 1) is frozen, via inline styles. */
+table.sc-tracker-table { min-width: 0; }
+.sc-tracker-table th:nth-child(2), .sc-tracker-table td:nth-child(2),
+.sc-tracker-table th:nth-child(3), .sc-tracker-table td:nth-child(3) {
+  position: static;
+  left: auto;
+  box-shadow: none;
+  min-width: 0;
+  z-index: auto;
+}
+.sc-tracker-table th:nth-child(1), .sc-tracker-table td:nth-child(1) {
+  min-width: 0;
+  max-width: none;
+  width: auto;
+}
+
 tbody tr {
   transition: all 0.2s ease;
 }
