@@ -324,6 +324,23 @@ tfoot td:nth-child(3) {
   background: var(--tableHeader);
 }
 
+/* YTD panel manages its own column freezing (only the ticker) via inline styles.
+   Opt it out of the global "sticky first 3 columns" + min-width rules above. */
+table.ytd-panel-table { min-width: 0; }
+.ytd-panel-table th:nth-child(2), .ytd-panel-table td:nth-child(2),
+.ytd-panel-table th:nth-child(3), .ytd-panel-table td:nth-child(3) {
+  position: static;
+  left: auto;
+  box-shadow: none;
+  min-width: 0;
+  z-index: auto;
+}
+.ytd-panel-table th:nth-child(1), .ytd-panel-table td:nth-child(1) {
+  min-width: 0;
+  max-width: none;
+  width: auto;
+}
+
 tbody tr {
   transition: all 0.2s ease;
 }
