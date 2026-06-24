@@ -5,6 +5,7 @@ const DEFAULT_GLOBAL_START = '2026-03-15'
 const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
 const LS_SYMBOL_KEY = 'ytdPanel_symbolDates'
 const LS_COST_KEY = 'ytdPanel_costOverrides'
+const LS_HIDDEN_KEY = 'ytdPanel_hiddenTickers'
 
 const fmt = (n) => {
   if (n == null || isNaN(n)) return '—'
@@ -46,6 +47,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const [stockHoldings, setStockHoldings] = useState({})
   const [stockDebug, setStockDebug] = useState(null)
   const [search, setSearch] = useState('')
+  const [hiddenTickers, setHiddenTickers] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LS_HIDDEN_KEY) || '[]') } catch { return [] }
+  })
+  const [showHiddenList, setShowHiddenList] = useState(false)
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates) => {
     setLoading(true)
@@ -173,6 +178,25 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     }
   }
 
+  const hideTicker = (t) => {
+    const updated = [...new Set([...hiddenTickers, t])]
+    setHiddenTickers(updated)
+    localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify(updated))
+  }
+
+  const restoreTicker = (t) => {
+    const updated = hiddenTickers.filter(x => x !== t)
+    setHiddenTickers(updated)
+    localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify(updated))
+    if (updated.length === 0) setShowHiddenList(false)
+  }
+
+  const restoreAllTickers = () => {
+    setHiddenTickers([])
+    localStorage.setItem(LS_HIDDEN_KEY, '[]')
+    setShowHiddenList(false)
+  }
+
   const toggleSort = (field) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortField(field); setSortDir('desc') }
@@ -199,7 +223,9 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   })
 
   const q = search.trim().toUpperCase()
-  const rows = (data?.byUnderlying || []).filter(r => !q || (r.ticker || '').toUpperCase().includes(q))
+  const hiddenSet = new Set(hiddenTickers)
+  const rows = (data?.byUnderlying || []).filter(r =>
+    !hiddenSet.has(r.ticker) && (!q || (r.ticker || '').toUpperCase().includes(q)))
   const sorted = [...rows].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
     return mul * ((a[sortField] ?? 0) - (b[sortField] ?? 0))
@@ -284,8 +310,32 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 color: textMid, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}>×</button>
           )}
         </div>
+        {hiddenTickers.length > 0 && (
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setShowHiddenList(v => !v)}
+              style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>
+              🚫 {hiddenTickers.length} hidden ▾
+            </button>
+            {showHiddenList && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 20, background: surface, border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', minWidth: '180px', maxWidth: '260px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+                  {hiddenTickers.map(t => (
+                    <button key={t} onClick={() => restoreTicker(t)} title={`Restore ${t}`}
+                      style={{ padding: '2px 7px', borderRadius: '4px', border: `1px solid ${border}`, background: isDark ? '#252d3d' : '#f1f5f9', color: text, fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
+                      {t} ✕
+                    </button>
+                  ))}
+                </div>
+                <button onClick={restoreAllTickers}
+                  style={{ width: '100%', padding: '5px', borderRadius: '4px', border: 'none', background: '#3b82f6', color: 'white', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
+                  Show all
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <span style={{ fontSize: '12px', color: textMid }}>
-          Click a date cell to set a per-symbol start date
+          Click a date cell to set a per-symbol start date · hover a row to hide it
         </span>
         {stockDebug && (
           <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px',
@@ -360,6 +410,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 const isEditing = editingSymbol === row.ticker
                 const effectiveDate = symbolDates[row.ticker] || globalStart
                 const hasOverride = !!symbolDates[row.ticker]
+                const tickerBg = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')
                 return (
                   <tr
                     key={row.ticker}
@@ -367,8 +418,14 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     onMouseEnter={e => e.currentTarget.style.background = rowHover}
                     onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')}
                   >
-                    <td style={{ padding: '10px 4px', fontWeight: '700', color: text, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'), boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
+                    <td style={{ padding: '10px 4px', fontWeight: '700', color: text, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: tickerBg, boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
                       {row.ticker}
+                      <button
+                        className="ytd-hide"
+                        onClick={(e) => { e.stopPropagation(); hideTicker(row.ticker) }}
+                        title={`Hide ${row.ticker} from view`}
+                        style={{ position: 'absolute', top: '50%', right: '1px', transform: 'translateY(-50%)', width: '15px', height: '15px', padding: 0, lineHeight: '13px', textAlign: 'center', border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: '12px', fontWeight: 700, color: '#fff', background: '#ef4444' }}
+                      >×</button>
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortCalls, isDark), fontWeight: '600' }}>
                       {fmt(row.realizedShortCalls)}

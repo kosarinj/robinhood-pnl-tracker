@@ -341,6 +341,10 @@ table.ytd-panel-table { min-width: 0; }
   width: auto;
 }
 
+/* Per-row "hide ticker" button — only visible (and clickable) when hovering the row */
+.ytd-panel-table .ytd-hide { opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+.ytd-panel-table tbody tr:hover .ytd-hide { opacity: 1; pointer-events: auto; }
+
 /* Short Call Tracker: same opt-out — only the ticker (col 1) is frozen, via inline styles. */
 table.sc-tracker-table { min-width: 0; }
 .sc-tracker-table th:nth-child(2), .sc-tracker-table td:nth-child(2),
