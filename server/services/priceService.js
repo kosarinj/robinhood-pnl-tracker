@@ -252,6 +252,46 @@ export class PriceService {
     return prices
   }
 
+  // Weekly change per symbol — uses Yahoo "spark" 5-day daily series (one bulk call per batch).
+  // Returns { SYMBOL: { current, weekAgo, change, pct } } where pct is % change over ~1 week.
+  async fetchWeeklyChange(symbols) {
+    const result = {}
+    if (!symbols || symbols.length === 0) return result
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+    }
+    const batchSize = 50
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      const batch = symbols.slice(i, i + batchSize)
+      try {
+        const url = `https://query1.finance.yahoo.com/v7/finance/spark?symbols=${batch.join(',')}&range=5d&interval=1d`
+        const response = await axios.get(url, { timeout: 12000, headers })
+        const results = response.data?.spark?.result || []
+        results.forEach(item => {
+          const resp0 = item.response?.[0]
+          const meta = resp0?.meta || {}
+          const closes = (resp0?.indicators?.quote?.[0]?.close || []).filter(c => c != null && c > 0)
+          if (closes.length < 2) return
+          const weekAgo = closes[0]
+          const current = meta.regularMarketPrice > 0 ? meta.regularMarketPrice : closes[closes.length - 1]
+          if (weekAgo > 0 && current > 0) {
+            result[item.symbol] = {
+              current,
+              weekAgo,
+              change: Math.round((current - weekAgo) * 100) / 100,
+              pct: Math.round(((current - weekAgo) / weekAgo) * 10000) / 100,
+            }
+          }
+        })
+      } catch (err) {
+        console.warn(`Weekly change batch ${i / batchSize + 1} failed:`, err.response?.status || err.message)
+      }
+      if (i + batchSize < symbols.length) await new Promise(r => setTimeout(r, 400))
+    }
+    return result
+  }
+
   // Fetch historical price data for charting
   async fetchHistoricalPrices(symbol, range = '6mo', interval = '1d') {
     try {

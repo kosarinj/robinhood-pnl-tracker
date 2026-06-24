@@ -2037,11 +2037,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const pricesFetched = Object.keys(stockPrices).filter(t => stockPrices[t] > 0).length
     console.log(`YTD: ${Object.keys(stockPositions).length} stock positions, ${allTickers.length} tickers, ${pricesFetched} prices fetched`)
 
+    // Weekly stock change (~5 trading days) per ticker — one bulk call
+    let weeklyChange = {}
+    if (allTickers.length > 0) {
+      try { weeklyChange = await priceService.fetchWeeklyChange(allTickers) } catch (e) { console.warn('YTD weekly change fetch failed:', e.message) }
+    }
+
     const r2 = n => Math.round(n * 100) / 100
     const result = Object.values(byUnderlying)
       .map(e => {
         const sp = stockPositions[e.ticker]
         const cp = stockPrices[e.ticker] || null
+        const wk = weeklyChange[e.ticker]
         return {
           ...e,
           realizedShortCalls: r2(e.realizedShortCalls),
@@ -2053,7 +2060,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockPosition: sp?.position ?? null,
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
-          stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null
+          stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null,
+          weeklyChangePct: wk ? wk.pct : null,
+          weeklyChange: wk ? wk.change : null
         }
       })
       .sort((a, b) => b.totalRealized - a.totalRealized)

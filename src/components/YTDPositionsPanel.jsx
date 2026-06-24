@@ -403,6 +403,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                   Net<SortIcon field="net" />
                 </th>
                 <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default', borderLeft: `1px solid ${border}` }}>Start Date</th>
+                <th style={{ ...thStyle('weeklyChangePct'), borderLeft: `1px solid ${border}` }} onClick={() => toggleSort('weeklyChangePct')}
+                    title="Stock price change over the past ~week (5 trading days)">
+                  Wk %<SortIcon field="weeklyChangePct" />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -531,6 +535,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                         </button>
                       )}
                     </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.weeklyChangePct, isDark), borderLeft: `1px solid ${border}` }}
+                        title={row.weeklyChange != null ? `${row.weeklyChange >= 0 ? '+' : ''}$${row.weeklyChange.toFixed(2)} over ~1 week` : ''}>
+                      {row.weeklyChangePct != null ? `${row.weeklyChangePct >= 0 ? '+' : ''}${row.weeklyChangePct.toFixed(2)}%` : '—'}
+                    </td>
                   </tr>
                 )
               })}
@@ -550,6 +558,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td colSpan={3} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>
+                <td style={{ borderLeft: `1px solid ${border}` }} />
                 <td style={{ borderLeft: `1px solid ${border}` }} />
               </tr>
             </tfoot>
