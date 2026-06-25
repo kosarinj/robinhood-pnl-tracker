@@ -2051,6 +2051,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const sp = stockPositions[e.ticker]
         const cp = stockPrices[e.ticker] || null
         const wk = weeklyChange[e.ticker]
+        // Only surface realized stock P&L for CLOSED positions (no open shares) — e.g. JPM.
+        // Open positions keep showing just their unrealized (open-share) gain, as before, so
+        // active names aren't inflated by all-time realized gains.
+        const isOpen = sp && sp.position > 0
         return {
           ...e,
           realizedShortCalls: r2(e.realizedShortCalls),
@@ -2063,7 +2067,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
           stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null,
-          stockRealizedPnL: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
+          stockRealizedPnL: (!isOpen && stockRealized[e.ticker] != null) ? r2(stockRealized[e.ticker]) : null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null
         }
