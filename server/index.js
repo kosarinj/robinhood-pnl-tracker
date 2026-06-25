@@ -2018,6 +2018,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
     // Stock positions + live prices — fetched server-side so frontend doesn't need pnlData
     const stockPositions = databaseService.getStockPositionsWithCost(userId)
+    const stockRealized = databaseService.getStockRealizedPnL(userId)
     const allTickers = [...new Set([...Object.keys(byUnderlying), ...Object.keys(stockPositions)])]
     const stockPrices = {}
     if (allTickers.length > 0) {
@@ -2061,6 +2062,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
           stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null,
+          stockRealizedPnL: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null
         }

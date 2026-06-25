@@ -1896,6 +1896,35 @@ export class DatabaseService {
     }
   }
 
+  // Realized stock P&L per symbol (average-cost method), INCLUDING fully-closed positions.
+  // realized = sell proceeds − avgCost × shares sold, where avgCost = total buy cost / total shares bought.
+  getStockRealizedPnL(userId = 1) {
+    try {
+      const rows = db.prepare(`
+        SELECT
+          symbol,
+          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought,
+          SUM(CASE WHEN is_buy = 1 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_buy_cost,
+          SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) ELSE 0 END) AS total_sold,
+          SUM(CASE WHEN is_buy = 0 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_sell_proceeds
+        FROM trades
+        WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
+        GROUP BY symbol
+      `).all(userId)
+      const result = {}
+      rows.forEach(r => {
+        if (r.total_sold > 0 && r.total_bought > 0) {
+          const avgCost = r.total_buy_cost / r.total_bought
+          result[r.symbol] = Math.round((r.total_sell_proceeds - avgCost * r.total_sold) * 100) / 100
+        }
+      })
+      return result
+    } catch (e) {
+      console.error('Error getting stock realized P&L:', e)
+      return {}
+    }
+  }
+
   getCostOverrides(userId = 1) {
     try {
       const rows = db.prepare(`SELECT symbol, avg_cost FROM stock_cost_overrides WHERE user_id = ?`).all(userId)

@@ -238,9 +238,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
     const avgCost = costOverrides[r.ticker] || computedCost
     const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
-    const stockPnL = (pos > 0 && avgCost > 0 && price > 0)
+    const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
       : 0
+    const stockPnL = stockUnrealized + (r.stockRealizedPnL || 0)
     return {
       realizedShortCalls: acc.realizedShortCalls + (r.realizedShortCalls || 0),
       realizedLongCalls: acc.realizedLongCalls + (r.realizedLongCalls || 0),
@@ -395,7 +396,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Average cost per share">Avg Cost</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Current stock price">Stock Price</th>
-                <th style={{ ...thStyle('stockPnL') }} onClick={() => toggleSort('stockPnL')}>
+                <th style={{ ...thStyle('stockPnL') }} onClick={() => toggleSort('stockPnL')}
+                    title="Stock P&L = realized (buy/sell gains) + unrealized (open shares)">
                   Stock P&L<SortIcon field="stockPnL" />
                 </th>
                 <th style={{ ...thStyle('net'), borderLeft: `2px solid ${border}` }} onClick={() => toggleSort('net')}
@@ -458,9 +460,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const hasManualCost = !!costOverrides[row.ticker]
                       const avgCost = costOverrides[row.ticker] || computedCost
                       const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
-                      const stockPnl = (pos > 0 && avgCost > 0 && price > 0)
+                      const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
-                        : null
+                        : 0
+                      const stockRealized = row.stockRealizedPnL || 0
+                      const hasStock = (pos > 0 && avgCost > 0 && price > 0) || row.stockRealizedPnL != null
+                      const stockPnl = hasStock ? Math.round((stockUnrealized + stockRealized) * 100) / 100 : null
                       const net = Math.round(((row.totalRealized || 0) + (stockPnl || 0)) * 100) / 100
                       const isCostEditing = editingCost === row.ticker
                       return (<>
@@ -497,7 +502,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                           {price ? fmt(price) : '—'}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(stockPnl, isDark) }}
-                            title={pos && price && avgCost ? `${pos} shares × ($${price.toFixed(2)} − $${avgCost.toFixed(2)})` : ''}>
+                            title={`Realized (buy/sell): ${fmt(stockRealized)}  ·  Unrealized (open shares): ${fmt(stockUnrealized)}`}>
                           {stockPnl != null ? fmt(stockPnl) : '—'}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(net, isDark), borderLeft: `2px solid ${border}` }}
