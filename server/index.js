@@ -2018,7 +2018,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
     // Stock positions + live prices — fetched server-side so frontend doesn't need pnlData
     const stockPositions = databaseService.getStockPositionsWithCost(userId)
-    const stockRealized = databaseService.getStockRealizedPnL(userId)
+    const stockCostOverrides = databaseService.getCostOverrides(userId)
+    const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides)
     const allTickers = [...new Set([...Object.keys(byUnderlying), ...Object.keys(stockPositions)])]
     const stockPrices = {}
     if (allTickers.length > 0) {

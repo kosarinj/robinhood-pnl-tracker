@@ -1897,16 +1897,20 @@ export class DatabaseService {
   }
 
   // Realized stock P&L per symbol (average-cost method), INCLUDING fully-closed positions.
+  // Uses quantity × price (matching the Dashboard's calculation) so the two agree.
   // realized = sell proceeds − avgCost × shares sold, where avgCost = total buy cost / total shares bought.
-  getStockRealizedPnL(userId = 1) {
+  // For a fully-closed position this equals sells − buys, matching the Dashboard's realized P&L.
+  // `overrides` is an optional { SYMBOL: avgCost } map; when present for a symbol, the
+  // manual cost basis is used instead of the computed average cost.
+  getStockRealizedPnL(userId = 1, overrides = {}) {
     try {
       const rows = db.prepare(`
         SELECT
           symbol,
           SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought,
-          SUM(CASE WHEN is_buy = 1 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_buy_cost,
+          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) * COALESCE(price,0) ELSE 0 END) AS total_buy_cost,
           SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) ELSE 0 END) AS total_sold,
-          SUM(CASE WHEN is_buy = 0 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_sell_proceeds
+          SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) * COALESCE(price,0) ELSE 0 END) AS total_sell_proceeds
         FROM trades
         WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
         GROUP BY symbol
@@ -1914,7 +1918,8 @@ export class DatabaseService {
       const result = {}
       rows.forEach(r => {
         if (r.total_sold > 0 && r.total_bought > 0) {
-          const avgCost = r.total_buy_cost / r.total_bought
+          const computedAvg = r.total_buy_cost / r.total_bought
+          const avgCost = overrides[r.symbol] > 0 ? overrides[r.symbol] : computedAvg
           result[r.symbol] = Math.round((r.total_sell_proceeds - avgCost * r.total_sold) * 100) / 100
         }
       })
