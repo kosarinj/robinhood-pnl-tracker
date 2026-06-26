@@ -249,10 +249,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
       totalRealized: acc.totalRealized + (r.totalRealized || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
+      openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
       net: acc.net + (r.totalRealized || 0) + stockPnL
     }
-  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, stockUnrealizedPnL: 0, net: 0 })
+  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -390,8 +391,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                   Options Total<SortIcon field="totalRealized" />
                 </th>
                 <th style={thStyle('openPremium')} onClick={() => toggleSort('openPremium')}
-                    title="Net premium in currently-open positions (all time — not filtered by start date)">
+                    title="Net premium collected on currently-open option positions (all time)">
                   Open Premium<SortIcon field="openPremium" />
+                </th>
+                <th style={thStyle('openUnrealizedPnL')} onClick={() => toggleSort('openUnrealizedPnL')}
+                    title="Unrealized P&L on open options: premium collected/paid minus current cost to close (live option prices)">
+                  Open P&L<SortIcon field="openUnrealizedPnL" />
                 </th>
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Average cost per share">Avg Cost</th>
@@ -450,6 +455,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
                       <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.openUnrealizedPnL, isDark) }}
+                        title={row.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available'}>
+                      {row.openUnrealizedPnL != null ? fmt(row.openUnrealizedPnL) : '—'}
                     </td>
                     {/* Stock columns + Net */}
                     {(() => {
@@ -560,6 +569,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongPuts, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongPuts)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.totalRealized, isDark), fontWeight: '700', fontSize: '15px' }}>{fmt(totals.totalRealized)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.openUnrealizedPnL)}</td>
                 <td colSpan={3} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>

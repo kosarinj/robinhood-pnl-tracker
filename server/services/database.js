@@ -1954,12 +1954,18 @@ export class DatabaseService {
 
   getOptionTradesForYTD(userId = 1) {
     try {
+      // Sum contracts/amount per (date, option, action, direction) so multiple contracts or
+      // separate fills of the same option aren't collapsed into one (which undercounted premium).
       return db.prepare(`
-        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy, COALESCE(contracts, 1) as contracts
+        SELECT trans_date, trans_code, symbol, is_buy,
+               SUM(COALESCE(quantity, 0)) AS quantity,
+               MAX(price) AS price,
+               SUM(COALESCE(amount, 0)) AS amount,
+               SUM(COALESCE(contracts, 1)) AS contracts
         FROM trades
         WHERE is_option = 1 AND user_id = ?
-        GROUP BY trans_date, symbol, trans_code, is_buy, amount
-        ORDER BY trans_date ASC, id ASC
+        GROUP BY trans_date, symbol, trans_code, is_buy
+        ORDER BY trans_date ASC
       `).all(userId)
     } catch (e) {
       console.error('Error getting option trades for YTD:', e)

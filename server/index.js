@@ -1939,9 +1939,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       if (!lifoStacks[sym]) lifoStacks[sym] = { long: [], short: [] }
       const stacks = lifoStacks[sym]
       if (tc === 'BTO') {
-        stacks.long.push({ ppc, remaining: contracts })
+        stacks.long.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
       } else if (tc === 'STO') {
-        stacks.short.push({ ppc, remaining: contracts })
+        stacks.short.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
       } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
         let closingShort, stack
         if (tc === 'BTC') { stack = stacks.short; closingShort = true }
@@ -1967,13 +1967,48 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // Using stack residuals is correct because OEXP (expired short) reduces the short stack,
     // so anything remaining is truly unclosed.
     const openPremiumByTicker = {}
+    const openLegs = []
     Object.entries(lifoStacks).forEach(([sym, stacks]) => {
       const ticker = sym.split('|')[0]
       if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
       if (!openPremiumByTicker[ticker]) openPremiumByTicker[ticker] = 0
-      stacks.short.forEach(lot => { if (lot.remaining > 0) openPremiumByTicker[ticker] += lot.remaining * lot.ppc })
-      stacks.long.forEach(lot => { if (lot.remaining > 0) openPremiumByTicker[ticker] -= lot.remaining * lot.ppc })
+      stacks.short.forEach(lot => { if (lot.remaining > 0) { openPremiumByTicker[ticker] += lot.remaining * lot.ppc; openLegs.push({ ticker, lot, isShort: true }) } })
+      stacks.long.forEach(lot => { if (lot.remaining > 0) { openPremiumByTicker[ticker] -= lot.remaining * lot.ppc; openLegs.push({ ticker, lot, isShort: false }) } })
     })
+
+    // Unrealized P&L on open option legs = premium collected/paid vs current cost to close.
+    // For shorts: (premium sold − current value); for longs: (current value − premium paid).
+    const openUnrealizedByTicker = {}
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (polygonKey && openLegs.length > 0) {
+      const bySymbol = {}
+      openLegs.forEach(leg => {
+        const polyTicker = leg.lot.parsed ? toPolygonTicker(leg.lot.symbol) : null
+        if (!polyTicker) return
+        if (!bySymbol[polyTicker]) bySymbol[polyTicker] = leg.lot.parsed.ticker
+      })
+      const optPrices = {}
+      await Promise.all(Object.entries(bySymbol).map(async ([polyTicker, undTicker]) => {
+        try {
+          const url = `https://api.polygon.io/v3/snapshot/options/${undTicker}/${polyTicker}`
+          const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
+          const snap = resp.data?.results
+          if (snap) {
+            const bid = snap.last_quote?.bid || 0, ask = snap.last_quote?.ask || 0
+            const mid = (bid && ask) ? (bid + ask) / 2 : (snap.day?.close || snap.last_trade?.price || 0)
+            if (mid >= 0) optPrices[polyTicker] = mid
+          }
+        } catch (e) { /* no price for this leg */ }
+      }))
+      openLegs.forEach(leg => {
+        const polyTicker = leg.lot.parsed ? toPolygonTicker(leg.lot.symbol) : null
+        const price = polyTicker != null ? optPrices[polyTicker] : undefined
+        if (price === undefined) return
+        const currentPerContract = price * 100
+        const perContract = leg.isShort ? (leg.lot.ppc - currentPerContract) : (currentPerContract - leg.lot.ppc)
+        openUnrealizedByTicker[leg.ticker] = (openUnrealizedByTicker[leg.ticker] || 0) + perContract * leg.lot.remaining
+      })
+    }
 
     // Group realized P&L by underlying, split by short/long x call/put, date-filtered
     const byUnderlying = {}
@@ -2063,6 +2098,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           realizedLongPuts: r2(e.realizedLongPuts),
           totalRealized: r2(e.totalRealized),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),
+          openUnrealizedPnL: openUnrealizedByTicker[e.ticker] != null ? r2(openUnrealizedByTicker[e.ticker]) : null,
           stockPosition: sp?.position ?? null,
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
