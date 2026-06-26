@@ -391,11 +391,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                   Options Total<SortIcon field="totalRealized" />
                 </th>
                 <th style={thStyle('openPremium')} onClick={() => toggleSort('openPremium')}
-                    title="Net premium collected on currently-open option positions (all time)">
+                    title="Credit collected on currently-open SHORT options (covered calls / cash-secured puts). Long options are not netted in.">
                   Open Premium<SortIcon field="openPremium" />
                 </th>
                 <th style={thStyle('openUnrealizedPnL')} onClick={() => toggleSort('openUnrealizedPnL')}
-                    title="Unrealized P&L on open options: premium collected/paid minus current cost to close (live option prices)">
+                    title="Unrealized P&L on open short options: premium collected minus current cost to buy them back (live option prices)">
                   Open P&L<SortIcon field="openUnrealizedPnL" />
                 </th>
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>

@@ -1966,14 +1966,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // Open premium from LIFO stack residuals — only what's genuinely still open.
     // Using stack residuals is correct because OEXP (expired short) reduces the short stack,
     // so anything remaining is truly unclosed.
+    // Open Premium = credit collected on OPEN SHORT options (covered calls / cash-secured puts).
+    // Long options are debits and are NOT netted in here (that hid the true short credit).
     const openPremiumByTicker = {}
     const openLegs = []
     Object.entries(lifoStacks).forEach(([sym, stacks]) => {
       const ticker = sym.split('|')[0]
       if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
-      if (!openPremiumByTicker[ticker]) openPremiumByTicker[ticker] = 0
-      stacks.short.forEach(lot => { if (lot.remaining > 0) { openPremiumByTicker[ticker] += lot.remaining * lot.ppc; openLegs.push({ ticker, lot, isShort: true }) } })
-      stacks.long.forEach(lot => { if (lot.remaining > 0) { openPremiumByTicker[ticker] -= lot.remaining * lot.ppc; openLegs.push({ ticker, lot, isShort: false }) } })
+      stacks.short.forEach(lot => {
+        if (lot.remaining > 0) {
+          openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + lot.remaining * lot.ppc
+          openLegs.push({ ticker, lot })
+        }
+      })
     })
 
     // Unrealized P&L on open option legs = premium collected/paid vs current cost to close.
@@ -2005,7 +2010,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const price = polyTicker != null ? optPrices[polyTicker] : undefined
         if (price === undefined) return
         const currentPerContract = price * 100
-        const perContract = leg.isShort ? (leg.lot.ppc - currentPerContract) : (currentPerContract - leg.lot.ppc)
+        // Short: collected ppc, would pay currentValue to buy back → gain = ppc − currentValue
+        const perContract = leg.lot.ppc - currentPerContract
         openUnrealizedByTicker[leg.ticker] = (openUnrealizedByTicker[leg.ticker] || 0) + perContract * leg.lot.remaining
       })
     }
