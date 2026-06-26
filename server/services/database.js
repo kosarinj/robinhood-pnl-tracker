@@ -1954,21 +1954,30 @@ export class DatabaseService {
 
   getOptionTradesForYTD(userId = 1) {
     try {
-      // Sum contracts/amount per (date, option, action, direction) so multiple contracts or
-      // separate fills of the same option aren't collapsed into one (which undercounted premium).
       return db.prepare(`
-        SELECT trans_date, trans_code, symbol, is_buy,
-               SUM(COALESCE(quantity, 0)) AS quantity,
-               MAX(price) AS price,
-               SUM(COALESCE(amount, 0)) AS amount,
-               SUM(COALESCE(contracts, 1)) AS contracts
+        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy, COALESCE(contracts, 1) as contracts
         FROM trades
         WHERE is_option = 1 AND user_id = ?
-        GROUP BY trans_date, symbol, trans_code, is_buy
-        ORDER BY trans_date ASC
+        GROUP BY trans_date, symbol, trans_code, is_buy, amount
+        ORDER BY trans_date ASC, id ASC
       `).all(userId)
     } catch (e) {
       console.error('Error getting option trades for YTD:', e)
+      return []
+    }
+  }
+
+  // Raw (ungrouped) option trades for one ticker — for diagnosing premium/P&L issues.
+  getRawOptionTradesForTicker(userId = 1, ticker = '') {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy, contracts
+        FROM trades
+        WHERE is_option = 1 AND user_id = ? AND symbol LIKE ?
+        ORDER BY trans_date ASC, id ASC
+      `).all(userId, `${ticker}%`)
+    } catch (e) {
+      console.error('Error getting raw option trades:', e)
       return []
     }
   }

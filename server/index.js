@@ -2462,6 +2462,18 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
   }
 })
 
+// Debug: raw option trades for a ticker — diagnose open premium / P&L issues
+app.get('/api/debug-option-trades', requireAuth, (req, res) => {
+  try {
+    const userId = req.session?.userId || req.user?.userId || 1
+    const ticker = (req.query.ticker || '').toUpperCase()
+    const rows = databaseService.getRawOptionTradesForTicker(userId, ticker)
+    res.json({ success: true, ticker, count: rows.length, rows })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Debug: show raw stock trades from DB so we can diagnose position query issues
 app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
   try {
