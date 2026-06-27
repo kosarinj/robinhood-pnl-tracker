@@ -1963,56 +1963,56 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       }
     })
 
-    // Open premium from LIFO stack residuals — only what's genuinely still open.
-    // Using stack residuals is correct because OEXP (expired short) reduces the short stack,
-    // so anything remaining is truly unclosed.
-    // Open Premium = credit collected on OPEN SHORT options (covered calls / cash-secured puts).
-    // Long options are debits and are NOT netted in here (that hid the true short credit).
+    // Open Premium = credit collected on OPEN SHORT calls. This is sourced from the
+    // SAME data the Short Call Tracker uses (short_call_entries), NOT the LIFO trade
+    // stacks. The trades table's short stack can be empty (e.g. multi-fill collapse or
+    // short opens recorded only as entries), so deriving it here guaranteed the two
+    // panels disagreed. Mirroring the tracker keeps Open Premium / Open P&L consistent.
     const openPremiumByTicker = {}
-    const openLegs = []
-    Object.entries(lifoStacks).forEach(([sym, stacks]) => {
-      const ticker = sym.split('|')[0]
-      if (!ticker || ticker.length > 6 || !/^[A-Z]+$/.test(ticker)) return
-      stacks.short.forEach(lot => {
-        if (lot.remaining > 0) {
-          openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + lot.remaining * lot.ppc
-          openLegs.push({ ticker, lot })
-        }
-      })
-    })
-
-    // Unrealized P&L on open option legs = premium collected/paid vs current cost to close.
-    // For shorts: (premium sold − current value); for longs: (current value − premium paid).
     const openUnrealizedByTicker = {}
     const polygonKey = process.env.POLYGON_API_KEY || ''
-    if (polygonKey && openLegs.length > 0) {
-      const bySymbol = {}
-      openLegs.forEach(leg => {
-        const polyTicker = leg.lot.parsed ? toPolygonTicker(leg.lot.symbol) : null
-        if (!polyTicker) return
-        if (!bySymbol[polyTicker]) bySymbol[polyTicker] = leg.lot.parsed.ticker
-      })
+    {
+      const shortEntries = databaseService.getShortCallEntries(userId)
+      const openShortSymbols = new Set(
+        databaseService.getOpenOptionPositions(userId)
+          .filter(p => p.net_short > 0)
+          .map(p => p.symbol)
+      )
+      const openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
+
+      // Fetch current per-share option prices for the open short calls (same as tracker).
       const optPrices = {}
-      await Promise.all(Object.entries(bySymbol).map(async ([polyTicker, undTicker]) => {
-        try {
-          const url = `https://api.polygon.io/v3/snapshot/options/${undTicker}/${polyTicker}`
-          const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
-          const snap = resp.data?.results
-          if (snap) {
-            const bid = snap.last_quote?.bid || 0, ask = snap.last_quote?.ask || 0
-            const mid = (bid && ask) ? (bid + ask) / 2 : (snap.day?.close || snap.last_trade?.price || 0)
-            if (mid >= 0) optPrices[polyTicker] = mid
-          }
-        } catch (e) { /* no price for this leg */ }
-      }))
-      openLegs.forEach(leg => {
-        const polyTicker = leg.lot.parsed ? toPolygonTicker(leg.lot.symbol) : null
-        const price = polyTicker != null ? optPrices[polyTicker] : undefined
-        if (price === undefined) return
-        const currentPerContract = price * 100
-        // Short: collected ppc, would pay currentValue to buy back → gain = ppc − currentValue
-        const perContract = leg.lot.ppc - currentPerContract
-        openUnrealizedByTicker[leg.ticker] = (openUnrealizedByTicker[leg.ticker] || 0) + perContract * leg.lot.remaining
+      if (polygonKey && openEntries.length > 0) {
+        await Promise.all(openEntries.map(async entry => {
+          const polyTicker = toPolygonTicker(entry.symbol)
+          const parsed = parseOptionDescription(entry.symbol)
+          if (!polyTicker || !parsed) return
+          try {
+            const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
+            const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
+            const snap = resp.data?.results
+            if (snap) {
+              const bid = snap.last_quote?.bid || 0, ask = snap.last_quote?.ask || 0
+              const mid = (bid && ask) ? (bid + ask) / 2 : (snap.day?.close || snap.last_trade?.price || 0)
+              if (mid >= 0) optPrices[entry.symbol] = mid
+            }
+          } catch (e) { /* no price for this leg */ }
+        }))
+      }
+
+      openEntries.forEach(entry => {
+        const ticker = entry.ticker
+        if (!ticker) return
+        const shares = (entry.contracts || 1) * 100
+        // entry.premium is stored as TOTAL dollars received for the position.
+        openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + entry.premium
+        const currentOptionPrice = optPrices[entry.symbol]
+        if (currentOptionPrice != null) {
+          const premiumPerShare = shares > 0 ? entry.premium / shares : entry.premium
+          // Short call P&L = (premium collected − current cost to buy back) × shares.
+          openUnrealizedByTicker[ticker] =
+            (openUnrealizedByTicker[ticker] || 0) + (premiumPerShare - currentOptionPrice) * shares
+        }
       })
     }
 
