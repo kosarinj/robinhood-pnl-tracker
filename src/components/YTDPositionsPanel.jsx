@@ -409,6 +409,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     title="Options Total (realized) + Stock P&L. Open Premium is excluded — it isn't marked to market.">
                   Net<SortIcon field="net" />
                 </th>
+                <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }}
+                    title="Net + Open P&L — marks open short options to market on top of Net.">
+                  Net + Open P&L
+                </th>
                 <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default', borderLeft: `1px solid ${border}` }}>Start Date</th>
                 <th style={{ ...thStyle('weeklyChangePct'), borderLeft: `1px solid ${border}` }} onClick={() => toggleSort('weeklyChangePct')}
                     title="Stock price change over the past ~week (5 trading days)">
@@ -476,6 +480,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const hasStock = (pos > 0 && avgCost > 0 && price > 0) || row.stockRealizedPnL != null
                       const stockPnl = hasStock ? Math.round((stockUnrealized + stockRealized) * 100) / 100 : null
                       const net = Math.round(((row.totalRealized || 0) + (stockPnl || 0)) * 100) / 100
+                      const netPlusOpen = Math.round((net + (row.openUnrealizedPnL || 0)) * 100) / 100
                       const isCostEditing = editingCost === row.ticker
                       return (<>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
@@ -517,6 +522,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(net, isDark), borderLeft: `2px solid ${border}` }}
                             title="Options Total (realized) + Stock P&L">
                           {fmt(net)}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(netPlusOpen, isDark), borderLeft: `1px solid ${border}` }}
+                            title={`Net (${fmt(net)}) + Open P&L (${row.openUnrealizedPnL != null ? fmt(row.openUnrealizedPnL) : '—'})`}>
+                          {fmt(netPlusOpen)}
                         </td>
                       </>)
                     })()}
@@ -573,6 +582,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td colSpan={3} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net + totals.openUnrealizedPnL, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{fmt(totals.net + totals.openUnrealizedPnL)}</td>
                 <td style={{ borderLeft: `1px solid ${border}` }} />
                 <td style={{ borderLeft: `1px solid ${border}` }} />
               </tr>
