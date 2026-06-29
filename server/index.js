@@ -1993,7 +1993,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             const snap = resp.data?.results
             if (snap) {
               const bid = snap.last_quote?.bid || 0, ask = snap.last_quote?.ask || 0
-              const mid = (bid && ask) ? (bid + ask) / 2 : (snap.day?.close || snap.last_trade?.price || 0)
+              // Prefer last_trade over day.close (day.close is the prior session intraday).
+              const mid = (bid && ask) ? (bid + ask) / 2 : (snap.last_trade?.price || snap.day?.close || 0)
               if (mid >= 0) optPrices[entry.symbol] = mid
             }
           } catch (e) { /* no price for this leg */ }
@@ -2151,7 +2152,9 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
           const snap = resp.data?.results
           if (snap) {
             const mid = snap.last_quote?.midpoint || (snap.last_quote?.bid && snap.last_quote?.ask ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
-            const fallback = snap.day?.close || snap.last_trade?.price || 0
+            // Prefer the most recent trade over day.close: intraday, Polygon's
+            // day.close is the PRIOR session's close (stale), while last_trade is today's.
+            const fallback = snap.last_trade?.price || snap.day?.close || 0
             optionPrices[entry.symbol] = Math.max(mid || 0, fallback || 0)
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
