@@ -22,6 +22,27 @@ import axios from 'axios'
 import { parseOptionDescription, toPolygonTicker, calcPremiumLeft, toYahooOptionTicker } from './utils/optionUtils.js'
 import { calculateRSI, calculateEMA, calculateStochastic } from './services/technicalAnalysis.js'
 
+// Best current per-share mark from a Polygon option snapshot.
+// Priority: live quote midpoint → a trade that actually happened TODAY → the daily
+// close (updates every session) → any last trade as a final resort. This stops
+// illiquid LEAPs (no live quote, e.g. MRVL/CRWV) from freezing on a stale last_trade,
+// while still preferring a fresh quote/trade when one exists. Returns 0 if unknown.
+function optionMarkFromSnapshot(snap) {
+  if (!snap) return 0
+  const q = snap.last_quote || {}
+  const qMid = q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0)
+  if (qMid > 0) return qMid
+  const ltPrice = snap.last_trade?.price || 0
+  const rawTs = snap.last_trade?.sip_timestamp ?? snap.last_trade?.t ?? 0
+  const ltMs = rawTs ? (rawTs > 1e15 ? rawTs / 1e6 : rawTs) : 0 // ns→ms when needed
+  const ltDate = ltMs ? new Date(ltMs).toISOString().slice(0, 10) : ''
+  const today = new Date().toISOString().slice(0, 10)
+  if (ltPrice > 0 && ltDate === today) return ltPrice
+  const dayClose = snap.day?.close || 0
+  if (dayClose > 0) return dayClose
+  return ltPrice
+}
+
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
   console.error('🚨 Uncaught Exception:', error)
@@ -1992,10 +2013,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
             const snap = resp.data?.results
             if (snap) {
-              const bid = snap.last_quote?.bid || 0, ask = snap.last_quote?.ask || 0
-              // Prefer last_trade over day.close (day.close is the prior session intraday).
-              const mid = (bid && ask) ? (bid + ask) / 2 : (snap.last_trade?.price || snap.day?.close || 0)
-              if (mid >= 0) optPrices[entry.symbol] = mid
+              const mark = optionMarkFromSnapshot(snap)
+              if (mark > 0) optPrices[entry.symbol] = mark
             }
           } catch (e) { /* no price for this leg */ }
         }))
@@ -2151,11 +2170,8 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
           const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
           const snap = resp.data?.results
           if (snap) {
-            const mid = snap.last_quote?.midpoint || (snap.last_quote?.bid && snap.last_quote?.ask ? (snap.last_quote.bid + snap.last_quote.ask) / 2 : 0)
-            // Prefer the most recent trade over day.close: intraday, Polygon's
-            // day.close is the PRIOR session's close (stale), while last_trade is today's.
-            const fallback = snap.last_trade?.price || snap.day?.close || 0
-            optionPrices[entry.symbol] = Math.max(mid || 0, fallback || 0)
+            const mark = optionMarkFromSnapshot(snap)
+            if (mark > 0) optionPrices[entry.symbol] = mark
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
           }
