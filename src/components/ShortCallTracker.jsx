@@ -102,7 +102,13 @@ export default function ShortCallTracker() {
   }
 
   const sq = search.trim().toUpperCase()
-  const entries = (data?.entries || []).filter(e => !sq || (e.ticker || '').toUpperCase().includes(sq))
+  const entries = (data?.entries || [])
+    .filter(e => !sq || (e.ticker || '').toUpperCase().includes(sq))
+    .sort((a, b) =>
+      (a.ticker || '').localeCompare(b.ticker || '') ||
+      (a.expiry || '').localeCompare(b.expiry || '') ||
+      (a.strike || 0) - (b.strike || 0)
+    )
   const openEntries = entries.filter(e => e.isOpen)
   const closedEntries = entries.filter(e => !e.isOpen)
   const filtered = showClosed ? entries : openEntries
