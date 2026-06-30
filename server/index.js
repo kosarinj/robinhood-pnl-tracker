@@ -43,6 +43,80 @@ function optionMarkFromSnapshot(snap) {
   return ltPrice
 }
 
+// Split the snapshot mark into "fresh" (a real live quote or a trade dated today)
+// vs "stale" (yesterday's close / an old trade), so callers can prefer fresh,
+// then a model price, then the stale close.
+function freshOptionMark(snap) {
+  if (!snap) return 0
+  const q = snap.last_quote || {}
+  const qMid = q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0)
+  if (qMid > 0) return qMid
+  const lt = snap.last_trade || {}
+  const rawTs = lt.sip_timestamp ?? lt.t ?? 0
+  const ltMs = rawTs ? (rawTs > 1e15 ? rawTs / 1e6 : rawTs) : 0
+  const ltDate = ltMs ? new Date(ltMs).toISOString().slice(0, 10) : ''
+  const today = new Date().toISOString().slice(0, 10)
+  if ((lt.price || 0) > 0 && ltDate === today) return lt.price
+  return 0
+}
+function staleOptionMark(snap) {
+  if (!snap) return 0
+  return (snap.day?.close || 0) || (snap.last_trade?.price || 0)
+}
+
+// ── Black–Scholes (for marking illiquid LEAPs when the plan has no live quote) ──
+function normCdf(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x))
+  const d = 0.3989422804014327 * Math.exp(-x * x / 2)
+  const p = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+  return x > 0 ? 1 - p : p
+}
+function bsCall(S, K, T, r, sig) {
+  if (T <= 0 || sig <= 0 || S <= 0 || K <= 0) return Math.max(0, S - K)
+  const d1 = (Math.log(S / K) + (r + sig * sig / 2) * T) / (sig * Math.sqrt(T))
+  const d2 = d1 - sig * Math.sqrt(T)
+  return S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2)
+}
+function impliedVolCall(price, S, K, T, r) {
+  if (price <= 0 || S <= 0 || K <= 0 || T <= 0) return 0
+  let lo = 0.001, hi = 5, mid = 0
+  if (price <= bsCall(S, K, T, r, lo)) return lo
+  if (price >= bsCall(S, K, T, r, hi)) return hi
+  for (let i = 0; i < 64; i++) {
+    mid = (lo + hi) / 2
+    const p = bsCall(S, K, T, r, mid)
+    if (Math.abs(p - price) < 1e-4) return mid
+    if (p < price) lo = mid; else hi = mid
+  }
+  return mid
+}
+// Model mark for a short call: anchor the implied vol to what you sold it for
+// (premium vs the underlying on the sale date), then reprice at the current
+// underlying and remaining time. Moves with the stock + decays — an estimate,
+// used only when there's no live quote. Returns 0 when inputs are missing.
+function modelOptionMark(entry, parsed, underlyingNow) {
+  try {
+    if (!parsed || !(underlyingNow > 0)) return 0
+    const contracts = entry.contracts || 1
+    const premiumPerShare = entry.premium / (contracts * 100)
+    const Sat = Number(entry.underlying_close)
+    const saleDate = entry.sale_date
+    const K = parsed.strike
+    if (!(premiumPerShare > 0) || !(Sat > 0) || !saleDate || !(K > 0)) return 0
+    const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+    const r = 0.045
+    const yrs = (a, b) => (new Date(b).getTime() - new Date(a).getTime()) / (365.25 * 24 * 3600 * 1000)
+    const today = new Date().toISOString().slice(0, 10)
+    const Tsale = yrs(String(saleDate).slice(0, 10), expiry)
+    const Tnow = yrs(today, expiry)
+    if (!(Tsale > 0) || !(Tnow > 0)) return 0
+    const sig = impliedVolCall(premiumPerShare, Sat, K, Tsale, r)
+    if (!(sig > 0)) return 0
+    const mark = bsCall(underlyingNow, K, Tnow, r, sig)
+    return mark > 0 ? mark : 0
+  } catch { return 0 }
+}
+
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
   console.error('🚨 Uncaught Exception:', error)
@@ -2001,8 +2075,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       )
       const openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
 
-      // Fetch current per-share option prices for the open short calls (same as tracker).
-      const optPrices = {}
+      // Fetch current per-share option prices for the open short calls (same as tracker):
+      // fresh live quote/today's trade → Black–Scholes model mark → stale daily close.
+      const optFresh = {}, optClose = {}, optUnderlying = {}
       if (polygonKey && openEntries.length > 0) {
         await Promise.all(openEntries.map(async entry => {
           const polyTicker = toPolygonTicker(entry.symbol)
@@ -2013,8 +2088,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
             const snap = resp.data?.results
             if (snap) {
-              const mark = optionMarkFromSnapshot(snap)
-              if (mark > 0) optPrices[entry.symbol] = mark
+              const fresh = freshOptionMark(snap)
+              if (fresh > 0) optFresh[entry.symbol] = fresh
+              const stale = staleOptionMark(snap)
+              if (stale > 0) optClose[entry.symbol] = stale
+              const u = snap.underlying_asset?.price
+              if (u > 0) optUnderlying[entry.symbol] = u
             }
           } catch (e) { /* no price for this leg */ }
         }))
@@ -2026,7 +2105,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const shares = (entry.contracts || 1) * 100
         // entry.premium is stored as TOTAL dollars received for the position.
         openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + entry.premium
-        const currentOptionPrice = optPrices[entry.symbol]
+        let currentOptionPrice = optFresh[entry.symbol]
+        if (currentOptionPrice == null) {
+          const model = modelOptionMark(entry, parseOptionDescription(entry.symbol), optUnderlying[entry.symbol])
+          currentOptionPrice = model > 0 ? model : optClose[entry.symbol]
+        }
         if (currentOptionPrice != null) {
           const premiumPerShare = shares > 0 ? entry.premium / shares : entry.premium
           // Short call P&L = (premium collected − current cost to buy back) × shares.
@@ -2157,7 +2240,8 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
 
     // Fetch current option prices via Polygon for open positions
     const polygonKey = process.env.POLYGON_API_KEY || ''
-    const optionPrices = {}
+    const optionPrices = {} // fresh marks (live quote / today's trade)
+    const optionClose = {}  // stale fallback marks (daily close / old trade)
     const polygonStockPrices = {}
     if (polygonKey) {
       for (const entry of entries) {
@@ -2170,8 +2254,10 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
           const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
           const snap = resp.data?.results
           if (snap) {
-            const mark = optionMarkFromSnapshot(snap)
-            if (mark > 0) optionPrices[entry.symbol] = mark
+            const fresh = freshOptionMark(snap)   // live quote or a trade dated today
+            if (fresh > 0) optionPrices[entry.symbol] = fresh
+            const stale = staleOptionMark(snap)   // daily close / old trade (fallback)
+            if (stale > 0) optionClose[entry.symbol] = stale
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
           }
@@ -2200,7 +2286,15 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
     const today = new Date().toISOString().slice(0, 10)
     const result = entries.map(entry => {
       const currentStock = polygonStockPrices[entry.ticker] > 0 ? polygonStockPrices[entry.ticker] : null
-      const currentOptionPrice = optionPrices[entry.symbol] || null
+      // Prefer a live quote / today's trade; else a Black–Scholes model mark that
+      // moves with the underlying; else the stale daily close.
+      let currentOptionPrice = optionPrices[entry.symbol] || null
+      let priceSource = currentOptionPrice != null ? 'quote' : null
+      if (currentOptionPrice == null) {
+        const model = modelOptionMark(entry, parseOptionDescription(entry.symbol), currentStock)
+        if (model > 0) { currentOptionPrice = model; priceSource = 'model' }
+        else if (optionClose[entry.symbol] > 0) { currentOptionPrice = optionClose[entry.symbol]; priceSource = 'close' }
+      }
       const isOpen = openShortSymbols.has(entry.symbol)
       const expiryMs = new Date(entry.expiry + 'T00:00:00Z').getTime()
       const todayMs = new Date(today + 'T00:00:00Z').getTime()
@@ -2218,6 +2312,7 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
         premiumTotal: Math.round(entry.premium * 100) / 100,
         currentStock,
         currentOptionPrice,
+        priceSource,
         isOpen,
         isExpired,
         daysToExpiry,

@@ -154,8 +154,13 @@ export default function ShortCallTracker() {
           )}
         </td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: text }}>{fmt(entry.currentStock)}</td>
-        <td style={{ padding: '9px 10px', textAlign: 'right', color: textMid }}>
-          {entry.currentOptionPrice != null ? fmt(entry.currentOptionPrice) : <span style={{ fontSize: '11px', color: textMid }}>n/a</span>}
+        <td style={{ padding: '9px 10px', textAlign: 'right', color: textMid }}
+            title={entry.priceSource === 'model' ? 'Estimated (Black–Scholes) — no live quote on the data plan, so modeled from the underlying'
+                 : entry.priceSource === 'close' ? 'Stale: last daily close (no live quote or recent trade)'
+                 : entry.priceSource === 'quote' ? 'Live quote / recent trade' : ''}>
+          {entry.currentOptionPrice != null
+            ? <>{entry.priceSource === 'model' ? '~' : ''}{fmt(entry.currentOptionPrice)}{entry.priceSource === 'model' ? <span style={{ fontSize: '10px', color: textMid }}> est</span> : entry.priceSource === 'close' ? <span style={{ fontSize: '10px', color: '#f59e0b' }}> stale</span> : ''}</>
+            : <span style={{ fontSize: '11px', color: textMid }}>n/a</span>}
         </td>
         <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '600', color: stockMoveColor(entry.stockMove, isDark) }}>
           {entry.stockMove != null ? (entry.stockMove >= 0 ? '+' : '') + fmt(entry.stockMove) : '—'}
