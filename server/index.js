@@ -2499,6 +2499,50 @@ app.get('/api/debug-option-trades', requireAuth, (req, res) => {
   }
 })
 
+// Debug: show the raw Polygon snapshot + computed mark for open short calls,
+// so we can see exactly why an option price is/ isn't updating (e.g. MRVL/CRWV).
+// Usage: /api/debug-option-mark?symbol=MRVL  (substring match; omit for all)
+app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session?.userId || req.user?.userId || 1
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return res.json({ error: 'No POLYGON_API_KEY set on server' })
+    const wanted = (req.query.symbol || '').toLowerCase()
+    let entries = databaseService.getShortCallEntries(userId)
+    if (wanted) entries = entries.filter(e => (e.symbol || '').toLowerCase().includes(wanted))
+    const out = []
+    for (const entry of entries) {
+      const polygonTicker = toPolygonTicker(entry.symbol)
+      const parsed = parseOptionDescription(entry.symbol)
+      const row = { symbol: entry.symbol, polygonTicker, undTicker: parsed?.ticker || null }
+      if (!polygonTicker || !parsed) { row.error = 'could not parse / build polygon ticker'; out.push(row); continue }
+      try {
+        const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+        const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
+        const snap = resp.data?.results
+        if (!snap) { row.error = 'no results'; row.rawStatus = resp.data?.status || null; out.push(row); continue }
+        const lt = snap.last_trade || {}
+        const rawTs = lt.sip_timestamp ?? lt.t ?? 0
+        const ltMs = rawTs ? (rawTs > 1e15 ? rawTs / 1e6 : rawTs) : 0
+        row.last_quote = snap.last_quote
+          ? { bid: snap.last_quote.bid, ask: snap.last_quote.ask, midpoint: snap.last_quote.midpoint }
+          : null
+        row.last_trade = { price: lt.price ?? null, sip_timestamp: rawTs, date: ltMs ? new Date(ltMs).toISOString() : null }
+        row.day = snap.day ? { close: snap.day.close, volume: snap.day.volume } : null
+        row.computedMark = optionMarkFromSnapshot(snap)
+        row.serverToday = new Date().toISOString().slice(0, 10)
+      } catch (e) {
+        row.error = e.response?.status ? `HTTP ${e.response.status}` : e.message
+        row.errorBody = e.response?.data || null
+      }
+      out.push(row)
+    }
+    res.json({ count: out.length, entries: out })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Debug: show raw stock trades from DB so we can diagnose position query issues
 app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
   try {
