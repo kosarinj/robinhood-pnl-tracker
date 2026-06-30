@@ -2508,8 +2508,13 @@ app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!polygonKey) return res.json({ error: 'No POLYGON_API_KEY set on server' })
     const wanted = (req.query.symbol || '').toLowerCase()
-    let entries = databaseService.getShortCallEntries(userId)
-    if (wanted) entries = entries.filter(e => (e.symbol || '').toLowerCase().includes(wanted))
+    const allEntries = databaseService.getShortCallEntries(userId)
+    // Match on symbol OR ticker (the MRVL row may carry the ticker in either column)
+    let entries = wanted
+      ? allEntries.filter(e => (e.symbol || '').toLowerCase().includes(wanted) || (e.ticker || '').toLowerCase().includes(wanted))
+      : allEntries
+    // Always surface what's actually stored so we can see column contents
+    const stored = allEntries.map(e => ({ symbol: e.symbol, ticker: e.ticker, contracts: e.contracts, premium: e.premium }))
     const out = []
     for (const entry of entries) {
       const polygonTicker = toPolygonTicker(entry.symbol)
@@ -2537,7 +2542,7 @@ app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
       }
       out.push(row)
     }
-    res.json({ count: out.length, entries: out })
+    res.json({ count: out.length, totalEntries: allEntries.length, stored, entries: out })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
