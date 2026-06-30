@@ -41,8 +41,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   })
   const [editingCost, setEditingCost] = useState(null)
   const [costDraft, setCostDraft] = useState('')
-  const [sortField, setSortField] = useState('totalRealized')
-  const [sortDir, setSortDir] = useState('desc')
+  const [sortField, setSortField] = useState('ticker')
+  const [sortDir, setSortDir] = useState('asc')
   const [livePrices, setLivePrices] = useState({})
   const [stockHoldings, setStockHoldings] = useState({})
   const [stockDebug, setStockDebug] = useState(null)
@@ -228,7 +228,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     !hiddenSet.has(r.ticker) && (!q || (r.ticker || '').toUpperCase().includes(q)))
   const sorted = [...rows].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
-    return mul * ((a[sortField] ?? 0) - (b[sortField] ?? 0))
+    const av = a[sortField], bv = b[sortField]
+    if (typeof av === 'string' || typeof bv === 'string') {
+      return mul * String(av ?? '').localeCompare(String(bv ?? ''))
+    }
+    return mul * ((av ?? 0) - (bv ?? 0))
   })
 
   const totals = rows.reduce((acc, r) => {
@@ -374,7 +378,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
             </colgroup>
             <thead>
               <tr>
-                <th style={{ ...thStyle(null), textAlign: 'left', cursor: 'default', padding: '10px 4px', position: 'sticky', left: 0, zIndex: 2, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>Ticker</th>
+                <th style={{ ...thStyle('ticker'), textAlign: 'left', padding: '10px 4px', position: 'sticky', left: 0, zIndex: 2, background: sortField === 'ticker' ? (isDark ? '#1a2035' : '#f0f4ff') : (isDark ? '#151929' : '#f8fafc'), boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }} onClick={() => toggleSort('ticker')}>Ticker<SortIcon field="ticker" /></th>
                 <th style={thStyle('realizedShortCalls')} onClick={() => toggleSort('realizedShortCalls')} title="Realized P&L from short calls (covered calls sold)">
                   Short Calls<SortIcon field="realizedShortCalls" />
                 </th>
