@@ -55,6 +55,21 @@ function staleOptionMark(snap) {
   if (!snap) return 0
   return (snap.day?.close || 0) || (snap.last_trade?.price || 0)
 }
+// Real bid/ask midpoint from Polygon's dedicated quotes endpoint. On the Options
+// Starter (delayed) plan the snapshot's last_quote is null, but /v3/quotes still
+// serves the (15-min delayed) NBBO — this is the actual market mid. Returns 0 if
+// unavailable (no quote, or key not entitled → caller falls back to the model).
+async function fetchOptionQuoteMid(polygonTicker, polygonKey) {
+  try {
+    const url = `https://api.polygon.io/v3/quotes/${polygonTicker}`
+    const resp = await axios.get(url, { params: { apiKey: polygonKey, limit: 1, order: 'desc', sort: 'timestamp' }, timeout: 6000 })
+    const q = resp.data?.results?.[0]
+    if (!q) return 0
+    const bid = q.bid_price || 0, ask = q.ask_price || 0
+    if (bid > 0 && ask > 0) return (bid + ask) / 2
+    return bid || ask || 0
+  } catch { return 0 }
+}
 
 // ── Black–Scholes (for marking illiquid LEAPs when the plan has no live quote) ──
 function normCdf(x) {
@@ -2075,13 +2090,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const polyTicker = toPolygonTicker(entry.symbol)
           const parsed = parseOptionDescription(entry.symbol)
           if (!polyTicker || !parsed) return
+          const qMid = await fetchOptionQuoteMid(polyTicker, polygonKey)
+          if (qMid > 0) optFresh[entry.symbol] = qMid
           try {
             const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
             const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
             const snap = resp.data?.results
             if (snap) {
-              const fresh = freshOptionMark(snap)
-              if (fresh > 0) optFresh[entry.symbol] = fresh
+              if (!(qMid > 0)) {
+                const fresh = freshOptionMark(snap)
+                if (fresh > 0) optFresh[entry.symbol] = fresh
+              }
               const stale = staleOptionMark(snap)
               if (stale > 0) optClose[entry.symbol] = stale
               const u = snap.underlying_asset?.price
@@ -2241,13 +2260,18 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
         const polygonTicker = toPolygonTicker(entry.symbol)
         const parsed = parseOptionDescription(entry.symbol)
         if (!polygonTicker || !parsed) continue
+        // Real (delayed) bid/ask mid from the quotes endpoint — the actual market mark.
+        const qMid = await fetchOptionQuoteMid(polygonTicker, polygonKey)
+        if (qMid > 0) optionPrices[entry.symbol] = qMid
         try {
           const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
           const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
           const snap = resp.data?.results
           if (snap) {
-            const fresh = freshOptionMark(snap)   // live quote or a trade dated today
-            if (fresh > 0) optionPrices[entry.symbol] = fresh
+            if (!(qMid > 0)) {
+              const fresh = freshOptionMark(snap)   // snapshot last_quote (usually null on delayed)
+              if (fresh > 0) optionPrices[entry.symbol] = fresh
+            }
             const stale = staleOptionMark(snap)   // daily close / old trade (fallback)
             if (stale > 0) optionClose[entry.symbol] = stale
             const underlyingPrice = snap.underlying_asset?.price
