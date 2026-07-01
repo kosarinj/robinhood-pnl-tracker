@@ -43,21 +43,13 @@ function optionMarkFromSnapshot(snap) {
   return ltPrice
 }
 
-// Split the snapshot mark into "fresh" (a real live quote or a trade dated today)
-// vs "stale" (yesterday's close / an old trade), so callers can prefer fresh,
-// then a model price, then the stale close.
+// A real live quote midpoint — the only truly "current" market signal. Returns 0
+// when the data plan doesn't serve option quotes (common here). Callers then fall
+// back to the Black–Scholes model mark so every contract is priced consistently,
+// rather than mixing smooth model marks with jumpy single-trade prints.
 function freshOptionMark(snap) {
-  if (!snap) return 0
-  const q = snap.last_quote || {}
-  const qMid = q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0)
-  if (qMid > 0) return qMid
-  const lt = snap.last_trade || {}
-  const rawTs = lt.sip_timestamp ?? lt.t ?? 0
-  const ltMs = rawTs ? (rawTs > 1e15 ? rawTs / 1e6 : rawTs) : 0
-  const ltDate = ltMs ? new Date(ltMs).toISOString().slice(0, 10) : ''
-  const today = new Date().toISOString().slice(0, 10)
-  if ((lt.price || 0) > 0 && ltDate === today) return lt.price
-  return 0
+  const q = snap?.last_quote || {}
+  return q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0)
 }
 function staleOptionMark(snap) {
   if (!snap) return 0
