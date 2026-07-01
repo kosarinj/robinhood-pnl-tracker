@@ -2634,6 +2634,21 @@ app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
         row.error = e.response?.status ? `HTTP ${e.response.status}` : e.message
         row.errorBody = e.response?.data || null
       }
+      // Directly probe the dedicated options QUOTES endpoint — this tells us whether
+      // the key is entitled to option quotes (the real bid/ask mid) at all, even if
+      // the snapshot doesn't surface last_quote.
+      try {
+        const qurl = `https://api.polygon.io/v3/quotes/${polygonTicker}`
+        const qresp = await axios.get(qurl, { params: { apiKey: polygonKey, limit: 1, order: 'desc', sort: 'timestamp' }, timeout: 6000 })
+        const q0 = qresp.data?.results?.[0]
+        row.quotesProbe = {
+          status: qresp.data?.status || null,
+          count: qresp.data?.results?.length || 0,
+          sample: q0 ? { bid: q0.bid_price, ask: q0.ask_price, mid: (q0.bid_price && q0.ask_price) ? (q0.bid_price + q0.ask_price) / 2 : null, t: q0.sip_timestamp } : null
+        }
+      } catch (e) {
+        row.quotesProbe = { error: e.response?.status ? `HTTP ${e.response.status}` : e.message, body: e.response?.data || null }
+      }
       out.push(row)
     }
     res.json({ count: out.length, totalEntries: allEntries.length, stored, entries: out })
