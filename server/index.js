@@ -124,6 +124,69 @@ function modelOptionMark(entry, parsed, underlyingNow) {
   } catch { return 0 }
 }
 
+// ── Volatility scanner helpers ──
+// Annualized historical (realized) volatility from the last `window` daily closes.
+function annualizedHV(closes, window) {
+  if (!Array.isArray(closes) || closes.length < window + 1) return null
+  const rets = []
+  for (let i = closes.length - window; i < closes.length; i++) {
+    if (i > 0 && closes[i] > 0 && closes[i - 1] > 0) rets.push(Math.log(closes[i] / closes[i - 1]))
+  }
+  if (rets.length < 2) return null
+  const mean = rets.reduce((s, r) => s + r, 0) / rets.length
+  const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1)
+  return Math.round(Math.sqrt(variance) * Math.sqrt(252) * 1000) / 1000 // e.g. 0.652 = 65.2%
+}
+// IV of the near-the-money call ~21–60 DTE, from the option chain snapshot.
+// Prefers Polygon's implied_volatility; falls back to inverting the mark via Black–Scholes.
+async function fetchAtmCallIV(ticker, stock, polygonKey) {
+  const out = { iv: 0, contract: null, dte: null, source: null }
+  if (!(stock > 0)) return out
+  const now = Date.now()
+  const url = `https://api.polygon.io/v3/snapshot/options/${ticker}`
+  const resp = await axios.get(url, {
+    params: {
+      apiKey: polygonKey,
+      contract_type: 'call',
+      'expiration_date.gte': new Date(now + 21 * 86400000).toISOString().slice(0, 10),
+      'expiration_date.lte': new Date(now + 60 * 86400000).toISOString().slice(0, 10),
+      'strike_price.gte': Math.round(stock * 0.9),
+      'strike_price.lte': Math.round(stock * 1.1),
+      limit: 250, order: 'asc', sort: 'strike_price'
+    },
+    timeout: 10000
+  })
+  const results = resp.data?.results || []
+  if (!results.length) return out
+  // Nearest expiry first, then closest strike to ATM
+  let best = null, bestKey = Infinity
+  for (const c of results) {
+    const strike = c.details?.strike_price
+    const exp = c.details?.expiration_date
+    if (!(strike > 0) || !exp) continue
+    const dte = Math.round((new Date(exp).getTime() - now) / 86400000)
+    const key = dte * 1000 + Math.abs(strike - stock) // prefer nearer expiry, then ATM
+    if (key < bestKey) { bestKey = key; best = c }
+  }
+  if (!best) return out
+  const exp = best.details.expiration_date
+  out.contract = best.details.ticker || null
+  out.dte = Math.round((new Date(exp).getTime() - now) / 86400000)
+  if (best.implied_volatility > 0) {
+    out.iv = Math.round(best.implied_volatility * 1000) / 1000
+    out.source = 'polygon'
+  } else {
+    const q = best.last_quote || {}
+    const mark = q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0) || best.day?.close || 0
+    const T = (new Date(exp).getTime() - now) / (365.25 * 86400000)
+    if (mark > 0 && T > 0) {
+      const sig = impliedVolCall(mark, stock, best.details.strike_price, T, 0.045)
+      if (sig > 0) { out.iv = Math.round(sig * 1000) / 1000; out.source = 'computed' }
+    }
+  }
+  return out
+}
+
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
   console.error('🚨 Uncaught Exception:', error)
@@ -2243,6 +2306,59 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates })
   } catch (e) {
     console.error('Error in /api/options-pnl/ytd:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// GET /api/vol-scan — per-stock IV vs HV, to flag which names' options are "rich"
+// (expensive relative to realized movement) — the core premium-selling signal.
+// ?tickers=MRVL,HOOD  (default: the tickers from your short-call entries)
+app.get('/api/vol-scan', requireAuth, async (req, res) => {
+  try {
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return res.json({ error: 'No POLYGON_API_KEY set' })
+    const userId = req.user?.userId || 1
+
+    let tickers = (req.query.tickers || '').split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
+    if (tickers.length === 0) {
+      const entries = databaseService.getShortCallEntries(userId)
+      tickers = [...new Set(entries.map(e => (e.ticker || '').toUpperCase()).filter(Boolean))]
+    }
+    tickers = [...new Set(tickers)].slice(0, 60)
+
+    const results = await Promise.all(tickers.map(async ticker => {
+      const row = { ticker }
+      try {
+        const now = Date.now()
+        const from = new Date(now - 100 * 86400000).toISOString().slice(0, 10)
+        const to = new Date(now).toISOString().slice(0, 10)
+        const barsUrl = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}`
+        const barsResp = await axios.get(barsUrl, { params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 200 }, timeout: 10000 })
+        const closes = (barsResp.data?.results || []).map(b => b.c).filter(c => c > 0)
+        row.stock = closes.length ? Math.round(closes[closes.length - 1] * 100) / 100 : null
+        row.hv20 = annualizedHV(closes, 20)
+        row.hv30 = annualizedHV(closes, 30)
+
+        const iv = await fetchAtmCallIV(ticker, row.stock, polygonKey)
+        row.iv = iv.iv || null
+        row.ivDte = iv.dte
+        row.ivSource = iv.source
+
+        const hv = row.hv30 ?? row.hv20
+        if (row.iv > 0 && hv > 0) {
+          row.ivHvRatio = Math.round((row.iv / hv) * 100) / 100
+          row.ivHvSpread = Math.round((row.iv - hv) * 1000) / 10 // vol points (%)
+          row.signal = row.ivHvRatio >= 1.3 ? 'rich' : row.ivHvRatio <= 0.9 ? 'cheap' : 'normal'
+        }
+      } catch (e) {
+        row.error = e.response?.status ? `HTTP ${e.response.status}` : e.message
+      }
+      return row
+    }))
+
+    results.sort((a, b) => (b.ivHvRatio || 0) - (a.ivHvRatio || 0))
+    res.json({ success: true, count: results.length, results })
+  } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
 })

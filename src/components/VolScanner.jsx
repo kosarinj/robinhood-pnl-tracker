@@ -1,0 +1,116 @@
+import React, { useState, useEffect } from 'react'
+import { useTheme } from '../contexts/ThemeContext'
+
+const pct = (v, d = 1) => (v == null || isNaN(v)) ? '—' : `${(v * 100).toFixed(d)}%`
+const num = (v, d = 2) => (v == null || isNaN(v)) ? '—' : v.toFixed(d)
+
+// IV vs HV: options are "rich" (good to SELL premium) when implied vol sits well
+// above the stock's recent realized (historical) vol. Ratio ≥ 1.3 = rich, ≤ 0.9 = cheap.
+export default function VolScanner() {
+  const { isDark } = useTheme()
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [tickers, setTickers] = useState('')
+
+  const surface = isDark ? '#1e2130' : '#ffffff'
+  const border = isDark ? '#2d3748' : '#e2e8f0'
+  const text = isDark ? '#e2e8f0' : '#1a202c'
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+  const headerBg = isDark ? '#151929' : '#f8fafc'
+
+  const fetchData = async (tk = '') => {
+    setLoading(true); setError(null)
+    try {
+      const q = tk.trim() ? `?tickers=${encodeURIComponent(tk.trim().toUpperCase())}` : ''
+      const res = await fetch(`/api/vol-scan${q}`, { credentials: 'include' })
+      const json = await res.json()
+      if (json.success) setRows(Array.isArray(json.results) ? json.results : [])
+      else setError(json.error || 'Failed to load')
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { fetchData() }, [])
+
+  const signalStyle = (s) => {
+    if (s === 'rich') return { bg: '#22c55e22', color: '#22c55e', label: '🔥 Rich' }
+    if (s === 'cheap') return { bg: '#ef444422', color: '#ef4444', label: '🧊 Cheap' }
+    if (s === 'normal') return { bg: '#94a3b822', color: textMid, label: '— Normal' }
+    return { bg: 'transparent', color: textMid, label: '—' }
+  }
+
+  const th = { padding: '8px 10px', textAlign: 'right', fontSize: '11px', fontWeight: 700, color: textMid,
+    textTransform: 'uppercase', letterSpacing: '0.04em', background: headerBg, borderBottom: `2px solid ${border}`, whiteSpace: 'nowrap' }
+
+  return (
+    <div style={{ marginTop: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: text }}>📊 Volatility Scanner</h3>
+        <span style={{ fontSize: '12px', color: textMid }}>IV vs realized (HV) — which options are rich to sell</span>
+        <div style={{ flex: 1 }} />
+        <input
+          value={tickers}
+          onChange={e => setTickers(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') fetchData(tickers) }}
+          placeholder="Tickers e.g. MRVL,HOOD,PLTR (blank = your short calls)"
+          style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '13px', width: '320px', maxWidth: '55vw' }}
+        />
+        <button onClick={() => fetchData(tickers)} disabled={loading}
+          style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+          {loading ? 'Scanning…' : 'Scan'}
+        </button>
+      </div>
+
+      {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px' }}>{error}</div>}
+
+      <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${border}` }}>
+        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: 'left' }}>Ticker</th>
+              <th style={th} title="Current stock price">Stock</th>
+              <th style={th} title="30-day annualized realized (historical) volatility">HV 30d</th>
+              <th style={th} title="Implied volatility of the ~30–45 DTE at-the-money call">IV (ATM)</th>
+              <th style={th} title="IV ÷ HV — above ~1.3 means options are expensive vs how much the stock actually moves">IV / HV</th>
+              <th style={th} title="IV minus HV, in volatility points">Spread</th>
+              <th style={th} title="Days to expiry of the sampled option">DTE</th>
+              <th style={{ ...th, textAlign: 'center' }}>Signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const sig = signalStyle(r.signal)
+              return (
+                <tr key={r.ticker} style={{ borderBottom: `1px solid ${border}`, background: i % 2 ? (isDark ? '#1a2035' : '#fafbff') : surface }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 700, color: text }}>{r.ticker}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: text }}>{r.stock != null ? `$${num(r.stock)}` : '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{pct(r.hv30)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: text, fontWeight: 600 }}
+                      title={r.ivSource ? `IV source: ${r.ivSource}` : ''}>{pct(r.iv)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: sig.color }}>{r.ivHvRatio != null ? num(r.ivHvRatio, 2) : '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivHvSpread != null ? `${r.ivHvSpread > 0 ? '+' : ''}${num(r.ivHvSpread, 1)}` : '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivDte != null ? r.ivDte : '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                    {r.error
+                      ? <span style={{ fontSize: '11px', color: '#ef4444' }} title={r.error}>error</span>
+                      : <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sig.bg, color: sig.color }}>{sig.label}</span>}
+                  </td>
+                </tr>
+              )
+            })}
+            {rows.length === 0 && !loading && (
+              <tr><td colSpan={8} style={{ padding: '28px', textAlign: 'center', color: textMid }}>No data yet — enter tickers and Scan, or leave blank to scan your short‑call names.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginTop: '8px', fontSize: '11px', color: textMid, lineHeight: 1.5 }}>
+        <strong style={{ color: '#22c55e' }}>🔥 Rich</strong> = IV well above realized vol → options relatively expensive, better odds when <em>selling</em> premium (covered calls / CSPs).{' '}
+        <strong style={{ color: '#ef4444' }}>🧊 Cheap</strong> = IV below realized → options underpricing recent movement.{' '}
+        HV is the stock's own recent realized volatility. This flags relative richness only — high‑IV names are volatile for real reasons, so size for the tail. Not investment advice.
+      </div>
+    </div>
+  )
+}

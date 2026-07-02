@@ -16,6 +16,7 @@ import DCAAlertPanel from './components/DCAAlertPanel'
 import StrategyPnLSplit from './components/StrategyPnLSplit'
 import YTDPositionsPanel from './components/YTDPositionsPanel'
 import ShortCallTracker from './components/ShortCallTracker'
+import VolScanner from './components/VolScanner'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -2448,6 +2449,7 @@ function AuthenticatedApp({ user }) {
       )}
 
       {/* Research tab */}
+      {activeMainTab === 'research' && <VolScanner />}
       {activeMainTab === 'research' && <PreMoveVolumePanel />}
       {activeMainTab === 'research' && <ScreenerPanel />}
 
