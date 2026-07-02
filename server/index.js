@@ -2681,6 +2681,62 @@ app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
   }
 })
 
+// Debug: per-entry breakdown of the YTD panel's open short-call P&L for a ticker,
+// so we can see exactly which entries/prices sum to the "Open P&L" number.
+// Usage: /api/debug-open-pnl?ticker=MRVL
+app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
+  try {
+    const userId = req.session?.userId || req.user?.userId || 1
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    const ticker = (req.query.ticker || '').toUpperCase()
+    const shortEntries = databaseService.getShortCallEntries(userId)
+    const openShortSymbols = new Set(
+      databaseService.getOpenOptionPositions(userId).filter(p => p.net_short > 0).map(p => p.symbol)
+    )
+    let openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
+    if (ticker) openEntries = openEntries.filter(e => (e.ticker || '').toUpperCase() === ticker)
+    const rows = []
+    let total = 0
+    for (const entry of openEntries) {
+      const polyTicker = toPolygonTicker(entry.symbol)
+      const parsed = parseOptionDescription(entry.symbol)
+      const shares = (entry.contracts || 1) * 100
+      const premiumPerShare = entry.premium / shares
+      let price = null, source = null
+      if (polyTicker && parsed && polygonKey) {
+        const qMid = await fetchOptionQuoteMid(polyTicker, polygonKey)
+        if (qMid > 0) { price = qMid; source = 'quote' }
+        else {
+          let underlying = 0, close = 0
+          try {
+            const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
+            const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
+            const snap = resp.data?.results
+            if (snap) { underlying = snap.underlying_asset?.price || 0; close = staleOptionMark(snap) }
+          } catch { /* ignore */ }
+          const model = modelOptionMark(entry, parsed, underlying)
+          if (model > 0) { price = model; source = 'model' }
+          else if (close > 0) { price = close; source = 'close' }
+        }
+      }
+      const contribution = price != null ? (premiumPerShare - price) * shares : null
+      if (contribution != null) total += contribution
+      rows.push({
+        symbol: entry.symbol,
+        contracts: entry.contracts,
+        saleDate: String(entry.sale_date || '').slice(0, 10),
+        premiumPerShare: Math.round(premiumPerShare * 100) / 100,
+        currentPrice: price != null ? Math.round(price * 100) / 100 : null,
+        source,
+        openPnL: contribution != null ? Math.round(contribution * 100) / 100 : null
+      })
+    }
+    res.json({ ticker, openCount: rows.length, totalOpenPnL: Math.round(total * 100) / 100, rows })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Debug: show raw stock trades from DB so we can diagnose position query issues
 app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
   try {
