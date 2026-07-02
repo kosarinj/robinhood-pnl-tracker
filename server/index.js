@@ -187,6 +187,7 @@ async function fetchAtmCallIV(ticker, stock, polygonKey) {
   return out
 }
 // Scan one ticker: current stock, HV20/HV30 (realized), and ATM-call IV.
+// Stock-data and option-data steps are isolated so one failing doesn't wipe the other.
 async function scanTickerVol(ticker, polygonKey) {
   const row = { ticker }
   try {
@@ -194,17 +195,23 @@ async function scanTickerVol(ticker, polygonKey) {
     const from = new Date(now - 100 * 86400000).toISOString().slice(0, 10)
     const to = new Date(now).toISOString().slice(0, 10)
     const barsUrl = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}`
-    const barsResp = await axios.get(barsUrl, { params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 200 }, timeout: 10000 })
+    const barsResp = await axios.get(barsUrl, { params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 200 }, timeout: 12000 })
     const closes = (barsResp.data?.results || []).map(b => b.c).filter(c => c > 0)
     row.stock = closes.length ? Math.round(closes[closes.length - 1] * 100) / 100 : null
     row.hv20 = annualizedHV(closes, 20)
     row.hv30 = annualizedHV(closes, 30)
-    const iv = await fetchAtmCallIV(ticker, row.stock, polygonKey)
-    row.iv = iv.iv || null
-    row.ivDte = iv.dte
-    row.ivSource = iv.source
   } catch (e) {
-    row.error = e.response?.status ? `HTTP ${e.response.status}` : e.message
+    row.barsError = e.response?.status ? `HTTP ${e.response.status}` : (e.code || e.message)
+  }
+  try {
+    if (row.stock > 0) {
+      const iv = await fetchAtmCallIV(ticker, row.stock, polygonKey)
+      row.iv = iv.iv || null
+      row.ivDte = iv.dte
+      row.ivSource = iv.source
+    }
+  } catch (e) {
+    row.ivError = e.response?.status ? `HTTP ${e.response.status}` : (e.code || e.message)
   }
   return row
 }
@@ -2380,7 +2387,7 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
     const today = new Date().toISOString().slice(0, 10)
     const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
 
-    const results = await Promise.all(tickers.map(async ticker => {
+    const processTicker = async (ticker) => {
       const row = await scanTickerVol(ticker, polygonKey)
       const hv = row.hv30 ?? row.hv20
       if (row.iv > 0 && hv > 0) {
@@ -2394,7 +2401,15 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
         Object.assign(row, computeIVRank(databaseService.getIVHistory(ticker, since), row.iv))
       }
       return row
-    }))
+    }
+
+    // Limited concurrency to avoid Polygon rate limits / timeouts on big lists.
+    const CONCURRENCY = 4
+    const results = []
+    for (let i = 0; i < tickers.length; i += CONCURRENCY) {
+      const batch = await Promise.all(tickers.slice(i, i + CONCURRENCY).map(processTicker))
+      results.push(...batch)
+    }
 
     results.sort((a, b) => (b.ivHvRatio || 0) - (a.ivHvRatio || 0))
     res.json({ success: true, count: results.length, results })

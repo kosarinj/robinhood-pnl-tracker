@@ -103,9 +103,11 @@ export default function VolScanner() {
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivHvSpread != null ? `${r.ivHvSpread > 0 ? '+' : ''}${num(r.ivHvSpread, 1)}` : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivDte != null ? r.ivDte : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                    {r.error
-                      ? <span style={{ fontSize: '11px', color: '#ef4444' }} title={r.error}>error</span>
-                      : <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sig.bg, color: sig.color }}>{sig.label}</span>}
+                    {r.signal
+                      ? <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sig.bg, color: sig.color }}>{sig.label}</span>
+                      : (r.ivError || r.barsError)
+                        ? <span style={{ fontSize: '11px', color: '#ef4444' }} title={r.ivError || r.barsError}>error</span>
+                        : <span style={{ fontSize: '11px', color: textMid }}>—</span>}
                   </td>
                 </tr>
               )
