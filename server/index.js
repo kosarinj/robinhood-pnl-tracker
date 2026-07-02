@@ -186,6 +186,57 @@ async function fetchAtmCallIV(ticker, stock, polygonKey) {
   }
   return out
 }
+// Scan one ticker: current stock, HV20/HV30 (realized), and ATM-call IV.
+async function scanTickerVol(ticker, polygonKey) {
+  const row = { ticker }
+  try {
+    const now = Date.now()
+    const from = new Date(now - 100 * 86400000).toISOString().slice(0, 10)
+    const to = new Date(now).toISOString().slice(0, 10)
+    const barsUrl = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}`
+    const barsResp = await axios.get(barsUrl, { params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 200 }, timeout: 10000 })
+    const closes = (barsResp.data?.results || []).map(b => b.c).filter(c => c > 0)
+    row.stock = closes.length ? Math.round(closes[closes.length - 1] * 100) / 100 : null
+    row.hv20 = annualizedHV(closes, 20)
+    row.hv30 = annualizedHV(closes, 30)
+    const iv = await fetchAtmCallIV(ticker, row.stock, polygonKey)
+    row.iv = iv.iv || null
+    row.ivDte = iv.dte
+    row.ivSource = iv.source
+  } catch (e) {
+    row.error = e.response?.status ? `HTTP ${e.response.status}` : e.message
+  }
+  return row
+}
+// IV Rank / Percentile of currentIV within a history of IV values.
+function computeIVRank(history, currentIV) {
+  const ivs = (history || []).map(h => h.iv).filter(v => v > 0)
+  if (!(currentIV > 0) || ivs.length < 2) return { ivRank: null, ivPercentile: null, ivHistoryDays: ivs.length }
+  const min = Math.min(...ivs), max = Math.max(...ivs)
+  const ivRank = max > min ? Math.round(((currentIV - min) / (max - min)) * 1000) / 10 : null
+  const below = ivs.filter(v => v < currentIV).length
+  const ivPercentile = Math.round((below / ivs.length) * 1000) / 10
+  return { ivRank, ivPercentile, ivHistoryDays: ivs.length }
+}
+// Background: record a daily IV/HV snapshot for the short-call tickers so IV Rank builds.
+async function recordDailyIVSnapshots() {
+  try {
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return
+    const entries = databaseService.getShortCallEntries(1)
+    const tickers = [...new Set(entries.map(e => (e.ticker || '').toUpperCase()).filter(Boolean))].slice(0, 80)
+    const today = new Date().toISOString().slice(0, 10)
+    for (const ticker of tickers) {
+      const row = await scanTickerVol(ticker, polygonKey)
+      if (row.iv > 0) databaseService.recordIV(ticker, today, row.iv, row.hv30, row.stock)
+    }
+    console.log(`📈 Recorded daily IV snapshots for ${tickers.length} tickers`)
+  } catch (e) {
+    console.warn('Daily IV snapshot failed:', e.message)
+  }
+}
+setTimeout(recordDailyIVSnapshots, 60 * 1000)
+setInterval(recordDailyIVSnapshots, 24 * 60 * 60 * 1000)
 
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
@@ -2326,32 +2377,21 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
     }
     tickers = [...new Set(tickers)].slice(0, 60)
 
+    const today = new Date().toISOString().slice(0, 10)
+    const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
+
     const results = await Promise.all(tickers.map(async ticker => {
-      const row = { ticker }
-      try {
-        const now = Date.now()
-        const from = new Date(now - 100 * 86400000).toISOString().slice(0, 10)
-        const to = new Date(now).toISOString().slice(0, 10)
-        const barsUrl = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}`
-        const barsResp = await axios.get(barsUrl, { params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 200 }, timeout: 10000 })
-        const closes = (barsResp.data?.results || []).map(b => b.c).filter(c => c > 0)
-        row.stock = closes.length ? Math.round(closes[closes.length - 1] * 100) / 100 : null
-        row.hv20 = annualizedHV(closes, 20)
-        row.hv30 = annualizedHV(closes, 30)
-
-        const iv = await fetchAtmCallIV(ticker, row.stock, polygonKey)
-        row.iv = iv.iv || null
-        row.ivDte = iv.dte
-        row.ivSource = iv.source
-
-        const hv = row.hv30 ?? row.hv20
-        if (row.iv > 0 && hv > 0) {
-          row.ivHvRatio = Math.round((row.iv / hv) * 100) / 100
-          row.ivHvSpread = Math.round((row.iv - hv) * 1000) / 10 // vol points (%)
-          row.signal = row.ivHvRatio >= 1.3 ? 'rich' : row.ivHvRatio <= 0.9 ? 'cheap' : 'normal'
-        }
-      } catch (e) {
-        row.error = e.response?.status ? `HTTP ${e.response.status}` : e.message
+      const row = await scanTickerVol(ticker, polygonKey)
+      const hv = row.hv30 ?? row.hv20
+      if (row.iv > 0 && hv > 0) {
+        row.ivHvRatio = Math.round((row.iv / hv) * 100) / 100
+        row.ivHvSpread = Math.round((row.iv - hv) * 1000) / 10 // vol points (%)
+        row.signal = row.ivHvRatio >= 1.3 ? 'rich' : row.ivHvRatio <= 0.9 ? 'cheap' : 'normal'
+      }
+      // Record today's IV (idempotent per day) and attach IV Rank/Percentile from history.
+      if (row.iv > 0) {
+        databaseService.recordIV(ticker, today, row.iv, row.hv30, row.stock)
+        Object.assign(row, computeIVRank(databaseService.getIVHistory(ticker, since), row.iv))
       }
       return row
     }))

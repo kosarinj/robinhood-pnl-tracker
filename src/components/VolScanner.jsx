@@ -40,6 +40,13 @@ export default function VolScanner() {
     return { bg: 'transparent', color: textMid, label: '—' }
   }
 
+  // IV Rank builds over time; show the day-count until there's enough history.
+  const rankCell = (val, days) => {
+    if (val == null) return <span style={{ fontSize: '11px', color: textMid }} title={`Building — ${days || 0} day(s) of history so far`}>{days ? `${days}d` : '—'}</span>
+    const c = val >= 50 ? '#22c55e' : val <= 20 ? '#ef4444' : textMid
+    return <span style={{ color: c, fontWeight: 700 }} title={`Today's IV is at the ${val.toFixed(0)}th %-of-range vs the past year`}>{val.toFixed(0)}%</span>
+  }
+
   const th = { padding: '8px 10px', textAlign: 'right', fontSize: '11px', fontWeight: 700, color: textMid,
     textTransform: 'uppercase', letterSpacing: '0.04em', background: headerBg, borderBottom: `2px solid ${border}`, whiteSpace: 'nowrap' }
 
@@ -73,6 +80,8 @@ export default function VolScanner() {
               <th style={th} title="30-day annualized realized (historical) volatility">HV 30d</th>
               <th style={th} title="Implied volatility of the ~30–45 DTE at-the-money call">IV (ATM)</th>
               <th style={th} title="IV ÷ HV — above ~1.3 means options are expensive vs how much the stock actually moves">IV / HV</th>
+              <th style={th} title="Where today's IV sits in its own past-year range (0 = year low, 100 = year high). Builds up over time as daily snapshots accumulate.">IV Rank</th>
+              <th style={th} title="% of the past year's days that IV was below today's. Builds up over time.">IV %ile</th>
               <th style={th} title="IV minus HV, in volatility points">Spread</th>
               <th style={th} title="Days to expiry of the sampled option">DTE</th>
               <th style={{ ...th, textAlign: 'center' }}>Signal</th>
@@ -89,6 +98,8 @@ export default function VolScanner() {
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: text, fontWeight: 600 }}
                       title={r.ivSource ? `IV source: ${r.ivSource}` : ''}>{pct(r.iv)}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: sig.color }}>{r.ivHvRatio != null ? num(r.ivHvRatio, 2) : '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>{rankCell(r.ivRank, r.ivHistoryDays)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivPercentile != null ? `${r.ivPercentile.toFixed(0)}%` : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivHvSpread != null ? `${r.ivHvSpread > 0 ? '+' : ''}${num(r.ivHvSpread, 1)}` : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivDte != null ? r.ivDte : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'center' }}>
@@ -100,7 +111,7 @@ export default function VolScanner() {
               )
             })}
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={8} style={{ padding: '28px', textAlign: 'center', color: textMid }}>No data yet — enter tickers and Scan, or leave blank to scan your short‑call names.</td></tr>
+              <tr><td colSpan={10} style={{ padding: '28px', textAlign: 'center', color: textMid }}>No data yet — enter tickers and Scan, or leave blank to scan your short‑call names.</td></tr>
             )}
           </tbody>
         </table>
@@ -109,7 +120,7 @@ export default function VolScanner() {
       <div style={{ marginTop: '8px', fontSize: '11px', color: textMid, lineHeight: 1.5 }}>
         <strong style={{ color: '#22c55e' }}>🔥 Rich</strong> = IV well above realized vol → options relatively expensive, better odds when <em>selling</em> premium (covered calls / CSPs).{' '}
         <strong style={{ color: '#ef4444' }}>🧊 Cheap</strong> = IV below realized → options underpricing recent movement.{' '}
-        HV is the stock's own recent realized volatility. This flags relative richness only — high‑IV names are volatile for real reasons, so size for the tail. Not investment advice.
+        HV is the stock's own recent realized volatility. <strong>IV Rank</strong> (where today's IV sits in its own past‑year range) starts as a day‑count and fills in as daily snapshots accumulate — high IV Rank + 🔥 Rich is the strongest sell‑premium setup. This flags relative richness only; high‑IV names are volatile for real reasons, so size for the tail. Not investment advice.
       </div>
     </div>
   )

@@ -48,6 +48,19 @@ db.exec(`
     UNIQUE(symbol, price_date)
   );
 
+  -- Daily IV / HV snapshots per ticker, so IV Rank / Percentile can build over time
+  CREATE TABLE IF NOT EXISTS iv_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    snap_date TEXT NOT NULL,
+    iv REAL,
+    hv30 REAL,
+    stock REAL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    UNIQUE(ticker, snap_date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_iv_history_ticker ON iv_history(ticker, snap_date DESC);
+
   -- Table to store support/resistance levels from Level 2 data
   CREATE TABLE IF NOT EXISTS support_resistance_levels (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2033,6 +2046,34 @@ export class DatabaseService {
       `).all(userId)
     } catch (e) {
       console.error('Error getting STO call trades:', e)
+      return []
+    }
+  }
+
+  // Record (upsert) a day's IV/HV snapshot for a ticker so IV Rank can build over time
+  recordIV(ticker, snapDate, iv, hv30, stock) {
+    try {
+      if (!ticker || !snapDate || !(iv > 0)) return
+      db.prepare(`
+        INSERT INTO iv_history (ticker, snap_date, iv, hv30, stock)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, snap_date) DO UPDATE SET iv = excluded.iv, hv30 = excluded.hv30, stock = excluded.stock
+      `).run(ticker.toUpperCase(), snapDate, iv, hv30 ?? null, stock ?? null)
+    } catch (e) {
+      console.error('Error recording IV:', e.message)
+    }
+  }
+
+  // IV history for a ticker since a date (ascending). Returns [{ snap_date, iv, hv30, stock }]
+  getIVHistory(ticker, sinceDate) {
+    try {
+      return db.prepare(`
+        SELECT snap_date, iv, hv30, stock FROM iv_history
+        WHERE ticker = ? AND snap_date >= ?
+        ORDER BY snap_date ASC
+      `).all((ticker || '').toUpperCase(), sinceDate)
+    } catch (e) {
+      console.error('Error getting IV history:', e.message)
       return []
     }
   }
