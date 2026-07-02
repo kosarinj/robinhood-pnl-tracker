@@ -2083,8 +2083,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       const openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
 
       // Fetch current per-share option prices for the open short calls (same as tracker):
-      // fresh live quote/today's trade → Black–Scholes model mark → stale daily close.
-      const optFresh = {}, optClose = {}, optUnderlying = {}
+      // real quote mid → Black–Scholes model mark → stale daily close.
+      const optFresh = {}, optClose = {}, stockByTicker = {}
       if (polygonKey && openEntries.length > 0) {
         await Promise.all(openEntries.map(async entry => {
           const polyTicker = toPolygonTicker(entry.symbol)
@@ -2104,10 +2104,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
               const stale = staleOptionMark(snap)
               if (stale > 0) optClose[entry.symbol] = stale
               const u = snap.underlying_asset?.price
-              if (u > 0) optUnderlying[entry.symbol] = u
+              if (u > 0) stockByTicker[parsed.ticker] = u
             }
           } catch (e) { /* no price for this leg */ }
         }))
+        // Resolve any missing underlying stock prices (Yahoo fallback), like the tracker,
+        // so the Black–Scholes model has an underlying and doesn't fall to the stale close.
+        const openTickers = [...new Set(openEntries.map(e => e.ticker).filter(Boolean))]
+        const missing = openTickers.filter(t => !(stockByTicker[t] > 0))
+        if (missing.length > 0) {
+          try {
+            const fetched = await priceService.fetchPrices(missing)
+            missing.forEach(t => { if (fetched[t] > 0) stockByTicker[t] = fetched[t] })
+          } catch (e) { /* leave missing */ }
+        }
       }
 
       openEntries.forEach(entry => {
@@ -2118,7 +2128,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + entry.premium
         let currentOptionPrice = optFresh[entry.symbol]
         if (currentOptionPrice == null) {
-          const model = modelOptionMark(entry, parseOptionDescription(entry.symbol), optUnderlying[entry.symbol])
+          const model = modelOptionMark(entry, parseOptionDescription(entry.symbol), stockByTicker[entry.ticker])
           currentOptionPrice = model > 0 ? model : optClose[entry.symbol]
         }
         if (currentOptionPrice != null) {
@@ -2714,6 +2724,9 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
             const snap = resp.data?.results
             if (snap) { underlying = snap.underlying_asset?.price || 0; close = staleOptionMark(snap) }
           } catch { /* ignore */ }
+          if (!(underlying > 0)) {
+            try { const f = await priceService.fetchPrices([parsed.ticker]); if (f[parsed.ticker] > 0) underlying = f[parsed.ticker] } catch { /* leave */ }
+          }
           const model = modelOptionMark(entry, parsed, underlying)
           if (model > 0) { price = model; source = 'model' }
           else if (close > 0) { price = close; source = 'close' }
