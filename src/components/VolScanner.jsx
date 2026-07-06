@@ -14,6 +14,7 @@ export default function VolScanner() {
   const [tickers, setTickers] = useState('')
   const [cachedAt, setCachedAt] = useState(null)
   const [view, setView] = useState('mine') // 'mine' | 'sp500' | 'custom'
+  const [scanInfo, setScanInfo] = useState(null)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -21,21 +22,33 @@ export default function VolScanner() {
   const textMid = isDark ? '#94a3b8' : '#64748b'
   const headerBg = isDark ? '#151929' : '#f8fafc'
 
-  const fetchData = async ({ tk = '', uni = '' } = {}) => {
-    setLoading(true); setError(null); setCachedAt(null)
+  const fetchData = async ({ tk = '', uni = '', refresh = false, quiet = false } = {}) => {
+    if (!quiet) setLoading(true)
+    setError(null); if (!uni) setCachedAt(null)
     try {
       let q = ''
-      if (uni) q = `?universe=${uni}`
+      if (uni) q = `?universe=${uni}${refresh ? '&refresh=1' : ''}`
       else if (tk.trim()) q = `?tickers=${encodeURIComponent(tk.trim().toUpperCase())}`
       const res = await fetch(`/api/vol-scan${q}`, { credentials: 'include' })
       const json = await res.json()
-      if (json.success) { setRows(Array.isArray(json.results) ? json.results : []); setCachedAt(json.cachedAt || null) }
-      else setError(json.error || 'Failed to load')
+      if (json.success) {
+        setRows(Array.isArray(json.results) ? json.results : [])
+        setCachedAt(json.cachedAt || null)
+        setScanInfo(uni ? { running: json.scanRunning, progress: json.scanProgress, universeSize: json.universeSize, count: json.count } : null)
+      } else setError(json.error || 'Failed to load')
     } catch (e) { setError(e.message) }
-    finally { setLoading(false) }
+    finally { if (!quiet) setLoading(false) }
   }
 
   useEffect(() => { fetchData() }, [])
+
+  // While the S&P/NASDAQ background scan is running, poll to show it filling in.
+  useEffect(() => {
+    if (view === 'sp500' && scanInfo?.running) {
+      const t = setTimeout(() => fetchData({ uni: 'sp500', quiet: true }), 15000)
+      return () => clearTimeout(t)
+    }
+  }, [view, scanInfo])
 
   const signalStyle = (s) => {
     if (s === 'rich') return { bg: '#22c55e22', color: '#22c55e', label: '🔥 Rich' }
@@ -73,6 +86,13 @@ export default function VolScanner() {
             {label}
           </button>
         ))}
+        {view === 'sp500' && (
+          <button disabled={loading || scanInfo?.running} onClick={() => fetchData({ uni: 'sp500', refresh: true })}
+            title="Re-run the S&P/NASDAQ background scan now"
+            style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '13px', cursor: 'pointer' }}>
+            ↻ Refresh
+          </button>
+        )}
         <input
           value={tickers}
           onChange={e => setTickers(e.target.value)}
@@ -87,6 +107,28 @@ export default function VolScanner() {
       </div>
 
       {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '8px' }}>{error}</div>}
+
+      {view === 'sp500' && scanInfo && (scanInfo.running || (scanInfo.count || 0) < (scanInfo.universeSize || 0)) && (
+        <div style={{ marginBottom: '8px', padding: '8px 12px', borderRadius: '8px', border: `1px solid ${border}`,
+          background: isDark ? '#1a2035' : '#f8fafc', fontSize: '12px', color: textMid, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {scanInfo.running ? (
+            <>
+              <span style={{ fontSize: '14px' }}>⏳</span>
+              <span>
+                Building the S&amp;P/NASDAQ scan in the background —{' '}
+                <strong style={{ color: text }}>
+                  {scanInfo.progress ? `${scanInfo.progress.done} of ${scanInfo.progress.total}` : `${scanInfo.count || 0} of ~${scanInfo.universeSize || '?'}`}
+                </strong>{' '}
+                names processed ({scanInfo.count || 0} ready). This list fills in automatically over the next few minutes.
+              </span>
+            </>
+          ) : (
+            <span>
+              Showing <strong style={{ color: text }}>{scanInfo.count || 0}</strong> of ~{scanInfo.universeSize} names. Click ↻ Refresh to rescan the rest.
+            </span>
+          )}
+        </div>
+      )}
 
       <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${border}` }}>
         <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>

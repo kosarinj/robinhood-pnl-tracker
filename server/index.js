@@ -247,7 +247,11 @@ function enrichVolRow(row) {
 
 // Background: scan the universe (your short-call tickers ∪ S&P/NASDAQ) and cache each
 // row, so large-universe scans are served instantly. Also records daily IV for IV Rank.
+let universeScanRunning = false
+let universeScanProgress = { done: 0, total: 0, ok: 0, startedAt: 0 }
 async function runUniverseVolScan() {
+  if (universeScanRunning) return
+  universeScanRunning = true
   try {
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!polygonKey) return
@@ -255,22 +259,27 @@ async function runUniverseVolScan() {
     const universe = [...new Set([...shortTickers, ...SP500])]
     const today = new Date().toISOString().slice(0, 10)
     const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
-    let ok = 0
-    const CONC = 4
+    universeScanProgress = { done: 0, total: universe.length, ok: 0, startedAt: Date.now() }
+    const CONC = 3
     for (let i = 0; i < universe.length; i += CONC) {
       await Promise.all(universe.slice(i, i + CONC).map(async ticker => {
-        const row = enrichVolRow(await scanTickerVol(ticker, polygonKey))
-        if (row.iv > 0) {
-          databaseService.recordIV(ticker, today, row.iv, row.hv30, row.stock)
-          Object.assign(row, computeIVRank(databaseService.getIVHistory(ticker, since), row.iv))
-          databaseService.upsertVolScan(row)
-          ok++
-        }
+        try {
+          const row = enrichVolRow(await scanTickerVol(ticker, polygonKey))
+          if (row.iv > 0) {
+            databaseService.recordIV(ticker, today, row.iv, row.hv30, row.stock)
+            Object.assign(row, computeIVRank(databaseService.getIVHistory(ticker, since), row.iv))
+            databaseService.upsertVolScan(row)
+            universeScanProgress.ok++
+          }
+        } catch (e) { /* skip this ticker */ }
+        universeScanProgress.done++
       }))
     }
-    console.log(`📈 Universe vol scan: cached ${ok}/${universe.length} tickers`)
+    console.log(`📈 Universe vol scan: cached ${universeScanProgress.ok}/${universe.length} tickers`)
   } catch (e) {
     console.warn('Universe vol scan failed:', e.message)
+  } finally {
+    universeScanRunning = false
   }
 }
 setTimeout(runUniverseVolScan, 90 * 1000)
@@ -2419,6 +2428,10 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
     const universe = (req.query.universe || '').toLowerCase()
     if (universe === 'sp500' || universe === 'nasdaq' || universe === 'all') {
       const cached = databaseService.getVolScanCache(SP500)
+      // Kick off (or continue) the background scan when the cache is sparse, or on ?refresh=1.
+      if (!universeScanRunning && (req.query.refresh === '1' || cached.length < SP500.length * 0.6)) {
+        runUniverseVolScan() // fire-and-forget; fills the cache over the next few minutes
+      }
       const results = cached.map(c => ({
         ticker: c.ticker, stock: c.stock, hv20: c.hv20, hv30: c.hv30, iv: c.iv,
         ivDte: c.iv_dte, ivSource: c.iv_source, ivHvRatio: c.iv_hv_ratio, signal: c.signal,
@@ -2426,7 +2439,13 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
         ivHvSpread: (c.iv > 0 && c.hv30 > 0) ? Math.round((c.iv - c.hv30) * 1000) / 10 : null
       })).sort((a, b) => (b.ivHvRatio || 0) - (a.ivHvRatio || 0))
       const cachedAt = cached.reduce((mx, c) => Math.max(mx, c.updated_at || 0), 0)
-      return res.json({ success: true, count: results.length, results, cached: true, cachedAt: cachedAt ? cachedAt * 1000 : null })
+      return res.json({
+        success: true, count: results.length, results, cached: true,
+        cachedAt: cachedAt ? cachedAt * 1000 : null,
+        universeSize: SP500.length,
+        scanRunning: universeScanRunning,
+        scanProgress: universeScanRunning ? universeScanProgress : null
+      })
     }
 
     let tickers = (req.query.tickers || '').split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
