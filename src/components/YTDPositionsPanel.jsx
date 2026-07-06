@@ -418,7 +418,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                   Net + Open P&L
                 </th>
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }}
-                    title="(Net + Open P&L) ÷ Stock P&L — how the options+stock strategy compares to just holding the shares. 100% = same as stock-only; >100% = options added value.">
+                    title="How much better (or worse) options+stock did than just holding the shares, as a % of the stock result's size: (Net+Open − Stock) ÷ |Stock|. Positive = options added value (bigger = more); negative = options detracted. Consistent across gains and losses.">
                   vs Stock %
                 </th>
                 <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default', borderLeft: `1px solid ${border}` }}>Start Date</th>
@@ -489,8 +489,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const stockPnl = hasStock ? Math.round((stockUnrealized + stockRealized) * 100) / 100 : null
                       const net = Math.round(((row.totalRealized || 0) + (stockPnl || 0)) * 100) / 100
                       const netPlusOpen = Math.round((net + (row.openUnrealizedPnL || 0)) * 100) / 100
-                      // (Net + Open P&L) as a % of Stock P&L — options+stock vs stock-only
-                      const vsStockPct = (stockPnl != null && stockPnl !== 0) ? Math.round((netPlusOpen / stockPnl) * 1000) / 10 : null
+                      // Out-performance vs holding the shares: how much better/worse the
+                      // options+stock result is than stock-only, as a % of the stock result's size.
+                      // +% = options added value; −% = options detracted. Always intuitive across signs.
+                      const vsStockPct = (stockPnl != null && stockPnl !== 0) ? Math.round(((netPlusOpen - stockPnl) / Math.abs(stockPnl)) * 1000) / 10 : null
                       const optionsHelped = stockPnl != null && netPlusOpen >= stockPnl
                       const isCostEditing = editingCost === row.ticker
                       return (<>
@@ -539,8 +541,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                           {fmt(netPlusOpen)}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: vsStockPct == null ? textMid : pnlColor(optionsHelped ? 1 : -1, isDark), borderLeft: `1px solid ${border}` }}
-                            title={vsStockPct == null ? 'No stock P&L to compare against' : `(Net+Open ${fmt(netPlusOpen)}) ÷ (Stock P&L ${fmt(stockPnl)}). Options contributed ${fmt(Math.round((netPlusOpen - stockPnl) * 100) / 100)} vs holding stock alone.`}>
-                          {vsStockPct != null ? `${vsStockPct.toFixed(1)}%` : '—'}
+                            title={vsStockPct == null ? 'No stock P&L to compare against' : `Options+stock did ${vsStockPct >= 0 ? 'better' : 'worse'} than holding the shares by ${fmt(Math.round((netPlusOpen - stockPnl) * 100) / 100)} (${vsStockPct >= 0 ? '+' : ''}${vsStockPct.toFixed(1)}% of the $${Math.abs(Math.round(stockPnl))} stock move). Net+Open ${fmt(netPlusOpen)} vs Stock ${fmt(stockPnl)}.`}>
+                          {vsStockPct != null ? `${vsStockPct >= 0 ? '+' : ''}${vsStockPct.toFixed(1)}%` : '—'}
                         </td>
                       </>)
                     })()}
@@ -601,11 +603,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 {(() => {
                   const npo = totals.net + totals.openUnrealizedPnL
                   const sp = totals.stockUnrealizedPnL
-                  const pct = (sp !== 0) ? Math.round((npo / sp) * 1000) / 10 : null
+                  const pct = (sp !== 0) ? Math.round(((npo - sp) / Math.abs(sp)) * 1000) / 10 : null
                   return (
                     <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pct == null ? textMid : pnlColor(npo >= sp ? 1 : -1, isDark), borderLeft: `1px solid ${border}` }}
                         title={pct == null ? '' : `Options contributed ${fmt(Math.round((npo - sp) * 100) / 100)} vs holding stock alone`}>
-                      {pct != null ? `${pct.toFixed(1)}%` : '—'}
+                      {pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : '—'}
                     </td>
                   )
                 })()}
