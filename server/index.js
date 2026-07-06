@@ -137,53 +137,61 @@ function annualizedHV(closes, window) {
   const variance = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1)
   return Math.round(Math.sqrt(variance) * Math.sqrt(252) * 1000) / 1000 // e.g. 0.652 = 65.2%
 }
-// IV of the near-the-money call ~21–60 DTE, from the option chain snapshot.
-// Prefers Polygon's implied_volatility; falls back to inverting the mark via Black–Scholes.
+// IV of the near-the-money call ~21–60 DTE. Uses the REFERENCE endpoint to find a
+// valid ATM contract (lightweight metadata, broadly entitled), then a single
+// per-contract snapshot for IV — avoiding the heavier chain-snapshot endpoint that
+// errors on the Options Starter plan. Prefers Polygon's implied_volatility; else
+// inverts the mark via Black–Scholes.
 async function fetchAtmCallIV(ticker, stock, polygonKey) {
   const out = { iv: 0, contract: null, dte: null, source: null }
   if (!(stock > 0)) return out
   const now = Date.now()
-  const url = `https://api.polygon.io/v3/snapshot/options/${ticker}`
-  const resp = await axios.get(url, {
+  // 1) Find a near-ATM call via the reference endpoint
+  const refResp = await axios.get('https://api.polygon.io/v3/reference/options/contracts', {
     params: {
       apiKey: polygonKey,
+      underlying_ticker: ticker,
       contract_type: 'call',
       'expiration_date.gte': new Date(now + 21 * 86400000).toISOString().slice(0, 10),
       'expiration_date.lte': new Date(now + 60 * 86400000).toISOString().slice(0, 10),
       'strike_price.gte': Math.round(stock * 0.9),
       'strike_price.lte': Math.round(stock * 1.1),
-      limit: 250, order: 'asc', sort: 'strike_price'
+      limit: 250, sort: 'expiration_date', order: 'asc'
     },
     timeout: 10000
   })
-  const results = resp.data?.results || []
-  if (!results.length) return out
-  // Nearest expiry first, then closest strike to ATM
+  const contracts = refResp.data?.results || []
+  if (!contracts.length) return out
   let best = null, bestKey = Infinity
-  for (const c of results) {
-    const strike = c.details?.strike_price
-    const exp = c.details?.expiration_date
+  for (const c of contracts) {
+    const strike = c.strike_price, exp = c.expiration_date
     if (!(strike > 0) || !exp) continue
     const dte = Math.round((new Date(exp).getTime() - now) / 86400000)
-    const key = dte * 1000 + Math.abs(strike - stock) // prefer nearer expiry, then ATM
+    const key = dte * 1000 + Math.abs(strike - stock) // nearer expiry, then ATM
     if (key < bestKey) { bestKey = key; best = c }
   }
   if (!best) return out
-  const exp = best.details.expiration_date
-  out.contract = best.details.ticker || null
-  out.dte = Math.round((new Date(exp).getTime() - now) / 86400000)
-  if (best.implied_volatility > 0) {
-    out.iv = Math.round(best.implied_volatility * 1000) / 1000
-    out.source = 'polygon'
-  } else {
-    const q = best.last_quote || {}
-    const mark = q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0) || best.day?.close || 0
-    const T = (new Date(exp).getTime() - now) / (365.25 * 86400000)
-    if (mark > 0 && T > 0) {
-      const sig = impliedVolCall(mark, stock, best.details.strike_price, T, 0.045)
-      if (sig > 0) { out.iv = Math.round(sig * 1000) / 1000; out.source = 'computed' }
+  out.contract = best.ticker
+  out.dte = Math.round((new Date(best.expiration_date).getTime() - now) / 86400000)
+  // 2) Per-contract snapshot for IV (this path works on the plan)
+  try {
+    const snapResp = await axios.get(`https://api.polygon.io/v3/snapshot/options/${ticker}/${best.ticker}`, { params: { apiKey: polygonKey }, timeout: 8000 })
+    const snap = snapResp.data?.results
+    if (snap) {
+      if (snap.implied_volatility > 0) {
+        out.iv = Math.round(snap.implied_volatility * 1000) / 1000
+        out.source = 'polygon'
+      } else {
+        const q = snap.last_quote || {}
+        const mark = q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0) || snap.day?.close || 0
+        const T = (new Date(best.expiration_date).getTime() - now) / (365.25 * 86400000)
+        if (mark > 0 && T > 0) {
+          const sig = impliedVolCall(mark, stock, best.strike_price, T, 0.045)
+          if (sig > 0) { out.iv = Math.round(sig * 1000) / 1000; out.source = 'computed' }
+        }
+      }
     }
-  }
+  } catch { /* leave iv 0 */ }
   return out
 }
 // Scan one ticker: current stock, HV20/HV30 (realized), and ATM-call IV.
@@ -226,24 +234,47 @@ function computeIVRank(history, currentIV) {
   return { ivRank, ivPercentile, ivHistoryDays: ivs.length }
 }
 // Background: record a daily IV/HV snapshot for the short-call tickers so IV Rank builds.
-async function recordDailyIVSnapshots() {
+// Compute the derived vol fields (IV/HV ratio, signal, IV rank) for a scanned row.
+function enrichVolRow(row) {
+  const hv = row.hv30 ?? row.hv20
+  if (row.iv > 0 && hv > 0) {
+    row.ivHvRatio = Math.round((row.iv / hv) * 100) / 100
+    row.ivHvSpread = Math.round((row.iv - hv) * 1000) / 10
+    row.signal = row.ivHvRatio >= 1.3 ? 'rich' : row.ivHvRatio <= 0.9 ? 'cheap' : 'normal'
+  }
+  return row
+}
+
+// Background: scan the universe (your short-call tickers ∪ S&P/NASDAQ) and cache each
+// row, so large-universe scans are served instantly. Also records daily IV for IV Rank.
+async function runUniverseVolScan() {
   try {
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!polygonKey) return
-    const entries = databaseService.getShortCallEntries(1)
-    const tickers = [...new Set(entries.map(e => (e.ticker || '').toUpperCase()).filter(Boolean))].slice(0, 80)
+    const shortTickers = [...new Set(databaseService.getShortCallEntries(1).map(e => (e.ticker || '').toUpperCase()).filter(Boolean))]
+    const universe = [...new Set([...shortTickers, ...SP500])]
     const today = new Date().toISOString().slice(0, 10)
-    for (const ticker of tickers) {
-      const row = await scanTickerVol(ticker, polygonKey)
-      if (row.iv > 0) databaseService.recordIV(ticker, today, row.iv, row.hv30, row.stock)
+    const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
+    let ok = 0
+    const CONC = 4
+    for (let i = 0; i < universe.length; i += CONC) {
+      await Promise.all(universe.slice(i, i + CONC).map(async ticker => {
+        const row = enrichVolRow(await scanTickerVol(ticker, polygonKey))
+        if (row.iv > 0) {
+          databaseService.recordIV(ticker, today, row.iv, row.hv30, row.stock)
+          Object.assign(row, computeIVRank(databaseService.getIVHistory(ticker, since), row.iv))
+          databaseService.upsertVolScan(row)
+          ok++
+        }
+      }))
     }
-    console.log(`📈 Recorded daily IV snapshots for ${tickers.length} tickers`)
+    console.log(`📈 Universe vol scan: cached ${ok}/${universe.length} tickers`)
   } catch (e) {
-    console.warn('Daily IV snapshot failed:', e.message)
+    console.warn('Universe vol scan failed:', e.message)
   }
 }
-setTimeout(recordDailyIVSnapshots, 60 * 1000)
-setInterval(recordDailyIVSnapshots, 24 * 60 * 60 * 1000)
+setTimeout(runUniverseVolScan, 90 * 1000)
+setInterval(runUniverseVolScan, 24 * 60 * 60 * 1000)
 
 // Global error handlers to prevent server crashes
 process.on('uncaughtException', (error) => {
@@ -2374,14 +2405,29 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
   }
 })
 
-// GET /api/vol-scan — per-stock IV vs HV, to flag which names' options are "rich"
-// (expensive relative to realized movement) — the core premium-selling signal.
-// ?tickers=MRVL,HOOD  (default: the tickers from your short-call entries)
+// GET /api/vol-scan — per-stock IV vs HV, to flag which names' options are "rich".
+//   ?universe=sp500  → the whole S&P/NASDAQ list, served from the background cache (fast)
+//   ?tickers=MRVL,HOOD → live scan of a small custom list
+//   (default) → your short-call tickers, live
 app.get('/api/vol-scan', requireAuth, async (req, res) => {
   try {
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!polygonKey) return res.json({ error: 'No POLYGON_API_KEY set' })
     const userId = req.user?.userId || 1
+
+    // Large universes are served from the background-populated cache (can't live-fetch 300+).
+    const universe = (req.query.universe || '').toLowerCase()
+    if (universe === 'sp500' || universe === 'nasdaq' || universe === 'all') {
+      const cached = databaseService.getVolScanCache(SP500)
+      const results = cached.map(c => ({
+        ticker: c.ticker, stock: c.stock, hv20: c.hv20, hv30: c.hv30, iv: c.iv,
+        ivDte: c.iv_dte, ivSource: c.iv_source, ivHvRatio: c.iv_hv_ratio, signal: c.signal,
+        ivRank: c.iv_rank, ivPercentile: c.iv_percentile,
+        ivHvSpread: (c.iv > 0 && c.hv30 > 0) ? Math.round((c.iv - c.hv30) * 1000) / 10 : null
+      })).sort((a, b) => (b.ivHvRatio || 0) - (a.ivHvRatio || 0))
+      const cachedAt = cached.reduce((mx, c) => Math.max(mx, c.updated_at || 0), 0)
+      return res.json({ success: true, count: results.length, results, cached: true, cachedAt: cachedAt ? cachedAt * 1000 : null })
+    }
 
     let tickers = (req.query.tickers || '').split(',').map(t => t.trim().toUpperCase()).filter(Boolean)
     if (tickers.length === 0) {
@@ -2394,17 +2440,11 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
     const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
 
     const processTicker = async (ticker) => {
-      const row = await scanTickerVol(ticker, polygonKey)
-      const hv = row.hv30 ?? row.hv20
-      if (row.iv > 0 && hv > 0) {
-        row.ivHvRatio = Math.round((row.iv / hv) * 100) / 100
-        row.ivHvSpread = Math.round((row.iv - hv) * 1000) / 10 // vol points (%)
-        row.signal = row.ivHvRatio >= 1.3 ? 'rich' : row.ivHvRatio <= 0.9 ? 'cheap' : 'normal'
-      }
-      // Record today's IV (idempotent per day) and attach IV Rank/Percentile from history.
+      const row = enrichVolRow(await scanTickerVol(ticker, polygonKey))
       if (row.iv > 0) {
         databaseService.recordIV(ticker, today, row.iv, row.hv30, row.stock)
         Object.assign(row, computeIVRank(databaseService.getIVHistory(ticker, since), row.iv))
+        databaseService.upsertVolScan(row)
       }
       return row
     }

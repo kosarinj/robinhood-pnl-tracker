@@ -12,6 +12,8 @@ export default function VolScanner() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [tickers, setTickers] = useState('')
+  const [cachedAt, setCachedAt] = useState(null)
+  const [view, setView] = useState('mine') // 'mine' | 'sp500' | 'custom'
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -19,13 +21,15 @@ export default function VolScanner() {
   const textMid = isDark ? '#94a3b8' : '#64748b'
   const headerBg = isDark ? '#151929' : '#f8fafc'
 
-  const fetchData = async (tk = '') => {
-    setLoading(true); setError(null)
+  const fetchData = async ({ tk = '', uni = '' } = {}) => {
+    setLoading(true); setError(null); setCachedAt(null)
     try {
-      const q = tk.trim() ? `?tickers=${encodeURIComponent(tk.trim().toUpperCase())}` : ''
+      let q = ''
+      if (uni) q = `?universe=${uni}`
+      else if (tk.trim()) q = `?tickers=${encodeURIComponent(tk.trim().toUpperCase())}`
       const res = await fetch(`/api/vol-scan${q}`, { credentials: 'include' })
       const json = await res.json()
-      if (json.success) setRows(Array.isArray(json.results) ? json.results : [])
+      if (json.success) { setRows(Array.isArray(json.results) ? json.results : []); setCachedAt(json.cachedAt || null) }
       else setError(json.error || 'Failed to load')
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
@@ -55,16 +59,29 @@ export default function VolScanner() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: text }}>📊 Volatility Scanner</h3>
         <span style={{ fontSize: '12px', color: textMid }}>IV vs realized (HV) — which options are rich to sell</span>
+        {cachedAt != null && (
+          <span style={{ fontSize: '11px', color: textMid }} title="S&P/NASDAQ is served from a background scan that refreshes daily">
+            (as of {new Date(cachedAt).toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })})
+          </span>
+        )}
         <div style={{ flex: 1 }} />
+        {[['mine', 'My Short Calls'], ['sp500', 'S&P + NASDAQ']].map(([v, label]) => (
+          <button key={v} disabled={loading}
+            onClick={() => { setView(v); fetchData(v === 'sp500' ? { uni: 'sp500' } : {}) }}
+            style={{ padding: '6px 12px', borderRadius: '6px', border: `1px solid ${view === v ? '#3b82f6' : border}`,
+              background: view === v ? '#3b82f6' : surface, color: view === v ? '#fff' : text, fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+            {label}
+          </button>
+        ))}
         <input
           value={tickers}
           onChange={e => setTickers(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') fetchData(tickers) }}
-          placeholder="Tickers e.g. MRVL,HOOD,PLTR (blank = your short calls)"
-          style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '13px', width: '320px', maxWidth: '55vw' }}
+          onKeyDown={e => { if (e.key === 'Enter') { setView('custom'); fetchData({ tk: tickers }) } }}
+          placeholder="or type tickers e.g. MRVL,HOOD"
+          style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '13px', width: '220px', maxWidth: '45vw' }}
         />
-        <button onClick={() => fetchData(tickers)} disabled={loading}
-          style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+        <button onClick={() => { setView('custom'); fetchData({ tk: tickers }) }} disabled={loading || !tickers.trim()}
+          style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: 'pointer', opacity: (!tickers.trim() ? 0.5 : 1) }}>
           {loading ? 'Scanning…' : 'Scan'}
         </button>
       </div>
