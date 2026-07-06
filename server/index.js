@@ -2871,9 +2871,10 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
     const polygonKey = process.env.POLYGON_API_KEY || ''
     const ticker = (req.query.ticker || '').toUpperCase()
     const shortEntries = databaseService.getShortCallEntries(userId)
-    const openShortSymbols = new Set(
-      databaseService.getOpenOptionPositions(userId).filter(p => p.net_short > 0).map(p => p.symbol)
-    )
+    const openPositions = databaseService.getOpenOptionPositions(userId)
+    const netShortBySymbol = {}
+    openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
+    const openShortSymbols = new Set(openPositions.filter(p => p.net_short > 0).map(p => p.symbol))
     let openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
     if (ticker) openEntries = openEntries.filter(e => (e.ticker || '').toUpperCase() === ticker)
     const rows = []
@@ -2907,8 +2908,10 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
       if (contribution != null) total += contribution
       rows.push({
         symbol: entry.symbol,
-        contracts: entry.contracts,
+        entryContracts: entry.contracts,
+        actualOpenContracts: netShortBySymbol[entry.symbol] ?? null, // from trades (net STO-BTC)
         saleDate: String(entry.sale_date || '').slice(0, 10),
+        premiumTotal: Math.round((entry.premium || 0) * 100) / 100,
         premiumPerShare: Math.round(premiumPerShare * 100) / 100,
         currentPrice: price != null ? Math.round(price * 100) / 100 : null,
         source,
