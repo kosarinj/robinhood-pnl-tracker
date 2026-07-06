@@ -199,12 +199,11 @@ async function fetchAtmCallIV(ticker, stock, polygonKey) {
 async function scanTickerVol(ticker, polygonKey) {
   const row = { ticker }
   try {
-    const now = Date.now()
-    const from = new Date(now - 100 * 86400000).toISOString().slice(0, 10)
-    const to = new Date(now).toISOString().slice(0, 10)
-    const barsUrl = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${from}/${to}`
-    const barsResp = await axios.get(barsUrl, { params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 200 }, timeout: 12000 })
-    const closes = (barsResp.data?.results || []).map(b => b.c).filter(c => c > 0)
+    // Daily closes come from Yahoo (unlimited) rather than Polygon's stocks-aggregates
+    // endpoint, which is rate-limited to ~5 req/min on the Options-Starter plan and 429s
+    // the moment we scan more than a handful of names. Options IV below stays on Polygon.
+    const hist = await priceService.fetchHistoricalPrices(ticker, '6mo', '1d')
+    const closes = (hist || []).map(b => b.close).filter(c => c > 0)
     row.stock = closes.length ? Math.round(closes[closes.length - 1] * 100) / 100 : null
     row.hv20 = annualizedHV(closes, 20)
     row.hv30 = annualizedHV(closes, 30)
@@ -274,6 +273,7 @@ async function runUniverseVolScan() {
         } catch (e) { /* skip this ticker */ }
         universeScanProgress.done++
       }))
+      if (i + CONC < universe.length) await new Promise(r => setTimeout(r, 300)) // gentle on Yahoo
     }
     console.log(`📈 Universe vol scan: cached ${universeScanProgress.ok}/${universe.length} tickers`)
   } catch (e) {
