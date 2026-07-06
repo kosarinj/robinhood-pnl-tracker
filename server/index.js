@@ -2196,12 +2196,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const polygonKey = process.env.POLYGON_API_KEY || ''
     {
       const shortEntries = databaseService.getShortCallEntries(userId)
-      const openShortSymbols = new Set(
-        databaseService.getOpenOptionPositions(userId)
-          .filter(p => p.net_short > 0)
-          .map(p => p.symbol)
-      )
+      const openPositions = databaseService.getOpenOptionPositions(userId)
+      const netShortBySymbol = {}
+      openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
+      const openShortSymbols = new Set(openPositions.filter(p => p.net_short > 0).map(p => p.symbol))
       const openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
+      // Only rescale to net_short when a symbol has a single open entry (avoids double-count).
+      const openEntryCount = {}
+      openEntries.forEach(e => { openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
 
       // Fetch current per-share option prices for the open short calls (same as tracker):
       // real quote mid → Black–Scholes model mark → stale daily close.
@@ -2244,16 +2246,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       openEntries.forEach(entry => {
         const ticker = entry.ticker
         if (!ticker) return
-        const shares = (entry.contracts || 1) * 100
-        // entry.premium is stored as TOTAL dollars received for the position.
-        openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + entry.premium
+        // Scale to the ACTUAL open contract count when the stored entry undercounts
+        // (split-fill collapse) and it's the only entry for this symbol.
+        const entryContracts = entry.contracts || 1
+        const netShort = netShortBySymbol[entry.symbol] || entryContracts
+        const effContracts = (openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
+        const shares = effContracts * 100
+        const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
+        openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + premiumPerShare * shares
         let currentOptionPrice = optFresh[entry.symbol]
         if (currentOptionPrice == null) {
           const model = modelOptionMark(entry, parseOptionDescription(entry.symbol), stockByTicker[entry.ticker])
           currentOptionPrice = model > 0 ? model : optClose[entry.symbol]
         }
         if (currentOptionPrice != null) {
-          const premiumPerShare = shares > 0 ? entry.premium / shares : entry.premium
           // Short call P&L = (premium collected − current cost to buy back) × shares.
           openUnrealizedByTicker[ticker] =
             (openUnrealizedByTicker[ticker] || 0) + (premiumPerShare - currentOptionPrice) * shares
@@ -2429,6 +2435,11 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
     const openShortSymbols = new Set(
       openPositions.filter(p => p.net_short > 0).map(p => p.symbol)
     )
+    const netShortBySymbol = {}
+    openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
+    // Count open entries per symbol so we only rescale to net_short for single-entry symbols.
+    const openEntryCount = {}
+    entries.forEach(e => { if (openShortSymbols.has(e.symbol)) openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
 
     // Fetch current option prices via Polygon for open positions
     const polygonKey = process.env.POLYGON_API_KEY || ''
@@ -2497,16 +2508,20 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       const todayMs = new Date(today + 'T00:00:00Z').getTime()
       const daysToExpiry = Math.round((expiryMs - todayMs) / (1000 * 60 * 60 * 24))
       const isExpired = daysToExpiry < 0
-      // entry.premium is stored as the TOTAL dollars received for the whole position
-      // (CSV parser sets option price = amount). Convert to per-share so it's
-      // comparable to currentOptionPrice (which Polygon returns per share).
-      const shares = (entry.contracts || 1) * 100
-      const premiumPerShare = shares > 0 ? entry.premium / shares : entry.premium
+      // entry.premium is the TOTAL dollars received for the stored contracts. If the
+      // entry undercounts (split-fill collapse) and it's the only open entry for the
+      // symbol, scale to the actual open contract count from trades (net_short).
+      const entryContracts = entry.contracts || 1
+      const netShort = netShortBySymbol[entry.symbol] || entryContracts
+      const effContracts = (isOpen && openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
+      const shares = effContracts * 100
+      const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
       const callGainPerShare = (currentOptionPrice != null) ? (premiumPerShare - currentOptionPrice) : null
       return {
         ...entry,
+        contracts: effContracts,
         premium: Math.round(premiumPerShare * 100) / 100,
-        premiumTotal: Math.round(entry.premium * 100) / 100,
+        premiumTotal: Math.round(premiumPerShare * shares * 100) / 100,
         currentStock,
         currentOptionPrice,
         priceSource,
@@ -2876,14 +2891,19 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
     openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
     const openShortSymbols = new Set(openPositions.filter(p => p.net_short > 0).map(p => p.symbol))
     let openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
+    const openEntryCount = {}
+    openEntries.forEach(e => { openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
     if (ticker) openEntries = openEntries.filter(e => (e.ticker || '').toUpperCase() === ticker)
     const rows = []
     let total = 0
     for (const entry of openEntries) {
       const polyTicker = toPolygonTicker(entry.symbol)
       const parsed = parseOptionDescription(entry.symbol)
-      const shares = (entry.contracts || 1) * 100
-      const premiumPerShare = entry.premium / shares
+      const entryContracts = entry.contracts || 1
+      const netShort = netShortBySymbol[entry.symbol] || entryContracts
+      const effContracts = (openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
+      const shares = effContracts * 100
+      const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
       let price = null, source = null
       if (polyTicker && parsed && polygonKey) {
         const qMid = await fetchOptionQuoteMid(polyTicker, polygonKey)
