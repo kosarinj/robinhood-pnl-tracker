@@ -10,8 +10,9 @@ const __dirname = dirname(__filename)
 // so DATABASE_PATH is frequently unset and the app would silently fall back to an
 // EPHEMERAL path that gets wiped on every redeploy. To survive redeploys, prefer the
 // mounted persistent volume at /app/data whenever it exists, even without the env var.
-// Candidate volume mount points (the mountPath has changed across the project's history).
-export const VOLUME_CANDIDATES = ['/app/data', '/app/server/data']
+// Candidate volume mount points, in priority order. /data is where the Railway volume
+// (robinhood-pnl-tracker-volume) is actually mounted; the others are legacy paths.
+export const VOLUME_CANDIDATES = ['/data', '/app/data', '/app/server/data']
 function resolveDbPath() {
   if (process.env.DATABASE_PATH) return process.env.DATABASE_PATH
   for (const dir of VOLUME_CANDIDATES) {
