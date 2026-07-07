@@ -2935,6 +2935,13 @@ app.get('/api/health', (req, res) => {
     }
     volumeDirs[dir] = { exists, writable }
   }
+  // Surface real mounts so we can locate a Railway volume wherever it's actually mounted.
+  let mounts = []
+  try {
+    mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n')
+      .filter(l => /ext4|xfs|btrfs/.test(l) && !/\/(proc|sys|dev|etc\/)/.test(l))
+      .map(l => { const p = l.split(' '); return `${p[1]} (${p[2]})` })
+  } catch { /* ignore */ }
   res.json({
     ok: true,
     instanceId: INSTANCE_ID,
@@ -2942,6 +2949,7 @@ app.get('/api/health', (req, res) => {
     onVolume: VOLUME_CANDIDATES.some(d => dbPath.startsWith(d)),
     databasePathEnvSet: !!process.env.DATABASE_PATH,
     volumeDirs,
+    mounts,
     shortCallEntries: shortCalls,
     uptimeSec: Math.round((Date.now() - PROCESS_STARTED) / 1000)
   })
