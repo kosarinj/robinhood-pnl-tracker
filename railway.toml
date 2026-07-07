@@ -13,10 +13,12 @@ restartPolicyMaxRetries = 10
 numReplicas = 1
 overlapSeconds = 0
 
-[[deploy.volumes]]
-mountPath = "/app/data"
+# NOTE: The persistent volume (robinhood-pnl-tracker-volume) is attached via the Railway
+# DASHBOARD at mount path /data. Do NOT declare a config-as-code volume here — a second
+# volume block at a different mountPath conflicts with the dashboard volume so neither
+# mounts, leaving the app on ephemeral disk. The app auto-detects /data (see resolveDbPath).
 
 [deploy.environmentVariables]
-DATABASE_PATH = "/app/data/trading_data.db"
+DATABASE_PATH = "/data/trading_data.db"
 NODE_ENV = "production"
 PUPPETEER_SKIP_DOWNLOAD = "true"
