@@ -2917,6 +2917,23 @@ app.get('/api/debug-option-trades', requireAuth, (req, res) => {
   }
 })
 
+// Health/diagnostic: reports which DB file this process is using, its short-call row
+// count, and a per-process instance id. Hitting it repeatedly should always return the
+// SAME instanceId + count — if they flip, more than one replica is serving (volume bug).
+const INSTANCE_ID = Math.random().toString(36).slice(2, 10)
+const PROCESS_STARTED = Date.now()
+app.get('/api/health', (req, res) => {
+  let shortCalls = null
+  try { shortCalls = databaseService.getShortCallEntries(1).length } catch (e) { shortCalls = `err:${e.message}` }
+  res.json({
+    ok: true,
+    instanceId: INSTANCE_ID,
+    dbPath: process.env.DATABASE_PATH || '(default)',
+    shortCallEntries: shortCalls,
+    uptimeSec: Math.round((Date.now() - PROCESS_STARTED) / 1000)
+  })
+})
+
 // Debug: show the raw Polygon snapshot + computed mark for open short calls,
 // so we can see exactly why an option price is/ isn't updating (e.g. MRVL/CRWV).
 // Usage: /api/debug-option-mark?symbol=MRVL  (substring match; omit for all)
