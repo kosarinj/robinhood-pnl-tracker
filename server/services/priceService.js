@@ -308,15 +308,23 @@ export class PriceService {
         const url = `https://query1.finance.yahoo.com/v7/finance/spark?symbols=${batch.join(',')}&range=5d&interval=1d`
         const response = await axios.get(url, { timeout: 12000, headers })
         const results = response.data?.spark?.result || []
+        const today = new Date().toISOString().slice(0, 10)
         results.forEach(item => {
           const resp0 = item.response?.[0]
           const meta = resp0?.meta || {}
-          const closes = (resp0?.indicators?.quote?.[0]?.close || []).filter(c => c != null && c > 0)
-          const current = meta.regularMarketPrice > 0 ? meta.regularMarketPrice : (closes.length ? closes[closes.length - 1] : 0)
-          // Prior trading-day close: prefer the meta previous-close; fall back to the
-          // second-to-last daily close so we still get a value pre-market.
-          let prevClose = meta.previousClose > 0 ? meta.previousClose : (meta.chartPreviousClose > 0 ? meta.chartPreviousClose : 0)
-          if (!(prevClose > 0) && closes.length >= 2) prevClose = closes[closes.length - 2]
+          const ts = resp0?.timestamp || []
+          const closesAll = resp0?.indicators?.quote?.[0]?.close || []
+          // Pair each daily close with its bar timestamp so we can pick YESTERDAY's close,
+          // not some earlier day. (Do NOT use meta.chartPreviousClose — that's the close
+          // just before the whole range window, i.e. ~5 days ago, which badly overstates
+          // the daily move.)
+          const bars = ts.map((t, i) => ({ t, c: closesAll[i] })).filter(b => b.c != null && b.c > 0)
+          if (bars.length < 2) return
+          const current = meta.regularMarketPrice > 0 ? meta.regularMarketPrice : bars[bars.length - 1].c
+          const lastDate = new Date(bars[bars.length - 1].t * 1000).toISOString().slice(0, 10)
+          // If the last bar is today's (forming) session, yesterday's close is the bar before it.
+          // If today's bar isn't there yet (pre-market), the last bar IS the prior close.
+          const prevClose = lastDate === today ? bars[bars.length - 2].c : bars[bars.length - 1].c
           if (current > 0 && prevClose > 0) {
             result[item.symbol] = {
               current,
