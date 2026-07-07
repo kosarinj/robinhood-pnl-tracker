@@ -2286,6 +2286,21 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         }
       }
 
+      // Yesterday's underlying close for the open names, so the daily option move can be
+      // priced on the SAME basis as "now" (model↔model) rather than mixing a live model
+      // mark with a stale market print — otherwise a short call looks like it moved the
+      // wrong way on a big stock day.
+      const openPrevUnderlying = {}
+      {
+        const openTickers = [...new Set(openEntries.map(e => e.ticker).filter(Boolean))]
+        if (openTickers.length > 0) {
+          try {
+            const dc = await priceService.fetchDailyChange(openTickers)
+            Object.entries(dc).forEach(([t, v]) => { if (v.prevClose > 0) openPrevUnderlying[t] = v.prevClose })
+          } catch (e) { /* fall back to the market prior close below */ }
+        }
+      }
+
       openEntries.forEach(entry => {
         const ticker = entry.ticker
         if (!ticker) return
@@ -2296,21 +2311,35 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const effContracts = (openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
         const shares = effContracts * 100
         const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
+        const parsed = parseOptionDescription(entry.symbol)
         openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + premiumPerShare * shares
+        const usedQuote = optFresh[entry.symbol] != null
         let currentOptionPrice = optFresh[entry.symbol]
         if (currentOptionPrice == null) {
-          const model = modelOptionMark(entry, parseOptionDescription(entry.symbol), stockByTicker[entry.ticker])
+          const model = modelOptionMark(entry, parsed, stockByTicker[entry.ticker])
           currentOptionPrice = model > 0 ? model : optClose[entry.symbol]
         }
         if (currentOptionPrice != null) {
           // Short call P&L = (premium collected − current cost to buy back) × shares.
           openUnrealizedByTicker[ticker] =
             (openUnrealizedByTicker[ticker] || 0) + (premiumPerShare - currentOptionPrice) * shares
-          // Today's option move for a short: (yesterday's close − now) × shares. Positive
-          // when the call got cheaper today. Only when we have a real prior EOD close.
-          const prevOpt = optPrevClose[entry.symbol]
-          if (prevOpt > 0) {
-            openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + (prevOpt - currentOptionPrice) * shares
+          // Today's option move for a short: (yesterday's mark − now) × shares. Positive when
+          // the call got cheaper today. Price both ends on the same basis so the option
+          // correctly offsets the stock (short call loses when the stock rises):
+          //   • live quote  → yesterday's market close vs today's quote
+          //   • modeled LEAP → same Black–Scholes model at yesterday's vs today's underlying
+          const prevMkt = optPrevClose[entry.symbol]
+          let dayOptPerShare = null
+          if (usedQuote && prevMkt > 0) {
+            dayOptPerShare = prevMkt - currentOptionPrice
+          } else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) {
+            const mNow = modelOptionMark(entry, parsed, stockByTicker[ticker])
+            const mPrev = modelOptionMark(entry, parsed, openPrevUnderlying[ticker])
+            if (mNow > 0 && mPrev > 0) dayOptPerShare = mPrev - mNow
+          }
+          if (dayOptPerShare == null && prevMkt > 0) dayOptPerShare = prevMkt - currentOptionPrice // last resort
+          if (dayOptPerShare != null) {
+            openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
           }
         }
       })
