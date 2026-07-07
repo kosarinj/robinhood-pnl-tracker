@@ -2929,9 +2929,16 @@ app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
           ? { bid: snap.last_quote.bid, ask: snap.last_quote.ask, midpoint: snap.last_quote.midpoint }
           : null
         row.last_trade = { price: lt.price ?? null, sip_timestamp: rawTs, date: ltMs ? new Date(ltMs).toISOString() : null }
-        row.day = snap.day ? { close: snap.day.close, volume: snap.day.volume } : null
+        row.day = snap.day ? { close: snap.day.close, volume: snap.day.volume, previous_close: snap.day.previous_close ?? null } : null
         row.computedMark = optionMarkFromSnapshot(snap)
         row.serverToday = new Date().toISOString().slice(0, 10)
+        // Probe the dedicated previous-close aggregate — a reliable option EOD prior close
+        // even when the snapshot's day.previous_close is absent on the delayed plan.
+        try {
+          const purl = `https://api.polygon.io/v2/aggs/ticker/${polygonTicker}/prev`
+          const presp = await axios.get(purl, { params: { apiKey: polygonKey, adjusted: true }, timeout: 6000 })
+          row.prevAgg = presp.data?.results?.[0] ? { close: presp.data.results[0].c, date: presp.data.results[0].t } : { status: presp.data?.status, count: presp.data?.resultsCount }
+        } catch (e) { row.prevAgg = { error: e.response?.status ? `HTTP ${e.response.status}` : e.message } }
       } catch (e) {
         row.error = e.response?.status ? `HTTP ${e.response.status}` : e.message
         row.errorBody = e.response?.data || null
