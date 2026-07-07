@@ -2935,12 +2935,21 @@ app.get('/api/health', (req, res) => {
     }
     volumeDirs[dir] = { exists, writable }
   }
-  // Surface real mounts so we can locate a Railway volume wherever it's actually mounted.
+  // Surface real (non-virtual) mounts so we can locate the Railway volume wherever it's
+  // actually mounted, and whether it already contains a trading_data.db (recoverable data).
+  const VIRTUAL_FS = ['proc','sysfs','tmpfs','devtmpfs','devpts','cgroup','cgroup2','mqueue','overlay','shm','securityfs','pstore','bpf','tracefs','debugfs','fusectl','configfs','autofs','hugetlbfs','ramfs','nsfs','binfmt_misc']
   let mounts = []
   try {
-    mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n')
-      .filter(l => /ext4|xfs|btrfs/.test(l) && !/\/(proc|sys|dev|etc\/)/.test(l))
-      .map(l => { const p = l.split(' '); return `${p[1]} (${p[2]})` })
+    mounts = fs.readFileSync('/proc/mounts', 'utf8').split('\n').filter(Boolean)
+      .map(l => l.split(' '))
+      .filter(p => p[1] && !VIRTUAL_FS.includes(p[2]) && p[1] !== '/')
+      .map(p => {
+        const mnt = p[1]
+        let hasDb = false, files = []
+        try { files = fs.readdirSync(mnt).slice(0, 20) } catch { /* ignore */ }
+        try { hasDb = fs.existsSync(`${mnt}/trading_data.db`) } catch { /* ignore */ }
+        return { mount: mnt, type: p[2], hasTradingDb: hasDb, files }
+      })
   } catch { /* ignore */ }
   res.json({
     ok: true,
