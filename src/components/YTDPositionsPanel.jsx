@@ -255,9 +255,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
-      net: acc.net + (r.totalRealized || 0) + stockPnL
+      net: acc.net + (r.totalRealized || 0) + stockPnL,
+      dayPnl: acc.dayPnl + (r.dayPnl || 0)
     }
-  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0 })
+  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -417,6 +418,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     title="Net + Open P&L — marks open short options to market on top of Net.">
                   Net + Open P&L
                 </th>
+                <th style={{ ...thStyle('dayPnl'), borderLeft: `1px solid ${border}` }} onClick={() => toggleSort('dayPnl')}
+                    title="Today's mark-to-market move: shares × stock's move since yesterday's close, plus open short options × 100 × their move since yesterday's close.">
+                  Day P&L<SortIcon field="dayPnl" />
+                </th>
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }}
                     title="How much better (or worse) options+stock did than just holding the shares, as a % of the stock result's size: (Net+Open − Stock) ÷ |Stock|. Positive = options added value (bigger = more); negative = options detracted. Consistent across gains and losses.">
                   vs Stock %
@@ -540,6 +545,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                             title={`Net (${fmt(net)}) + Open P&L (${row.openUnrealizedPnL != null ? fmt(row.openUnrealizedPnL) : '—'})`}>
                           {fmt(netPlusOpen)}
                         </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.dayPnl, isDark), borderLeft: `1px solid ${border}` }}
+                            title={row.dayPnl != null
+                              ? `Today's move (since yesterday's close): stock ${row.dayStockPnl != null ? fmt(row.dayStockPnl) : '—'}${row.dayStockChangePct != null ? ` (${row.dayStockChangePct >= 0 ? '+' : ''}${row.dayStockChangePct}%)` : ''} + options ${row.dayOptionPnl != null ? fmt(row.dayOptionPnl) : '—'}`
+                              : 'No prior-day close available yet'}>
+                          {row.dayPnl != null ? `${row.dayPnl >= 0 ? '+' : ''}${fmt(row.dayPnl)}` : '—'}
+                        </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: vsStockPct == null ? textMid : pnlColor(optionsHelped ? 1 : -1, isDark), borderLeft: `1px solid ${border}` }}
                             title={vsStockPct == null ? 'No stock P&L to compare against' : `Options+stock did ${vsStockPct >= 0 ? 'better' : 'worse'} than holding the shares by ${fmt(Math.round((netPlusOpen - stockPnl) * 100) / 100)} (${vsStockPct >= 0 ? '+' : ''}${vsStockPct.toFixed(1)}% of the $${Math.abs(Math.round(stockPnl))} stock move). Net+Open ${fmt(netPlusOpen)} vs Stock ${fmt(stockPnl)}.`}>
                           {vsStockPct != null ? `${vsStockPct >= 0 ? '+' : ''}${vsStockPct.toFixed(1)}%` : '—'}
@@ -600,6 +611,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net + totals.openUnrealizedPnL, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{fmt(totals.net + totals.openUnrealizedPnL)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.dayPnl, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{totals.dayPnl != null ? `${totals.dayPnl >= 0 ? '+' : ''}${fmt(totals.dayPnl)}` : '—'}</td>
                 {(() => {
                   const npo = totals.net + totals.openUnrealizedPnL
                   const sp = totals.stockUnrealizedPnL

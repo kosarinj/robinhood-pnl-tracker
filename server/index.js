@@ -2233,6 +2233,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // panels disagreed. Mirroring the tracker keeps Open Premium / Open P&L consistent.
     const openPremiumByTicker = {}
     const openUnrealizedByTicker = {}
+    const openDailyByTicker = {}   // option side of today's mark-to-market move (EOD close → now)
     const polygonKey = process.env.POLYGON_API_KEY || ''
     {
       const shortEntries = databaseService.getShortCallEntries(userId)
@@ -2247,7 +2248,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
       // Fetch current per-share option prices for the open short calls (same as tracker):
       // real quote mid → Black–Scholes model mark → stale daily close.
-      const optFresh = {}, optClose = {}, stockByTicker = {}
+      const optFresh = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
       if (polygonKey && openEntries.length > 0) {
         await Promise.all(openEntries.map(async entry => {
           const polyTicker = toPolygonTicker(entry.symbol)
@@ -2266,6 +2267,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
               }
               const stale = staleOptionMark(snap)
               if (stale > 0) optClose[entry.symbol] = stale
+              // Option's prior-day EOD close (for today's mark-to-market move) — same snapshot, no extra call.
+              if (snap.day?.previous_close > 0) optPrevClose[entry.symbol] = snap.day.previous_close
               const u = snap.underlying_asset?.price
               if (u > 0) stockByTicker[parsed.ticker] = u
             }
@@ -2303,6 +2306,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Short call P&L = (premium collected − current cost to buy back) × shares.
           openUnrealizedByTicker[ticker] =
             (openUnrealizedByTicker[ticker] || 0) + (premiumPerShare - currentOptionPrice) * shares
+          // Today's option move for a short: (yesterday's close − now) × shares. Positive
+          // when the call got cheaper today. Only when we have a real prior EOD close.
+          const prevOpt = optPrevClose[entry.symbol]
+          if (prevOpt > 0) {
+            openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + (prevOpt - currentOptionPrice) * shares
+          }
         }
       })
     }
@@ -2373,8 +2382,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
     // Weekly stock change (~5 trading days) per ticker — one bulk call
     let weeklyChange = {}
+    let dailyChange = {}
     if (allTickers.length > 0) {
       try { weeklyChange = await priceService.fetchWeeklyChange(allTickers) } catch (e) { console.warn('YTD weekly change fetch failed:', e.message) }
+      try { dailyChange = await priceService.fetchDailyChange(allTickers) } catch (e) { console.warn('YTD daily change fetch failed:', e.message) }
     }
 
     const r2 = n => Math.round(n * 100) / 100
@@ -2383,6 +2394,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const sp = stockPositions[e.ticker]
         const cp = stockPrices[e.ticker] || null
         const wk = weeklyChange[e.ticker]
+        const dc = dailyChange[e.ticker]
+        // Today's mark-to-market move (EOD close → now): shares × stock day move +
+        // the option side accumulated above (contracts × 100 × option day move).
+        const dayStockPnl = (sp && sp.position > 0 && dc && dc.prevClose > 0)
+          ? r2(sp.position * (dc.current - dc.prevClose)) : null
+        const dayOptionPnl = openDailyByTicker[e.ticker] != null ? r2(openDailyByTicker[e.ticker]) : null
+        const dayPnl = (dayStockPnl != null || dayOptionPnl != null)
+          ? r2((dayStockPnl || 0) + (dayOptionPnl || 0)) : null
         // Only surface realized stock P&L for CLOSED positions (no open shares) — e.g. JPM.
         // Open positions keep showing just their unrealized (open-share) gain, as before, so
         // active names aren't inflated by all-time realized gains.
@@ -2402,7 +2421,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null,
           stockRealizedPnL: (!isOpen && stockRealized[e.ticker] != null) ? r2(stockRealized[e.ticker]) : null,
           weeklyChangePct: wk ? wk.pct : null,
-          weeklyChange: wk ? wk.change : null
+          weeklyChange: wk ? wk.change : null,
+          dayPnl,
+          dayStockPnl,
+          dayOptionPnl,
+          dayStockChangePct: dc ? dc.pct : null
         }
       })
       .sort((a, b) => b.totalRealized - a.totalRealized)
