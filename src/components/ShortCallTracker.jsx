@@ -123,24 +123,22 @@ export default function ShortCallTracker() {
     const isEditing = editingId === entry.id
     const dteBadgeColor = entry.daysToExpiry > 21 ? '#22c55e' : entry.daysToExpiry > 7 ? '#f59e0b' : entry.daysToExpiry >= 0 ? '#ef4444' : '#94a3b8'
 
-    // Truly in the money: current stock is above the call strike (assignment risk),
-    // independent of the Net P&L. Flag it so she knows a roll may be warranted.
-    const strikeNum = parseFloat(entry.strike)
-    const stockNum = entry.currentStock != null ? parseFloat(entry.currentStock) : null
-    const itm = stockNum != null && !isNaN(strikeNum) && stockNum > strikeNum
-    const itmAmount = itm ? stockNum - strikeNum : null
-    const rowBg = itm ? (isDark ? '#3a1d24' : '#fff1f2') : (i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'))
+    // Highlight by the option's own P&L: premium sold − current call price (per share).
+    // Profitable (green) when the call is cheaper to buy back than you sold it for;
+    // underwater (red) when it now costs more. Neutral when there's no current price.
+    const optGain = entry.thetaGain
+    const hasGain = optGain != null && entry.currentOptionPrice != null
+    const profitable = hasGain && optGain > 0
+    const losing = hasGain && optGain < 0
+    const rowBg = profitable ? (isDark ? '#13301e' : '#f0fdf4')
+      : losing ? (isDark ? '#3a1d24' : '#fff1f2')
+      : (i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'))
+    const accent = profitable ? '#22c55e' : losing ? '#ef4444' : null
 
     return (
-      <tr key={entry.id} style={{ borderBottom: `1px solid ${border}`, background: rowBg, boxShadow: itm ? `inset 3px 0 0 #ef4444` : undefined }}>
+      <tr key={entry.id} style={{ borderBottom: `1px solid ${border}`, background: rowBg, boxShadow: accent ? `inset 3px 0 0 ${accent}` : undefined }}>
         <td style={{ padding: '9px 8px', fontWeight: '700', color: text, position: 'sticky', left: 0, zIndex: 1, width: '60px', minWidth: '60px', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: rowBg, boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>{entry.ticker}</td>
-        <td style={{ padding: '9px 10px', textAlign: 'right', color: text, whiteSpace: 'nowrap' }}>
-          ${entry.strike}
-          {itm && (
-            <span title={`In the money: stock is $${itmAmount.toFixed(2)} above the $${strikeNum} strike — assignment risk, consider rolling`}
-              style={{ marginLeft: 6, padding: '1px 5px', borderRadius: '8px', fontSize: '10px', fontWeight: '700', background: '#ef444422', color: '#ef4444' }}>ITM</span>
-          )}
-        </td>
+        <td style={{ padding: '9px 10px', textAlign: 'right', color: text }}>${entry.strike}</td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: textMid }}>{fmtDate(entry.expiry)}</td>
         <td style={{ padding: '9px 10px', textAlign: 'center' }}>
           <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '11px', fontWeight: '700', background: dteBadgeColor + '22', color: dteBadgeColor }}>
@@ -256,7 +254,8 @@ export default function ShortCallTracker() {
       <p style={{ margin: '0 0 12px', fontSize: '12px', color: textMid }}>
         Tracks the underlying stock price when you sell a short call. Compare current vs. sale-day price to see how the position is working.
         <strong style={{ color: pnlColor(1, isDark) }}> Call Gain/Sh</strong> = premium you sold for − current call price (per share). It's positive when the call is cheaper to buy back than you sold it for — driven by both time decay and the stock falling. Hover the value for the dollar total across all contracts.
-        {' '}<span style={{ color: '#ef4444', fontWeight: 600 }}>Rows shaded red / tagged ITM</span> mean the stock is above the strike (truly in the money → assignment risk), so a roll may be worth considering.
+        {' '}<span style={{ color: '#22c55e', fontWeight: 600 }}>Rows shaded green</span> are profitable on the option (sold premium &gt; current call price — cheaper to buy back);{' '}
+        <span style={{ color: '#ef4444', fontWeight: 600 }}>rows shaded red</span> cost more to buy back than you sold them for.
       </p>
 
       {error && (
