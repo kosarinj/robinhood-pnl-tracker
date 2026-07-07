@@ -1,12 +1,26 @@
 import Database from 'better-sqlite3'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { existsSync } from 'fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-// Initialize database
-const dbPath = process.env.DATABASE_PATH || join(__dirname, '..', 'trading_data.db')
+// Resolve the SQLite file. Railway does NOT apply env vars declared in railway.toml,
+// so DATABASE_PATH is frequently unset and the app would silently fall back to an
+// EPHEMERAL path that gets wiped on every redeploy. To survive redeploys, prefer the
+// mounted persistent volume at /app/data whenever it exists, even without the env var.
+// Candidate volume mount points (the mountPath has changed across the project's history).
+export const VOLUME_CANDIDATES = ['/app/data', '/app/server/data']
+function resolveDbPath() {
+  if (process.env.DATABASE_PATH) return process.env.DATABASE_PATH
+  for (const dir of VOLUME_CANDIDATES) {
+    try { if (existsSync(dir)) return join(dir, 'trading_data.db') } catch { /* ignore */ }
+  }
+  return join(__dirname, '..', 'trading_data.db')
+}
+export const dbPath = resolveDbPath()
+console.log(`📁 SQLite path: ${dbPath} (DATABASE_PATH ${process.env.DATABASE_PATH ? 'set' : 'unset → resolved'})`)
 const db = new Database(dbPath)
 
 // Enable WAL mode for better concurrent access

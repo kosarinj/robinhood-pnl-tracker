@@ -8,7 +8,7 @@ import { calculatePnL } from './services/pnlCalculator.js'
 import { PriceService } from './services/priceService.js'
 import { SignalService } from './services/signalService.js'
 import { PolygonService } from './services/polygonService.js'
-import { databaseService } from './services/database.js'
+import { databaseService, dbPath, VOLUME_CANDIDATES } from './services/database.js'
 import { authService } from './services/auth.js'
 import { supportResistanceService } from './services/supportResistanceService.js'
 import { emaAlertService } from './services/emaAlertService.js'
@@ -2925,10 +2925,23 @@ const PROCESS_STARTED = Date.now()
 app.get('/api/health', (req, res) => {
   let shortCalls = null
   try { shortCalls = databaseService.getShortCallEntries(1).length } catch (e) { shortCalls = `err:${e.message}` }
+  // Report where data actually lives so we can confirm it's on the persistent volume.
+  const volumeDirs = {}
+  for (const dir of VOLUME_CANDIDATES) {
+    let exists = false, writable = false
+    try { exists = fs.existsSync(dir) } catch { /* ignore */ }
+    if (exists) {
+      try { const p = `${dir}/.write-probe`; fs.writeFileSync(p, String(Date.now())); fs.unlinkSync(p); writable = true } catch { /* ro */ }
+    }
+    volumeDirs[dir] = { exists, writable }
+  }
   res.json({
     ok: true,
     instanceId: INSTANCE_ID,
-    dbPath: process.env.DATABASE_PATH || '(default)',
+    dbPath,
+    onVolume: VOLUME_CANDIDATES.some(d => dbPath.startsWith(d)),
+    databasePathEnvSet: !!process.env.DATABASE_PATH,
+    volumeDirs,
     shortCallEntries: shortCalls,
     uptimeSec: Math.round((Date.now() - PROCESS_STARTED) / 1000)
   })
