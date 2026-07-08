@@ -256,9 +256,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
       net: acc.net + (r.totalRealized || 0) + stockPnL,
-      dayPnl: acc.dayPnl + (r.dayPnl || 0)
+      dayPnl: acc.dayPnl + (r.dayPnl || 0),
+      costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0 })
+  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -418,6 +419,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     title="Net + Open P&L — marks open short options to market on top of Net.">
                   Net + Open P&L
                 </th>
+                <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }}
+                    title="Total return = (Net + Open P&L) ÷ cost basis of the shares (shares × avg cost). The combined options + stock return on the capital invested. '—' when there are no open shares to size against.">
+                  Return %
+                </th>
                 <th style={{ ...thStyle('dayPnl'), borderLeft: `1px solid ${border}` }} onClick={() => toggleSort('dayPnl')}
                     title="Today's mark-to-market move: shares × stock's move since yesterday's close, plus open short options × 100 × their move since yesterday's close.">
                   Day P&L<SortIcon field="dayPnl" />
@@ -494,6 +499,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const stockPnl = hasStock ? Math.round((stockUnrealized + stockRealized) * 100) / 100 : null
                       const net = Math.round(((row.totalRealized || 0) + (stockPnl || 0)) * 100) / 100
                       const netPlusOpen = Math.round((net + (row.openUnrealizedPnL || 0)) * 100) / 100
+                      // Total return: combined options + stock result as a % of the capital
+                      // invested in the shares (cost basis = shares × avg cost).
+                      const costBasis = (pos > 0 && avgCost > 0) ? pos * avgCost : null
+                      const returnPct = (costBasis && costBasis > 0) ? Math.round((netPlusOpen / costBasis) * 1000) / 10 : null
                       // Out-performance vs holding the shares: how much better/worse the
                       // options+stock result is than stock-only, as a % of the stock result's size.
                       // +% = options added value; −% = options detracted. Always intuitive across signs.
@@ -544,6 +553,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(netPlusOpen, isDark), borderLeft: `1px solid ${border}` }}
                             title={`Net (${fmt(net)}) + Open P&L (${row.openUnrealizedPnL != null ? fmt(row.openUnrealizedPnL) : '—'})`}>
                           {fmt(netPlusOpen)}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: returnPct == null ? textMid : pnlColor(returnPct, isDark), borderLeft: `1px solid ${border}` }}
+                            title={returnPct == null ? 'No open shares to compute a return on' : `Total return on the ${fmt(costBasis)} cost basis (${pos?.toLocaleString()} sh × ${fmt(avgCost)}): Net+Open ${fmt(netPlusOpen)}`}>
+                          {returnPct != null ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%` : '—'}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.dayPnl, isDark), borderLeft: `1px solid ${border}` }}
                             title={row.dayPnl != null
@@ -611,6 +624,16 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net + totals.openUnrealizedPnL, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{fmt(totals.net + totals.openUnrealizedPnL)}</td>
+                {(() => {
+                  const npo = totals.net + totals.openUnrealizedPnL
+                  const ret = totals.costBasis > 0 ? Math.round((npo / totals.costBasis) * 1000) / 10 : null
+                  return (
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '15px', color: ret == null ? textMid : pnlColor(ret, isDark), borderLeft: `1px solid ${border}` }}
+                        title={ret == null ? '' : `Total return: Net+Open ${fmt(npo)} ÷ ${fmt(totals.costBasis)} cost basis`}>
+                      {ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(1)}%` : '—'}
+                    </td>
+                  )
+                })()}
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.dayPnl, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{totals.dayPnl != null ? `${totals.dayPnl >= 0 ? '+' : ''}${fmt(totals.dayPnl)}` : '—'}</td>
                 {(() => {
                   const npo = totals.net + totals.openUnrealizedPnL
