@@ -52,8 +52,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   })
   const [showHiddenList, setShowHiddenList] = useState(false)
 
-  const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates) => {
-    setLoading(true)
+  const [lastUpdated, setLastUpdated] = useState(null)
+
+  const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates, quiet = false) => {
+    if (!quiet) setLoading(true)
     setError(null)
     try {
       const gs = overrideGlobal ?? globalStart
@@ -62,12 +64,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       if (Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
       const res = await fetch(`/api/options-pnl/ytd?${params}`, { credentials: 'include' })
       const json = await res.json()
-      if (json.success) setData(json)
+      if (json.success) { setData(json); setLastUpdated(Date.now()) }
       else setError(json.error)
     } catch (e) {
       setError(e.message)
     } finally {
-      setLoading(false)
+      if (!quiet) setLoading(false)
     }
   }, [globalStart, symbolDates])
 
@@ -118,6 +120,21 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   }
 
   useEffect(() => { fetchStockHoldings(); fetchCostOverrides() }, [])
+
+  // Auto-refresh every 2 minutes (quietly — no loading flash) and whenever the tab
+  // regains focus, so prices / option marks update without clicking Refresh.
+  useEffect(() => {
+    const tick = () => { fetchData(undefined, undefined, true); fetchStockHoldings() }
+    const iv = setInterval(tick, 120 * 1000)
+    const onVis = () => { if (!document.hidden) tick() }
+    window.addEventListener('focus', tick)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(iv)
+      window.removeEventListener('focus', tick)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [fetchData])
 
   const applyGlobalStart = (date) => {
     setGlobalStart(date)
@@ -300,6 +317,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
           >
             Refresh
           </button>
+          {lastUpdated && (
+            <span style={{ fontSize: '11px', color: textMid, whiteSpace: 'nowrap' }}
+              title="Auto-refreshes every 2 minutes and when you return to the tab">
+              updated {new Date(lastUpdated).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
         </div>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <input
