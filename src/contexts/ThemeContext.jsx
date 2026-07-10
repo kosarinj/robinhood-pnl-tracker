@@ -32,7 +32,7 @@ export function ThemeProvider({ children }) {
       themes,
       toggleTheme,
       setTheme,
-      isDark: currentTheme === 'dark'
+      isDark: themes[currentTheme]?.dark ?? (currentTheme === 'dark')
     }}>
       {children}
     </ThemeContext.Provider>

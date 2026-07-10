@@ -1,6 +1,6 @@
 export const themes = {
   light: {
-    name: 'light',
+    name: 'light', label: 'Light', dark: false,
     background: '#f8f9fa',
     surface: '#ffffff',
     surfaceHover: '#f8f9fa',
@@ -40,7 +40,7 @@ export const themes = {
   },
 
   dark: {
-    name: 'dark',
+    name: 'dark', label: 'Dark', dark: true,
     background: '#1a1a1a',
     surface: '#2d2d2d',
     surfaceHover: '#3a3a3a',
@@ -77,12 +77,85 @@ export const themes = {
     buttonSecondaryHover: '#4b5563',
     buttonDanger: '#ef4444',
     buttonDangerHover: '#dc2626'
+  },
+
+  midnight: {
+    name: 'midnight', label: 'Midnight', dark: true,
+    background: '#0f1629',
+    surface: '#1a2140',
+    surfaceHover: '#232c52',
+    text: '#e2e8f0',
+    textSecondary: '#94a3b8',
+    border: '#2d3a63',
+    shadow: 'rgba(0, 0, 0, 0.4)',
+
+    positive: '#34d399',
+    negative: '#f87171',
+    neutral: '#94a3b8',
+    warning: '#fbbf24',
+
+    cardPositive: '#12351f',
+    cardNegative: '#3a1e1e',
+    cardNeutral: '#1a2140',
+
+    chartLine: '#818cf8',
+    chartGrid: '#2d3a63',
+    chartText: '#94a3b8',
+
+    tableHeader: '#151b33',
+    tableRowHover: '#232c52',
+    tableRowExpanded: '#2d3a63',
+
+    buttonPrimary: '#6366f1',
+    buttonPrimaryHover: '#4f46e5',
+    buttonSecondary: '#64748b',
+    buttonSecondaryHover: '#475569',
+    buttonDanger: '#ef4444',
+    buttonDangerHover: '#dc2626'
+  },
+
+  sepia: {
+    name: 'sepia', label: 'Sepia', dark: false,
+    background: '#f4ecd8',
+    surface: '#fbf6ea',
+    surfaceHover: '#f1e7cf',
+    text: '#433422',
+    textSecondary: '#8a7355',
+    border: '#e0d3b8',
+    shadow: 'rgba(120, 90, 40, 0.12)',
+
+    positive: '#2f8f4e',
+    negative: '#c0392b',
+    neutral: '#8a7355',
+    warning: '#c9860a',
+
+    cardPositive: '#dcecd6',
+    cardNegative: '#f2ddd6',
+    cardNeutral: '#efe6d2',
+
+    chartLine: '#b06b2c',
+    chartGrid: '#e0d3b8',
+    chartText: '#8a7355',
+
+    tableHeader: '#efe4cc',
+    tableRowHover: '#f1e7cf',
+    tableRowExpanded: '#e9dcc0',
+
+    buttonPrimary: '#b06b2c',
+    buttonPrimaryHover: '#95591f',
+    buttonSecondary: '#8a7355',
+    buttonSecondaryHover: '#6f5c43',
+    buttonDanger: '#c0392b',
+    buttonDangerHover: '#a52f22'
   }
 }
+
+// Keys that are metadata, not CSS custom properties.
+const META_KEYS = new Set(['name', 'label', 'dark'])
 
 export const applyTheme = (theme) => {
   const root = document.documentElement
   Object.entries(theme).forEach(([key, value]) => {
-    root.style.setProperty(`--${key}`, value)
+    if (!META_KEYS.has(key)) root.style.setProperty(`--${key}`, value)
   })
 }

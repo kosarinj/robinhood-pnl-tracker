@@ -4,7 +4,7 @@ import TradesTable from './components/TradesTable'
 import TradingSignals from './components/TradingSignals'
 import MarketAnalysis from './components/MarketAnalysis'
 import SignalPerformance from './components/SignalPerformance'
-import ThemeToggle from './components/ThemeToggle'
+import SettingsPanel from './components/SettingsPanel'
 import DailyPnLChart from './components/DailyPnLChart'
 import SupportResistanceLevels from './components/SupportResistanceLevels'
 import PriceChart from './components/PriceChart'
@@ -1189,7 +1189,7 @@ function AuthenticatedApp({ user }) {
             📁 Upload CSV
             <input type="file" accept=".csv" onChange={(e) => { const file = e.target.files[0]; if (file) handleFileUpload(file) }} style={{ display: 'none' }} />
           </label>
-          <ThemeToggle />
+          <SettingsPanel />
         </div>
       </div>
 

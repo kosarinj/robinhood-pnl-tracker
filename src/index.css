@@ -53,6 +53,11 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* When a custom background image is set, let it show through: the body and the main
+   container go transparent (BackgroundLayer paints a themed base + the faded image). */
+body.has-bg { background: transparent; }
+body.has-bg .app-container { background: transparent; box-shadow: none; }
+
 #root {
   max-width: 1400px;
   margin: 0 auto;
