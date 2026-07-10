@@ -220,7 +220,41 @@ async function scanTickerVol(ticker, polygonKey) {
   } catch (e) {
     row.ivError = e.response?.status ? `HTTP ${e.response.status}` : (e.code || e.message)
   }
+  try { row.earningsDate = await fetchEarningsDate(ticker) } catch (e) { row.earningsDate = null }
   return row
+}
+
+// Next-earnings date from Nasdaq's free API, cached ~3 days in earnings_cache.
+// Returns 'YYYY-MM-DD' or null. Earnings drives IV, so it's key context for selling premium.
+const EARNINGS_MONTHS = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' }
+async function fetchEarningsDate(ticker) {
+  const T = (ticker || '').toUpperCase()
+  if (!T) return null
+  try {
+    const cached = databaseService.getEarnings(T)
+    const ageDays = cached ? (Date.now() / 1000 - cached.updated_at) / 86400 : Infinity
+    if (cached && ageDays < 3) return cached.earnings_date || null
+    const resp = await axios.get(`https://api.nasdaq.com/api/analyst/${T}/earnings-date`, {
+      timeout: 8000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    })
+    const data = resp.data?.data || {}
+    let iso = null
+    const m = String(data.reportText || '').match(/(\d{2})\/(\d{2})\/(\d{4})/) // MM/DD/YYYY
+    if (m) iso = `${m[3]}-${m[1]}-${m[2]}`
+    else {
+      const m2 = String(data.announcement || '').match(/([A-Z][a-z]{2}) (\d{1,2}), (\d{4})/) // Mon D, YYYY
+      if (m2 && EARNINGS_MONTHS[m2[1]]) iso = `${m2[3]}-${EARNINGS_MONTHS[m2[1]]}-${String(m2[2]).padStart(2, '0')}`
+    }
+    databaseService.setEarnings(T, iso) // cache even when null, to avoid re-hammering Nasdaq
+    return iso
+  } catch (e) {
+    const cached = databaseService.getEarnings(T)
+    return cached?.earnings_date || null // fall back to any stale value
+  }
 }
 // IV Rank / Percentile of currentIV within a history of IV values.
 function computeIVRank(history, currentIV) {
@@ -2525,7 +2559,7 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
       const results = cached.map(c => ({
         ticker: c.ticker, stock: c.stock, hv20: c.hv20, hv30: c.hv30, iv: c.iv,
         ivDte: c.iv_dte, ivSource: c.iv_source, ivHvRatio: c.iv_hv_ratio, signal: c.signal,
-        ivRank: c.iv_rank, ivPercentile: c.iv_percentile,
+        ivRank: c.iv_rank, ivPercentile: c.iv_percentile, earnings: c.earnings_date,
         ivHvSpread: (c.iv > 0 && c.hv30 > 0) ? Math.round((c.iv - c.hv30) * 1000) / 10 : null
       })).sort((a, b) => (b.ivHvRatio || 0) - (a.ivHvRatio || 0))
       const cachedAt = cached.reduce((mx, c) => Math.max(mx, c.updated_at || 0), 0)

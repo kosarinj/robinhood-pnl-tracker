@@ -90,6 +90,14 @@ db.exec(`
     ticker TEXT PRIMARY KEY,
     stock REAL, hv20 REAL, hv30 REAL, iv REAL, iv_dte INTEGER, iv_source TEXT,
     iv_hv_ratio REAL, signal TEXT, iv_rank REAL, iv_percentile REAL,
+    earnings_date TEXT,
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+  );
+
+  -- Next-earnings dates per ticker (from Nasdaq), cached so we don't refetch constantly.
+  CREATE TABLE IF NOT EXISTS earnings_cache (
+    ticker TEXT PRIMARY KEY,
+    earnings_date TEXT,
     updated_at INTEGER DEFAULT (strftime('%s', 'now'))
   );
 
@@ -325,6 +333,9 @@ try {
 }
 
 console.log(`Database initialized at: ${dbPath}`)
+
+// Migration: add earnings_date to an existing vol_scan_cache (older DBs created before it)
+try { db.exec(`ALTER TABLE vol_scan_cache ADD COLUMN earnings_date TEXT`) } catch (e) { /* column already exists */ }
 
 // Migration: Drop the trades dedup unique index that incorrectly prevents identical legitimate trades
 try {
@@ -2134,20 +2145,36 @@ export class DatabaseService {
     try {
       if (!r || !r.ticker) return
       db.prepare(`
-        INSERT INTO vol_scan_cache (ticker, stock, hv20, hv30, iv, iv_dte, iv_source, iv_hv_ratio, signal, iv_rank, iv_percentile, updated_at)
-        VALUES (@ticker, @stock, @hv20, @hv30, @iv, @iv_dte, @iv_source, @iv_hv_ratio, @signal, @iv_rank, @iv_percentile, strftime('%s','now'))
+        INSERT INTO vol_scan_cache (ticker, stock, hv20, hv30, iv, iv_dte, iv_source, iv_hv_ratio, signal, iv_rank, iv_percentile, earnings_date, updated_at)
+        VALUES (@ticker, @stock, @hv20, @hv30, @iv, @iv_dte, @iv_source, @iv_hv_ratio, @signal, @iv_rank, @iv_percentile, @earnings_date, strftime('%s','now'))
         ON CONFLICT(ticker) DO UPDATE SET
           stock=excluded.stock, hv20=excluded.hv20, hv30=excluded.hv30, iv=excluded.iv,
           iv_dte=excluded.iv_dte, iv_source=excluded.iv_source, iv_hv_ratio=excluded.iv_hv_ratio,
           signal=excluded.signal, iv_rank=excluded.iv_rank, iv_percentile=excluded.iv_percentile,
+          earnings_date=excluded.earnings_date,
           updated_at=strftime('%s','now')
       `).run({
         ticker: r.ticker.toUpperCase(),
         stock: r.stock ?? null, hv20: r.hv20 ?? null, hv30: r.hv30 ?? null, iv: r.iv ?? null,
         iv_dte: r.ivDte ?? null, iv_source: r.ivSource ?? null, iv_hv_ratio: r.ivHvRatio ?? null,
-        signal: r.signal ?? null, iv_rank: r.ivRank ?? null, iv_percentile: r.ivPercentile ?? null
+        signal: r.signal ?? null, iv_rank: r.ivRank ?? null, iv_percentile: r.ivPercentile ?? null,
+        earnings_date: r.earningsDate ?? null
       })
     } catch (e) { console.error('Error upserting vol scan:', e.message) }
+  }
+
+  // Cached next-earnings date per ticker (Nasdaq). Refreshed by the scanner when stale.
+  getEarnings(ticker) {
+    try { return db.prepare('SELECT earnings_date, updated_at FROM earnings_cache WHERE ticker = ?').get((ticker || '').toUpperCase()) || null }
+    catch (e) { return null }
+  }
+  setEarnings(ticker, date) {
+    try {
+      db.prepare(`
+        INSERT INTO earnings_cache (ticker, earnings_date, updated_at) VALUES (?, ?, strftime('%s','now'))
+        ON CONFLICT(ticker) DO UPDATE SET earnings_date=excluded.earnings_date, updated_at=strftime('%s','now')
+      `).run((ticker || '').toUpperCase(), date ?? null)
+    } catch (e) { console.error('Error setting earnings:', e.message) }
   }
 
   // Get cached vol-scan rows for a set of tickers

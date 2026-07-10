@@ -4,6 +4,15 @@ import { useTheme } from '../contexts/ThemeContext'
 const pct = (v, d = 1) => (v == null || isNaN(v)) ? '—' : `${(v * 100).toFixed(d)}%`
 const num = (v, d = 2) => (v == null || isNaN(v)) ? '—' : v.toFixed(d)
 
+// Format an earnings date (YYYY-MM-DD) into a short label + days-away count.
+const fmtEarnings = (ds) => {
+  if (!ds) return null
+  const d = new Date(ds + 'T00:00:00'); if (isNaN(d)) return null
+  const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00')
+  const days = Math.round((d - today) / 86400000)
+  return { label: `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}`, days }
+}
+
 // IV vs HV: options are "rich" (good to SELL premium) when implied vol sits well
 // above the stock's recent realized (historical) vol. Ratio ≥ 1.3 = rich, ≤ 0.9 = cheap.
 export default function VolScanner() {
@@ -143,6 +152,7 @@ export default function VolScanner() {
               <th style={th} title="% of the past year's days that IV was below today's. Builds up over time.">IV %ile</th>
               <th style={th} title="IV minus HV, in volatility points">Spread</th>
               <th style={th} title="Days to expiry of the sampled option">DTE</th>
+              <th style={th} title="Next earnings date (Nasdaq estimate). Selling premium THROUGH earnings is risky — IV usually crushes right after the report.">Earnings</th>
               <th style={{ ...th, textAlign: 'center' }}>Signal</th>
             </tr>
           </thead>
@@ -161,6 +171,16 @@ export default function VolScanner() {
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivPercentile != null ? `${r.ivPercentile.toFixed(0)}%` : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivHvSpread != null ? `${r.ivHvSpread > 0 ? '+' : ''}${num(r.ivHvSpread, 1)}` : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: textMid }}>{r.ivDte != null ? r.ivDte : '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {(() => {
+                      const e = fmtEarnings(r.earnings ?? r.earningsDate)
+                      if (!e) return <span style={{ color: textMid }}>—</span>
+                      const c = (e.days >= 0 && e.days <= 7) ? '#ef4444' : (e.days >= 0 && e.days <= 21) ? '#f59e0b' : textMid
+                      return <span style={{ color: c, fontWeight: (e.days >= 0 && e.days <= 21) ? 700 : 400 }}
+                        title={e.days >= 0 ? `~${e.days} day(s) away (estimate)` : 'estimated'}>
+                        {e.label}{(e.days >= 0 && e.days <= 90) ? ` · ${e.days}d` : ''}</span>
+                    })()}
+                  </td>
                   <td style={{ padding: '8px 10px', textAlign: 'center' }}>
                     {r.signal
                       ? <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sig.bg, color: sig.color }}>{sig.label}</span>
@@ -172,7 +192,7 @@ export default function VolScanner() {
               )
             })}
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={10} style={{ padding: '28px', textAlign: 'center', color: textMid }}>No data yet — enter tickers and Scan, or leave blank to scan your short‑call names.</td></tr>
+              <tr><td colSpan={11} style={{ padding: '28px', textAlign: 'center', color: textMid }}>No data yet — enter tickers and Scan, or leave blank to scan your short‑call names.</td></tr>
             )}
           </tbody>
         </table>
