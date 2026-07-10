@@ -70,7 +70,7 @@ body.has-bg .app-container { background: transparent; box-shadow: none; }
 }
 
 #root {
-  max-width: 1400px;
+  max-width: 2000px;
   margin: 0 auto;
 }
 
