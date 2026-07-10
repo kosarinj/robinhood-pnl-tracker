@@ -13,7 +13,7 @@ export function SettingsProvider({ children }) {
   const [bgUrl, setBgUrl] = useState(() => localStorage.getItem(LS.bgUrl) || '')
   const [bgOpacity, setBgOpacity] = useState(() => {
     const v = parseFloat(localStorage.getItem(LS.bgOpacity))
-    return isNaN(v) ? 0.12 : v
+    return isNaN(v) ? 0.25 : v
   })
   const [bgTint, setBgTint] = useState(() => localStorage.getItem(LS.bgTint) || 'none')
   const [bgBlur, setBgBlur] = useState(() => {

@@ -68,6 +68,18 @@ export default function SettingsPanel() {
               <button onClick={() => { setBgUrl(''); setUrlDraft('') }}
                 style={{ marginTop: 8, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--textSecondary)', fontSize: 12, cursor: 'pointer' }}>Remove background</button>
             )}
+            {/* Live preview so a broken / non-image URL is obvious */}
+            {(urlDraft || bgUrl) && (
+              <div style={{ marginTop: 10 }}>
+                <img src={urlDraft || bgUrl} alt="background preview"
+                  onLoad={e => { e.currentTarget.style.display = 'block'; const w = e.currentTarget.nextSibling; if (w) w.style.display = 'none' }}
+                  onError={e => { e.currentTarget.style.display = 'none'; const w = e.currentTarget.nextSibling; if (w) w.style.display = 'block' }}
+                  style={{ width: '100%', height: 90, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                <div style={{ display: 'none', fontSize: 12, color: 'var(--negative)', marginTop: 4 }}>
+                  ⚠️ Couldn't load that image URL. Make sure it's a <strong>direct link to an image</strong> (ends in .jpg/.png/.webp).
+                </div>
+              </div>
+            )}
 
             <div style={label}>Fade — {Math.round(bgOpacity * 100)}%</div>
             <input type="range" min="0" max="1" step="0.01" value={bgOpacity} onChange={e => setBgOpacity(parseFloat(e.target.value))} style={{ width: '100%' }} disabled={!bgUrl} />
