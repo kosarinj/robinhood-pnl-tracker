@@ -63,6 +63,14 @@ db.exec(`
     UNIQUE(symbol, price_date)
   );
 
+  -- App-wide UI settings (theme, background image, etc.) stored server-side so they
+  -- sync across every device/browser instead of living in one browser's localStorage.
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+  );
+
   -- Daily IV / HV snapshots per ticker, so IV Rank / Percentile can build over time
   CREATE TABLE IF NOT EXISTS iv_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2075,6 +2083,25 @@ export class DatabaseService {
   }
 
   // Record (upsert) a day's IV/HV snapshot for a ticker so IV Rank can build over time
+  // App settings (key-value) — synced UI preferences (theme, background image, …)
+  getAppSettings() {
+    try {
+      const rows = db.prepare('SELECT key, value FROM app_settings').all()
+      const out = {}
+      rows.forEach(r => { out[r.key] = r.value })
+      return out
+    } catch (e) { console.error('getAppSettings:', e.message); return {} }
+  }
+
+  setAppSetting(key, value) {
+    try {
+      db.prepare(`
+        INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, strftime('%s','now'))
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).run(key, value == null ? null : String(value))
+    } catch (e) { console.error('setAppSetting:', e.message) }
+  }
+
   recordIV(ticker, snapDate, iv, hv30, stock) {
     try {
       if (!ticker || !snapDate || !(iv > 0)) return

@@ -8,11 +8,44 @@ const TINTS = [
   { label: 'Lighten', value: 'rgba(255,255,255,0.35)' }
 ]
 
+// Downscale a picked image to keep the upload small & fast (max ~1920px, JPEG).
+async function resizeImage(file, maxDim = 1920, quality = 0.85) {
+  const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(file) })
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl })
+  let { width, height } = img
+  if (Math.max(width, height) > maxDim) { const s = maxDim / Math.max(width, height); width = Math.round(width * s); height = Math.round(height * s) }
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+  return await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality))
+}
+
 export default function SettingsPanel() {
   const { theme, themes, setTheme } = useTheme()
   const { bgUrl, setBgUrl, bgOpacity, setBgOpacity, bgTint, setBgTint, bgBlur, setBgBlur } = useSettings()
   const [open, setOpen] = useState(false)
   const [urlDraft, setUrlDraft] = useState(bgUrl)
+  const [uploading, setUploading] = useState(false)
+  const [uploadErr, setUploadErr] = useState('')
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file
+    if (!file) return
+    setUploading(true); setUploadErr('')
+    try {
+      const blob = await resizeImage(file)
+      const fd = new FormData()
+      fd.append('image', blob, 'background.jpg')
+      const r = await fetch('/api/settings/background', { method: 'POST', credentials: 'include', body: fd })
+      const d = await r.json()
+      if (!r.ok || !d.success) throw new Error(d.error || 'Upload failed')
+      setBgUrl(d.url); setUrlDraft(d.url)
+    } catch (err) {
+      setUploadErr(err.message || 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const themeList = Object.values(themes)
 
@@ -57,7 +90,15 @@ export default function SettingsPanel() {
               ))}
             </div>
 
-            <div style={label}>Background image URL</div>
+            <div style={label}>Background image</div>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 8, border: '1px dashed var(--border)', background: 'var(--surfaceHover)', color: 'var(--text)', fontSize: 13, fontWeight: 600, cursor: uploading ? 'default' : 'pointer' }}>
+              {uploading ? 'Uploading…' : '⬆️ Upload image from this device'}
+              <input type="file" accept="image/*" onChange={handleUpload} disabled={uploading} style={{ display: 'none' }} />
+            </label>
+            <div style={{ fontSize: 11, color: 'var(--textSecondary)', marginTop: 4 }}>Saved to your account — shows up on every device you log in from.</div>
+            {uploadErr && <div style={{ fontSize: 12, color: 'var(--negative)', marginTop: 4 }}>⚠️ {uploadErr}</div>}
+
+            <div style={{ ...label, fontSize: 11 }}>…or paste an image URL</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <input style={input} placeholder="https://… (link to an image)" value={urlDraft}
                 onChange={e => setUrlDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') setBgUrl(urlDraft.trim()) }} />

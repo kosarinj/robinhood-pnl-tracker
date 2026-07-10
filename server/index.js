@@ -380,6 +380,14 @@ app.use(express.static(path.join(__dirname, '../dist'), {
 // Configure multer for file uploads
 const upload = multer({ storage: multer.memoryStorage() })
 
+// Uploaded background images live on the persistent volume (next to the DB) so they
+// survive redeploys, and are served at /uploads.
+const UPLOADS_DIR = path.join(path.dirname(dbPath), 'uploads')
+try { fs.mkdirSync(UPLOADS_DIR, { recursive: true }) } catch (e) { /* ignore */ }
+app.use('/uploads', express.static(UPLOADS_DIR, {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+}))
+
 // Services
 const priceService = new PriceService(databaseService)
 
@@ -1863,6 +1871,36 @@ const requireAuth = (req, res, next) => {
   }
   next()
 }
+
+// ── App settings (synced UI preferences: theme, background image) ──────────────
+// Stored server-side so they follow you across every device instead of one browser.
+app.get('/api/app-settings', requireAuth, (req, res) => {
+  res.json({ success: true, settings: databaseService.getAppSettings() })
+})
+
+app.put('/api/app-settings', requireAuth, (req, res) => {
+  try {
+    Object.entries(req.body || {}).forEach(([k, v]) => databaseService.setAppSetting(k, v))
+    res.json({ success: true, settings: databaseService.getAppSettings() })
+  } catch (e) { res.status(500).json({ success: false, error: e.message }) }
+})
+
+// Upload a background image → saved on the volume, URL stored in settings.
+app.post('/api/settings/background', requireAuth, upload.single('image'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'No image uploaded' })
+    if (!/^image\//.test(req.file.mimetype)) return res.status(400).json({ success: false, error: 'File must be an image' })
+    if (req.file.size > 12 * 1024 * 1024) return res.status(413).json({ success: false, error: 'Image too large (max 12MB)' })
+    const ext = ((req.file.mimetype.split('/')[1] || 'jpg').toLowerCase().replace('jpeg', 'jpg').replace(/[^a-z0-9]/g, '')) || 'jpg'
+    // Remove old background files so the volume doesn't accumulate them.
+    try { fs.readdirSync(UPLOADS_DIR).filter(f => f.startsWith('bg-')).forEach(f => fs.unlinkSync(path.join(UPLOADS_DIR, f))) } catch (e) { /* ignore */ }
+    const filename = `bg-${Date.now()}.${ext}`
+    fs.writeFileSync(path.join(UPLOADS_DIR, filename), req.file.buffer)
+    const url = `/uploads/${filename}`
+    databaseService.setAppSetting('bg_url', url)
+    res.json({ success: true, url })
+  } catch (e) { res.status(500).json({ success: false, error: e.message }) }
+})
 
 // Debug endpoint to test Polygon connection and open option positions
 app.get('/api/debug/polygon-options', requireAuth, async (req, res) => {
