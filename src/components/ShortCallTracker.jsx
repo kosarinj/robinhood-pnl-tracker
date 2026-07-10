@@ -269,7 +269,7 @@ export default function ShortCallTracker() {
       )}
 
       {filtered.length > 0 && (
-        <div style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
+        <div className="floating-panel" style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
           <table className="sc-tracker-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '12px', background: surface }}>
             <colgroup>
               <col style={{ width: '60px' }} />

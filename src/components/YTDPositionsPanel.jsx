@@ -396,7 +396,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       )}
 
       {!loading && rows.length > 0 && (
-        <div style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
+        <div className="floating-panel" style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
           <table className="ytd-panel-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
             <colgroup>
               <col style={{ width: '44px' }} />

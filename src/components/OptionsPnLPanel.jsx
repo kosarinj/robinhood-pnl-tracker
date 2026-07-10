@@ -307,6 +307,7 @@ export default function OptionsPnLPanel() {
     borderRadius: '12px',
     padding: '20px 24px',
     marginBottom: '16px',
+    boxShadow: '0 10px 28px var(--shadow), 0 2px 6px var(--shadow)',
   }
 
   const btnStyle = (active) => ({

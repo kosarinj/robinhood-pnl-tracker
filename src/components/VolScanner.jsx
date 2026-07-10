@@ -130,7 +130,7 @@ export default function VolScanner() {
         </div>
       )}
 
-      <div style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${border}` }}>
+      <div className="floating-panel" style={{ overflowX: 'auto', borderRadius: '10px', border: `1px solid ${border}` }}>
         <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
           <thead>
             <tr>

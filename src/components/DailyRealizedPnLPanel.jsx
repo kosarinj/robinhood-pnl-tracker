@@ -238,7 +238,7 @@ export default function DailyRealizedPnLPanel({ trades }) {
   const hasData = trades && trades.length > 0
 
   return (
-    <div style={{
+    <div className="floating-panel" style={{
       background: surface, border: `1px solid ${border}`,
       borderRadius: '12px', padding: '20px', marginBottom: '20px', color: text
     }}>

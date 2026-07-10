@@ -58,6 +58,17 @@ body {
 body.has-bg { background: transparent; }
 body.has-bg .app-container { background: transparent; box-shadow: none; }
 
+/* "Floating" cards — a soft layered elevation that reads as lifting off the page,
+   deepening gently on hover for a subtle 3-D feel (no jump, so tables stay usable). */
+.floating-panel {
+  box-shadow: 0 10px 28px var(--shadow), 0 2px 6px var(--shadow);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+.floating-panel:hover {
+  box-shadow: 0 18px 44px var(--shadow), 0 4px 10px var(--shadow);
+  transform: translateY(-2px);
+}
+
 #root {
   max-width: 1400px;
   margin: 0 auto;
