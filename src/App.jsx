@@ -4,7 +4,7 @@ import TradesTable from './components/TradesTable'
 import TradingSignals from './components/TradingSignals'
 import MarketAnalysis from './components/MarketAnalysis'
 import SignalPerformance from './components/SignalPerformance'
-import SettingsPanel from './components/SettingsPanel'
+import ThemeToggle from './components/ThemeToggle'
 import DailyPnLChart from './components/DailyPnLChart'
 import SupportResistanceLevels from './components/SupportResistanceLevels'
 import PriceChart from './components/PriceChart'
@@ -17,6 +17,7 @@ import StrategyPnLSplit from './components/StrategyPnLSplit'
 import YTDPositionsPanel from './components/YTDPositionsPanel'
 import ShortCallTracker from './components/ShortCallTracker'
 import VolScanner from './components/VolScanner'
+import TaxCenter from './components/TaxCenter'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -220,6 +221,7 @@ function AuthenticatedApp({ user }) {
             socketService.getAllTrades().then(setAllTrades).catch(() => {})
             setDeposits(result.deposits || [])
             setTotalPrincipal(result.totalPrincipal || 0)
+            setDividendsAndInterest(result.dividendsAndInterest || [])
             // Set historical prices and P&L data
             if (result.currentPrices) {
               setCurrentPrices(result.currentPrices)
@@ -742,6 +744,7 @@ function AuthenticatedApp({ user }) {
         socketService.getAllTrades().then(setAllTrades).catch(() => {})
         setDeposits(result.deposits || [])
         setTotalPrincipal(result.totalPrincipal || 0)
+        setDividendsAndInterest(result.dividendsAndInterest || [])
         if (result.currentPrices) {
           setCurrentPrices(result.currentPrices)
         }
@@ -939,6 +942,7 @@ function AuthenticatedApp({ user }) {
         setTrades(response.trades)
         setDeposits(response.deposits)
         setTotalPrincipal(response.totalPrincipal)
+        setDividendsAndInterest(response.dividendsAndInterest || [])
         setCurrentPrices(response.currentPrices)
         setPnlData(response.pnlData)
         setFailedSymbols(response.failedSymbols || [])
@@ -1189,13 +1193,13 @@ function AuthenticatedApp({ user }) {
             📁 Upload CSV
             <input type="file" accept=".csv" onChange={(e) => { const file = e.target.files[0]; if (file) handleFileUpload(file) }} style={{ display: 'none' }} />
           </label>
-          <SettingsPanel />
+          <ThemeToggle />
         </div>
       </div>
 
       {/* Main tab navigation */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '2px solid #e2e8f0', paddingBottom: '0' }}>
-        {[['dashboard', '📊 Dashboard'], ['positions', '📈 Positions'], ['analytics', '🔬 Analytics'], ['research', '🔍 Research']].map(([key, label]) => (
+        {[['dashboard', '📊 Dashboard'], ['positions', '📈 Positions'], ['analytics', '🔬 Analytics'], ['tax', '🧾 Tax'], ['research', '🔍 Research']].map(([key, label]) => (
           <button key={key} onClick={() => setActiveMainTab(key)} style={{
             padding: '8px 24px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
             background: 'none', borderBottom: activeMainTab === key ? '2px solid #667eea' : '2px solid transparent',
@@ -2446,6 +2450,17 @@ function AuthenticatedApp({ user }) {
           <YTDPositionsPanel pnlData={pnlData} />
           <ShortCallTracker />
         </div>
+      )}
+
+      {/* Tax tab */}
+      {activeMainTab === 'tax' && (
+        <TaxCenter
+          trades={allTrades.length > 0 ? allTrades : trades}
+          dividendsAndInterest={dividendsAndInterest}
+          pnlData={pnlData}
+          currentPrices={currentPrices}
+          accountName={user.username}
+        />
       )}
 
       {/* Research tab */}

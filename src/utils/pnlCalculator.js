@@ -1,3 +1,18 @@
+// Helper to safely get a YYYY-MM-DD string from a trade date that may be either
+// a Date object (standalone parser) or a string (server/DB). Avoids calling
+// .split() on a Date, which throws.
+const toDateStr = (val) => {
+  if (!val) return ''
+  if (val instanceof Date) {
+    if (isNaN(val)) return ''
+    const y = val.getFullYear()
+    const m = String(val.getMonth() + 1).padStart(2, '0')
+    const d = String(val.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  return String(val).split('T')[0].split(' ')[0]
+}
+
 // Helper to extract parent instrument from option description
 // e.g., "AAPL 01/15/2024 $150 Call" -> "AAPL"
 const extractParentInstrument = (description) => {
@@ -277,7 +292,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       const tradeDate = new Date(trade.date || trade.transDate)
       tradeDate.setHours(0, 0, 0, 0)
       // Get trade date string for reliable comparison
-      const tradeDateStr = (trade.date || trade.transDate || '').split('T')[0].split(' ')[0]
+      const tradeDateStr = toDateStr(trade.date || trade.transDate)
 
       // Track today's buys for day trading calculation (must be TODAY)
       if (tradeDateStr === todayStr) {
@@ -319,7 +334,7 @@ const calculateReal = (trades, currentPrice, symbol, debugCallback = null, divid
       tradeDate.setHours(0, 0, 0, 0)
       const isTodaysSell = tradeDate.getTime() === today.getTime()
       // Get trade date string for reliable day trading comparison
-      const sellDateStr = (trade.date || trade.transDate || '').split('T')[0].split(' ')[0]
+      const sellDateStr = toDateStr(trade.date || trade.transDate)
       const isTodaysSellForDayTrading = sellDateStr === todayStr
 
       // Track all sells for most recent sells list

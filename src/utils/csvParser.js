@@ -40,18 +40,22 @@ export const parseTrades = (file) => {
 
             // For options: use the Amount field directly (already correct contract value)
             // Set quantity=1 and price=amount so that quantity*price=amount in calculations
+            let contracts = 1
             if (isOption) {
+              contracts = Math.abs(quantity) || 1
               quantity = 1
               price = amount
             }
 
             // Determine if buy or sell
             // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
+            // OEXP = Option Expiration (expires worthless), OASGN = Assignment, OEXC = Exercise
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
             const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
+            const isExpiry = transCode === 'OEXP' || transCode === 'OASGN' || transCode === 'OEXC'
 
             // Parse date
-            const dateStr = row['Activity Date'] || row['Date'] || row['Trade Date']
+            const dateStr = row['Process Date'] || row['Activity Date'] || row['Date'] || row['Trade Date']
             const date = new Date(dateStr)
 
             return {
@@ -62,6 +66,8 @@ export const parseTrades = (file) => {
               description,
               isOption,
               isBuy,
+              isExpiry,
+              contracts,
               quantity: Math.abs(quantity),
               price: Math.abs(price),
               amount: Math.abs(amount),
@@ -70,20 +76,47 @@ export const parseTrades = (file) => {
             }
           })
 
-          // Filter out invalid trades and sort by date
+          // Separate real trades from dividends/interest
           const validTrades = trades
-            .filter(t => t.symbol && t.quantity > 0 && t.price > 0)
+            .filter(t => {
+              const tc = t.transCode
+              if (tc === 'CDIV' || tc === 'MDIV' || tc === 'INT' || tc === 'MINT') return false
+              if (t.isExpiry) return t.symbol && t.quantity > 0
+              return t.symbol && t.quantity > 0 && t.price > 0
+            })
+            .sort((a, b) => a.date - b.date)
+
+          // Extract dividends and interest for tax/income reporting
+          const dividendsAndInterest = results.data
+            .map((row, index) => {
+              const transCode = (row['Trans Code'] || '').toUpperCase()
+              if (!['CDIV', 'MDIV', 'INT', 'MINT'].includes(transCode)) return null
+              const instrument = row['Instrument'] || row['Symbol'] || ''
+              const amount = parseCurrency(row['Amount'] || 0)
+              const dateStr = row['Process Date'] || row['Activity Date'] || row['Date'] || row['Trade Date']
+              return {
+                id: index,
+                date: new Date(dateStr),
+                symbol: instrument.trim(),
+                amount: Math.abs(amount),
+                transCode,
+                isDividend: transCode === 'CDIV' || transCode === 'MDIV',
+                isInterest: transCode === 'INT' || transCode === 'MINT',
+                description: row['Description'] || ''
+              }
+            })
+            .filter(item => item !== null)
             .sort((a, b) => a.date - b.date)
 
           // Count options for debugging
           const optionCount = validTrades.filter(t => t.isOption).length
           const stockCount = validTrades.filter(t => !t.isOption).length
-          console.log(`📊 CSV Parsed: ${stockCount} stock trades, ${optionCount} option trades`)
+          console.log(`📊 CSV Parsed: ${stockCount} stock trades, ${optionCount} option trades, ${dividendsAndInterest.length} dividends/interest`)
 
           if (validTrades.length === 0) {
             reject(new Error('No valid trades found in CSV. Please check the file format.'))
           } else {
-            resolve(validTrades)
+            resolve({ trades: validTrades, dividendsAndInterest })
           }
         } catch (error) {
           reject(new Error(`Error parsing CSV: ${error.message}`))
