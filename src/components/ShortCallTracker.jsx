@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import ShortCallChart from './ShortCallChart'
 
 const fmt = (n, decimals = 2) => {
   if (n == null || isNaN(n)) return '—'
@@ -39,6 +40,7 @@ export default function ShortCallTracker() {
   const [rebuildMsg, setRebuildMsg] = useState(null)
   const [showClosed, setShowClosed] = useState(false)
   const [search, setSearch] = useState('')
+  const [chartEntry, setChartEntry] = useState(null)
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -137,7 +139,11 @@ export default function ShortCallTracker() {
 
     return (
       <tr key={entry.id} style={{ borderBottom: `1px solid ${border}`, background: rowBg, boxShadow: accent ? `inset 3px 0 0 ${accent}` : undefined }}>
-        <td style={{ padding: '9px 8px', fontWeight: '700', color: text, position: 'sticky', left: 0, zIndex: 1, width: '60px', minWidth: '60px', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: rowBg, boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>{entry.ticker}</td>
+        <td
+          onClick={() => setChartEntry(entry)}
+          title="View option vs stock price chart"
+          style={{ padding: '9px 8px', fontWeight: '700', color: '#3b82f6', cursor: 'pointer', position: 'sticky', left: 0, zIndex: 1, width: '60px', minWidth: '60px', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: rowBg, boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}
+        >{entry.ticker} 📈</td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: text }}>${entry.strike}</td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: textMid }}>{fmtDate(entry.expiry)}</td>
         <td style={{ padding: '9px 10px', textAlign: 'center' }}>
@@ -297,6 +303,10 @@ export default function ShortCallTracker() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {chartEntry && (
+        <ShortCallChart entry={chartEntry} onClose={() => setChartEntry(null)} isDark={isDark} />
       )}
     </div>
   )

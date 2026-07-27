@@ -2697,6 +2697,84 @@ app.post('/api/short-calls/rebuild', requireAuth, async (req, res) => {
   }
 })
 
+// GET /api/short-calls/:id/history — time series of the underlying stock price
+// and the MODELED short-call price since the sale date, for charting. There are
+// no historical option quotes on the data plan, so the call line is a
+// Black–Scholes reconstruction: implied vol is anchored once to the premium you
+// sold for on the sale date, then the contract is repriced against each day's
+// stock close. It's an estimate, labeled as such in the UI.
+app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const id = parseInt(req.params.id)
+    const entry = databaseService.getShortCallEntries(userId).find(e => e.id === id)
+    if (!entry) return res.status(404).json({ success: false, error: 'Entry not found' })
+
+    const parsed = parseOptionDescription(entry.symbol)
+    if (!parsed) return res.status(400).json({ success: false, error: 'Could not parse option contract' })
+
+    const K = parsed.strike
+    const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+    const saleDate = String(entry.sale_date).slice(0, 10)
+    const today = new Date().toISOString().slice(0, 10)
+    const endDate = expiry < today ? expiry : today
+
+    // Smallest Yahoo range that reaches back to the sale date.
+    const daysSinceSale = Math.max(1, Math.round((Date.now() - new Date(saleDate + 'T00:00:00Z').getTime()) / 86400000))
+    const range = daysSinceSale < 25 ? '1mo' : daysSinceSale < 80 ? '3mo' : daysSinceSale < 175 ? '6mo'
+      : daysSinceSale < 360 ? '1y' : daysSinceSale < 720 ? '2y' : '5y'
+
+    let hist
+    try {
+      hist = await priceService.fetchHistoricalPrices(parsed.ticker, range, '1d')
+    } catch (e) {
+      return res.status(502).json({ success: false, error: 'Could not fetch stock history: ' + e.message })
+    }
+
+    // Anchor implied vol to what the call was sold for on the sale date.
+    const r = 0.045
+    const contracts = entry.contracts || 1
+    const premiumPerShare = entry.premium / (contracts * 100)
+    const Sat = Number(entry.underlying_close)
+    const yrs = (a, b) => (new Date(b + 'T00:00:00Z').getTime() - new Date(a + 'T00:00:00Z').getTime()) / (365.25 * 24 * 3600 * 1000)
+    const Tsale = yrs(saleDate, expiry)
+    let sigma = 0
+    if (premiumPerShare > 0 && Sat > 0 && Tsale > 0) sigma = impliedVolCall(premiumPerShare, Sat, K, Tsale, r)
+    const optionModeled = sigma > 0
+
+    const series = []
+    for (const h of hist) {
+      const d = (h.date || '').slice(0, 10)
+      if (!d || d < saleDate || d > endDate) continue
+      const close = h.close
+      if (!(close > 0)) continue
+      let callPrice = null
+      if (optionModeled) {
+        const T = yrs(d, expiry)
+        const raw = T > 0 ? bsCall(close, K, T, r, sigma) : Math.max(0, close - K)
+        callPrice = Math.round(raw * 100) / 100
+      }
+      series.push({ date: d, stock: Math.round(close * 100) / 100, callPrice })
+    }
+
+    res.json({
+      success: true,
+      ticker: parsed.ticker,
+      strike: K,
+      expiry,
+      saleDate,
+      premiumPerShare: Math.round(premiumPerShare * 100) / 100,
+      underlyingAtSale: Sat > 0 ? Sat : null,
+      sigma: optionModeled ? Math.round(sigma * 1000) / 1000 : null,
+      optionModeled,
+      series
+    })
+  } catch (e) {
+    console.error('Error in /api/short-calls/:id/history:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Get daily EOD price snapshot for a specific date (default: most recent trading day)
 app.get('/api/daily-snapshot', requireAuth, async (req, res) => {
   try {
