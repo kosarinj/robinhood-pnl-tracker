@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import {
   buildTaxBase,
@@ -196,8 +196,8 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
   }
   const num = (n) => (n == null || isNaN(n) ? '0.00' : Number(n).toFixed(2))
 
-  const stRows = (summary?.allRealized || []).filter((r) => r.term === 'short')
-  const ltRows = (summary?.allRealized || []).filter((r) => r.term === 'long')
+  const stRows = useMemo(() => (summary?.allRealized || []).filter((r) => r.term === 'short'), [summary])
+  const ltRows = useMemo(() => (summary?.allRealized || []).filter((r) => r.term === 'long'), [summary])
   const totals = (rows) => rows.reduce(
     (a, r) => ({
       proceeds: a.proceeds + (r.proceeds || 0),
@@ -466,6 +466,16 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
   }
 
   const has1099B = (summary?.allRealized?.length || 0) > 0
+
+  // The realized-gains detail can be thousands of lot-level rows. Rendering them
+  // all bloats the DOM and makes the whole page janky to scroll, so cap what's
+  // shown and let the user expand. Full data is always available via the
+  // CSV / Consolidated-1099 exports below.
+  const DETAIL_PAGE = 150
+  const [detailLimit, setDetailLimit] = useState(DETAIL_PAGE)
+  useEffect(() => { setDetailLimit(DETAIL_PAGE) }, [activeYear, computed])
+  const allRealized = summary?.allRealized || []
+  const visibleRealized = allRealized.slice(0, detailLimit)
 
   // ---- shared styles ----
   const card = (accent) => ({
@@ -870,7 +880,7 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
                     </tr>
                   </thead>
                   <tbody>
-                    {summary.allRealized.map((r, i) => (
+                    {visibleRealized.map((r, i) => (
                       <tr key={i}>
                         <td style={{ ...tdLeft, maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.symbol}>
                           {r.type === 'option' ? '⚙️ ' : ''}{r.symbol}
@@ -901,6 +911,25 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
                     </tr>
                   </tfoot>
                 </table>
+              </div>
+            )}
+            {allRealized.length > detailLimit && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12px', color: textMid }}>
+                  Showing {visibleRealized.length.toLocaleString()} of {allRealized.length.toLocaleString()} lines (capped for smooth scrolling — export for the full list)
+                </span>
+                <button
+                  onClick={() => setDetailLimit((n) => n + 500)}
+                  style={{ padding: '6px 14px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Show 500 more
+                </button>
+                <button
+                  onClick={() => setDetailLimit(allRealized.length)}
+                  style={{ padding: '6px 14px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}
+                >
+                  Show all ({allRealized.length.toLocaleString()})
+                </button>
               </div>
             )}
           </div>
