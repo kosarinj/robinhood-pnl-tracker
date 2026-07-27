@@ -120,18 +120,40 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
     return p?.currentPrice > 0 ? p.currentPrice : 0
   }
 
-  const openWithMarket = (summary?.openLots || []).map((o) => {
-    const price = o.currentPrice > 0 ? o.currentPrice : priceOf(o.symbol)
-    const marketValue = price > 0 ? price * o.quantity : null
-    const unrealized =
-      marketValue != null ? marketValue - o.costBasis : (o.unrealizedFromData != null ? o.unrealizedFromData : null)
-    const daysToLongTerm = o.earliestHoldingDays != null ? Math.max(366 - o.earliestHoldingDays, 0) : null
-    // A hypothetical sale today would be long-term only if already past the 1-year
-    // mark (daysToLongTerm === 0). Unknown holding period (positions-only data)
-    // is treated as short-term — the conservative assumption used elsewhere here.
-    const wouldBeLong = daysToLongTerm === 0
-    return { ...o, price, marketValue, unrealized, daysToLongTerm, wouldBeLong }
-  })
+  // The app's main P&L data is the source of truth for what's ACTUALLY still
+  // held (it tracks the real broker position, incl. corporate actions). The
+  // trade-derived FIFO lots can leave phantom "open" residuals for positions
+  // that were closed long ago, so we only surface symbols pnlData confirms are
+  // still open — and use its live price so the sell-simulation works.
+  const openPnl = useMemo(() => {
+    const m = new Map()
+    for (const p of pnlData) {
+      if (!p || p.isOption || !p.symbol) continue
+      const r = p.real || p.avgCost || {}
+      if ((r.position || 0) > 0.01) m.set(p.symbol, p)
+    }
+    return m
+  }, [pnlData])
+
+  const openWithMarket = (summary?.openLots || [])
+    .filter((o) => openPnl.size === 0 || openPnl.has(o.symbol))
+    .map((o) => {
+      const p = openPnl.get(o.symbol)
+      const price = o.currentPrice > 0 ? o.currentPrice : (p?.currentPrice > 0 ? p.currentPrice : priceOf(o.symbol))
+      const marketValue = price > 0 ? price * o.quantity : null
+      const unrealized =
+        marketValue != null ? marketValue - o.costBasis
+          : (o.unrealizedFromData != null ? o.unrealizedFromData
+            : (p?.real?.unrealizedPnL != null ? p.real.unrealizedPnL : null))
+      const daysToLongTerm = o.earliestHoldingDays != null ? Math.max(366 - o.earliestHoldingDays, 0) : null
+      // A hypothetical sale today would be long-term only if already past the 1-year
+      // mark (daysToLongTerm === 0). Unknown holding period (positions-only data)
+      // is treated as short-term — the conservative assumption used elsewhere here.
+      const wouldBeLong = daysToLongTerm === 0
+      return { ...o, price, marketValue, unrealized, daysToLongTerm, wouldBeLong }
+    })
+
+  const openCostBasisShown = round2(openWithMarket.reduce((s, o) => s + (o.costBasis || 0), 0))
 
   const harvestCandidates = openWithMarket
     .filter((o) => o.unrealized != null && o.unrealized < 0)
@@ -744,7 +766,7 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
           <div style={box}>
             <h2 style={sectionTitle}>📦 Cost Basis — Open Positions ({openWithMarket.length})</h2>
             <div style={{ fontSize: '12px', color: textMid, marginBottom: '10px' }}>
-              Total open cost basis: <strong style={{ color: text }}>{fmt(summary.openCostBasis)}</strong> (FIFO).
+              Total open cost basis: <strong style={{ color: text }}>{fmt(openCostBasisShown)}</strong> (FIFO).
               {sellable.length > 0 && <> Tick a position's box to simulate <strong style={{ color: text }}>selling it today</strong> and see how your estimated tax changes.</>}
             </div>
 
