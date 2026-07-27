@@ -139,19 +139,35 @@ export function computeOptionsRealized(trades) {
 // this catches the common same-ticker case only.
 // ---------------------------------------------------------------------------
 function flagWashSales(realized, trades) {
+  // Group buy timestamps per symbol, sorted ascending, so each losing sale can
+  // binary-search the ±30-day window instead of scanning every buy (O(n²) → O(n log n)).
   const buysBySymbol = {}
   for (const t of trades) {
     if (!isStock(t) || !t.isBuy) continue
     if (!buysBySymbol[t.symbol]) buysBySymbol[t.symbol] = []
-    buysBySymbol[t.symbol].push(toDate(t.date))
+    buysBySymbol[t.symbol].push(toDate(t.date).getTime())
   }
+  for (const s in buysBySymbol) buysBySymbol[s].sort((a, b) => a - b)
+
+  const WINDOW = 30 * MS_PER_DAY
   for (const r of realized) {
     if (r.type !== 'stock' || r.gain >= 0) continue
-    const buys = buysBySymbol[r.symbol] || []
-    for (const b of buys) {
-      const diff = Math.abs((b - r.sellDate) / MS_PER_DAY)
-      // exclude the exact lot that was sold (same day is still a replacement buy)
-      if (diff <= 30 && b.getTime() !== r.buyDate.getTime()) {
+    const buys = buysBySymbol[r.symbol]
+    if (!buys || buys.length === 0) continue
+    const sellMs = r.sellDate.getTime()
+    const buyLotMs = r.buyDate.getTime()
+    const lower = sellMs - WINDOW
+    const upper = sellMs + WINDOW
+    // First buy timestamp >= lower bound of the window.
+    let lo = 0, hi = buys.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (buys[mid] < lower) lo = mid + 1
+      else hi = mid
+    }
+    for (let i = lo; i < buys.length && buys[i] <= upper; i++) {
+      // exclude the exact lot that was sold (a different same-day buy still counts)
+      if (buys[i] !== buyLotMs) {
         r.washSale = true
         break
       }
@@ -262,13 +278,31 @@ export function availableTaxYears(trades = [], dividendsAndInterest = []) {
 }
 
 // ---------------------------------------------------------------------------
-// Aggregate everything for a given tax year into a single summary object.
+// Heavy pass over the FULL trade history — run ONCE, independent of tax year.
+// This is the expensive part (FIFO lot matching + wash-sale detection + open
+// lots), so the UI computes it a single time and then slices per year cheaply
+// via summarizeTaxYear() below. Keeping it out of the per-year path is what
+// stops the Tax tab from re-crunching everything each time the year changes.
 // ---------------------------------------------------------------------------
-export function buildTaxSummary(trades = [], dividendsAndInterest = [], year) {
-  const stockRealized = computeStockRealized(trades).filter(
+export function buildTaxBase(trades = [], dividendsAndInterest = []) {
+  return {
+    stockRealized: computeStockRealized(trades), // all years, wash-flagged
+    optionsRealized: computeOptionsRealized(trades), // all years
+    openLots: computeOpenLots(trades),
+    trades,
+    dividendsAndInterest
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cheap per-year slice of a precomputed base — just filters + sums. Safe to
+// call on every tax-year change without any lot-matching work.
+// ---------------------------------------------------------------------------
+export function summarizeTaxYear(base, year) {
+  const stockRealized = base.stockRealized.filter(
     (r) => !year || r.sellDate.getFullYear() === year
   )
-  const optionsRealized = computeOptionsRealized(trades).filter(
+  const optionsRealized = base.optionsRealized.filter(
     (r) => !year || (r.sellDate && r.sellDate.getFullYear() === year)
   )
   const allRealized = [...stockRealized, ...optionsRealized]
@@ -277,9 +311,9 @@ export function buildTaxSummary(trades = [], dividendsAndInterest = [], year) {
   const shortTerm = allRealized.filter((r) => r.term === 'short')
   const longTerm = allRealized.filter((r) => r.term === 'long')
 
-  const income = summarizeIncome(dividendsAndInterest, year)
-  const withholding = detectWithholding(trades, dividendsAndInterest, year)
-  const openLots = computeOpenLots(trades)
+  const income = summarizeIncome(base.dividendsAndInterest, year)
+  const withholding = detectWithholding(base.trades, base.dividendsAndInterest, year)
+  const openLots = base.openLots
   const washSales = allRealized.filter((r) => r.washSale)
 
   return {
@@ -302,6 +336,14 @@ export function buildTaxSummary(trades = [], dividendsAndInterest = [], year) {
     washSales,
     washSaleDisallowed: Math.abs(sum(washSales, 'gain'))
   }
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate everything for a given tax year into a single summary object.
+// Convenience wrapper: does the heavy base pass then the per-year slice.
+// ---------------------------------------------------------------------------
+export function buildTaxSummary(trades = [], dividendsAndInterest = [], year) {
+  return summarizeTaxYear(buildTaxBase(trades, dividendsAndInterest), year)
 }
 
 // ---------------------------------------------------------------------------

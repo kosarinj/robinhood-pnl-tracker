@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import {
-  buildTaxSummary,
+  buildTaxBase,
+  summarizeTaxYear,
   buildSummaryFromPnl,
   estimateTax,
   relevantForms,
@@ -9,6 +10,8 @@ import {
 } from '../utils/taxCalculator'
 
 const LS_PLAN = 'taxCenter_plan'
+
+const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100
 
 const fmt = (n) => {
   if (n == null || isNaN(n)) return '—'
@@ -60,33 +63,55 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
   }
 
   const hasTrades = trades.length > 0
-  const summary = useMemo(
-    () =>
-      hasTrades
-        ? buildTaxSummary(trades, dividendsAndInterest, activeYear)
-        : buildSummaryFromPnl(pnlData, dividendsAndInterest, activeYear),
-    [hasTrades, trades, dividendsAndInterest, pnlData, activeYear]
-  )
-  const fromPositions = summary.source === 'positions'
 
-  const totalWithholding = (summary.withholding || 0) + (parseFloat(plan.extraWithholding) || 0)
+  // The tax figures are computed ON DEMAND (button click), not on tab open, so
+  // switching to the Tax tab stays instant even with a huge trade history. The
+  // heavy FIFO + wash-sale pass runs once via buildTaxBase; year changes only
+  // re-slice it cheaply via summarizeTaxYear.
+  const [computed, setComputed] = useState(false)
+  const [calculating, setCalculating] = useState(false)
+  const runCalc = () => {
+    setCalculating(true)
+    // Yield a frame so the "Calculating…" state paints before the synchronous crunch.
+    setTimeout(() => {
+      setComputed(true)
+      setCalculating(false)
+    }, 30)
+  }
+
+  const base = useMemo(
+    () => (computed && hasTrades ? buildTaxBase(trades, dividendsAndInterest) : null),
+    [computed, hasTrades, trades, dividendsAndInterest]
+  )
+  const summary = useMemo(() => {
+    if (!computed) return null
+    return hasTrades
+      ? summarizeTaxYear(base, activeYear)
+      : buildSummaryFromPnl(pnlData, dividendsAndInterest, activeYear)
+  }, [computed, hasTrades, base, pnlData, dividendsAndInterest, activeYear])
+
+  const fromPositions = summary?.source === 'positions'
+
+  const totalWithholding = (summary?.withholding || 0) + (parseFloat(plan.extraWithholding) || 0)
 
   const tax = useMemo(
     () =>
-      estimateTax({
-        shortTermGain: summary.shortTermGain,
-        longTermGain: summary.longTermGain,
-        dividends: summary.dividends,
-        interest: summary.interest,
-        ordinaryRate: parseFloat(plan.ordinaryRate) || 0,
-        longTermRate: parseFloat(plan.longTermRate) || 0,
-        dividendsQualified: plan.dividendsQualified,
-        withholding: totalWithholding
-      }),
+      summary
+        ? estimateTax({
+            shortTermGain: summary.shortTermGain,
+            longTermGain: summary.longTermGain,
+            dividends: summary.dividends,
+            interest: summary.interest,
+            ordinaryRate: parseFloat(plan.ordinaryRate) || 0,
+            longTermRate: parseFloat(plan.longTermRate) || 0,
+            dividendsQualified: plan.dividendsQualified,
+            withholding: totalWithholding
+          })
+        : null,
     [summary, plan, totalWithholding]
   )
 
-  const forms = useMemo(() => relevantForms(summary), [summary])
+  const forms = useMemo(() => (summary ? relevantForms(summary) : []), [summary])
 
   // Price lookup for open positions (for unrealized + loss harvesting)
   const priceOf = (symbol) => {
@@ -95,13 +120,17 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
     return p?.currentPrice > 0 ? p.currentPrice : 0
   }
 
-  const openWithMarket = summary.openLots.map((o) => {
+  const openWithMarket = (summary?.openLots || []).map((o) => {
     const price = o.currentPrice > 0 ? o.currentPrice : priceOf(o.symbol)
     const marketValue = price > 0 ? price * o.quantity : null
     const unrealized =
       marketValue != null ? marketValue - o.costBasis : (o.unrealizedFromData != null ? o.unrealizedFromData : null)
     const daysToLongTerm = o.earliestHoldingDays != null ? Math.max(366 - o.earliestHoldingDays, 0) : null
-    return { ...o, price, marketValue, unrealized, daysToLongTerm }
+    // A hypothetical sale today would be long-term only if already past the 1-year
+    // mark (daysToLongTerm === 0). Unknown holding period (positions-only data)
+    // is treated as short-term — the conservative assumption used elsewhere here.
+    const wouldBeLong = daysToLongTerm === 0
+    return { ...o, price, marketValue, unrealized, daysToLongTerm, wouldBeLong }
   })
 
   const harvestCandidates = openWithMarket
@@ -111,6 +140,50 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
   const nearLongTerm = openWithMarket
     .filter((o) => o.daysToLongTerm > 0 && o.daysToLongTerm <= 60 && o.unrealized != null && o.unrealized > 0)
     .sort((a, b) => a.daysToLongTerm - b.daysToLongTerm)
+
+  // ---- What-if: simulate selling selected open positions and see the tax delta ----
+  const [selectedSells, setSelectedSells] = useState(() => new Set())
+  const sellable = openWithMarket.filter((o) => o.unrealized != null)
+  const toggleSell = (symbol) => {
+    setSelectedSells((prev) => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
+  }
+  const whatIf = useMemo(() => {
+    if (!summary || !tax || selectedSells.size === 0) return null
+    let addShort = 0
+    let addLong = 0
+    const picked = []
+    for (const o of openWithMarket) {
+      if (!selectedSells.has(o.symbol) || o.unrealized == null) continue
+      if (o.wouldBeLong) addLong += o.unrealized
+      else addShort += o.unrealized
+      picked.push(o)
+    }
+    if (picked.length === 0) return null
+    const simTax = estimateTax({
+      shortTermGain: summary.shortTermGain + addShort,
+      longTermGain: summary.longTermGain + addLong,
+      dividends: summary.dividends,
+      interest: summary.interest,
+      ordinaryRate: parseFloat(plan.ordinaryRate) || 0,
+      longTermRate: parseFloat(plan.longTermRate) || 0,
+      dividendsQualified: plan.dividendsQualified,
+      withholding: totalWithholding
+    })
+    return {
+      picked,
+      addShort: round2(addShort),
+      addLong: round2(addLong),
+      addTotal: round2(addShort + addLong),
+      simTax,
+      deltaTax: round2(simTax.estimatedTax - tax.estimatedTax),
+      deltaBalance: round2(simTax.balance - tax.balance)
+    }
+  }, [summary, tax, openWithMarket, selectedSells, plan, totalWithholding])
 
   const noData = trades.length === 0 && pnlData.length === 0
 
@@ -123,8 +196,8 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
   }
   const num = (n) => (n == null || isNaN(n) ? '0.00' : Number(n).toFixed(2))
 
-  const stRows = summary.allRealized.filter((r) => r.term === 'short')
-  const ltRows = summary.allRealized.filter((r) => r.term === 'long')
+  const stRows = (summary?.allRealized || []).filter((r) => r.term === 'short')
+  const ltRows = (summary?.allRealized || []).filter((r) => r.term === 'long')
   const totals = (rows) => rows.reduce(
     (a, r) => ({
       proceeds: a.proceeds + (r.proceeds || 0),
@@ -392,7 +465,7 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
     w.focus()
   }
 
-  const has1099B = summary.allRealized.length > 0
+  const has1099B = (summary?.allRealized?.length || 0) > 0
 
   // ---- shared styles ----
   const card = (accent) => ({
@@ -446,8 +519,49 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
         </div>
       )}
 
-      {!noData && (
+      {/* On-demand calculation gate — nothing is crunched until you click, so
+          opening the Tax tab is instant even with a large trade history. */}
+      {!noData && !summary && (
+        <div style={{ textAlign: 'center', padding: '48px 20px', background: surface, border: `1px solid ${border}`, borderRadius: '12px' }}>
+          {calculating ? (
+            <div style={{ color: textMid, fontSize: '15px' }}>
+              <div style={{ fontSize: '28px', marginBottom: '10px' }}>⏳</div>
+              Crunching your trade history…
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: '15px', color: text, fontWeight: 600, marginBottom: '6px' }}>
+                Ready to calculate your {activeYear} tax figures
+              </div>
+              <div style={{ fontSize: '13px', color: textMid, maxWidth: '460px', margin: '0 auto 18px' }}>
+                {hasTrades
+                  ? 'Runs a full FIFO cost-basis, wash-sale and realized-gain pass over your entire trade history. It only runs when you ask, so switching to this tab stays fast.'
+                  : 'Builds your tax figures from the aggregated Positions data currently loaded.'}
+              </div>
+              <button
+                onClick={runCalc}
+                style={{ padding: '11px 26px', borderRadius: '8px', border: 'none', background: '#667eea', color: '#fff', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}
+              >
+                🧮 Calculate my taxes
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {!noData && summary && (
         <>
+          {/* Recalculate control */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+            <button
+              onClick={() => { setComputed(false); setSelectedSells(new Set()) }}
+              style={{ padding: '5px 12px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}
+              title="Clear the computed figures (they'll recompute on demand)"
+            >
+              ↺ Recalculate
+            </button>
+          </div>
+
           {fromPositions && (
             <div style={{ fontSize: '12px', color: textMid, background: isDark ? '#152033' : '#eff6ff', border: `1px solid ${isDark ? '#1e3a5f' : '#bfdbfe'}`, borderRadius: '8px', padding: '10px 14px', marginBottom: '18px' }}>
               📊 Using aggregated data from your Positions/Dashboard. This gives realized totals, cost basis, dividends and the forms checklist. The short-term vs long-term split, per-lot detail, and wash-sale detection need your full trade-history CSV — click <strong>Upload CSV</strong> above to unlock them.
@@ -616,10 +730,42 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
             </div>
           )}
 
-          {/* Cost basis of open positions */}
+          {/* Cost basis of open positions + sell-simulation what-if */}
           <div style={box}>
             <h2 style={sectionTitle}>📦 Cost Basis — Open Positions ({openWithMarket.length})</h2>
-            <div style={{ fontSize: '12px', color: textMid, marginBottom: '10px' }}>Total open cost basis: <strong style={{ color: text }}>{fmt(summary.openCostBasis)}</strong> (FIFO)</div>
+            <div style={{ fontSize: '12px', color: textMid, marginBottom: '10px' }}>
+              Total open cost basis: <strong style={{ color: text }}>{fmt(summary.openCostBasis)}</strong> (FIFO).
+              {sellable.length > 0 && <> Tick a position's box to simulate <strong style={{ color: text }}>selling it today</strong> and see how your estimated tax changes.</>}
+            </div>
+
+            {/* What-if result banner */}
+            {whatIf && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px', alignItems: 'center', justifyContent: 'space-between', background: isDark ? '#152033' : '#eff6ff', border: `1px solid ${isDark ? '#1e3a5f' : '#bfdbfe'}`, borderRadius: '10px', padding: '12px 16px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px', alignItems: 'center' }}>
+                  <div>
+                    <div style={label}>Selling {whatIf.picked.length} position{whatIf.picked.length > 1 ? 's' : ''} realizes</div>
+                    <div style={{ fontSize: '18px', fontWeight: 700, color: gain(whatIf.addTotal) }}>{fmt(whatIf.addTotal)}</div>
+                    <div style={{ fontSize: '11px', color: textMid }}>ST {fmt(whatIf.addShort)} · LT {fmt(whatIf.addLong)}</div>
+                  </div>
+                  <div style={{ fontSize: '20px', color: textMid }}>→</div>
+                  <div>
+                    <div style={label}>Est. tax liability</div>
+                    <div style={{ fontSize: '15px', color: text }}>
+                      {fmt(tax.estimatedTax)} <span style={{ color: textMid }}>→</span> <strong>{fmt(whatIf.simTax.estimatedTax)}</strong>
+                    </div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: whatIf.deltaTax > 0 ? '#ef4444' : whatIf.deltaTax < 0 ? '#22c55e' : textMid }}>
+                      {whatIf.deltaTax > 0 ? '+' : ''}{fmt(whatIf.deltaTax)} tax {whatIf.deltaTax > 0 ? 'more' : whatIf.deltaTax < 0 ? 'less' : ''}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={label}>{whatIf.simTax.balance > 0 ? 'Balance due' : 'Refund'}</div>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: whatIf.simTax.balance > 0 ? '#ef4444' : '#22c55e' }}>{fmt(Math.abs(whatIf.simTax.balance))}</div>
+                  </div>
+                </div>
+                <button onClick={() => setSelectedSells(new Set())} style={{ padding: '6px 12px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>Clear selection</button>
+              </div>
+            )}
+
             {openWithMarket.length === 0 ? (
               <div style={{ color: textMid, fontSize: '13px' }}>No open stock positions.</div>
             ) : (
@@ -627,6 +773,7 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
                 <table style={{ width: '100%', borderCollapse: 'collapse', background: surface }}>
                   <thead>
                     <tr>
+                      <th style={{ ...th, textAlign: 'center', width: '44px' }} title="Simulate selling this position today">Sell?</th>
                       <th style={thLeft}>Symbol</th>
                       <th style={th}>Shares</th>
                       <th style={th}>Avg Cost</th>
@@ -639,29 +786,48 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
                     </tr>
                   </thead>
                   <tbody>
-                    {openWithMarket.map((o) => (
-                      <tr key={o.symbol}>
-                        <td style={tdLeft}>{o.symbol}</td>
-                        <td style={td}>{o.quantity.toLocaleString()}</td>
-                        <td style={td}>{fmt(o.avgCost)}</td>
-                        <td style={td}>{fmt(o.costBasis)}</td>
-                        <td style={td}>{o.price > 0 ? fmt(o.price) : '—'}</td>
-                        <td style={td}>{o.marketValue != null ? fmt(o.marketValue) : '—'}</td>
-                        <td style={{ ...td, color: gain(o.unrealized), fontWeight: 600 }}>{o.unrealized != null ? fmt(o.unrealized) : '—'}</td>
-                        <td style={td}>{fmtDate(o.earliestDate)}</td>
-                        <td style={{ ...td, textAlign: 'right' }}>
-                          {o.daysToLongTerm == null ? (
-                            <span style={{ color: textMid }}>—</span>
-                          ) : o.daysToLongTerm > 0 ? (
-                            <span style={{ color: '#3b82f6' }}>{o.daysToLongTerm}d to long-term</span>
-                          ) : (
-                            <span style={{ color: '#8b5cf6' }}>Long-term ✓</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {openWithMarket.map((o) => {
+                      const checked = selectedSells.has(o.symbol)
+                      const canSell = o.unrealized != null
+                      return (
+                        <tr key={o.symbol} style={checked ? { background: isDark ? '#152033' : '#eff6ff' } : undefined}>
+                          <td style={{ ...td, textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={!canSell}
+                              onChange={() => toggleSell(o.symbol)}
+                              style={{ cursor: canSell ? 'pointer' : 'not-allowed' }}
+                              title={canSell ? 'Simulate selling this position today' : 'No current price — cannot simulate'}
+                            />
+                          </td>
+                          <td style={tdLeft}>{o.symbol}</td>
+                          <td style={td}>{o.quantity.toLocaleString()}</td>
+                          <td style={td}>{fmt(o.avgCost)}</td>
+                          <td style={td}>{fmt(o.costBasis)}</td>
+                          <td style={td}>{o.price > 0 ? fmt(o.price) : '—'}</td>
+                          <td style={td}>{o.marketValue != null ? fmt(o.marketValue) : '—'}</td>
+                          <td style={{ ...td, color: gain(o.unrealized), fontWeight: 600 }}>{o.unrealized != null ? fmt(o.unrealized) : '—'}</td>
+                          <td style={td}>{fmtDate(o.earliestDate)}</td>
+                          <td style={{ ...td, textAlign: 'right' }}>
+                            {o.daysToLongTerm == null ? (
+                              <span style={{ color: textMid }}>—</span>
+                            ) : o.daysToLongTerm > 0 ? (
+                              <span style={{ color: '#3b82f6' }}>{o.daysToLongTerm}d to long-term</span>
+                            ) : (
+                              <span style={{ color: '#8b5cf6' }}>Long-term ✓</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {sellable.length > 0 && (
+              <div style={{ fontSize: '11px', color: textMid, marginTop: '8px' }}>
+                Simulated sales use each position's <em>earliest</em> lot to decide short- vs long-term, so mixed-age holdings are approximated. Gains are added to your {activeYear} realized totals for the estimate above.
               </div>
             )}
           </div>
