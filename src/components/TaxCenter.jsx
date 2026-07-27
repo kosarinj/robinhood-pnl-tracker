@@ -174,18 +174,56 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
       return next
     })
   }
+
+  // Open OPTION positions (calls/puts, long/short) with mark-to-market P&L. Closing
+  // one today realizes its unrealizedPnl as a SHORT-TERM gain/loss — a losing short
+  // call bought back realizes a loss that offsets gains. Fetched only after the
+  // user calculates, so opening the tab stays instant.
+  const [optionPositions, setOptionPositions] = useState([])
+  const [optionsLoading, setOptionsLoading] = useState(false)
+  const [optionsError, setOptionsError] = useState(null)
+  const [selectedOptions, setSelectedOptions] = useState(() => new Set())
+  useEffect(() => {
+    if (!computed) { setOptionPositions([]); return }
+    let alive = true
+    setOptionsLoading(true)
+    setOptionsError(null)
+    fetch('/api/options-pnl/open-positions', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((j) => { if (!alive) return; if (j.success) setOptionPositions(j.positions || []); else setOptionsError(j.error || 'Failed to load options') })
+      .catch((e) => { if (alive) setOptionsError(e.message) })
+      .finally(() => { if (alive) setOptionsLoading(false) })
+    return () => { alive = false }
+  }, [computed])
+  const sellableOptions = optionPositions.filter((op) => op.unrealizedPnl != null)
+  const toggleOption = (symbol) => {
+    setSelectedOptions((prev) => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
+  }
+  const clearWhatIf = () => { setSelectedSells(new Set()); setSelectedOptions(new Set()) }
+
   const whatIf = useMemo(() => {
-    if (!summary || !tax || selectedSells.size === 0) return null
+    if (!summary || !tax || (selectedSells.size === 0 && selectedOptions.size === 0)) return null
     let addShort = 0
     let addLong = 0
-    const picked = []
+    const pickedStocks = []
     for (const o of openWithMarket) {
       if (!selectedSells.has(o.symbol) || o.unrealized == null) continue
       if (o.wouldBeLong) addLong += o.unrealized
       else addShort += o.unrealized
-      picked.push(o)
+      pickedStocks.push(o)
     }
-    if (picked.length === 0) return null
+    const pickedOptions = []
+    for (const op of optionPositions) {
+      if (!selectedOptions.has(op.symbol) || op.unrealizedPnl == null) continue
+      addShort += op.unrealizedPnl // closing an option realizes short-term gain/loss
+      pickedOptions.push(op)
+    }
+    if (pickedStocks.length === 0 && pickedOptions.length === 0) return null
     const simTax = estimateTax({
       shortTermGain: summary.shortTermGain + addShort,
       longTermGain: summary.longTermGain + addLong,
@@ -197,7 +235,9 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
       withholding: totalWithholding
     })
     return {
-      picked,
+      pickedStocks,
+      pickedOptions,
+      count: pickedStocks.length + pickedOptions.length,
       addShort: round2(addShort),
       addLong: round2(addLong),
       addTotal: round2(addShort + addLong),
@@ -205,7 +245,7 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
       deltaTax: round2(simTax.estimatedTax - tax.estimatedTax),
       deltaBalance: round2(simTax.balance - tax.balance)
     }
-  }, [summary, tax, openWithMarket, selectedSells, plan, totalWithholding])
+  }, [summary, tax, openWithMarket, selectedSells, optionPositions, selectedOptions, plan, totalWithholding])
 
   const noData = trades.length === 0 && pnlData.length === 0
 
@@ -586,7 +626,7 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
           {/* Recalculate control */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
             <button
-              onClick={() => { setComputed(false); setSelectedSells(new Set()) }}
+              onClick={() => { setComputed(false); clearWhatIf() }}
               style={{ padding: '5px 12px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}
               title="Clear the computed figures (they'll recompute on demand)"
             >
@@ -775,9 +815,9 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px', alignItems: 'center', justifyContent: 'space-between', background: isDark ? '#152033' : '#eff6ff', border: `1px solid ${isDark ? '#1e3a5f' : '#bfdbfe'}`, borderRadius: '10px', padding: '12px 16px', marginBottom: '12px' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px', alignItems: 'center' }}>
                   <div>
-                    <div style={label}>Selling {whatIf.picked.length} position{whatIf.picked.length > 1 ? 's' : ''} realizes</div>
+                    <div style={label}>Closing {whatIf.count} position{whatIf.count > 1 ? 's' : ''} realizes</div>
                     <div style={{ fontSize: '18px', fontWeight: 700, color: gain(whatIf.addTotal) }}>{fmt(whatIf.addTotal)}</div>
-                    <div style={{ fontSize: '11px', color: textMid }}>ST {fmt(whatIf.addShort)} · LT {fmt(whatIf.addLong)}</div>
+                    <div style={{ fontSize: '11px', color: textMid }}>ST {fmt(whatIf.addShort)} · LT {fmt(whatIf.addLong)}{whatIf.pickedOptions.length > 0 ? ` · ${whatIf.pickedOptions.length} option${whatIf.pickedOptions.length > 1 ? 's' : ''}` : ''}</div>
                   </div>
                   <div style={{ fontSize: '20px', color: textMid }}>→</div>
                   <div>
@@ -794,7 +834,7 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
                     <div style={{ fontSize: '15px', fontWeight: 700, color: whatIf.simTax.balance > 0 ? '#ef4444' : '#22c55e' }}>{fmt(Math.abs(whatIf.simTax.balance))}</div>
                   </div>
                 </div>
-                <button onClick={() => setSelectedSells(new Set())} style={{ padding: '6px 12px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>Clear selection</button>
+                <button onClick={clearWhatIf} style={{ padding: '6px 12px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>Clear selection</button>
               </div>
             )}
 
@@ -862,6 +902,69 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
                 Simulated sales use each position's <em>earliest</em> lot to decide short- vs long-term, so mixed-age holdings are approximated. Gains are added to your {activeYear} realized totals for the estimate above.
               </div>
             )}
+          </div>
+
+          {/* Open OPTIONS — close simulation (short calls, etc.) */}
+          <div style={box}>
+            <h2 style={sectionTitle}>⚙️ Open Options — Close Simulation {optionPositions.length > 0 ? `(${optionPositions.length})` : ''}</h2>
+            <div style={{ fontSize: '12px', color: textMid, marginBottom: '10px' }}>
+              Closing an option realizes its mark-to-market P&L as a <strong>short-term</strong> gain/loss. A <strong>losing short call</strong> bought back realizes a loss that offsets your realized gains — tick a contract to fold it into the estimate above.
+            </div>
+            {optionsLoading ? (
+              <div style={{ color: textMid, fontSize: '13px', padding: '10px 0' }}>Loading open options…</div>
+            ) : optionsError ? (
+              <div style={{ color: '#ef4444', fontSize: '13px' }}>{optionsError}</div>
+            ) : optionPositions.length === 0 ? (
+              <div style={{ color: textMid, fontSize: '13px' }}>No open option positions.</div>
+            ) : (
+              <div style={{ overflowX: 'auto', border: `1px solid ${border}`, borderRadius: '10px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', background: surface }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...th, textAlign: 'center', width: '44px' }} title="Simulate closing this contract today">Close?</th>
+                      <th style={thLeft}>Contract</th>
+                      <th style={th}>Side</th>
+                      <th style={th}>Qty</th>
+                      <th style={th}>Avg Cost</th>
+                      <th style={th}>Mark</th>
+                      <th style={th}>Close P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...optionPositions]
+                      .sort((a, b) => (a.unrealizedPnl ?? 1e12) - (b.unrealizedPnl ?? 1e12))
+                      .map((op) => {
+                        const checked = selectedOptions.has(op.symbol)
+                        const canClose = op.unrealizedPnl != null
+                        const typeLabel = op.optionType === 'call' ? 'Call' : 'Put'
+                        return (
+                          <tr key={op.symbol} style={checked ? { background: isDark ? '#152033' : '#eff6ff' } : undefined}>
+                            <td style={{ ...td, textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={!canClose}
+                                onChange={() => toggleOption(op.symbol)}
+                                style={{ cursor: canClose ? 'pointer' : 'not-allowed' }}
+                                title={canClose ? 'Simulate closing this contract today' : 'No current mark — cannot simulate'}
+                              />
+                            </td>
+                            <td style={tdLeft}>{op.ticker} ${op.strike} {typeLabel} {op.expiry ? `${op.expiry.slice(5, 7)}/${op.expiry.slice(8, 10)}/${op.expiry.slice(2, 4)}` : ''}</td>
+                            <td style={{ ...td, color: op.isLong ? '#3b82f6' : '#f59e0b', fontWeight: 600 }}>{op.isLong ? 'Long' : 'Short'}</td>
+                            <td style={td}>{op.openContracts}</td>
+                            <td style={td}>{fmt(op.avgCostPerContract)}</td>
+                            <td style={td}>{op.markPrice > 0 ? fmt(op.markPrice) : '—'}</td>
+                            <td style={{ ...td, color: gain(op.unrealizedPnl), fontWeight: 600 }}>{op.unrealizedPnl != null ? fmt(op.unrealizedPnl) : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{ fontSize: '11px', color: textMid, marginTop: '8px' }}>
+              Option marks come from the live options feed (short-call marks may be a Black–Scholes estimate when no quote is available). Closing P&L is treated as short-term. ⚠️ Rolling into a substantially-identical call can trigger a <strong>wash sale</strong>, and covered-call/straddle rules can defer losses — verify before acting.
+            </div>
           </div>
 
           {/* Realized gains detail */}
