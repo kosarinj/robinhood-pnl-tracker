@@ -429,6 +429,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 </th>
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Average cost per share">Avg Cost</th>
+                <th style={{ ...thStyle(null), cursor: 'default' }} title="Effective cost per share after options income = Avg Cost − (realized Options Total ÷ shares). Lower than avg cost when options have net paid you; higher when options net lost.">Eff. Cost</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Current stock price">Stock Price</th>
                 <th style={{ ...thStyle('stockPnL') }} onClick={() => toggleSort('stockPnL')}
                     title="Stock P&L = realized (buy/sell gains) + unrealized (open shares)">
@@ -513,6 +514,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
                       const hasManualCost = !!costOverrides[row.ticker]
                       const avgCost = costOverrides[row.ticker] || computedCost
+                      // Effective cost per share after options income: avg cost reduced by
+                      // the realized Options Total spread across the current shares. Lower
+                      // than avg cost when options have net paid you; higher when they lost.
+                      const effectiveCost = (pos > 0 && avgCost > 0)
+                        ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
+                        : null
                       const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
                       const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
@@ -561,6 +568,13 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                               {avgCost ? fmt(avgCost) : '—'}{hasManualCost ? ' ✎' : ''}
                             </button>
                           )}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '600',
+                            color: effectiveCost == null ? textMid : effectiveCost < avgCost ? '#22c55e' : effectiveCost > avgCost ? '#ef4444' : text }}
+                            title={effectiveCost != null
+                              ? `Avg cost ${fmt(avgCost)} − options ${fmt(row.totalRealized)} ÷ ${pos?.toLocaleString()} sh (${fmt((row.totalRealized || 0) / pos)}/sh) = ${fmt(effectiveCost)}`
+                              : 'Needs shares held + an avg cost'}>
+                          {effectiveCost != null ? fmt(effectiveCost) : '—'}
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
                           {price ? fmt(price) : '—'}
@@ -643,7 +657,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.totalRealized, isDark), fontWeight: '700', fontSize: '15px' }}>{fmt(totals.totalRealized)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.openUnrealizedPnL)}</td>
-                <td colSpan={3} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
+                <td colSpan={4} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net + totals.openUnrealizedPnL, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{fmt(totals.net + totals.openUnrealizedPnL)}</td>
