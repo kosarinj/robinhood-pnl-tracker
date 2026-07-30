@@ -120,38 +120,48 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
     return p?.currentPrice > 0 ? p.currentPrice : 0
   }
 
-  // The app's main P&L data is the source of truth for what's ACTUALLY still
-  // held (it tracks the real broker position, incl. corporate actions). The
-  // trade-derived FIFO lots can leave phantom "open" residuals for positions
-  // that were closed long ago, so we only surface symbols pnlData confirms are
-  // still open — and use its live price so the sell-simulation works.
-  const openPnl = useMemo(() => {
-    const m = new Map()
-    for (const p of pnlData) {
-      if (!p || p.isOption || !p.symbol) continue
-      const r = p.real || p.avgCost || {}
-      if ((r.position || 0) > 0.01) m.set(p.symbol, p)
-    }
-    return m
-  }, [pnlData])
+  // Authoritative OPEN stock positions come from the server (open-only via
+  // `HAVING position > 0`, with live prices) — the trade-derived FIFO lots can
+  // leave phantom "open" residuals for long-closed positions and often lack a
+  // current price (which disabled the sell checkboxes). We keep the FIFO lots
+  // only for holding-period / cost-basis detail, matched by symbol.
+  const [stockHoldings, setStockHoldings] = useState([])
+  const [stockLoaded, setStockLoaded] = useState(false)
+  useEffect(() => {
+    if (!computed) { setStockHoldings([]); setStockLoaded(false); return }
+    let alive = true
+    fetch('/api/stock-positions-with-prices', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((j) => { if (!alive) return; setStockHoldings(j.success ? (j.holdings || []) : []); setStockLoaded(true) })
+      .catch(() => { if (alive) setStockLoaded(true) })
+    return () => { alive = false }
+  }, [computed])
 
-  const openWithMarket = (summary?.openLots || [])
-    .filter((o) => openPnl.size === 0 || openPnl.has(o.symbol))
-    .map((o) => {
-      const p = openPnl.get(o.symbol)
-      const price = o.currentPrice > 0 ? o.currentPrice : (p?.currentPrice > 0 ? p.currentPrice : priceOf(o.symbol))
-      const marketValue = price > 0 ? price * o.quantity : null
-      const unrealized =
-        marketValue != null ? marketValue - o.costBasis
-          : (o.unrealizedFromData != null ? o.unrealizedFromData
-            : (p?.real?.unrealizedPnL != null ? p.real.unrealizedPnL : null))
-      const daysToLongTerm = o.earliestHoldingDays != null ? Math.max(366 - o.earliestHoldingDays, 0) : null
+  const lotBySymbol = useMemo(() => {
+    const m = {}
+    for (const o of (summary?.openLots || [])) m[o.symbol] = o
+    return m
+  }, [summary])
+
+  const openWithMarket = stockHoldings
+    .filter((h) => (h.position || 0) > 0)
+    .map((h) => {
+      const lot = lotBySymbol[h.symbol]
+      const quantity = h.position
+      const avgCost = h.avgCost > 0 ? h.avgCost : (lot?.avgCost || 0)
+      const costBasis = lot?.costBasis != null ? lot.costBasis : round2(avgCost * quantity)
+      const price = h.currentPrice > 0 ? h.currentPrice : 0
+      const marketValue = price > 0 ? round2(price * quantity) : null
+      const unrealized = h.unrealizedPnL != null ? h.unrealizedPnL
+        : (marketValue != null ? round2(marketValue - costBasis) : null)
+      const earliestDate = lot?.earliestDate ?? null
+      const daysToLongTerm = lot?.earliestHoldingDays != null ? Math.max(366 - lot.earliestHoldingDays, 0) : null
       // A hypothetical sale today would be long-term only if already past the 1-year
-      // mark (daysToLongTerm === 0). Unknown holding period (positions-only data)
-      // is treated as short-term — the conservative assumption used elsewhere here.
+      // mark (daysToLongTerm === 0). Unknown holding period is treated as short-term.
       const wouldBeLong = daysToLongTerm === 0
-      return { ...o, price, marketValue, unrealized, daysToLongTerm, wouldBeLong }
+      return { symbol: h.symbol, quantity, avgCost, costBasis, price, marketValue, unrealized, earliestDate, daysToLongTerm, wouldBeLong }
     })
+    .sort((a, b) => (b.costBasis || 0) - (a.costBasis || 0))
 
   const openCostBasisShown = round2(openWithMarket.reduce((s, o) => s + (o.costBasis || 0), 0))
 
@@ -838,7 +848,9 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
               </div>
             )}
 
-            {openWithMarket.length === 0 ? (
+            {!stockLoaded ? (
+              <div style={{ color: textMid, fontSize: '13px' }}>Loading open positions…</div>
+            ) : openWithMarket.length === 0 ? (
               <div style={{ color: textMid, fontSize: '13px' }}>No open stock positions.</div>
             ) : (
               <div style={{ overflowX: 'auto', border: `1px solid ${border}`, borderRadius: '10px' }}>

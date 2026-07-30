@@ -2106,6 +2106,21 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
       console.warn('POLYGON_API_KEY not set — skipping options mark prices')
     }
 
+    // Underlying stock prices — fall back to a direct quote fetch for tickers the
+    // option snapshot didn't cover, so we can model a mark when an option has no
+    // live quote (common for thin / far-OTM strikes on the delayed data plan).
+    const needTickers = allUnderlyingTickers.filter(t => !(polygonStockPrices[t] > 0))
+    if (needTickers.length > 0) {
+      try {
+        const fetched = await priceService.fetchPrices(needTickers)
+        needTickers.forEach(t => { if (fetched[t] > 0) polygonStockPrices[t] = fetched[t] })
+      } catch (e) { console.warn('open-positions stock price fallback failed:', e.message) }
+    }
+    // Short-call entries carry the sale-day premium + underlying, letting us model a
+    // Black–Scholes mark when a short call has no live option quote.
+    const shortEntryBySymbol = {}
+    for (const e of databaseService.getShortCallEntries(req.user.userId)) shortEntryBySymbol[e.symbol] = e
+
     const positions = []
     activeOpts.forEach(pos => {
       const quotes = markPrices[pos.symbol] || null
@@ -2113,10 +2128,25 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
       if (!parsed) return
       const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
       const isLong = pos.net_long > 0
-      const mark = quotes?.mid || 0
       const openContracts = isLong ? pos.net_long : pos.net_short
       const totalCostBasis = isLong ? pos.total_paid : pos.total_received
       const avgCostPerContract = openContracts > 0 ? Math.abs(totalCostBasis) / (isLong ? pos.bto_contracts : pos.sto_contracts) : 0
+      const underlyingNow = polygonStockPrices[parsed.ticker] || 0
+      // Prefer a live quote; else model a mark so the position still shows a P&L
+      // (otherwise the tax/close simulation can't include it). Short calls get a
+      // Black–Scholes mark anchored to their sale premium; everything else falls
+      // back to intrinsic value (0 for an OTM option ≈ worthless).
+      let mark = quotes?.mid || 0
+      let markSource = mark > 0 ? 'quote' : null
+      if (!(mark > 0) && underlyingNow > 0) {
+        const entry = shortEntryBySymbol[pos.symbol]
+        const modeled = (!isLong && parsed.type === 'call' && entry) ? modelOptionMark(entry, parsed, underlyingNow) : 0
+        if (modeled > 0) { mark = modeled; markSource = 'model' }
+        else {
+          mark = parsed.type === 'call' ? Math.max(0, underlyingNow - parsed.strike) : Math.max(0, parsed.strike - underlyingNow)
+          markSource = 'intrinsic'
+        }
+      }
       const currentValue = mark * 100 * openContracts
       const unrealizedPnl = isLong
         ? currentValue - (avgCostPerContract * openContracts)
@@ -2149,8 +2179,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
         isLong,
         avgCostPerContract: Math.round(avgCostPerContract * 100) / 100,
         markPrice: mark,
+        markSource,
         currentValue: Math.round(currentValue * 100) / 100,
-        unrealizedPnl: mark > 0 ? Math.round(unrealizedPnl * 100) / 100 : null,
+        unrealizedPnl: markSource ? Math.round(unrealizedPnl * 100) / 100 : null,
         stockPrice,
         remainingPremium,
         remainingPremiumLabel
