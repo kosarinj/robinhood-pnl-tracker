@@ -24,6 +24,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [chartReady, setChartReady] = useState(false)
   const [supportResistanceLevels, setSupportResistanceLevels] = useState([])
   const [showSupportResistance, setShowSupportResistance] = useState(true)
+  const [showFib, setShowFib] = useState(false)
   const [showStockPnL, setShowStockPnL] = useState(true)
   const [showOptionsPnL, setShowOptionsPnL] = useState(true)
   const [dateRange, setDateRange] = useState('6mo') // '1mo', '3mo', '6mo', '1y', 'max'
@@ -436,6 +437,27 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 </label>
               )}
 
+              {/* Fibonacci Retracement Toggle */}
+              <label style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                background: showFib ? '#fef3c7' : '#f0f0f0',
+                borderRadius: '6px',
+                fontSize: '14px',
+                color: '#666',
+                cursor: 'pointer',
+                border: showFib ? '1px solid #d97706' : '1px solid transparent'
+              }} title="Auto-drawn from the swing high/low of the visible range. Watch the 61.8% and 50% levels for reversals — strongest when they line up with a support/resistance level.">
+                <input
+                  type="checkbox"
+                  checked={showFib}
+                  onChange={(e) => setShowFib(e.target.checked)}
+                />
+                Fibonacci
+              </label>
+
               {/* Stock P&L Toggle */}
               <label style={{
                 display: 'flex',
@@ -796,6 +818,43 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   }
 
                   return linesToShow
+                })()}
+
+                {/* Fibonacci retracement — auto-anchored to the visible swing high/low */}
+                {showFib && priceData.length > 1 && (() => {
+                  const highs = priceData.map(d => d.high).filter(v => v > 0)
+                  const lows = priceData.map(d => d.low).filter(v => v > 0)
+                  if (highs.length === 0 || lows.length === 0) return null
+                  const swingHigh = Math.max(...highs)
+                  const swingLow = Math.min(...lows)
+                  const range = swingHigh - swingLow
+                  if (!(range > 0)) return null
+                  // ratio 0 = swing high, 1 = swing low. 50% & 61.8% are the key
+                  // reversal ("golden pocket") levels, so they're drawn emphasized.
+                  const ratios = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
+                  return ratios.map(r => {
+                    const price = swingHigh - range * r
+                    const key = r === 0.5 || r === 0.618
+                    const pct = (r * 100).toFixed(1).replace(/\.0$/, '')
+                    return (
+                      <ReferenceLine
+                        key={`fib-${r}`}
+                        y={price}
+                        yAxisId="price"
+                        stroke={key ? '#b45309' : '#d97706'}
+                        strokeWidth={r === 0.618 ? 2 : 1}
+                        strokeDasharray={key ? undefined : '4 4'}
+                        strokeOpacity={key ? 0.9 : 0.5}
+                        label={{
+                          value: `${pct}%  ${price.toFixed(2)}`,
+                          position: 'insideRight',
+                          fill: key ? '#b45309' : '#d97706',
+                          fontSize: 10,
+                          fontWeight: key ? 'bold' : 'normal'
+                        }}
+                      />
+                    )
+                  })
                 })()}
               </ComposedChart>
             </ResponsiveContainer>
