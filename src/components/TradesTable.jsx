@@ -17,6 +17,9 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   const [whatIfShares, setWhatIfShares] = useState('')
   const [whatIfPrice, setWhatIfPrice] = useState('')
   const [whatIfMethod, setWhatIfMethod] = useState('real')
+  const [whatIfManual, setWhatIfManual] = useState(false)   // standalone mode: type any symbol
+  const [whatIfCurShares, setWhatIfCurShares] = useState('') // current shares (editable, defaults to held)
+  const [whatIfCurAvg, setWhatIfCurAvg] = useState('')       // current avg cost (editable, defaults to held)
   const [editingRisk, setEditingRisk] = useState(null)
   const [riskInput, setRiskInput] = useState('')
   const [premiumData, setPremiumData] = useState({}) // { [parentSymbol]: { quotes: {}, loading: false, error: null } }
@@ -263,18 +266,47 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
   }
 
   const openWhatIf = (symbol, currentPrice) => {
+    setWhatIfManual(false)
     setWhatIfSymbol(symbol)
     setWhatIfShares('')
     setWhatIfPrice(currentPrice.toString())
     setWhatIfMethod('real')
+    // Current shares / avg cost seed from the held position (Real), and stay editable.
+    const row = data.find(r => r.symbol === symbol)
+    setWhatIfCurShares(row?.real?.position != null ? String(row.real.position) : '')
+    setWhatIfCurAvg(row?.real?.avgCostBasis != null ? String(row.real.avgCostBasis) : '')
+  }
+
+  const openManualWhatIf = () => {
+    setWhatIfManual(true)
+    setWhatIfSymbol('')
+    setWhatIfShares('')
+    setWhatIfPrice('')
+    setWhatIfMethod('real')
+    setWhatIfCurShares('')
+    setWhatIfCurAvg('')
   }
 
   const closeWhatIf = () => {
     setWhatIfSymbol(null)
+    setWhatIfManual(false)
     setWhatIfShares('')
     setWhatIfPrice('')
     setWhatIfMethod('real')
+    setWhatIfCurShares('')
+    setWhatIfCurAvg('')
   }
+
+  // When editing a held symbol, switching the cost-basis method refreshes the
+  // current-shares/avg-cost defaults (still overridable by hand afterward).
+  useEffect(() => {
+    if (whatIfManual || !whatIfSymbol) return
+    const row = data.find(r => r.symbol === whatIfSymbol)
+    if (!row || !row[whatIfMethod]) return
+    setWhatIfCurShares(row[whatIfMethod].position != null ? String(row[whatIfMethod].position) : '')
+    setWhatIfCurAvg(row[whatIfMethod].avgCostBasis != null ? String(row[whatIfMethod].avgCostBasis) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whatIfMethod, whatIfSymbol, whatIfManual])
 
   const startEditingRisk = (symbol, currentAllocation) => {
     setEditingRisk(symbol)
@@ -294,28 +326,15 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     setRiskInput('')
   }
 
-  const calculateWhatIfAvgCost = (row) => {
-    if (!whatIfShares || !whatIfPrice || isNaN(whatIfShares) || isNaN(whatIfPrice)) {
-      return null
-    }
-
-    // Get data based on selected method
-    let currentPosition, currentAvgCost
-    if (whatIfMethod === 'real') {
-      currentPosition = row.real.position
-      currentAvgCost = row.real.avgCostBasis
-    } else if (whatIfMethod === 'fifo') {
-      currentPosition = row.fifo.position
-      currentAvgCost = row.fifo.avgCostBasis
-    } else if (whatIfMethod === 'lifo') {
-      currentPosition = row.lifo.position
-      currentAvgCost = row.lifo.avgCostBasis
-    }
-
+  const calculateWhatIfAvgCost = () => {
+    // Current shares / avg cost come from the editable fields (seeded from the
+    // held position, but overridable — and fully manual in standalone mode).
+    const currentPosition = parseFloat(whatIfCurShares)
+    const currentAvgCost = parseFloat(whatIfCurAvg)
     const newShares = parseFloat(whatIfShares)
     const newPrice = parseFloat(whatIfPrice)
 
-    if (newShares <= 0 || newPrice <= 0 || currentPosition <= 0) {
+    if (!(currentPosition > 0) || !(currentAvgCost > 0) || !(newShares > 0) || !(newPrice > 0)) {
       return null
     }
 
@@ -323,11 +342,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
     const newPosition = currentPosition + newShares
     const costDifference = newAvgCost - currentAvgCost
 
-    return {
-      newAvgCost,
-      newPosition,
-      costDifference
-    }
+    return { newAvgCost, newPosition, costDifference, currentAvgCost }
   }
 
   useEffect(() => {
@@ -837,6 +852,16 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   return (
     <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+        <button
+          onClick={openManualWhatIf}
+          style={{ padding: '7px 14px', borderRadius: '6px', border: '1px solid #667eea', background: 'rgba(102,126,234,0.10)', color: '#667eea', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
+          title="Blended average-cost calculator: enter shares held + shares to buy + price to see your new average. Type any symbol, or click a row's Avg Cost to prefill a held position."
+        >
+          🧮 Avg Cost Calculator
+        </button>
+      </div>
+
       {data.length !== allData?.length && (
         <div style={{
           padding: '10px 15px',
@@ -1840,7 +1865,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       )}
 
       {/* What-If Popup */}
-      {whatIfSymbol && (
+      {(whatIfManual || whatIfSymbol) && (
         <div
           className="signal-popup"
           style={{
@@ -1855,117 +1880,83 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
           }}
         >
           <div className="signal-popup-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h4>📊 What-If Calculator: {whatIfSymbol}</h4>
+            <h4>🧮 Avg Cost Calculator{whatIfSymbol ? `: ${whatIfSymbol}` : ''}</h4>
             <button onClick={closeWhatIf} className="btn-small btn-cancel" style={{ fontSize: '16px', padding: '4px 8px' }}>✗</button>
           </div>
 
           {(() => {
-            const row = data.find(r => r.symbol === whatIfSymbol)
-            if (!row) return null
-
-            // Get current values based on selected method
-            let currentPosition, currentAvgCost
-            if (whatIfMethod === 'real') {
-              currentPosition = row.real.position
-              currentAvgCost = row.real.avgCostBasis
-            } else if (whatIfMethod === 'fifo') {
-              currentPosition = row.fifo.position
-              currentAvgCost = row.fifo.avgCostBasis
-            } else if (whatIfMethod === 'lifo') {
-              currentPosition = row.lifo.position
-              currentAvgCost = row.lifo.avgCostBasis
-            }
-
+            const row = whatIfManual ? null : data.find(r => r.symbol === whatIfSymbol)
+            const inputStyle = { width: '100%', padding: '8px', fontSize: '14px' }
             return (
               <>
-                <div style={{ marginBottom: '15px', padding: '10px', background: 'var(--tableHeader)', borderRadius: '6px' }}>
-                  <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Calculation Method:</div>
-                  <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="whatIfMethod"
-                        value="real"
-                        checked={whatIfMethod === 'real'}
-                        onChange={(e) => setWhatIfMethod(e.target.value)}
-                      />
-                      Real P&L
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="whatIfMethod"
-                        value="fifo"
-                        checked={whatIfMethod === 'fifo'}
-                        onChange={(e) => setWhatIfMethod(e.target.value)}
-                      />
-                      FIFO
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="whatIfMethod"
-                        value="lifo"
-                        checked={whatIfMethod === 'lifo'}
-                        onChange={(e) => setWhatIfMethod(e.target.value)}
-                      />
-                      LIFO
-                    </label>
+                {/* Symbol — editable in standalone mode */}
+                {whatIfManual && (
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Symbol (optional):</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. AAPL"
+                      value={whatIfSymbol || ''}
+                      onChange={(e) => setWhatIfSymbol(e.target.value.toUpperCase())}
+                      className="price-input"
+                      style={{ ...inputStyle, textTransform: 'uppercase' }}
+                      autoFocus
+                    />
                   </div>
-                </div>
+                )}
 
-                <div style={{ marginBottom: '15px', padding: '10px', background: 'var(--tableHeader)', borderRadius: '6px' }}>
-                  <div style={{ marginBottom: '5px' }}>
-                    <strong>Current Position:</strong> {currentPosition} shares
+                {/* Cost-basis method — only when tied to a held position */}
+                {row && (
+                  <div style={{ marginBottom: '15px', padding: '10px', background: 'var(--tableHeader)', borderRadius: '6px' }}>
+                    <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Seed current values from:</div>
+                    <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+                      {['real', 'fifo', 'lifo'].map(m => (
+                        <label key={m} style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}>
+                          <input type="radio" name="whatIfMethod" value={m} checked={whatIfMethod === m} onChange={(e) => setWhatIfMethod(e.target.value)} />
+                          {m === 'real' ? 'Real P&L' : m.toUpperCase()}
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                  <div>
-                    <strong>Current Avg Cost:</strong> {formatCurrency(currentAvgCost)}
+                )}
+
+                {/* Current shares + avg cost — editable, default to what we hold */}
+                <div style={{ marginBottom: '15px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Current Shares:</label>
+                    <input type="number" step="1" min="0" placeholder="Shares held" value={whatIfCurShares}
+                      onChange={(e) => setWhatIfCurShares(e.target.value)} className="price-input" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Current Avg Cost:</label>
+                    <input type="number" step="0.01" min="0" placeholder="Avg cost / share" value={whatIfCurAvg}
+                      onChange={(e) => setWhatIfCurAvg(e.target.value)} className="price-input" style={inputStyle} />
                   </div>
                 </div>
 
                 <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                    Shares to Buy:
-                  </label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    placeholder="Number of shares"
-                    value={whatIfShares}
-                    onChange={(e) => setWhatIfShares(e.target.value)}
-                    className="price-input"
-                    style={{ width: '100%', padding: '8px', fontSize: '14px' }}
-                    autoFocus
-                  />
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Shares to Buy:</label>
+                  <input type="number" step="1" min="0" placeholder="Number of shares" value={whatIfShares}
+                    onChange={(e) => setWhatIfShares(e.target.value)} className="price-input" style={inputStyle} />
                 </div>
 
                 <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                    Buy Price per Share:
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="Price per share"
-                    value={whatIfPrice}
-                    onChange={(e) => setWhatIfPrice(e.target.value)}
-                    className="price-input"
-                    style={{ width: '100%', padding: '8px', fontSize: '14px' }}
-                  />
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>Buy Price per Share:</label>
+                  <input type="number" step="0.01" min="0" placeholder="Price per share" value={whatIfPrice}
+                    onChange={(e) => setWhatIfPrice(e.target.value)} className="price-input" style={inputStyle} />
                 </div>
 
                 {(() => {
-                  const result = calculateWhatIfAvgCost(row)
-                  if (!result) return null
-
-                  const methodLabel = whatIfMethod === 'real' ? 'Real P&L' : whatIfMethod === 'fifo' ? 'FIFO' : 'LIFO'
-
+                  const result = calculateWhatIfAvgCost()
+                  if (!result) return (
+                    <div style={{ padding: '12px', fontSize: '13px', color: '#666', textAlign: 'center' }}>
+                      Enter current shares, current avg cost, shares to buy, and a buy price to see the new average.
+                    </div>
+                  )
                   return (
                     <div style={{ padding: '15px', background: 'var(--surface)', borderRadius: '8px', border: '2px solid #667eea' }}>
                       <div style={{ marginBottom: '10px', fontSize: '16px', fontWeight: 'bold', color: '#0056b3' }}>
-                        📈 Results ({methodLabel}):
+                        📈 Results:
                       </div>
                       <div style={{ marginBottom: '8px' }}>
                         <strong>New Position:</strong> {result.newPosition.toFixed(2)} shares
@@ -1974,7 +1965,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
                         <strong>New Avg Cost:</strong> {formatCurrency(result.newAvgCost)}
                       </div>
                       <div className={getClassName(result.costDifference)}>
-                        <strong>Change:</strong> {formatCurrency(result.costDifference)} ({result.costDifference > 0 ? '↑' : '↓'} {((result.costDifference / currentAvgCost) * 100).toFixed(2)}%)
+                        <strong>Change:</strong> {formatCurrency(result.costDifference)} ({result.costDifference > 0 ? '↑' : '↓'} {((result.costDifference / result.currentAvgCost) * 100).toFixed(2)}%)
                       </div>
                       <div style={{ marginTop: '10px', fontSize: '12px', color: '#666' }}>
                         Total Investment: {formatCurrency(parseFloat(whatIfShares) * parseFloat(whatIfPrice))}
@@ -1989,7 +1980,7 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
       )}
 
       {/* Backdrop for What-If popup */}
-      {whatIfSymbol && (
+      {(whatIfManual || whatIfSymbol) && (
         <div
           style={{
             position: 'fixed',
