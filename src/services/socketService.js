@@ -27,7 +27,8 @@ class SocketService {
     this.socket = io(this.serverUrl, {
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionAttempts: 5
+      reconnectionAttempts: 5,
+      withCredentials: true  // send the session cookie so the server can auth the socket
     })
 
     this.socket.on('connect', () => {

@@ -10,6 +10,13 @@ function Login({ onSwitchToSignup }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  // Admin password reset (gated by the ADMIN_RESET_KEY set in the server env).
+  const [showReset, setShowReset] = useState(false)
+  const [resetUsername, setResetUsername] = useState('')
+  const [resetPassword, setResetPassword] = useState('')
+  const [resetKey, setResetKey] = useState('')
+  const [resetMsg, setResetMsg] = useState(null)
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -21,6 +28,32 @@ function Login({ onSwitchToSignup }) {
       setError(result.error)
       setLoading(false)
     }
+  }
+
+  const handleReset = async (e) => {
+    e.preventDefault()
+    setResetMsg(null)
+    try {
+      const r = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username: resetUsername, newPassword: resetPassword, resetKey })
+      })
+      const d = await r.json()
+      setResetMsg(d.success
+        ? { ok: true, text: 'Password reset. Log in with your new password above.' }
+        : { ok: false, text: d.error || 'Reset failed' })
+    } catch (err) {
+      setResetMsg({ ok: false, text: err.message })
+    }
+  }
+
+  const resetInput = {
+    width: '100%', padding: '10px', borderRadius: '8px', marginBottom: '8px',
+    border: isDark ? '1px solid #444' : '1px solid #ddd',
+    background: isDark ? '#1e1e1e' : 'white', color: isDark ? '#e0e0e0' : '#333',
+    fontSize: '14px', boxSizing: 'border-box'
   }
 
   return (
@@ -165,6 +198,35 @@ function Login({ onSwitchToSignup }) {
             </button>
           </div>
         </form>
+
+        <div style={{ textAlign: 'center', marginTop: '14px' }}>
+          <button
+            type="button"
+            onClick={() => { setShowReset(v => !v); setResetMsg(null) }}
+            style={{ background: 'none', border: 'none', color: isDark ? '#8a8a9a' : '#94a3b8', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline' }}
+          >
+            {showReset ? 'Cancel reset' : 'Reset password'}
+          </button>
+        </div>
+
+        {showReset && (
+          <form onSubmit={handleReset} style={{ marginTop: '10px', paddingTop: '14px', borderTop: isDark ? '1px solid #444' : '1px solid #eee' }}>
+            <div style={{ fontSize: '12px', color: isDark ? '#b0b0b0' : '#666', marginBottom: '10px' }}>
+              Resets a password using the server's <strong>ADMIN_RESET_KEY</strong> (set it in your Railway environment variables first).
+            </div>
+            <input style={resetInput} type="text" placeholder="Username" value={resetUsername} onChange={e => setResetUsername(e.target.value)} autoComplete="off" />
+            <input style={resetInput} type="password" placeholder="New password (min 6 chars)" value={resetPassword} onChange={e => setResetPassword(e.target.value)} autoComplete="new-password" />
+            <input style={resetInput} type="password" placeholder="Admin reset key" value={resetKey} onChange={e => setResetKey(e.target.value)} autoComplete="off" />
+            {resetMsg && (
+              <div style={{ padding: '10px', marginBottom: '8px', borderRadius: '8px', fontSize: '13px', background: resetMsg.ok ? '#d1e7dd' : '#f8d7da', color: resetMsg.ok ? '#0f5132' : '#721c24' }}>
+                {resetMsg.text}
+              </div>
+            )}
+            <button type="submit" style={{ width: '100%', padding: '12px', background: '#64748b', color: 'white', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+              Reset Password
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )

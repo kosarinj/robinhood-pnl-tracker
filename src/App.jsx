@@ -24,20 +24,23 @@ import { fetchCurrentPrices } from './utils/yahooFinance'
 import { getIntradayData } from './utils/marketData'
 import { generateSignal } from './utils/technicalAnalysis'
 import { socketService } from './services/socketService'
-
-// Auth disabled - defaulting to jkosarin user
-const DEFAULT_USER = {
-  userId: 1,
-  username: 'jkosarin',
-  email: 'jkosarin@example.com'
-}
+import { useAuth } from './contexts/AuthContext'
+import AuthPage from './components/Auth/AuthPage'
 
 function App() {
-  // Skip auth - always use default user
-  return <AuthenticatedApp user={DEFAULT_USER} />
+  const { user, loading, isAuthenticated } = useAuth()
+
+  if (loading) {
+    return <div className="loading" style={{ padding: '40px', textAlign: 'center' }}>Loading…</div>
+  }
+  if (!isAuthenticated) {
+    return <AuthPage />
+  }
+  return <AuthenticatedApp user={user} />
 }
 
 function AuthenticatedApp({ user }) {
+  const { logout } = useAuth()
   const [trades, setTrades] = useState([])
   const [allTrades, setAllTrades] = useState([])
   const [pnlData, setPnlData] = useState([])
@@ -1184,6 +1187,13 @@ function AuthenticatedApp({ user }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '14px', fontWeight: '500' }}>👤 {user.username}</span>
           {useServer && <span title={connected ? 'Connected' : 'Disconnected'} style={{ fontSize: '13px', color: connected ? '#22c55e' : '#ef4444' }}>●</span>}
+          <button
+            onClick={() => { if (window.confirm('Log out?')) logout() }}
+            style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: 'transparent', color: '#64748b', cursor: 'pointer' }}
+            title="Log out"
+          >
+            Log out
+          </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '11px', opacity: 0.4 }}>

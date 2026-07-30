@@ -474,16 +474,21 @@ setInterval(async () => {
 
 console.log('ℹ️  Background support/resistance scan is DISABLED - use manual refresh in UI')
 
-// Socket.IO authentication middleware
-// AUTH DISABLED - defaulting to jkosarin user
+// Socket.IO authentication middleware — verify the session cookie from the
+// handshake. CSV upload happens over the socket, so this is what tags each
+// user's uploaded data. Unauthenticated connections are rejected.
 io.use((socket, next) => {
-  // Skip authentication - default to jkosarin user (ID 1)
-  socket.data.user = {
-    userId: 1,
-    username: 'jkosarin',
-    email: 'jkosarin@example.com'
+  try {
+    const cookieHeader = socket.handshake.headers?.cookie || ''
+    const match = cookieHeader.match(/(?:^|;\s*)session_token=([^;]+)/)
+    const token = match ? decodeURIComponent(match[1]) : null
+    const user = authService.verifySession(token)
+    if (!user) return next(new Error('Authentication required'))
+    socket.data.user = user
+    next()
+  } catch (e) {
+    next(new Error('Authentication required'))
   }
-  next()
 })
 
 // Socket.IO connection handling
@@ -1195,11 +1200,11 @@ io.on('connection', (socket) => {
     }
   })
 
-  // Clear all saved data (admin function)
+  // Clear all saved data for THIS user only
   socket.on('clear-database', () => {
-    console.log(`🗑️  Received clear-database request`)
+    console.log(`🗑️  Received clear-database request (user: ${user.userId})`)
     try {
-      databaseService.clearAllData()
+      databaseService.clearAllData(user.userId)
       socket.emit('database-cleared', { success: true })
     } catch (error) {
       console.error(`❌ Error clearing database:`, error)
@@ -1812,14 +1817,16 @@ app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body
     const result = await authService.login(username, password)
 
-    // Set session cookie (httpOnly for security)
+    // Set session cookie (httpOnly for security). `secure` in production so the
+    // cookie is only sent over HTTPS (Railway serves HTTPS).
     res.cookie('session_token', result.sessionToken, {
       httpOnly: true,
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-      sameSite: 'lax'
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production'
     })
 
-    res.json({ success: true, user: result.user })
+    res.json({ success: true, user: { ...result.user, userId: result.user.id } })
   } catch (error) {
     res.status(401).json({ success: false, error: error.message })
   }
@@ -1853,15 +1860,14 @@ app.get('/api/auth/me', (req, res) => {
   }
 })
 
-// Middleware to require authentication for protected routes
-// AUTH DISABLED - defaulting to jkosarin user
+// Middleware to require authentication for protected routes.
+// Verifies the httpOnly session cookie and attaches { userId, username, email }.
 const requireAuth = (req, res, next) => {
-  // Skip authentication - default to jkosarin user (ID 1)
-  req.user = {
-    userId: 1,
-    username: 'jkosarin',
-    email: 'jkosarin@example.com'
+  const user = authService.verifySession(req.cookies?.session_token)
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Not authenticated' })
   }
+  req.user = user
   next()
 }
 
@@ -2506,7 +2512,7 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
   try {
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!polygonKey) return res.json({ error: 'No POLYGON_API_KEY set' })
-    const userId = req.user?.userId || 1
+    const userId = req.user.userId
 
     // Large universes are served from the background-populated cache (can't live-fetch 300+).
     const universe = (req.query.universe || '').toLowerCase()
@@ -2911,10 +2917,21 @@ app.get('/api/debug/users', (req, res) => {
   }
 })
 
-// Password reset endpoint (for debugging - should require email verification in production)
+// Admin password reset — gated by a secret ADMIN_RESET_KEY that only the app
+// owner sets in the environment (Railway). Disabled entirely if the env var is
+// unset, so it can't be used for account takeover. Intended for recovering a
+// forgotten password (e.g. the original jkosarin account).
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
-    const { username, newPassword } = req.body
+    const { username, newPassword, resetKey } = req.body
+
+    const adminKey = process.env.ADMIN_RESET_KEY
+    if (!adminKey) {
+      return res.status(403).json({ success: false, error: 'Password reset is disabled (no ADMIN_RESET_KEY configured).' })
+    }
+    if (!resetKey || resetKey !== adminKey) {
+      return res.status(403).json({ success: false, error: 'Invalid reset key.' })
+    }
 
     if (!username || !newPassword) {
       return res.status(400).json({
@@ -2922,8 +2939,10 @@ app.post('/api/auth/reset-password', async (req, res) => {
         error: 'Username and new password required'
       })
     }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' })
+    }
 
-    // For now, allow password reset without verification (debug mode)
     const bcrypt = await import('bcryptjs')
     const passwordHash = await bcrypt.hash(newPassword, 10)
 
@@ -2981,7 +3000,7 @@ app.get('/api/tracked-symbols', (req, res) => {
 // Stock positions with avg cost and live prices — used by YTD Positions panel
 app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
   try {
-    const userId = req.session?.userId || 1
+    const userId = req.user.userId
     // getStockPositionsWithCost lives in database.js where db is in scope
     const stockData = databaseService.getStockPositionsWithCost(userId)
     const symbols = Object.keys(stockData)
@@ -3018,7 +3037,7 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
 // Debug: raw option trades for a ticker — diagnose open premium / P&L issues
 app.get('/api/debug-option-trades', requireAuth, (req, res) => {
   try {
-    const userId = req.session?.userId || req.user?.userId || 1
+    const userId = req.user.userId
     const ticker = (req.query.ticker || '').toUpperCase()
     const rows = databaseService.getRawOptionTradesForTicker(userId, ticker)
     res.json({ success: true, ticker, count: rows.length, rows })
@@ -3079,7 +3098,7 @@ app.get('/api/health', (req, res) => {
 // Usage: /api/debug-option-mark?symbol=MRVL  (substring match; omit for all)
 app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
   try {
-    const userId = req.session?.userId || req.user?.userId || 1
+    const userId = req.user.userId
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!polygonKey) return res.json({ error: 'No POLYGON_API_KEY set on server' })
     const wanted = (req.query.symbol || '').toLowerCase()
@@ -3157,7 +3176,7 @@ app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
 // Usage: /api/debug-open-pnl?ticker=MRVL
 app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
   try {
-    const userId = req.session?.userId || req.user?.userId || 1
+    const userId = req.user.userId
     const polygonKey = process.env.POLYGON_API_KEY || ''
     const ticker = (req.query.ticker || '').toUpperCase()
     const shortEntries = databaseService.getShortCallEntries(userId)
@@ -3222,7 +3241,7 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
 // Debug: show raw stock trades from DB so we can diagnose position query issues
 app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
   try {
-    const userId = req.session?.userId || 1
+    const userId = req.user.userId
     const rows = databaseService.getRawStockTrades(userId)
     res.json({ success: true, userId, rows })
   } catch (e) {
@@ -3233,7 +3252,7 @@ app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
 // Stock avg cost overrides — permanent per-user storage for manual cost basis corrections
 app.get('/api/stock-cost-overrides', requireAuth, (req, res) => {
   try {
-    const userId = req.session?.userId || 1
+    const userId = req.user.userId
     res.json({ success: true, overrides: databaseService.getCostOverrides(userId) })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
@@ -3242,7 +3261,7 @@ app.get('/api/stock-cost-overrides', requireAuth, (req, res) => {
 
 app.put('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
   try {
-    const userId = req.session?.userId || 1
+    const userId = req.user.userId
     const symbol = req.params.symbol.toUpperCase()
     const avgCost = parseFloat(req.body.avgCost)
     if (!avgCost || avgCost <= 0) return res.status(400).json({ success: false, error: 'Invalid avgCost' })
@@ -3255,7 +3274,7 @@ app.put('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
 
 app.delete('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
   try {
-    const userId = req.session?.userId || 1
+    const userId = req.user.userId
     databaseService.deleteCostOverride(userId, req.params.symbol)
     res.json({ success: true })
   } catch (e) {
@@ -3571,7 +3590,7 @@ app.get('/api/pre-move-volume/:symbol', requireAuth, async (req, res) => {
 // DCA schedule endpoints
 app.get('/api/dca-schedule', requireAuth, (req, res) => {
   try {
-    const userId = req.session?.userId || 1
+    const userId = req.user.userId
     const schedule = databaseService.getDCASchedule(userId)
     const positions = databaseService.getAllPositions(userId)
     const stockOnlySymbols = databaseService.getStockOnlySymbols(userId)
@@ -3592,7 +3611,7 @@ app.get('/api/dca-schedule', requireAuth, (req, res) => {
 
 app.post('/api/dca-schedule', requireAuth, (req, res) => {
   try {
-    const userId = req.session?.userId || 1
+    const userId = req.user.userId
     const { symbol } = req.body
     if (!symbol) return res.status(400).json({ success: false, error: 'symbol required' })
     const nextDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]

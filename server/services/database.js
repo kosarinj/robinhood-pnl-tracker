@@ -1436,13 +1436,16 @@ export class DatabaseService {
   }
 
   // Clear all saved data (useful after code changes that affect P&L calculation)
-  clearAllData() {
+  clearAllData(userId) {
+    if (userId == null) throw new Error('clearAllData requires a userId')
     try {
-      db.prepare('DELETE FROM price_benchmarks').run()
-      db.prepare('DELETE FROM pnl_snapshots').run()
-      db.prepare('DELETE FROM trades').run()
-      db.prepare('DELETE FROM csv_uploads').run()
-      console.log('✅ Cleared all saved data from database')
+      // Scoped to the requesting user only — never wipe other users' data.
+      db.prepare('DELETE FROM pnl_snapshots WHERE user_id = ?').run(userId)
+      db.prepare('DELETE FROM trades WHERE user_id = ?').run(userId)
+      db.prepare('DELETE FROM deposits WHERE user_id = ?').run(userId)
+      db.prepare('DELETE FROM csv_uploads WHERE user_id = ?').run(userId)
+      db.prepare('DELETE FROM short_call_entries WHERE user_id = ?').run(userId)
+      console.log(`✅ Cleared saved data for user ${userId}`)
     } catch (error) {
       console.error('Error clearing database:', error)
       throw error
