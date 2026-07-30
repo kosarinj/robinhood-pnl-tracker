@@ -53,6 +53,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const [showHiddenList, setShowHiddenList] = useState(false)
 
   const [lastUpdated, setLastUpdated] = useState(null)
+  // Ordinary tax rate reused from the Tax Center's saved plan (options + short-term
+  // gains are taxed at this rate). Defaults to 24% if the Tax tab hasn't been set.
+  const [taxRate] = useState(() => {
+    try { const p = JSON.parse(localStorage.getItem('taxCenter_plan') || '{}'); return parseFloat(p.ordinaryRate) || 24 } catch { return 24 }
+  })
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates, quiet = false) => {
     if (!quiet) setLoading(true)
@@ -269,6 +274,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       realizedShortPuts: acc.realizedShortPuts + (r.realizedShortPuts || 0),
       realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
       totalRealized: acc.totalRealized + (r.totalRealized || 0),
+      taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
@@ -276,7 +282,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       dayPnl: acc.dayPnl + (r.dayPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -419,6 +425,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <th style={thStyle('totalRealized')} onClick={() => toggleSort('totalRealized')}>
                   Options Total<SortIcon field="totalRealized" />
                 </th>
+                <th style={{ ...thStyle(null), cursor: 'default' }}
+                    title={`Estimated tax on this year's REALIZED gains (options + stock sold) at your ${taxRate}% ordinary rate from the Tax tab. Unrealized gains aren't taxed until sold; losses show as a negative (tax benefit). Simplified — see the Tax tab for the full calc.`}>
+                  Est. Tax
+                </th>
                 <th style={thStyle('openPremium')} onClick={() => toggleSort('openPremium')}
                     title="Credit collected on currently-open SHORT options (covered calls / cash-secured puts). Long options are not netted in.">
                   Open Premium<SortIcon field="openPremium" />
@@ -468,6 +478,9 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 const effectiveDate = symbolDates[row.ticker] || globalStart
                 const hasOverride = !!symbolDates[row.ticker]
                 const tickerBg = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')
+                // Est. tax on realized gains only (options + stock sold); unrealized isn't taxed yet.
+                const taxableRealized = (row.totalRealized || 0) + (row.stockRealizedPnL || 0)
+                const estTax = Math.round(taxableRealized * taxRate) / 100
                 return (
                   <tr
                     key={row.ticker}
@@ -498,6 +511,10 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.totalRealized, isDark), fontWeight: '700', fontSize: '14px' }}>
                       {fmt(row.totalRealized)}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '600', color: estTax > 0 ? '#ef4444' : estTax < 0 ? '#22c55e' : textMid }}
+                        title={`(${fmt(row.totalRealized)} options + ${fmt(row.stockRealizedPnL || 0)} stock realized) × ${taxRate}% = ${fmt(estTax)}${estTax < 0 ? ' (tax benefit from losses)' : ''}`}>
+                      {fmt(estTax)}
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
                       <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
@@ -657,6 +674,15 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortPuts, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortPuts)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongPuts, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongPuts)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.totalRealized, isDark), fontWeight: '700', fontSize: '15px' }}>{fmt(totals.totalRealized)}</td>
+                {(() => {
+                  const footTax = Math.round(totals.taxableRealized * taxRate) / 100
+                  return (
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '15px', color: footTax > 0 ? '#ef4444' : footTax < 0 ? '#22c55e' : textMid }}
+                        title={`Estimated tax on all realized gains this year at ${taxRate}%`}>
+                      {fmt(footTax)}
+                    </td>
+                  )
+                })()}
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.openUnrealizedPnL)}</td>
                 <td colSpan={4} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
