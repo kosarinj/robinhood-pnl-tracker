@@ -18,6 +18,7 @@ import YTDPositionsPanel from './components/YTDPositionsPanel'
 import ShortCallTracker from './components/ShortCallTracker'
 import VolScanner from './components/VolScanner'
 import TaxCenter from './components/TaxCenter'
+import AvgCostCalculator from './components/AvgCostCalculator'
 import { parseTrades, parseDeposits } from './utils/csvParser'
 import { calculatePnL } from './utils/pnlCalculator'
 import { fetchCurrentPrices } from './utils/yahooFinance'
@@ -1217,6 +1218,8 @@ function AuthenticatedApp({ user }) {
           }}>{label}</button>
         ))}
       </div>
+
+      {activeMainTab === 'analytics' && <AvgCostCalculator pnlData={pnlData} />}
 
       <div style={{ display: activeMainTab === 'analytics' ? 'flex' : 'none', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '10px', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>Robinhood P&L Tracker</h1>

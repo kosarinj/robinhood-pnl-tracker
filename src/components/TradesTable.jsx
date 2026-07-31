@@ -852,16 +852,6 @@ function TradesTable({ data, allData, trades, manualPrices, splitAdjustments, vi
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
-        <button
-          onClick={openManualWhatIf}
-          style={{ padding: '7px 14px', borderRadius: '6px', border: '1px solid #667eea', background: 'rgba(102,126,234,0.10)', color: '#667eea', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
-          title="Blended average-cost calculator: enter shares held + shares to buy + price to see your new average. Type any symbol, or click a row's Avg Cost to prefill a held position."
-        >
-          🧮 Avg Cost Calculator
-        </button>
-      </div>
-
       {data.length !== allData?.length && (
         <div style={{
           padding: '10px 15px',
