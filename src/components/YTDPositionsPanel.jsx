@@ -409,7 +409,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
 
       {asOf && (
         <div style={{ padding: '10px 14px', borderRadius: '8px', background: isDark ? '#2e1e47' : '#f3e8ff', border: `1px solid ${isDark ? '#5b3a8a' : '#d8b4fe'}`, color: isDark ? '#e2e8f0' : '#6b21a8', marginBottom: '12px', fontSize: '13px' }}>
-          🕒 <strong>As of {fmtDate(asOf)}</strong> — trades after this date are excluded. Realized P&L, open premium, and stock positions/values reflect that day (stock priced at its close). <em>Open P&L, Day P&L and Wk% are blank for past dates</em> (there are no historical option marks to price them).
+          🕒 <strong>As of {fmtDate(asOf)}</strong> — trades after this date are excluded. Realized P&L, open premium, and stock positions/values reflect that day (stock priced at its close). <em>Open P&L is a Black–Scholes estimate</em> (marked “~”; no historical option quotes exist), and Day P&L / Wk% are blank for past dates.
         </div>
       )}
 
@@ -549,7 +549,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     </td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.openUnrealizedPnL, isDark) }}
                         title={row.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available'}>
-                      {row.openUnrealizedPnL != null ? fmt(row.openUnrealizedPnL) : '—'}
+                      {row.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(row.openUnrealizedPnL)}` : '—'}
                     </td>
                     {/* Stock columns + Net */}
                     {(() => {

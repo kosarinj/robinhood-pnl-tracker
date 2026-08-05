@@ -101,7 +101,9 @@ function impliedVolCall(price, S, K, T, r) {
 // (premium vs the underlying on the sale date), then reprice at the current
 // underlying and remaining time. Moves with the stock + decays — an estimate,
 // used only when there's no live quote. Returns 0 when inputs are missing.
-function modelOptionMark(entry, parsed, underlyingNow) {
+// asOfDate (YYYY-MM-DD) prices the mark as of a past date instead of today —
+// used by the "as of" point-in-time view. Defaults to today when omitted.
+function modelOptionMark(entry, parsed, underlyingNow, asOfDate = null) {
   try {
     if (!parsed || !(underlyingNow > 0)) return 0
     const contracts = entry.contracts || 1
@@ -113,7 +115,7 @@ function modelOptionMark(entry, parsed, underlyingNow) {
     const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
     const r = 0.045
     const yrs = (a, b) => (new Date(b).getTime() - new Date(a).getTime()) / (365.25 * 24 * 3600 * 1000)
-    const today = new Date().toISOString().slice(0, 10)
+    const today = asOfDate || new Date().toISOString().slice(0, 10)
     const Tsale = yrs(String(saleDate).slice(0, 10), expiry)
     const Tnow = yrs(today, expiry)
     if (!(Tsale > 0) || !(Tnow > 0)) return 0
@@ -2387,13 +2389,35 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       })
     } else {
       // As-of view: open premium = credit still open on short legs, taken from the
-      // LIFO leftover (positions that were still open on the as-of date). Open P&L
-      // marks are omitted for past dates (no historical option quotes to price them).
+      // LIFO leftover (positions still open on the as-of date). Open P&L is a
+      // Black-Scholes ESTIMATE — the short call repriced at the underlying's close
+      // on asOf (no historical option quotes exist to price it exactly).
+      const shortEntryBySymbol = {}
+      for (const e of databaseService.getShortCallEntries(userId)) shortEntryBySymbol[e.symbol] = e
+      const openShortLots = []
       Object.values(lifoStacks).forEach(stacks => {
         stacks.short.forEach(lot => {
           if (!(lot.remaining > 0) || !lot.parsed?.ticker) return
           openPremiumByTicker[lot.parsed.ticker] = (openPremiumByTicker[lot.parsed.ticker] || 0) + lot.remaining * lot.ppc
+          openShortLots.push(lot)
         })
+      })
+      // Underlying close on the as-of date for the open tickers (cached historical).
+      const openTickers = [...new Set(openShortLots.map(l => l.parsed.ticker))]
+      const asOfUnderlying = {}
+      await Promise.all(openTickers.map(async t => {
+        try { const p = await priceService.getPriceForDate(t, asOf); if (p > 0) asOfUnderlying[t] = p } catch (e) { /* leave missing */ }
+      }))
+      openShortLots.forEach(lot => {
+        const ticker = lot.parsed.ticker
+        const underlying = asOfUnderlying[ticker]
+        const entry = shortEntryBySymbol[lot.symbol] // short_call_entries are calls; puts skipped
+        if (!(underlying > 0) || !entry) return
+        const mark = modelOptionMark(entry, lot.parsed, underlying, asOf)
+        if (!(mark > 0)) return
+        const premiumPerShare = lot.ppc / 100
+        const shares = lot.remaining * 100
+        openUnrealizedByTicker[ticker] = (openUnrealizedByTicker[ticker] || 0) + (premiumPerShare - mark) * shares
       })
     }
 
