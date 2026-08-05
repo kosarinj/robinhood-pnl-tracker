@@ -28,6 +28,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   const { isDark } = useTheme()
 
   const [globalStart, setGlobalStart] = useState(() => localStorage.getItem(LS_GLOBAL_KEY) || DEFAULT_GLOBAL_START)
+  const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   const [symbolDates, setSymbolDates] = useState(() => {
     try { return JSON.parse(localStorage.getItem(LS_SYMBOL_KEY) || '{}') } catch { return {} }
   })
@@ -67,6 +68,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       const sd = overrideSymbolDates ?? symbolDates
       const params = new URLSearchParams({ startDate: gs })
       if (Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
+      if (asOf) params.set('asOf', asOf)
       const res = await fetch(`/api/options-pnl/ytd?${params}`, { credentials: 'include' })
       const json = await res.json()
       if (json.success) { setData(json); setLastUpdated(Date.now()) }
@@ -76,9 +78,11 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     } finally {
       if (!quiet) setLoading(false)
     }
-  }, [globalStart, symbolDates])
+  }, [globalStart, symbolDates, asOf])
 
   useEffect(() => { fetchData() }, [])
+  // Refetch when the as-of date changes (or is cleared back to live)
+  useEffect(() => { fetchData(undefined, undefined, true) }, [asOf])
 
   // Fetch stock holdings + cost overrides from server on mount
   const fetchStockHoldings = () => {
@@ -258,12 +262,13 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
   })
 
   const totals = rows.reduce((acc, r) => {
-    const sh = stockHoldings[r.ticker]
-    const fb = pnlLookup[r.ticker]
+    // In as-of mode ignore live holdings/prices so the endpoint's historical values win.
+    const sh = asOf ? null : stockHoldings[r.ticker]
+    const fb = asOf ? null : pnlLookup[r.ticker]
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
     const avgCost = costOverrides[r.ticker] || computedCost
-    const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
+    const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (!asOf && livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
     const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
       : 0
@@ -313,6 +318,23 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
               background: surface, color: text, fontSize: '13px', cursor: 'pointer'
             }}
           />
+          <label style={{ fontSize: '13px', color: asOf ? '#8b5cf6' : textMid, fontWeight: asOf ? 700 : 500, marginLeft: '4px' }}>As of:</label>
+          <input
+            type="date"
+            value={asOf}
+            onChange={(e) => setAsOf(e.target.value)}
+            title="Point-in-time view — shows your book as of this date; trades after it are ignored. Leave blank for live."
+            style={{
+              padding: '5px 8px', borderRadius: '6px', border: `1px solid ${asOf ? '#8b5cf6' : border}`,
+              background: asOf ? (isDark ? '#2e1e47' : '#f3e8ff') : surface, color: text, fontSize: '13px', cursor: 'pointer'
+            }}
+          />
+          {asOf && (
+            <button onClick={() => setAsOf('')} title="Back to live"
+              style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>
+              ✕ Live
+            </button>
+          )}
           <button
             onClick={() => { fetchData(); fetchStockHoldings() }}
             style={{
@@ -384,6 +406,12 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
           </span>
         )}
       </div>
+
+      {asOf && (
+        <div style={{ padding: '10px 14px', borderRadius: '8px', background: isDark ? '#2e1e47' : '#f3e8ff', border: `1px solid ${isDark ? '#5b3a8a' : '#d8b4fe'}`, color: isDark ? '#e2e8f0' : '#6b21a8', marginBottom: '12px', fontSize: '13px' }}>
+          🕒 <strong>As of {fmtDate(asOf)}</strong> — trades after this date are excluded. Realized P&L, open premium, and stock positions/values reflect that day (stock priced at its close). <em>Open P&L, Day P&L and Wk% are blank for past dates</em> (there are no historical option marks to price them).
+        </div>
+      )}
 
       {error && (
         <div style={{ padding: '10px 14px', borderRadius: '8px', background: '#fee2e2', color: '#991b1b', marginBottom: '12px', fontSize: '13px' }}>
@@ -525,8 +553,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     </td>
                     {/* Stock columns + Net */}
                     {(() => {
-                      const sh = stockHoldings[row.ticker]
-                      const fb = pnlLookup[row.ticker]
+                      const sh = asOf ? null : stockHoldings[row.ticker]
+                      const fb = asOf ? null : pnlLookup[row.ticker]
                       const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
                       const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
                       const hasManualCost = !!costOverrides[row.ticker]
@@ -538,7 +566,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                       const effectiveCost = (pos > 0 && avgCost > 0)
                         ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
                         : null
-                      const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
+                      const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (!asOf && livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
                       const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
                         ? Math.round(pos * (price - avgCost) * 100) / 100
                         : 0

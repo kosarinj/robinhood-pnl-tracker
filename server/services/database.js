@@ -1925,9 +1925,10 @@ export class DatabaseService {
     }
   }
 
-  getStockPositionsWithCost(userId = 1) {
+  getStockPositionsWithCost(userId = 1, asOf = null) {
     try {
-      // Use COALESCE so NULL quantity/amount don't silently zero out rows
+      // Use COALESCE so NULL quantity/amount don't silently zero out rows.
+      // asOf (YYYY-MM-DD) bounds to trades on/before that date for a point-in-time view.
       const rows = db.prepare(`
         SELECT
           symbol,
@@ -1936,9 +1937,10 @@ export class DatabaseService {
           SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought
         FROM trades
         WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
+          ${asOf ? 'AND trans_date <= ?' : ''}
         GROUP BY symbol
         HAVING position > 0
-      `).all(userId)
+      `).all(...(asOf ? [userId, asOf] : [userId]))
       console.log(`getStockPositionsWithCost: ${rows.length} stock positions for user ${userId}`)
       if (rows.length > 0) console.log('  sample:', JSON.stringify(rows.slice(0,3)))
       const result = {}
@@ -1961,7 +1963,7 @@ export class DatabaseService {
   // For a fully-closed position this equals sells − buys, matching the Dashboard's realized P&L.
   // `overrides` is an optional { SYMBOL: avgCost } map; when present for a symbol, the
   // manual cost basis is used instead of the computed average cost.
-  getStockRealizedPnL(userId = 1, overrides = {}) {
+  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null) {
     try {
       const rows = db.prepare(`
         SELECT
@@ -1972,8 +1974,9 @@ export class DatabaseService {
           SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) * COALESCE(price,0) ELSE 0 END) AS total_sell_proceeds
         FROM trades
         WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
+          ${asOf ? 'AND trans_date <= ?' : ''}
         GROUP BY symbol
-      `).all(userId)
+      `).all(...(asOf ? [userId, asOf] : [userId]))
       const result = {}
       rows.forEach(r => {
         if (r.total_sold > 0 && r.total_bought > 0) {

@@ -2218,8 +2218,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const userId = req.user.userId
     const globalStart = req.query.startDate || '2000-01-01'
     const perSymbolDates = req.query.symbolDates ? JSON.parse(req.query.symbolDates) : {}
+    // Point-in-time "as of" date (YYYY-MM-DD): chop off trades after it and price
+    // everything as of that day's close. When absent, this is the normal live view.
+    const asOf = /^\d{4}-\d{2}-\d{2}$/.test(req.query.asOf || '') ? req.query.asOf : null
 
-    const allTrades = databaseService.getOptionTradesForYTD(userId)
+    const allTrades0 = databaseService.getOptionTradesForYTD(userId)
+    const allTrades = asOf ? allTrades0.filter(t => t.trans_date <= asOf) : allTrades0
 
     // LIFO pass over ALL trades
     const lifoStacks = {}
@@ -2273,7 +2277,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const openUnrealizedByTicker = {}
     const openDailyByTicker = {}   // option side of today's mark-to-market move (EOD close → now)
     const polygonKey = process.env.POLYGON_API_KEY || ''
-    {
+    if (!asOf) {
       const shortEntries = databaseService.getShortCallEntries(userId)
       const openPositions = databaseService.getOpenOptionPositions(userId)
       const netShortBySymbol = {}
@@ -2381,6 +2385,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           }
         }
       })
+    } else {
+      // As-of view: open premium = credit still open on short legs, taken from the
+      // LIFO leftover (positions that were still open on the as-of date). Open P&L
+      // marks are omitted for past dates (no historical option quotes to price them).
+      Object.values(lifoStacks).forEach(stacks => {
+        stacks.short.forEach(lot => {
+          if (!(lot.remaining > 0) || !lot.parsed?.ticker) return
+          openPremiumByTicker[lot.parsed.ticker] = (openPremiumByTicker[lot.parsed.ticker] || 0) + lot.remaining * lot.ppc
+        })
+      })
     }
 
     // Group realized P&L by underlying, split by short/long x call/put, date-filtered
@@ -2424,13 +2438,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       if (!(byUnderlying[ticker].tradeCount > 0)) delete byUnderlying[ticker]
     })
 
-    // Stock positions + live prices — fetched server-side so frontend doesn't need pnlData
-    const stockPositions = databaseService.getStockPositionsWithCost(userId)
+    // Stock positions + prices — as of the chosen date, or live. Position/cost bounded
+    // to trades on/before asOf; price is that day's historical close (else live).
+    const stockPositions = databaseService.getStockPositionsWithCost(userId, asOf)
     const stockCostOverrides = databaseService.getCostOverrides(userId)
-    const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides)
+    const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides, asOf)
     const allTickers = [...new Set([...Object.keys(byUnderlying), ...Object.keys(stockPositions)])]
     const stockPrices = {}
-    if (allTickers.length > 0) {
+    if (allTickers.length > 0 && asOf) {
+      // Historical close on the as-of date.
+      await Promise.all(allTickers.map(async t => {
+        try { const p = await priceService.getPriceForDate(t, asOf); if (p > 0) stockPrices[t] = p } catch (e) { /* leave missing */ }
+      }))
+    } else if (allTickers.length > 0) {
       try {
         const fetched = await priceService.fetchPrices(allTickers)
         allTickers.forEach(t => { if (fetched[t] > 0) stockPrices[t] = fetched[t] })
@@ -2441,16 +2461,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       }
     }
 
-    // Also fill any missing prices from the in-memory cache (populated by dashboard refresh)
-    const cachedPrices = priceService.getCurrentPrices()
-    allTickers.forEach(t => { if (!stockPrices[t] && cachedPrices[t] > 0) stockPrices[t] = cachedPrices[t] })
+    // Fill any missing prices from the in-memory cache (live view only).
+    if (!asOf) {
+      const cachedPrices = priceService.getCurrentPrices()
+      allTickers.forEach(t => { if (!stockPrices[t] && cachedPrices[t] > 0) stockPrices[t] = cachedPrices[t] })
+    }
     const pricesFetched = Object.keys(stockPrices).filter(t => stockPrices[t] > 0).length
-    console.log(`YTD: ${Object.keys(stockPositions).length} stock positions, ${allTickers.length} tickers, ${pricesFetched} prices fetched`)
+    console.log(`YTD${asOf ? ` (as of ${asOf})` : ''}: ${Object.keys(stockPositions).length} stock positions, ${allTickers.length} tickers, ${pricesFetched} prices`)
 
-    // Weekly stock change (~5 trading days) per ticker — one bulk call
+    // Weekly/daily change are "today"-relative — only for the live view.
     let weeklyChange = {}
     let dailyChange = {}
-    if (allTickers.length > 0) {
+    if (allTickers.length > 0 && !asOf) {
       try { weeklyChange = await priceService.fetchWeeklyChange(allTickers) } catch (e) { console.warn('YTD weekly change fetch failed:', e.message) }
       try { dailyChange = await priceService.fetchDailyChange(allTickers) } catch (e) { console.warn('YTD daily change fetch failed:', e.message) }
     }
@@ -2497,7 +2519,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       })
       .sort((a, b) => b.totalRealized - a.totalRealized)
 
-    res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates })
+    res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates, asOf })
   } catch (e) {
     console.error('Error in /api/options-pnl/ytd:', e.message)
     res.status(500).json({ success: false, error: e.message })
