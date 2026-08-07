@@ -29,6 +29,8 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
 
   const [globalStart, setGlobalStart] = useState(() => localStorage.getItem(LS_GLOBAL_KEY) || DEFAULT_GLOBAL_START)
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
+  // Horizon for the theta projection column (months ahead, underlying held flat)
+  const [projectMonths, setProjectMonths] = useState(1)
   const [symbolDates, setSymbolDates] = useState(() => {
     try { return JSON.parse(localStorage.getItem(LS_SYMBOL_KEY) || '{}') } catch { return {} }
   })
@@ -282,12 +284,13 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
+      openProjectedPnL: acc.openProjectedPnL + (r.openProjected?.[projectMonths]?.pnl ?? r.openUnrealizedPnL ?? 0),
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
       net: acc.net + (r.totalRealized || 0) + stockPnL,
       dayPnl: acc.dayPnl + (r.dayPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -465,6 +468,23 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                     title="Unrealized P&L on open short options: premium collected minus current cost to buy them back (live option prices)">
                   Open P&L<SortIcon field="openUnrealizedPnL" />
                 </th>
+                <th style={{ ...thStyle(null), cursor: 'default' }}
+                    title={`Estimated Open P&L in ${projectMonths} month${projectMonths > 1 ? 's' : ''} if the stock doesn't move — decay only. Volatility is held constant and backed out of today's mark, so at zero months it equals Open P&L exactly. Contracts that expire before then settle at intrinsic (marked ✓). An estimate, not a forecast: it assumes the stock stands still, which it won't.`}>
+                  <div>Theta {projectMonths}M</div>
+                  <div style={{ display: 'flex', gap: '2px', justifyContent: 'flex-end', marginTop: '3px' }}>
+                    {[1, 2, 3].map(m => (
+                      <span key={m}
+                        onClick={e => { e.stopPropagation(); setProjectMonths(m) }}
+                        style={{
+                          cursor: 'pointer', fontSize: '9px', fontWeight: 700, padding: '1px 4px',
+                          borderRadius: '3px', lineHeight: 1.4,
+                          background: projectMonths === m ? '#667eea' : 'transparent',
+                          color: projectMonths === m ? '#fff' : (isDark ? '#64748b' : '#94a3b8'),
+                          border: `1px solid ${projectMonths === m ? '#667eea' : 'transparent'}`,
+                        }}>{m}M</span>
+                    ))}
+                  </div>
+                </th>
                 <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Average cost per share">Avg Cost</th>
                 <th style={{ ...thStyle(null), cursor: 'default' }} title="Effective cost per share after options income = Avg Cost − (realized Options Total ÷ shares). Uses booked option P&L only (excludes unrealized open-option P&L) so it's a stable cost basis. Lower than avg cost when options have net paid you; higher when options net lost.">Eff. Cost</th>
@@ -551,6 +571,32 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                         title={row.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available'}>
                       {row.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(row.openUnrealizedPnL)}` : '—'}
                     </td>
+                    {/* Theta projection — Open P&L rolled forward with the stock held flat */}
+                    {(() => {
+                      const proj = row.openProjected?.[projectMonths]
+                      if (!proj) {
+                        return <td style={{ padding: '10px 12px', textAlign: 'right', color: isDark ? '#475569' : '#cbd5e1' }}>—</td>
+                      }
+                      const gain = proj.pnl - (row.openUnrealizedPnL || 0)
+                      const allExpired = proj.totalLegs > 0 && proj.expiredLegs === proj.totalLegs
+                      return (
+                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(proj.pnl, isDark) }}
+                            title={`In ${projectMonths} month${projectMonths > 1 ? 's' : ''} with ${row.ticker} unchanged: ${fmt(proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay from today).`
+                              + (proj.expiredLegs > 0
+                                ? ` ${proj.expiredLegs} of ${proj.totalLegs} contract${proj.totalLegs > 1 ? 's' : ''} expire${proj.expiredLegs === 1 ? 's' : ''} by then and settle at intrinsic.`
+                                : '')}>
+                          {fmt(proj.pnl)}
+                          <div style={{ fontSize: '10px', fontWeight: 500, color: isDark ? '#64748b' : '#94a3b8' }}>
+                            {gain >= 0 ? '+' : ''}{fmt(gain)}
+                            {proj.expiredLegs > 0 && (
+                              <span title={allExpired ? 'All contracts expired by then' : 'Some contracts expired by then'}>
+                                {' '}{allExpired ? '✓' : `✓${proj.expiredLegs}`}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      )
+                    })()}
                     {/* Stock columns + Net */}
                     {(() => {
                       const sh = asOf ? null : stockHoldings[row.ticker]
@@ -712,6 +758,14 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
                 })()}
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.openUnrealizedPnL)}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openProjectedPnL, isDark), fontWeight: '700' }}
+                    title={`Total Open P&L in ${projectMonths} month${projectMonths > 1 ? 's' : ''} with every stock unchanged. Tickers with no projection available fall back to their current Open P&L.`}>
+                  {fmt(totals.openProjectedPnL)}
+                  <div style={{ fontSize: '10px', fontWeight: 500, color: isDark ? '#64748b' : '#94a3b8' }}>
+                    {totals.openProjectedPnL - totals.openUnrealizedPnL >= 0 ? '+' : ''}
+                    {fmt(totals.openProjectedPnL - totals.openUnrealizedPnL)}
+                  </div>
+                </td>
                 <td colSpan={4} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
                 <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>

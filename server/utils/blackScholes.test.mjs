@@ -161,4 +161,87 @@ test('repriceFromClose matches plain BS when sigma is well calibrated', () => {
   assert.ok(Math.abs(viaDiff - viaDirect) < 2e-4, `${viaDiff} vs ${viaDirect}`)
 })
 
+console.log('\nTheta projection (underlying held flat)')
+
+// Mirrors the YTD panel's projection: roll T forward, keep S and sigma fixed.
+// Short-call P&L = (premium collected - mark to buy back) x shares.
+const project = ({ type = 'call', mark, S, K, T0, months, premium }) => {
+  let sigma = impliedVol(mark, S, K, T0, r, type) || 0.001
+  const T1 = T0 - months / 12
+  const projMark = T1 <= 0
+    ? (type === 'put' ? Math.max(0, K - S) : Math.max(0, S - K))       // settles at intrinsic
+    : repriceFromClose({ type, closeMark: mark, S0: S, S1: S, K, T0, T1, sigma })
+  return { projMark, pnl: (premium - projMark) * 100 }
+}
+
+test('zero months reproduces today exactly', () => {
+  const S = 100, K = 110, T0 = 0.5, mark = 2.0
+  const { projMark } = project({ mark, S, K, T0, months: 0, premium: 3 })
+  assert.ok(Math.abs(projMark - mark) < 1e-6, `${projMark} vs ${mark}`)
+})
+
+test('an OTM short call decays toward full premium', () => {
+  const S = 100, K = 115, T0 = 0.5, mark = 1.5, premium = 3
+  const now = (premium - mark) * 100
+  const m1 = project({ mark, S, K, T0, months: 1, premium }).pnl
+  const m3 = project({ mark, S, K, T0, months: 3, premium }).pnl
+  assert.ok(m1 > now, `1M (${m1}) should beat today (${now})`)
+  assert.ok(m3 > m1, `3M (${m3}) should beat 1M (${m1})`)
+  assert.ok(m3 <= premium * 100 + 0.01, `cannot exceed the full premium: ${m3}`)
+})
+
+test('near the money, decay accelerates toward expiry', () => {
+  // ATM value scales with sqrt(T), so the final month sheds far more than the first.
+  const S = 100, K = 100, T0 = 3 / 12, mark = 6.0, premium = 7
+  const now = (premium - mark) * 100
+  const first = project({ mark, S, K, T0, months: 1, premium }).pnl - now
+  const third = project({ mark, S, K, T0, months: 3, premium }).pnl
+             - project({ mark, S, K, T0, months: 2, premium }).pnl
+  assert.ok(third > first, `theta should accelerate: month1 ${first} vs month3 ${third}`)
+})
+
+test('far OTM, decay is front-loaded instead', () => {
+  // The opposite case, worth pinning down because it's counterintuitive: what
+  // decays on a far-OTM short call is the chance of ever finishing ITM, and most
+  // of that is gone well before expiry. So the 1M projection already captures
+  // most of the gain and 2M/3M add comparatively little.
+  const S = 100, K = 115, T0 = 3 / 12, mark = 1.2, premium = 2
+  const now = (premium - mark) * 100
+  const first = project({ mark, S, K, T0, months: 1, premium }).pnl - now
+  const third = project({ mark, S, K, T0, months: 3, premium }).pnl
+             - project({ mark, S, K, T0, months: 2, premium }).pnl
+  assert.ok(first > third, `expected front-loaded decay: month1 ${first} vs month3 ${third}`)
+})
+
+test('a contract expiring inside the horizon settles at intrinsic', () => {
+  // 1-month call, projected 3 months out — long expired.
+  const S = 100, K = 105, premium = 2
+  const { projMark, pnl } = project({ mark: 1.0, S, K, T0: 1 / 12, months: 3, premium })
+  assert.equal(projMark, 0, 'OTM at expiry is worthless')
+  assert.ok(Math.abs(pnl - premium * 100) < 0.01, `expected full premium, got ${pnl}`)
+})
+
+test('an ITM contract expiring inside the horizon keeps its intrinsic loss', () => {
+  const S = 120, K = 105, premium = 2
+  const { projMark, pnl } = project({ mark: 15.5, S, K, T0: 1 / 12, months: 2, premium })
+  assert.equal(projMark, 15, 'intrinsic is S - K')
+  assert.ok(pnl < 0, 'short call assigned deep ITM is a loss')
+})
+
+test('deep ITM still projects (no vol information, but decay is small)', () => {
+  // The case that returns a pinned sigma — must not produce NaN or a wild number.
+  const S = 200, K = 100, T0 = 0.25, mark = 100.5, premium = 5
+  const { projMark, pnl } = project({ mark, S, K, T0, months: 1, premium })
+  assert.ok(Number.isFinite(projMark) && Number.isFinite(pnl))
+  assert.ok(projMark >= 100, `never below intrinsic: ${projMark}`)
+  assert.ok(Math.abs(projMark - mark) < 2, `decay should be small: ${projMark} vs ${mark}`)
+})
+
+test('a short put also decays toward full premium', () => {
+  const S = 100, K = 90, T0 = 0.5, mark = 1.8, premium = 3
+  const now = (premium - mark) * 100
+  const m2 = project({ type: 'put', mark, S, K, T0, months: 2, premium }).pnl
+  assert.ok(m2 > now, `put should decay too: ${m2} vs ${now}`)
+})
+
 console.log(`\n${passed} passed\n`)

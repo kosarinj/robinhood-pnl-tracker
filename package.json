@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "start": "node server/index.js",
     "test": "node server/utils/blackScholes.test.mjs && node server/services/extendedHours.test.mjs",
-    "test:api": "node server/extendedHoursApi.test.mjs",
+    "test:api": "node server/extendedHoursApi.test.mjs && node server/thetaProjection.test.mjs",
     "cap:sync": "npx cap sync ios",
     "cap:open": "npx cap open ios"
   },

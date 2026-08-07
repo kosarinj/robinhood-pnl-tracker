@@ -2255,6 +2255,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const openPremiumByTicker = {}
     const openUnrealizedByTicker = {}
     const openDailyByTicker = {}   // option side of today's mark-to-market move (EOD close → now)
+    // Theta projection: what Open P&L becomes in 1/2/3 months if the underlying
+    // doesn't move. Keyed [months][ticker].
+    const PROJECT_MONTHS = [1, 2, 3]
+    const openProjectedByTicker = { 1: {}, 2: {}, 3: {} }
+    const openProjectedLegs = { 1: {}, 2: {}, 3: {} }   // { ticker: {expired, total} }
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!asOf) {
       const shortEntries = databaseService.getShortCallEntries(userId)
@@ -2361,6 +2366,48 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           if (dayOptPerShare == null && prevMkt > 0) dayOptPerShare = prevMkt - currentOptionPrice // last resort
           if (dayOptPerShare != null) {
             openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
+          }
+
+          // ── Theta projection ──
+          // Roll time forward with the underlying and vol held fixed, so the only
+          // thing moving is decay. Vol is backed out of the CURRENT mark, which
+          // makes the projection continuous with the Open P&L beside it: at zero
+          // months it reproduces today's number exactly.
+          const S = stockByTicker[ticker]
+          if (parsed && S > 0) {
+            const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+            const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
+            const T0 = yrs(new Date(expiry).getTime() - Date.now())
+            if (T0 > 0) {
+              let sigma = impliedVol(currentOptionPrice, S, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
+              if (!(sigma > 0)) sigma = 0.001   // deep ITM: price is all intrinsic, no vol info
+              for (const months of PROJECT_MONTHS) {
+                const T1 = T0 - months / 12
+                let projMark
+                let expired = false
+                if (T1 <= 0) {
+                  // Already expired by this horizon. With the stock where it is,
+                  // the contract settles at intrinsic — this is the max-profit
+                  // case for a short call, not a decayed guess.
+                  expired = true
+                  projMark = parsed.type === 'put'
+                    ? Math.max(0, parsed.strike - S)
+                    : Math.max(0, S - parsed.strike)
+                } else {
+                  projMark = repriceFromClose({
+                    type: parsed.type, closeMark: currentOptionPrice,
+                    S0: S, S1: S, K: parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
+                  })
+                }
+                if (projMark == null) continue
+                openProjectedByTicker[months][ticker] =
+                  (openProjectedByTicker[months][ticker] || 0) + (premiumPerShare - projMark) * shares
+                const legs = openProjectedLegs[months][ticker] || { expired: 0, total: 0 }
+                legs.total += 1
+                if (expired) legs.expired += 1
+                openProjectedLegs[months][ticker] = legs
+              }
+            }
           }
         }
       })
@@ -2505,6 +2552,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           totalRealized: r2(e.totalRealized),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),
           openUnrealizedPnL: openUnrealizedByTicker[e.ticker] != null ? r2(openUnrealizedByTicker[e.ticker]) : null,
+          // Open P&L projected forward on theta alone (underlying held flat).
+          // { "1": {pnl, expiredLegs, totalLegs}, "2": …, "3": … }
+          openProjected: PROJECT_MONTHS.reduce((acc, m) => {
+            const v = openProjectedByTicker[m][e.ticker]
+            if (v != null) {
+              const legs = openProjectedLegs[m][e.ticker] || { expired: 0, total: 0 }
+              acc[m] = { pnl: r2(v), expiredLegs: legs.expired, totalLegs: legs.total }
+            }
+            return acc
+          }, {}),
           stockPosition: sp?.position ?? null,
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
