@@ -10,6 +10,7 @@ import SupportResistanceLevels from './components/SupportResistanceLevels'
 import PriceChart from './components/PriceChart'
 import OptionsPnLPanel from './components/OptionsPnLPanel'
 import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
+import ExtendedHoursPanel from './components/ExtendedHoursPanel'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
 import DCAAlertPanel from './components/DCAAlertPanel'
@@ -2483,6 +2484,9 @@ function AuthenticatedApp({ user }) {
 
       {/* DCA Alert Panel */}
       {activeMainTab === 'dashboard' && <DCAAlertPanel />}
+
+      {/* Pre/post market option estimates — self-hides during regular hours */}
+      {activeMainTab === 'dashboard' && <ExtendedHoursPanel />}
 
       {/* Daily Realized P&L Panel */}
       {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={allTrades.length > 0 ? allTrades : trades} />}

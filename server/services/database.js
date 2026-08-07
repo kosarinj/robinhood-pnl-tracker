@@ -316,6 +316,34 @@ try {
   console.error('short_call_entries migration error:', e.message)
 }
 
+// Migration: option_iv_marks — the closing implied vol for each open contract.
+// Captured at the 4pm close and calibrated so Black-Scholes reproduces that day's
+// actual closing mark exactly. Extended-hours repricing holds this sigma constant
+// and only moves the underlying, so the estimate is continuous with the close.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS option_iv_marks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      symbol TEXT NOT NULL,
+      ticker TEXT NOT NULL,
+      opt_type TEXT NOT NULL,
+      strike REAL NOT NULL,
+      expiry TEXT NOT NULL,
+      mark_date TEXT NOT NULL,
+      close_mark REAL NOT NULL,
+      underlying_close REAL NOT NULL,
+      sigma REAL NOT NULL,
+      source TEXT,
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      UNIQUE(user_id, symbol, mark_date)
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_option_iv_marks_lookup ON option_iv_marks(user_id, symbol, mark_date DESC)`)
+} catch (e) {
+  console.error('option_iv_marks migration error:', e.message)
+}
+
 // Migration: stock cost overrides — manual avg cost per symbol for YTD panel
 try {
   db.exec(`
@@ -2264,6 +2292,35 @@ export class DatabaseService {
   // Returns list of dates (desc) that have daily price snapshots for a given user
   getDailySnapshotDates(userId, limit = 30) {
     return db.prepare(`SELECT DISTINCT price_date FROM daily_price_snapshots WHERE user_id = ? ORDER BY price_date DESC LIMIT ?`).all(userId, limit).map(r => r.price_date)
+  }
+
+  // ── Closing implied vol per contract (for extended-hours repricing) ──
+  saveOptionIvMark(userId, m) {
+    return db.prepare(`
+      INSERT INTO option_iv_marks
+        (user_id, symbol, ticker, opt_type, strike, expiry, mark_date, close_mark, underlying_close, sigma, source)
+      VALUES (@user_id, @symbol, @ticker, @opt_type, @strike, @expiry, @mark_date, @close_mark, @underlying_close, @sigma, @source)
+      ON CONFLICT(user_id, symbol, mark_date) DO UPDATE SET
+        close_mark = excluded.close_mark,
+        underlying_close = excluded.underlying_close,
+        sigma = excluded.sigma,
+        source = excluded.source
+    `).run({ user_id: userId, ...m })
+  }
+
+  // Most recent calibration at or before asOfDate, one row per symbol.
+  getLatestOptionIvMarks(userId, asOfDate = null) {
+    const cutoff = asOfDate || '9999-12-31'
+    return db.prepare(`
+      SELECT m.* FROM option_iv_marks m
+      JOIN (
+        SELECT symbol, MAX(mark_date) AS mark_date
+        FROM option_iv_marks
+        WHERE user_id = ? AND mark_date <= ?
+        GROUP BY symbol
+      ) latest ON latest.symbol = m.symbol AND latest.mark_date = m.mark_date
+      WHERE m.user_id = ?
+    `).all(userId, cutoff, userId)
   }
 }
 

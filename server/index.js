@@ -21,6 +21,7 @@ import path from 'path'
 import axios from 'axios'
 import { parseOptionDescription, toPolygonTicker, calcPremiumLeft, toYahooOptionTicker } from './utils/optionUtils.js'
 import { calculateRSI, calculateEMA, calculateStochastic } from './services/technicalAnalysis.js'
+import { RISK_FREE_RATE, bsCall, impliedVol, impliedVolCall, repriceFromClose } from './utils/blackScholes.js'
 
 // Best current per-share mark from a Polygon option snapshot.
 // Priority: live quote midpoint → a trade that actually happened TODAY → the daily
@@ -71,32 +72,8 @@ async function fetchOptionQuoteMid(polygonTicker, polygonKey) {
   } catch { return 0 }
 }
 
-// ── Black–Scholes (for marking illiquid LEAPs when the plan has no live quote) ──
-function normCdf(x) {
-  const t = 1 / (1 + 0.2316419 * Math.abs(x))
-  const d = 0.3989422804014327 * Math.exp(-x * x / 2)
-  const p = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
-  return x > 0 ? 1 - p : p
-}
-function bsCall(S, K, T, r, sig) {
-  if (T <= 0 || sig <= 0 || S <= 0 || K <= 0) return Math.max(0, S - K)
-  const d1 = (Math.log(S / K) + (r + sig * sig / 2) * T) / (sig * Math.sqrt(T))
-  const d2 = d1 - sig * Math.sqrt(T)
-  return S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2)
-}
-function impliedVolCall(price, S, K, T, r) {
-  if (price <= 0 || S <= 0 || K <= 0 || T <= 0) return 0
-  let lo = 0.001, hi = 5, mid = 0
-  if (price <= bsCall(S, K, T, r, lo)) return lo
-  if (price >= bsCall(S, K, T, r, hi)) return hi
-  for (let i = 0; i < 64; i++) {
-    mid = (lo + hi) / 2
-    const p = bsCall(S, K, T, r, mid)
-    if (Math.abs(p - price) < 1e-4) return mid
-    if (p < price) lo = mid; else hi = mid
-  }
-  return mid
-}
+// ── Black–Scholes marking (math lives in utils/blackScholes.js) ──
+const round2 = v => Math.round((Number(v) || 0) * 100) / 100
 // Model mark for a short call: anchor the implied vol to what you sold it for
 // (premium vs the underlying on the sale date), then reprice at the current
 // underlying and remaining time. Moves with the stock + decays — an estimate,
@@ -2619,6 +2596,121 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
   }
 })
 
+// GET /api/extended-hours — pre/post market option marks.
+//
+// Robinhood moves the stock leg outside regular hours but leaves option marks
+// frozen at the 4pm close, so a mixed portfolio reads inconsistently in the
+// AM/PM. This reprices each open contract with Black-Scholes: the underlying
+// comes from Yahoo's extended-hours feed, and the vol is the one calibrated to
+// that contract's own closing mark (so skew is per-contract and the estimate is
+// continuous with the close). Everything here is an ESTIMATE — the response
+// labels it as such and flags the cases where it's least reliable.
+app.get('/api/extended-hours', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const nowEt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
+    const today = nowEt.toISOString().slice(0, 10)
+
+    const ivMarks = databaseService.getLatestOptionIvMarks(userId)
+    if (!ivMarks.length) {
+      return res.json({
+        success: true, session: 'unknown', positions: [],
+        note: 'No closing implied vol captured yet. It records automatically after the 4pm ET close.',
+      })
+    }
+
+    // Only price contracts that are still open and unexpired.
+    const openSymbols = new Set(
+      databaseService.getOpenOptionPositions(userId)
+        .filter(p => (p.net_short > 0 || p.net_long > 0))
+        .map(p => p.symbol)
+    )
+    const live = ivMarks.filter(m => openSymbols.has(m.symbol) && m.expiry > today)
+    if (!live.length) {
+      return res.json({ success: true, session: 'unknown', positions: [], note: 'No open unexpired option positions.' })
+    }
+
+    const tickers = [...new Set(live.map(m => m.ticker))]
+    const ext = await priceService.fetchExtendedHours(tickers)
+
+    // Earnings tonight is the big caveat: IV collapses after the print, and this
+    // model holds vol constant, so those estimates can be well off.
+    const earningsByTicker = {}
+    for (const t of tickers) {
+      try { earningsByTicker[t] = databaseService.getEarnings(t)?.earnings_date || null } catch { /* optional */ }
+    }
+
+    const positions = []
+    for (const m of live) {
+      const e = ext[m.ticker]
+      if (!e || !(e.price > 0)) continue
+      const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
+      const expiryMs = new Date(m.expiry).getTime()
+      const T1 = yrs(expiryMs - nowEt.getTime())                  // now → expiry
+      const T0 = yrs(expiryMs - new Date(m.mark_date).getTime())  // calibration date → expiry
+      if (!(T1 > 0) || !(T0 > 0)) continue
+
+      // Anchor on the real closing mark and let Black-Scholes supply only the
+      // change. See repriceFromClose for why the difference form is used.
+      const estMark = repriceFromClose({
+        type: m.opt_type, closeMark: m.close_mark,
+        S0: m.underlying_close, S1: e.price,
+        K: m.strike, T0, T1, sigma: m.sigma, r: RISK_FREE_RATE,
+      })
+      if (estMark == null) continue
+      const delta = estMark - m.close_mark
+      const underlyingMove = e.price - m.underlying_close
+      const movePct = m.underlying_close > 0 ? (underlyingMove / m.underlying_close) * 100 : 0
+
+      positions.push({
+        symbol: m.symbol,
+        ticker: m.ticker,
+        type: m.opt_type,
+        strike: m.strike,
+        expiry: m.expiry,
+        closeMark: round2(m.close_mark),
+        estMark: round2(estMark),
+        changePerShare: round2(delta),
+        changePerContract: round2(delta * 100),
+        underlyingClose: round2(m.underlying_close),
+        underlyingNow: round2(e.price),
+        underlyingMovePct: Math.round(movePct * 100) / 100,
+        sigma: Math.round(m.sigma * 1000) / 1000,
+        ivDate: m.mark_date,
+        session: e.session,
+        // Reliability flags — surfaced so a confident-looking number isn't trusted blindly.
+        noExtendedTrade: e.stale,
+        staleIv: m.mark_date < today,
+        earningsTonight: !!earningsByTicker[m.ticker] && earningsByTicker[m.ticker] === today,
+        largeMove: Math.abs(movePct) > 3,
+        estimated: true,
+      })
+    }
+
+    const session = Object.values(ext).find(v => v?.session)?.session || 'unknown'
+    res.json({
+      success: true,
+      session,
+      asOf: Date.now(),
+      positions,
+      estimated: true,
+      note: 'Model estimate: Black-Scholes repriced on the extended-hours underlying, holding each contract\'s closing implied vol constant.',
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// Manual trigger for the closing-IV capture (the scheduled run is 4:05-4:30pm ET).
+app.post('/api/extended-hours/capture-iv', requireAuth, async (req, res) => {
+  try {
+    const saved = await captureClosingIV(req.user.userId)
+    res.json({ success: true, captured: saved })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // GET /api/short-calls — short call positions with current prices
 app.get('/api/short-calls', requireAuth, async (req, res) => {
   try {
@@ -4572,6 +4664,74 @@ async function takeEODSnapshot(userId, force = false) {
   }
 }
 
+// ── Closing implied vol capture ───────────────────────────────────────────────
+// For each open contract, take the day's actual closing mark and solve for the
+// vol that reproduces it against the underlying's close. Storing sigma (rather
+// than repricing off the original sale premium) is what makes the extended-hours
+// estimate continuous with the close: BS(underlying_close, sigma) == close_mark
+// by construction, so there's no jump at 4pm.
+async function captureClosingIV(userId) {
+  const polygonKey = process.env.POLYGON_API_KEY || ''
+  if (!polygonKey) return 0
+  const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })).toISOString().slice(0, 10)
+
+  const openOpts = databaseService.getOpenOptionPositions(userId).filter(pos => {
+    const parsed = parseOptionDescription(pos.symbol)
+    if (!parsed) return false
+    return `${parsed.year}-${parsed.month}-${parsed.day}` > today   // still has time value
+  })
+  if (!openOpts.length) return 0
+
+  // One underlying close per ticker, shared across that ticker's contracts.
+  const tickers = [...new Set(openOpts.map(p => parseOptionDescription(p.symbol).ticker))]
+  const stockCloses = await priceService.fetchPrices(tickers)
+
+  let saved = 0
+  for (const pos of openOpts) {
+    const parsed = parseOptionDescription(pos.symbol)
+    const polygonTicker = toPolygonTicker(pos.symbol)
+    if (!parsed || !polygonTicker) continue
+    const S = stockCloses[parsed.ticker] || 0
+    if (!(S > 0)) continue
+
+    // Prefer the real bid/ask mid; fall back to the day's close / last trade.
+    let closeMark = 0, source = 'quote-mid'
+    try {
+      closeMark = await fetchOptionQuoteMid(polygonTicker, polygonKey)
+      if (!(closeMark > 0)) {
+        const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
+        const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 8000 })
+        closeMark = staleOptionMark(resp.data?.results)
+        source = 'day-close'
+      }
+    } catch { /* leave 0 */ }
+    if (!(closeMark > 0)) continue
+
+    const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+    const T = (new Date(expiry).getTime() - new Date(today).getTime()) / (365.25 * 24 * 3600 * 1000)
+    if (!(T > 0)) continue
+
+    let sigma = impliedVol(closeMark, S, parsed.strike, T, RISK_FREE_RATE, parsed.type)
+    // A high pin means the mark is above anything any vol can produce — a stale
+    // or crossed quote. Storing it would poison the estimate, so drop it.
+    if (sigma >= 4.999) continue
+    // A low pin is not an error: a deep ITM contract is nearly all intrinsic, so
+    // its price genuinely carries no vol information. repriceFromClose handles
+    // that correctly (the change becomes the change in intrinsic, delta ~ 1),
+    // but it needs a positive sigma to work with.
+    if (!(sigma > 0)) sigma = 0.001
+
+    databaseService.saveOptionIvMark(userId, {
+      symbol: pos.symbol, ticker: parsed.ticker, opt_type: parsed.type,
+      strike: parsed.strike, expiry, mark_date: today,
+      close_mark: closeMark, underlying_close: S, sigma, source,
+    })
+    saved++
+  }
+  if (saved > 0) console.log(`✓ Closing IV captured for ${saved} contracts on ${today} (user ${userId})`)
+  return saved
+}
+
 // Check every 5 minutes; trigger snapshot Mon-Fri between 4:05-4:30pm ET
 setInterval(async () => {
   try {
@@ -4582,7 +4742,11 @@ setInterval(async () => {
     if (day < 1 || day > 5) return              // weekend
     if (hour !== 16 || minute < 5 || minute > 30) return  // outside 4:05-4:30pm ET
     const users = databaseService.getAllUsers()
-    for (const user of users) await takeEODSnapshot(user.id)
+    for (const user of users) {
+      await takeEODSnapshot(user.id)
+      // Same window: the marks we just read are the closing marks.
+      try { await captureClosingIV(user.id) } catch (e) { console.error('Closing IV capture error:', e.message) }
+    }
   } catch (e) {
     console.error('EOD snapshot job error:', e.message)
   }

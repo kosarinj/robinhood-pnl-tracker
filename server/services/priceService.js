@@ -64,6 +64,63 @@ async function fetchPolygonGrouped(apiKey) {
   return polygonGroupedCache || new Map()
 }
 
+/**
+ * Pull the current extended-hours price out of a Yahoo v8 chart result.
+ *
+ * Pure so the session logic is testable at any hour. `nowSec` is unix seconds.
+ * Returns { price, session, regularClose, prevClose, asOf, stale } or null.
+ *
+ * session is 'pre' | 'post' | 'regular' | 'closed', taken from Yahoo's own
+ * currentTradingPeriod windows so holidays and half-days come along for free.
+ *
+ * The bar is filtered to the *current* session's window. A 1d chart still
+ * carries the prior session's bars, so without that filter a 4:05am request
+ * would happily return yesterday's 7:59pm print as if it were this morning's.
+ */
+export function parseExtendedHoursChart(result, nowSec) {
+  if (!result) return null
+  const meta = result.meta || {}
+  const ts = result.timestamp || []
+  const closes = result.indicators?.quote?.[0]?.close || []
+  const period = meta.currentTradingPeriod || {}
+
+  const inWindow = w => w && nowSec >= w.start && nowSec < w.end
+  let session = 'closed'
+  if (inWindow(period.regular)) session = 'regular'
+  else if (inWindow(period.pre)) session = 'pre'
+  else if (inWindow(period.post)) session = 'post'
+
+  const windowStart = session === 'pre' ? period.pre?.start
+                    : session === 'post' ? period.post?.start
+                    : session === 'regular' ? period.regular?.start
+                    : null
+
+  let price = 0, asOf = null
+  for (let i = closes.length - 1; i >= 0; i--) {
+    if (ts[i] > nowSec) continue                       // ignore bars ahead of "now"
+    if (windowStart != null && ts[i] < windowStart) break   // fell out of this session
+    if (closes[i] == null) continue
+    price = closes[i]; asOf = ts[i]
+    break
+  }
+
+  const regularClose = meta.regularMarketPrice || 0
+  // No trade in this session yet (common right at 4:05am) — fall back to the
+  // regular close and flag it, so callers can say "no extended-hours trade".
+  const stale = !(price > 0)
+  if (stale) price = regularClose
+  if (!(price > 0)) return null
+
+  return {
+    price,
+    session,
+    regularClose,
+    prevClose: meta.chartPreviousClose || meta.previousClose || 0,
+    asOf: asOf ? asOf * 1000 : null,
+    stale,
+  }
+}
+
 export class PriceService {
   constructor(databaseService = null) {
     this.priceCache = new Map()   // symbol → price
@@ -250,6 +307,41 @@ export class PriceService {
     // Ensure every requested symbol has an entry (0 = unknown)
     symbols.forEach(sym => { if (prices[sym] === undefined) { prices[sym] = 0; this._cachePrice(sym, 0) } })
     return prices
+  }
+
+  // See parseExtendedHoursChart (module scope) — kept separate so the session
+  // logic can be tested without waiting for 4am.
+  //
+  // Extended-hours (pre/post market) prices. The v7/finance/quote endpoint that
+  // carries preMarketPrice now 401s, so this uses the v8 chart endpoint with
+  // includePrePost=true and reads the last bar outside the regular session.
+  // One request per symbol — only call it for tickers with open option positions.
+  //
+  // Returns { SYMBOL: { price, session, regularClose, prevClose, asOf, stale } }
+  // where session is 'pre' | 'post' | 'regular' | 'closed'. `price` is the best
+  // current underlying for that session; during 'regular' it's just the live price.
+  async fetchExtendedHours(symbols) {
+    const out = {}
+    if (!symbols || symbols.length === 0) return out
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+    }
+    for (const symbol of symbols) {
+      try {
+        const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+                    `?range=1d&interval=5m&includePrePost=true`
+        const resp = await axios.get(url, { timeout: 12000, headers })
+        const result = resp.data?.chart?.result?.[0]
+        if (!result) continue
+        const parsed = parseExtendedHoursChart(result, Math.floor(Date.now() / 1000))
+        if (parsed) out[symbol] = parsed
+      } catch (err) {
+        console.warn(`Extended-hours fetch failed for ${symbol}:`, err.response?.status || err.message)
+      }
+      await new Promise(r => setTimeout(r, 120))   // gentle on Yahoo
+    }
+    return out
   }
 
   // Weekly change per symbol — uses Yahoo "spark" 5-day daily series (one bulk call per batch).
