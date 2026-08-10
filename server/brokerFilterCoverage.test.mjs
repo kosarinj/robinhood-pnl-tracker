@@ -154,6 +154,58 @@ try {
     assert.ok((allSC.entries || []).length > 0, 'merged view lost the short call')
   })
 
+  console.log('\nOptions P&L panel')
+
+  const openPositions = async (broker) => {
+    const q = broker ? `?broker=${broker}` : ''
+    return (await fetch(`${BASE}/api/options-pnl/open-positions${q}`, { headers: { cookie } })).json()
+  }
+  const [allOP, rhOP, wbOP] = await Promise.all([
+    openPositions(), openPositions('robinhood'), openPositions('webull'),
+  ])
+
+  test('open positions follow the broker tab', () => {
+    assert.ok((rhOP.positions || []).length > 0,
+      `robinhood should have the open call: ${JSON.stringify(rhOP).slice(0, 200)}`)
+    assert.equal((wbOP.positions || []).length, 0,
+      'webull has no open options but the panel listed some')
+    assert.ok((allOP.positions || []).length > 0, 'merged view lost the open position')
+  })
+
+  const history = async (broker) => {
+    const q = broker ? `?broker=${broker}` : ''
+    return (await fetch(`${BASE}/api/options-pnl/history${q}`, { headers: { cookie } })).json()
+  }
+  const [rhH, wbH] = await Promise.all([history('robinhood'), history('webull')])
+
+  test('weekly history follows the broker tab', () => {
+    assert.equal(rhH.success, true, `robinhood history failed: ${rhH.error}`)
+    assert.equal(wbH.success, true, `webull history failed: ${wbH.error}`)
+    // Only Robinhood sold an option, so only it can carry an open option
+    // position in the weekly view.
+    assert.ok((rhH.openOptionPositions || []).length > 0,
+      `robinhood should list the open option: ${JSON.stringify(rhH.openOptionPositions)}`)
+    assert.equal((wbH.openOptionPositions || []).length, 0,
+      `webull should have none, got ${JSON.stringify(wbH.openOptionPositions)}`)
+  })
+
+  console.log('\nExtended hours')
+
+  const extHours = async (broker) => {
+    const q = broker ? `?broker=${broker}` : ''
+    return (await fetch(`${BASE}/api/extended-hours${q}`, { headers: { cookie } })).json()
+  }
+  const [rhEH, wbEH] = await Promise.all([extHours('robinhood'), extHours('webull')])
+
+  test('extended hours responds per broker', () => {
+    assert.equal(rhEH.success, true, `robinhood: ${rhEH.error}`)
+    assert.equal(wbEH.success, true, `webull: ${wbEH.error}`)
+    // No closing IV is captured in this fixture, so both are empty — what's
+    // being checked is that the broker param is accepted and scoped, not that
+    // estimates appear.
+    assert.equal((wbEH.positions || []).length, 0)
+  })
+
   console.log(`\n${passed} passed\n`)
 } catch (e) {
   console.error('\nTest harness error:', e)

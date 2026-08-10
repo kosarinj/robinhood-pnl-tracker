@@ -1829,16 +1829,20 @@ export class DatabaseService {
   }
 
   // Get all option trades for cash-flow-based P&L calculation (deduplicated)
-  getOptionTrades(userId = 1) {
+  getOptionTrades(userId = 1, broker = null) {
     try {
+      // broker in the GROUP BY: the same contract traded at two brokers on one
+      // day is two trades, not one.
       const stmt = db.prepare(`
-        SELECT trans_date, symbol, description, is_buy, amount, trans_code
+        SELECT trans_date, symbol, description, is_buy, amount, trans_code,
+               COALESCE(broker,'robinhood') as broker
         FROM trades
         WHERE is_option = 1 AND user_id = ?
-        GROUP BY trans_date, symbol, is_buy, amount
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        GROUP BY trans_date, symbol, is_buy, amount, COALESCE(broker,'robinhood')
         ORDER BY trans_date ASC
       `)
-      return stmt.all(userId)
+      return stmt.all(...[userId, ...(broker ? [broker] : [])])
     } catch (error) {
       console.error('Error getting option trades:', error)
       return []

@@ -28,7 +28,7 @@ const SESSION_LABEL = {
   unknown: '',
 }
 
-export default function ExtendedHoursPanel() {
+export default function ExtendedHoursPanel({ broker = 'all' }) {
   const { isDark } = useTheme()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -36,7 +36,8 @@ export default function ExtendedHoursPanel() {
 
   const load = async () => {
     try {
-      const r = await fetch('/api/extended-hours', { credentials: 'include' })
+      const q = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+      const r = await fetch(`/api/extended-hours${q}`, { credentials: 'include' })
       const d = await r.json()
       if (!r.ok || d.success === false) throw new Error(d.error || 'Failed to load')
       setData(d)
@@ -53,7 +54,7 @@ export default function ExtendedHoursPanel() {
     // Extended-hours prints are sparse; once a minute is plenty.
     const id = setInterval(load, 60000)
     return () => clearInterval(id)
-  }, [])
+  }, [broker])
 
   const positions = data?.positions || []
   const totalChange = useMemo(

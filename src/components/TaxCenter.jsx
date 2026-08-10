@@ -25,7 +25,7 @@ const fmtDate = (d) => {
   return dt.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' })
 }
 
-export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlData = [], currentPrices = {}, accountName = '' }) {
+export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlData = [], currentPrices = {}, accountName = '', broker = 'all' }) {
   const { isDark } = useTheme()
 
   const surface = isDark ? '#1e2130' : '#ffffff'
@@ -130,12 +130,12 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
   useEffect(() => {
     if (!computed) { setStockHoldings([]); setStockLoaded(false); return }
     let alive = true
-    fetch('/api/stock-positions-with-prices', { credentials: 'include' })
+    fetch(`/api/stock-positions-with-prices${broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''}`, { credentials: 'include' })
       .then((r) => r.json())
       .then((j) => { if (!alive) return; setStockHoldings(j.success ? (j.holdings || []) : []); setStockLoaded(true) })
       .catch(() => { if (alive) setStockLoaded(true) })
     return () => { alive = false }
-  }, [computed])
+  }, [computed, broker])
 
   const lotBySymbol = useMemo(() => {
     const m = {}
@@ -198,13 +198,13 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
     let alive = true
     setOptionsLoading(true)
     setOptionsError(null)
-    fetch('/api/options-pnl/open-positions', { credentials: 'include' })
+    fetch(`/api/options-pnl/open-positions${broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''}`, { credentials: 'include' })
       .then((r) => r.json())
       .then((j) => { if (!alive) return; if (j.success) setOptionPositions(j.positions || []); else setOptionsError(j.error || 'Failed to load options') })
       .catch((e) => { if (alive) setOptionsError(e.message) })
       .finally(() => { if (alive) setOptionsLoading(false) })
     return () => { alive = false }
-  }, [computed])
+  }, [computed, broker])
   const sellableOptions = optionPositions.filter((op) => op.unrealizedPnl != null)
   const toggleOption = (symbol) => {
     setSelectedOptions((prev) => {

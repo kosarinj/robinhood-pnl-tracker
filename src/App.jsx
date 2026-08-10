@@ -2512,7 +2512,8 @@ function AuthenticatedApp({ user }) {
         <TaxCenter
           trades={brokerScopedTrades}
           dividendsAndInterest={dividendsAndInterest}
-          pnlData={pnlData}
+          pnlData={brokerScopedPnl}
+          broker={brokerFilter}
           currentPrices={currentPrices}
           accountName={user.username}
         />
@@ -2527,13 +2528,13 @@ function AuthenticatedApp({ user }) {
       {activeMainTab === 'dashboard' && <DCAAlertPanel />}
 
       {/* Pre/post market option estimates — self-hides during regular hours */}
-      {activeMainTab === 'dashboard' && <ExtendedHoursPanel />}
+      {activeMainTab === 'dashboard' && <ExtendedHoursPanel broker={brokerFilter} />}
 
       {/* Daily Realized P&L Panel */}
       {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
 
       {/* Options P&L Weekly Panel */}
-      {activeMainTab === 'dashboard' && <OptionsPnLPanel />}
+      {activeMainTab === 'dashboard' && <OptionsPnLPanel broker={brokerFilter} />}
 
       {/* Support & Resistance Levels */}
       {activeMainTab === 'analytics' && connected && (

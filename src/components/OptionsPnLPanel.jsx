@@ -115,7 +115,7 @@ const getMondayOfWeek = (dateStr) => {
   return { monday: monday.toISOString().slice(0, 10), friday: fri.toISOString().slice(0, 10) }
 }
 
-export default function OptionsPnLPanel() {
+export default function OptionsPnLPanel({ broker = 'all' }) {
   const { isDark } = useTheme()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -214,7 +214,11 @@ export default function OptionsPnLPanel() {
     setError(null)
     try {
       const asOf = overrideAsOf ?? asOfDate
-      const url = asOf ? `/api/options-pnl/history?asOf=${asOf}` : '/api/options-pnl/history'
+      const params = new URLSearchParams()
+      if (asOf) params.set('asOf', asOf)
+      if (broker && broker !== 'all') params.set('broker', broker)
+      const qs = params.toString()
+      const url = qs ? `/api/options-pnl/history?${qs}` : '/api/options-pnl/history'
       const res = await fetch(url, { credentials: 'include' })
       const json = await res.json()
       if (json.success) setData(json)
@@ -230,7 +234,8 @@ export default function OptionsPnLPanel() {
     setPosLoading(true)
     setPosError(null)
     try {
-      const res = await fetch('/api/options-pnl/open-positions', { credentials: 'include' })
+      const q = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+      const res = await fetch(`/api/options-pnl/open-positions${q}`, { credentials: 'include' })
       const text = await res.text()
       let json
       try { json = JSON.parse(text) } catch { setPosError(`Bad response (${res.status}): ${text.slice(0, 200)}`); return }
@@ -250,6 +255,7 @@ export default function OptionsPnLPanel() {
     }
   }
 
+  // Refetches on broker change too, so this panel follows the broker tab.
   useEffect(() => {
     fetchData()
     fetchLivePositions()
@@ -258,7 +264,7 @@ export default function OptionsPnLPanel() {
       fetchLivePositions()
     }, 5 * 60 * 1000)
     return () => clearInterval(interval)
-  }, [])
+  }, [broker])
 
   const setQuick = (range) => {
     setActiveQuick(range)

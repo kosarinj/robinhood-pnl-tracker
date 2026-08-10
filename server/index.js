@@ -2060,7 +2060,8 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
   try {
     const today = new Date().toISOString().slice(0, 10)
     const polygonKey = process.env.POLYGON_API_KEY || ''
-    const openOpts = databaseService.getOpenOptionPositions(req.user.userId)
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const openOpts = databaseService.getOpenOptionPositions(req.user.userId, brokerFilter)
 
     // Filter out positions where option has already expired
     const activeOpts = openOpts.filter(pos => {
@@ -2735,6 +2736,10 @@ app.get('/api/extended-hours', requireAuth, async (req, res) => {
     const nowEt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
     const today = nowEt.toISOString().slice(0, 10)
 
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    // IV marks are market data — the closing vol for a contract is the same
+    // wherever it's held, so they carry no broker. Scoping happens below via
+    // the open-position set, which IS broker-filtered.
     const ivMarks = databaseService.getLatestOptionIvMarks(userId)
     if (!ivMarks.length) {
       return res.json({
@@ -2745,7 +2750,7 @@ app.get('/api/extended-hours', requireAuth, async (req, res) => {
 
     // Only price contracts that are still open and unexpired.
     const openSymbols = new Set(
-      databaseService.getOpenOptionPositions(userId)
+      databaseService.getOpenOptionPositions(userId, brokerFilter)
         .filter(p => (p.net_short > 0 || p.net_long > 0))
         .map(p => p.symbol)
     )
@@ -4153,7 +4158,8 @@ app.post('/api/robinhood/download', requireAuth, async (req, res) => {
 // GET /api/options-pnl/history — weekly and date-range options P&L
 app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
   try {
-    const trades = databaseService.getOptionTrades(req.user.userId)
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const trades = databaseService.getOptionTrades(req.user.userId, brokerFilter)
 
     // Cash-flow P&L per trade:
     //   sell (STO/STC/OEXP) = +amount (premium received or position closed)
@@ -4579,7 +4585,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     let openOptionPositions = []
     try {
       const today = new Date().toISOString().slice(0, 10)
-      const openOpts = databaseService.getOpenOptionPositions(req.user.userId)
+      const openOpts = databaseService.getOpenOptionPositions(req.user.userId, brokerFilter)
       // Filter out expired options
       const activeOpts = openOpts.filter(pos => {
         const parsed = parseOptionDescription(pos.symbol)
