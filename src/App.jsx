@@ -2503,7 +2503,7 @@ function AuthenticatedApp({ user }) {
       {activeMainTab === 'positions' && (
         <div style={{ padding: '8px 0' }}>
           <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
-          <ShortCallTracker />
+          <ShortCallTracker broker={brokerFilter} />
         </div>
       )}
 

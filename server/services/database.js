@@ -2271,11 +2271,14 @@ export class DatabaseService {
   getStoCallTrades(userId = 1) {
     try {
       return db.prepare(`
-        SELECT trans_date, symbol, COALESCE(contracts, 1) as contracts, price, amount
+        SELECT trans_date, symbol, COALESCE(contracts, 1) as contracts, price, amount,
+               COALESCE(broker,'robinhood') as broker
         FROM trades
         WHERE is_option = 1 AND user_id = ? AND trans_code = 'STO'
           AND (symbol LIKE '%Call%' OR description LIKE '%Call%')
-        GROUP BY trans_date, symbol, price, amount
+        -- broker in the GROUP BY: the same call sold at two brokers on one day
+        -- is two entries, not one.
+        GROUP BY trans_date, symbol, price, amount, COALESCE(broker,'robinhood')
         ORDER BY trans_date ASC
       `).all(userId)
     } catch (e) {

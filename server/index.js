@@ -594,7 +594,8 @@ io.on('connection', (socket) => {
               contracts: trade.contracts || trade.quantity || 1,
               premium: Math.abs(trade.price),
               saleDate,
-              underlyingClose
+              underlyingClose,
+              broker: trade.broker || broker
             })
           }
           console.log(`📝 Populated ${stoCallTrades.length} short call entries`)
@@ -2838,10 +2839,12 @@ app.post('/api/extended-hours/capture-iv', requireAuth, async (req, res) => {
 app.get('/api/short-calls', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
-    const entries = databaseService.getShortCallEntries(userId)
+    // Broker tab: 'all' (or absent) keeps every broker.
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const entries = databaseService.getShortCallEntries(userId, brokerFilter)
 
     // Get open short option positions for status determination
-    const openPositions = databaseService.getOpenOptionPositions(userId)
+    const openPositions = databaseService.getOpenOptionPositions(userId, brokerFilter)
     const openShortSymbols = new Set(
       openPositions.filter(p => p.net_short > 0).map(p => p.symbol)
     )
@@ -2985,7 +2988,8 @@ app.post('/api/short-calls/rebuild', requireAuth, async (req, res) => {
         contracts: trade.contracts || 1,
         premium: Math.abs(trade.price),
         saleDate: trade.trans_date,
-        underlyingClose
+        underlyingClose,
+        broker: trade.broker || 'robinhood'
       })
       populated++
     }

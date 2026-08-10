@@ -133,6 +133,27 @@ try {
     assert.equal(databaseService.getOpenOptionPositions(userId, 'webull').length, 0)
   })
 
+  console.log('\nShort Call Tracker')
+
+  const shortCalls = async (broker) => {
+    const q = broker ? `?broker=${broker}` : ''
+    return (await fetch(`${BASE}/api/short-calls${q}`, { headers: { cookie } })).json()
+  }
+  const [allSC, rhSC, wbSC] = await Promise.all([
+    shortCalls(), shortCalls('robinhood'), shortCalls('webull'),
+  ])
+
+  test('the tracker follows the broker tab', () => {
+    assert.ok((rhSC.entries || []).length > 0,
+      `robinhood should list the short call: ${JSON.stringify(rhSC).slice(0, 200)}`)
+    assert.equal((wbSC.entries || []).length, 0,
+      'webull has no short calls but the tracker listed some')
+  })
+
+  test('the merged view still lists it', () => {
+    assert.ok((allSC.entries || []).length > 0, 'merged view lost the short call')
+  })
+
   console.log(`\n${passed} passed\n`)
 } catch (e) {
   console.error('\nTest harness error:', e)

@@ -29,7 +29,7 @@ const stockMoveColor = (n, isDark) => {
   return isDark ? '#94a3b8' : '#64748b'
 }
 
-export default function ShortCallTracker() {
+export default function ShortCallTracker({ broker = 'all' }) {
   const { isDark } = useTheme()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -52,7 +52,8 @@ export default function ShortCallTracker() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/short-calls', { credentials: 'include' })
+      const q = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+      const res = await fetch(`/api/short-calls${q}`, { credentials: 'include' })
       const json = await res.json()
       if (json.success) setData(json)
       else setError(json.error)
@@ -63,11 +64,13 @@ export default function ShortCallTracker() {
     }
   }
 
+  // Refetches on broker change as well as on the timer, so the tracker follows
+  // the broker tab like the Positions panel does.
   useEffect(() => {
     fetchData()
     const iv = setInterval(fetchData, 5 * 60 * 1000)
     return () => clearInterval(iv)
-  }, [])
+  }, [broker])
 
   const saveUnderlyingClose = async (id, price) => {
     try {
