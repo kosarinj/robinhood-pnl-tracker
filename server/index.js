@@ -22,6 +22,10 @@ import axios from 'axios'
 import { parseOptionDescription, toPolygonTicker, calcPremiumLeft, toYahooOptionTicker } from './utils/optionUtils.js'
 import { calculateRSI, calculateEMA, calculateStochastic } from './services/technicalAnalysis.js'
 import { RISK_FREE_RATE, bsCall, impliedVol, impliedVolCall, repriceFromClose } from './utils/blackScholes.js'
+import { parseWebullOrders } from './services/webullParser.js'
+
+// Brokers whose exports we can parse. Adding one means a parser + a tab.
+const SUPPORTED_BROKERS = ['robinhood', 'webull']
 
 // Best current per-share mark from a Polygon option snapshot.
 // Priority: live quote midpoint → a trade that actually happened TODAY → the daily
@@ -483,13 +487,33 @@ io.on('connection', (socket) => {
   // Handle CSV upload via socket
   socket.on('upload-csv', async (data) => {
     try {
-      const { csvContent } = data
+      // broker defaults to robinhood so existing clients keep working unchanged
+      const { csvContent, broker = 'robinhood' } = data
+      if (!SUPPORTED_BROKERS.includes(broker)) {
+        socket.emit('upload-error', { message: `Unknown broker "${broker}"` })
+        return
+      }
 
-      console.log(`Processing CSV for client ${socket.id}`)
+      console.log(`Processing ${broker} CSV for client ${socket.id}`)
 
       // Parse trades, dividends/interest, and deposits
-      const { trades, dividendsAndInterest } = await parseTrades(csvContent)
-      const { deposits, totalPrincipal } = await parseDeposits(csvContent)
+      let trades, dividendsAndInterest, deposits = [], totalPrincipal = 0
+      if (broker === 'webull') {
+        // Webull's orders export carries no cash movements, so there are no
+        // deposits or dividends to pull out of it.
+        const parsed = parseWebullOrders(csvContent)
+        trades = parsed.trades
+        dividendsAndInterest = []
+        if (parsed.warnings.length) console.log(`Webull parser warnings: ${parsed.warnings.join(' | ')}`)
+        if (!trades.length) {
+          socket.emit('upload-error', { message: 'No filled orders found in that Webull export.' })
+          return
+        }
+      } else {
+        ;({ trades, dividendsAndInterest } = await parseTrades(csvContent))
+        ;({ deposits, totalPrincipal } = await parseDeposits(csvContent))
+      }
+      trades.forEach(t => { t.broker = broker })
 
       // Get unique stock symbols
       const allSymbols = [...new Set(trades.map(t => t.symbol))]
@@ -542,7 +566,7 @@ io.on('connection', (socket) => {
 
       // Save trades and deposits to database immediately (don't wait for prices)
       try {
-        databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal, user.userId)
+        databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal, user.userId, broker)
         console.log(`💾 Saved ${trades.length} trades and ${deposits.length} deposits to database for ${asofDate} (user: ${user.userId})`)
       } catch (error) {
         console.error('Error saving trades:', error)

@@ -6,7 +6,7 @@
  * 6pm ET — the parser is pure so the clock can be supplied instead.
  */
 import assert from 'node:assert/strict'
-import { parseExtendedHoursChart } from './priceService.js'
+import { parseExtendedHoursChart, currentUsSession } from './priceService.js'
 
 let passed = 0
 const test = (name, fn) => {
@@ -107,6 +107,34 @@ test('returns null when there is no usable price at all', () => {
 
 test('returns null for a missing result', () => {
   assert.equal(parseExtendedHoursChart(null, DAY), null)
+})
+
+console.log('\nSession from the clock (drives the pre/post price overlay)')
+
+// Build a Date that reads as a given ET wall-clock time.
+const at = (dateStr, timeStr) => new Date(`${dateStr}T${timeStr}-04:00`)   // EDT
+
+test('pre-market window is 4:00am–9:30am ET', () => {
+  assert.equal(currentUsSession(at('2026-08-10', '04:00:00')), 'pre')
+  assert.equal(currentUsSession(at('2026-08-10', '09:06:00')), 'pre')
+  assert.equal(currentUsSession(at('2026-08-10', '09:29:59')), 'pre')
+})
+
+test('regular session starts at 9:30 ET', () => {
+  assert.equal(currentUsSession(at('2026-08-10', '09:30:00')), 'regular')
+  assert.equal(currentUsSession(at('2026-08-10', '15:59:00')), 'regular')
+})
+
+test('after hours runs 4pm–8pm ET', () => {
+  assert.equal(currentUsSession(at('2026-08-10', '16:00:00')), 'post')
+  assert.equal(currentUsSession(at('2026-08-10', '19:59:00')), 'post')
+})
+
+test('overnight and weekends are closed', () => {
+  assert.equal(currentUsSession(at('2026-08-10', '03:00:00')), 'closed')
+  assert.equal(currentUsSession(at('2026-08-10', '20:00:00')), 'closed')
+  assert.equal(currentUsSession(at('2026-08-08', '10:00:00')), 'closed')  // Saturday
+  assert.equal(currentUsSession(at('2026-08-09', '10:00:00')), 'closed')  // Sunday
 })
 
 console.log(`\n${passed} passed\n`)

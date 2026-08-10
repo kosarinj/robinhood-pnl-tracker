@@ -48,21 +48,29 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
   const inputOptions = trades.filter(t => t.isOption).length
   debugLog(`Input: ${trades.length} trades, ${inputOptions} are options`)
 
-  // Group trades by symbol
+  // Group by BROKER + symbol, not symbol alone.
+  //
+  // Buy/sell matching has to stay inside one broker: a sale at Schwab cannot
+  // close a lot held at Robinhood, and letting them match would silently
+  // produce wrong realized P&L and cost basis. Results for the same ticker at
+  // different brokers are merged back into a single row afterwards (see
+  // mergeAcrossBrokers) so callers still see one entry per symbol.
+  const brokerOf = (t) => t.broker || 'robinhood'
   const tradesBySymbol = trades.reduce((acc, trade) => {
-    if (!acc[trade.symbol]) {
-      acc[trade.symbol] = []
-    }
-    acc[trade.symbol].push(trade)
+    const key = `${brokerOf(trade)}\u0000${trade.symbol}`
+    if (!acc[key]) acc[key] = []
+    acc[key].push(trade)
     return acc
   }, {})
 
-  const results = []
+  let results = []
   const optionsByParent = {} // Track options by their parent instrument
 
-  // Calculate P&L for each symbol
-  Object.keys(tradesBySymbol).forEach((symbol) => {
-    const symbolTrades = tradesBySymbol[symbol]
+  // Calculate P&L for each broker+symbol group
+  Object.keys(tradesBySymbol).forEach((groupKey) => {
+    const symbolTrades = tradesBySymbol[groupKey]
+    const symbol = symbolTrades[0].symbol
+    const broker = brokerOf(symbolTrades[0])
     const currentPrice = currentPrices[symbol] || 0
 
     // Determine if this symbol represents options
@@ -86,6 +94,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
 
     const item = {
       symbol,
+      broker,
       instrument: symbolTrades[0].instrument,
       isOption,
       currentPrice,
@@ -117,16 +126,24 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
     }
 
     results.push(item)
+  })
 
-    // Track options by parent for aggregation
-    if (isOption && parentInstrument) {
-      debugLog(`✓ Option: ${symbol} -> Parent: ${parentInstrument}`)
-      if (!optionsByParent[parentInstrument]) {
-        optionsByParent[parentInstrument] = []
+  // Collapse per-broker rows back to one row per symbol. Matching already
+  // happened inside each broker, so this only adds the pieces up — no lot is
+  // matched across brokers. Must run before optionsByParent is built, or that
+  // index would hold references to rows that have been merged away.
+  results = mergeAcrossBrokers(results)
+
+  // Track options by parent for aggregation
+  results.forEach(item => {
+    if (item.isOption && item.parentInstrument) {
+      debugLog(`✓ Option: ${item.symbol} -> Parent: ${item.parentInstrument}`)
+      if (!optionsByParent[item.parentInstrument]) {
+        optionsByParent[item.parentInstrument] = []
       }
-      optionsByParent[parentInstrument].push(item)
-    } else if (isOption && !parentInstrument) {
-      debugLog(`✗ Option without parent: ${symbol}`)
+      optionsByParent[item.parentInstrument].push(item)
+    } else if (item.isOption && !item.parentInstrument) {
+      debugLog(`✗ Option without parent: ${item.symbol}`)
     }
   })
 
@@ -172,6 +189,82 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
   }
 
   return stocksOnly.sort((a, b) => a.symbol.localeCompare(b.symbol))
+}
+
+/**
+ * Collapse rows for the same symbol held at more than one broker into one row.
+ *
+ * Buy/sell matching already ran separately inside each broker, which is the
+ * point — a Schwab sale must not close a Robinhood lot. So this only adds up
+ * the finished numbers. Dollar amounts sum; prices are re-derived from the
+ * combined totals rather than averaged, since averaging two average costs
+ * weights a 1-share lot the same as a 500-share one.
+ *
+ * Rows that appear at a single broker pass through untouched, so this is a
+ * no-op for a single-broker account.
+ */
+const mergeAcrossBrokers = (rows) => {
+  const bySymbol = new Map()
+  for (const row of rows) {
+    const existing = bySymbol.get(row.symbol)
+    if (!existing) {
+      // Clone the accounting blocks: the merged row is mutated below, and
+      // byBroker must keep this broker's own untouched numbers.
+      bySymbol.set(row.symbol, {
+        ...row,
+        real: { ...row.real }, avgCost: { ...row.avgCost },
+        fifo: { ...row.fifo }, lifo: { ...row.lifo },
+        brokers: [row.broker],
+        byBroker: { [row.broker]: row },
+      })
+      continue
+    }
+    existing.brokers.push(row.broker)
+    existing.byBroker[row.broker] = row
+    existing.broker = 'multiple'
+
+    for (const method of ['real', 'avgCost', 'fifo', 'lifo']) {
+      const a = existing[method], b = row[method]
+      if (!a || !b) continue
+      const posA = a.position || 0, posB = b.position || 0
+      const totalPos = posA + posB
+
+      // Cost basis must be re-weighted by position, not averaged.
+      const basisA = (a.avgCostBasis || 0) * posA
+      const basisB = (b.avgCostBasis || 0) * posB
+
+      a.realizedPnL = roundToTwo((a.realizedPnL || 0) + (b.realizedPnL || 0))
+      a.unrealizedPnL = roundToTwo((a.unrealizedPnL || 0) + (b.unrealizedPnL || 0))
+      a.totalPnL = roundToTwo((a.totalPnL || 0) + (b.totalPnL || 0))
+      a.position = roundToTwo(totalPos)
+      a.avgCostBasis = totalPos > 0 ? roundToTwo((basisA + basisB) / totalPos) : 0
+      a.totalTrades = (a.totalTrades || 0) + (b.totalTrades || 0)
+
+      // Percentage return is only meaningful against the combined basis.
+      const invested = totalPos > 0 ? totalPos * a.avgCostBasis : 0
+      a.percentageReturn = invested > 0 ? roundToTwo((a.totalPnL / invested) * 100) : 0
+
+      // "Lowest open buy" style fields describe a specific lot at a specific
+      // broker, so keep whichever is genuinely lowest rather than blending.
+      if (b.lowestOpenBuyPrice != null &&
+          (a.lowestOpenBuyPrice == null || b.lowestOpenBuyPrice < a.lowestOpenBuyPrice)) {
+        a.lowestOpenBuyPrice = b.lowestOpenBuyPrice
+        a.lowestOpenBuyDaysAgo = b.lowestOpenBuyDaysAgo
+      }
+      if (b.highestBuyEver != null && (a.highestBuyEver == null || b.highestBuyEver > a.highestBuyEver)) {
+        a.highestBuyEver = b.highestBuyEver
+      }
+      if (Array.isArray(a.recentLowestBuys) && Array.isArray(b.recentLowestBuys)) {
+        a.recentLowestBuys = [...a.recentLowestBuys, ...b.recentLowestBuys]
+          .sort((x, y) => (x.daysAgo ?? 0) - (y.daysAgo ?? 0)).slice(0, 20)
+      }
+      if (Array.isArray(a.recentSells) && Array.isArray(b.recentSells)) {
+        a.recentSells = [...a.recentSells, ...b.recentSells]
+          .sort((x, y) => (x.daysAgo ?? 0) - (y.daysAgo ?? 0)).slice(0, 20)
+      }
+    }
+  }
+  return [...bySymbol.values()]
 }
 
 // Rollup options under their parent instrument

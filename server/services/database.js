@@ -391,6 +391,28 @@ try {
     console.log('✅ Added is_option column and updated existing trades')
   }
 
+  // Migration: which broker a trade came from. Everything that existed before
+  // multi-broker support was a Robinhood CSV, so that's the backfill value.
+  // Must run before the prepared statements below reference the column.
+  // NB: no index here — on a fresh database `user_id` doesn't exist on trades
+  // yet (a later migration adds it), and a CREATE INDEX naming it would throw
+  // and abort the rest of this block. The index is created further down, once
+  // user_id is guaranteed to be there.
+  const hasBroker = tableInfo.some(col => col.name === 'broker')
+  if (!hasBroker) {
+    db.exec(`ALTER TABLE trades ADD COLUMN broker TEXT DEFAULT 'robinhood'`)
+    db.exec(`UPDATE trades SET broker = 'robinhood' WHERE broker IS NULL`)
+    console.log('✅ Added broker column to trades table (existing rows → robinhood)')
+  }
+  // Deposits carry a broker too, so re-uploading one broker's file can't delete
+  // another's cash movements for the same upload date.
+  const depositInfo = db.pragma('table_info(deposits)')
+  if (!depositInfo.some(col => col.name === 'broker')) {
+    db.exec(`ALTER TABLE deposits ADD COLUMN broker TEXT DEFAULT 'robinhood'`)
+    db.exec(`UPDATE deposits SET broker = 'robinhood' WHERE broker IS NULL`)
+    console.log('✅ Added broker column to deposits table')
+  }
+
   // Migration: Add contracts column to trades table if it doesn't exist
   const hasContracts = tableInfo.some(col => col.name === 'contracts')
   if (!hasContracts) {
@@ -522,6 +544,8 @@ try {
   try {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pnl_snapshots_user_date_symbol ON pnl_snapshots(user_id, asof_date, symbol)')
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_csv_uploads_user_date ON csv_uploads(user_id, upload_date)')
+    // Safe here: user_id exists on trades by this point.
+    db.exec('CREATE INDEX IF NOT EXISTS idx_trades_broker ON trades(user_id, broker)')
     console.log('✅ Created unique indexes for multi-user support')
   } catch (error) {
     console.log('ℹ️ Unique indexes may already exist')
@@ -587,14 +611,17 @@ const upsertPnLSnapshot = db.prepare(`
 `)
 
 const insertTrade = db.prepare(`
-  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, contracts, user_id)
-  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption, @contracts, @userId)
+  INSERT INTO trades (upload_date, trans_date, trans_code, symbol, quantity, price, amount, description, is_buy, is_option, contracts, user_id, broker)
+  VALUES (@uploadDate, @transDate, @transCode, @symbol, @quantity, @price, @amount, @description, @isBuy, @isOption, @contracts, @userId, @broker)
 `)
 
-// Count existing trades matching a given key from upload_dates OTHER than the current one
+// Count existing trades matching a given key from upload_dates OTHER than the current one.
+// Broker is part of the key: the same ticker, size and price can legitimately trade
+// at two brokers on the same day, and without it one of them would be deduped away.
 const countExistingTrade = db.prepare(`
   SELECT COUNT(*) as cnt FROM trades
   WHERE user_id = @userId
+    AND COALESCE(broker, 'robinhood') = @broker
     AND trans_date = @transDate
     AND COALESCE(trans_code, '') = @transCode
     AND symbol = @symbol
@@ -615,8 +642,8 @@ const upsertCsvUpload = db.prepare(`
 `)
 
 const insertDeposit = db.prepare(`
-  INSERT INTO deposits (upload_date, deposit_date, amount, description, user_id)
-  VALUES (@uploadDate, @depositDate, @amount, @description, @userId)
+  INSERT INTO deposits (upload_date, deposit_date, amount, description, user_id, broker)
+  VALUES (@uploadDate, @depositDate, @amount, @description, @userId, @broker)
 `)
 
 export class DatabaseService {
@@ -1146,7 +1173,7 @@ export class DatabaseService {
   }
 
   // Save trades from CSV upload
-  saveTrades(trades, uploadDate = null, deposits = [], totalPrincipal = 0, userId = 1) {
+  saveTrades(trades, uploadDate = null, deposits = [], totalPrincipal = 0, userId = 1, broker = 'robinhood') {
     try {
       // Use provided upload date or generate from latest trade date
       if (!uploadDate && trades.length > 0) {
@@ -1159,9 +1186,13 @@ export class DatabaseService {
         uploadDate = new Date(latestTrade.date || latestTrade.transDate).toISOString().split('T')[0]
       }
 
-      // Delete existing trades and deposits for this upload date and user
-      db.prepare('DELETE FROM trades WHERE upload_date = ? AND user_id = ?').run(uploadDate, userId)
-      db.prepare('DELETE FROM deposits WHERE upload_date = ? AND user_id = ?').run(uploadDate, userId)
+      // Delete existing rows for this upload date and user — scoped to THIS
+      // broker. Re-uploading a Webull file must not wipe the Robinhood trades
+      // that happen to share an upload date.
+      db.prepare(`DELETE FROM trades WHERE upload_date = ? AND user_id = ? AND COALESCE(broker,'robinhood') = ?`)
+        .run(uploadDate, userId, broker)
+      db.prepare(`DELETE FROM deposits WHERE upload_date = ? AND user_id = ? AND COALESCE(broker,'robinhood') = ?`)
+        .run(uploadDate, userId, broker)
 
       // Group CSV trades by dedup key so identical trades can be counted and compared against DB
       const csvTradeGroups = new Map()
@@ -1186,7 +1217,8 @@ export class DatabaseService {
             quantity: t.quantity,
             price: t.price,
             amount: t.amount,
-            uploadDate
+            uploadDate,
+            broker
           })
           // Insert only the trades that aren't already covered by other uploads
           const toInsert = Math.max(0, tradeList.length - alreadyInDb)
@@ -1204,7 +1236,8 @@ export class DatabaseService {
               isBuy: trade.isBuy ? 1 : 0,
               isOption: trade.isOption ? 1 : 0,
               contracts: trade.contracts || 1,
-              userId
+              userId,
+              broker
             })
           }
         }
@@ -1217,7 +1250,8 @@ export class DatabaseService {
             depositDate,
             amount: deposit.amount,
             description: deposit.description || null,
-            userId
+            userId,
+            broker
           })
         }
 

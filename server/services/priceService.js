@@ -65,6 +65,25 @@ async function fetchPolygonGrouped(apiKey) {
 }
 
 /**
+ * Which US market session we're in, from the clock alone.
+ *
+ * Deliberately avoids a network call: this is used to decide *whether* to make
+ * the extended-hours requests at all, so deriving it from a request would defeat
+ * the purpose. Holidays aren't accounted for — on one, this reports 'pre' or
+ * 'regular' and the extended-hours fetch simply finds no new bars and falls back.
+ */
+export function currentUsSession(now = new Date()) {
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+  const day = et.getDay()
+  if (day === 0 || day === 6) return 'closed'
+  const mins = et.getHours() * 60 + et.getMinutes()
+  if (mins >= 4 * 60 && mins < 9 * 60 + 30) return 'pre'
+  if (mins >= 9 * 60 + 30 && mins < 16 * 60) return 'regular'
+  if (mins >= 16 * 60 && mins < 20 * 60) return 'post'
+  return 'closed'
+}
+
+/**
  * Pull the current extended-hours price out of a Yahoo v8 chart result.
  *
  * Pure so the session logic is testable at any hour. `nowSec` is unix seconds.
@@ -288,6 +307,30 @@ export class PriceService {
     const gotYahoo = symbols.filter(s => prices[s] > 0).length
     console.log(`fetchPrices (Yahoo spark): ${gotYahoo}/${symbols.length} intraday`)
 
+    // Outside regular hours the spark endpoint is stale — its meta.regularMarketPrice
+    // holds the last regular-session price and its bars stop at 4pm, and it ignores
+    // includePrePost. So pre/post market, overlay the real extended-hours price from
+    // the v8 chart endpoint (one request per symbol, hence only when it matters).
+    const session = currentUsSession()
+    if (session === 'pre' || session === 'post') {
+      try {
+        const ext = await this.fetchExtendedHoursCached(symbols)
+        let moved = 0
+        for (const sym of symbols) {
+          const e = ext[sym]
+          // `stale` means no extended-hours trade has printed yet — keep the close.
+          if (e && e.price > 0 && !e.stale) {
+            prices[sym] = e.price
+            this._cachePrice(sym, e.price)
+            moved++
+          }
+        }
+        console.log(`fetchPrices (${session}-market overlay): ${moved}/${symbols.length} updated`)
+      } catch (e) {
+        console.warn('Extended-hours overlay failed, keeping regular-session prices:', e.message)
+      }
+    }
+
     // Fill any gaps (Yahoo missed/blocked) with Polygon end-of-day closes
     const missing = symbols.filter(s => !(prices[s] > 0))
     if (missing.length > 0 && process.env.POLYGON_API_KEY) {
@@ -307,6 +350,36 @@ export class PriceService {
     // Ensure every requested symbol has an entry (0 = unknown)
     symbols.forEach(sym => { if (prices[sym] === undefined) { prices[sym] = 0; this._cachePrice(sym, 0) } })
     return prices
+  }
+
+  /**
+   * fetchExtendedHours with a short TTL.
+   *
+   * The chart endpoint costs one request per symbol and the price loop runs
+   * often; Yahoo returns 429 if you lean on it. Extended-hours prints are
+   * sparse anyway, so a short cache loses nothing real.
+   */
+  async fetchExtendedHoursCached(symbols, ttlMs = 60000) {
+    const now = Date.now()
+    if (!this._extCache) this._extCache = new Map()
+
+    const fresh = {}
+    const stale = []
+    for (const s of symbols) {
+      const hit = this._extCache.get(s)
+      if (hit && now - hit.at < ttlMs) fresh[s] = hit.value
+      else stale.push(s)
+    }
+    if (stale.length) {
+      const fetched = await this.fetchExtendedHours(stale)
+      for (const s of stale) {
+        if (fetched[s]) {
+          this._extCache.set(s, { at: now, value: fetched[s] })
+          fresh[s] = fetched[s]
+        }
+      }
+    }
+    return fresh
   }
 
   // See parseExtendedHoursChart (module scope) — kept separate so the session
