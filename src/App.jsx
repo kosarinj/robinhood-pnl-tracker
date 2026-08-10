@@ -60,6 +60,9 @@ function AuthenticatedApp({ user }) {
     setUploadBroker(b)
     localStorage.setItem('uploadBroker', b)
   }
+  // Bumped after an upload so the broker bar re-queries which brokers exist —
+  // otherwise the tabs wouldn't appear until a page reload.
+  const [brokerRefreshKey, setBrokerRefreshKey] = useState(0)
   const [pnlData, setPnlData] = useState([])
   const [showOpenOnly, setShowOpenOnly] = useState(true)
   const [symbolFilter, setSymbolFilter] = useState('')
@@ -957,6 +960,8 @@ function AuthenticatedApp({ user }) {
         const response = await socketService.uploadCSV(csvContent, broker)
 
         console.log('✅ CSV processed by server')
+        // A new broker may now have data — refresh the broker bar.
+        setBrokerRefreshKey(k => k + 1)
 
         // Set state from server response
         setTrades(response.trades)
@@ -2481,7 +2486,7 @@ function AuthenticatedApp({ user }) {
 
       {/* Broker filter — hides itself when only one broker has data */}
       {(activeMainTab === 'dashboard' || activeMainTab === 'positions' || activeMainTab === 'tax') && (
-        <BrokerTabs value={brokerFilter} onChange={changeBrokerFilter} />
+        <BrokerTabs value={brokerFilter} onChange={changeBrokerFilter} refreshKey={brokerRefreshKey} />
       )}
 
       {/* Daily P&L Chart */}
