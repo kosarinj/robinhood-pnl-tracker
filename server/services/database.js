@@ -364,6 +364,41 @@ try {
       UNIQUE(user_id, symbol)
     )
   `)
+  // Overrides are per broker: the same ticker can be held at two brokers with
+  // genuinely different cost bases, and a single shared override made the
+  // Webull row show the Robinhood cost.
+  //
+  // The old UNIQUE(user_id, symbol) is a table constraint backed by an
+  // auto-index that SQLite won't let us drop, so the table has to be rebuilt.
+  // Existing overrides were all Robinhood, which is the backfill value.
+  const scoInfo = db.pragma('table_info(stock_cost_overrides)')
+  if (!scoInfo.some(c => c.name === 'broker')) {
+    db.exec('BEGIN')
+    try {
+      db.exec(`
+        CREATE TABLE stock_cost_overrides_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL DEFAULT 1,
+          symbol TEXT NOT NULL,
+          broker TEXT NOT NULL DEFAULT 'robinhood',
+          avg_cost REAL NOT NULL,
+          updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+          UNIQUE(user_id, symbol, broker)
+        )
+      `)
+      db.exec(`
+        INSERT INTO stock_cost_overrides_new (id, user_id, symbol, broker, avg_cost, updated_at)
+        SELECT id, user_id, symbol, 'robinhood', avg_cost, updated_at FROM stock_cost_overrides
+      `)
+      db.exec('DROP TABLE stock_cost_overrides')
+      db.exec('ALTER TABLE stock_cost_overrides_new RENAME TO stock_cost_overrides')
+      db.exec('COMMIT')
+      console.log('✅ stock_cost_overrides is now per-broker (existing rows → robinhood)')
+    } catch (inner) {
+      db.exec('ROLLBACK')
+      throw inner
+    }
+  }
 } catch (e) {
   console.error('stock_cost_overrides migration error:', e.message)
 }
@@ -2082,26 +2117,76 @@ export class DatabaseService {
     }
   }
 
-  getCostOverrides(userId = 1) {
+  /**
+   * Manual avg-cost overrides as { SYMBOL: cost }.
+   *
+   * With a broker, returns that broker's overrides. Without one (the merged
+   * view) a symbol overridden at two brokers has no single right answer, so
+   * each broker's effective cost is weighted by the shares held there — the
+   * same rule the cross-broker P&L merge uses. A broker with no override
+   * contributes its actual computed cost, so overriding one broker doesn't
+   * silently rewrite the other's basis.
+   */
+  getCostOverrides(userId = 1, broker = null) {
     try {
-      const rows = db.prepare(`SELECT symbol, avg_cost FROM stock_cost_overrides WHERE user_id = ?`).all(userId)
-      return Object.fromEntries(rows.map(r => [r.symbol, r.avg_cost]))
+      if (broker) {
+        const rows = db.prepare(
+          `SELECT symbol, avg_cost FROM stock_cost_overrides
+           WHERE user_id = ? AND COALESCE(broker,'robinhood') = ?`
+        ).all(userId, broker)
+        return Object.fromEntries(rows.map(r => [r.symbol, r.avg_cost]))
+      }
+
+      const rows = db.prepare(
+        `SELECT symbol, COALESCE(broker,'robinhood') AS broker, avg_cost
+         FROM stock_cost_overrides WHERE user_id = ?`
+      ).all(userId)
+      if (!rows.length) return {}
+
+      // Only symbols that actually carry an override need blending.
+      const symbols = [...new Set(rows.map(r => r.symbol))]
+      const blended = {}
+      for (const symbol of symbols) {
+        const perBroker = db.prepare(
+          `SELECT COALESCE(broker,'robinhood') AS broker,
+                  SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE -COALESCE(quantity,0) END) AS position,
+                  SUM(CASE WHEN is_buy = 1 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_cost,
+                  SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought
+           FROM trades
+           WHERE user_id = ? AND symbol = ? AND (is_option = 0 OR is_option IS NULL)
+           GROUP BY COALESCE(broker,'robinhood')
+           HAVING position > 0`
+        ).all(userId, symbol)
+
+        let shares = 0, cost = 0
+        for (const b of perBroker) {
+          const override = rows.find(r => r.symbol === symbol && r.broker === b.broker)?.avg_cost
+          const actual = b.total_bought > 0 ? b.total_cost / b.total_bought : 0
+          const effective = override != null ? override : actual
+          shares += b.position
+          cost += effective * b.position
+        }
+        if (shares > 0) blended[symbol] = Math.round((cost / shares) * 100) / 100
+      }
+      return blended
     } catch (e) {
       console.error('Error getting cost overrides:', e)
       return {}
     }
   }
 
-  setCostOverride(userId = 1, symbol, avgCost) {
+  setCostOverride(userId = 1, symbol, avgCost, broker = 'robinhood') {
     db.prepare(`
-      INSERT INTO stock_cost_overrides (user_id, symbol, avg_cost, updated_at)
-      VALUES (?, ?, ?, strftime('%s','now'))
-      ON CONFLICT(user_id, symbol) DO UPDATE SET avg_cost = excluded.avg_cost, updated_at = excluded.updated_at
-    `).run(userId, symbol.toUpperCase(), avgCost)
+      INSERT INTO stock_cost_overrides (user_id, symbol, broker, avg_cost, updated_at)
+      VALUES (?, ?, ?, ?, strftime('%s','now'))
+      ON CONFLICT(user_id, symbol, broker) DO UPDATE SET avg_cost = excluded.avg_cost, updated_at = excluded.updated_at
+    `).run(userId, symbol.toUpperCase(), broker, avgCost)
   }
 
-  deleteCostOverride(userId = 1, symbol) {
-    db.prepare(`DELETE FROM stock_cost_overrides WHERE user_id = ? AND symbol = ?`).run(userId, symbol.toUpperCase())
+  deleteCostOverride(userId = 1, symbol, broker = 'robinhood') {
+    db.prepare(
+      `DELETE FROM stock_cost_overrides WHERE user_id = ? AND symbol = ? AND COALESCE(broker,'robinhood') = ?`
+    ).run(userId, symbol.toUpperCase(), broker)
   }
 
   getOptionTradesForYTD(userId = 1) {

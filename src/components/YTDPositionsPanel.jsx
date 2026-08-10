@@ -4,9 +4,11 @@ import { useTheme } from '../contexts/ThemeContext'
 const DEFAULT_GLOBAL_START = '2026-03-15'
 const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
 const LS_SYMBOL_KEY = 'ytdPanel_symbolDates'
-const LS_COST_KEY = 'ytdPanel_costOverrides'
 const LS_HIDDEN_KEY = 'ytdPanel_hiddenTickers'
 const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
+// Cost overrides are cached per broker — one shared key was how the Robinhood
+// cost ended up showing on Webull rows.
+const costKey = (broker) => `ytdPanel_costOverrides_${broker || 'all'}`
 
 const fmt = (n) => {
   if (n == null || isNaN(n)) return '—'
@@ -45,7 +47,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [editingSymbol, setEditingSymbol] = useState(null)
   const [editDraft, setEditDraft] = useState('')
   const [costOverrides, setCostOverrides] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(LS_COST_KEY) || '{}') } catch { return {} }
+    try { return JSON.parse(localStorage.getItem(costKey(broker)) || '{}') } catch { return {} }
   })
   const [editingCost, setEditingCost] = useState(null)
   const [costDraft, setCostDraft] = useState('')
@@ -97,6 +99,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   useEffect(() => {
     fetchData(undefined, undefined, true)
     fetchStockHoldings()
+    fetchCostOverrides()
   }, [broker])
 
   // Fetch stock holdings + cost overrides from server on mount.
@@ -121,8 +124,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   }
 
   const fetchCostOverrides = () => {
-    const localData = (() => { try { return JSON.parse(localStorage.getItem(LS_COST_KEY) || '{}') } catch { return {} } })()
-    fetch('/api/stock-cost-overrides', { credentials: 'include' })
+    const key = costKey(broker)
+    const localData = (() => { try { return JSON.parse(localStorage.getItem(key) || '{}') } catch { return {} } })()
+    const q = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+    fetch(`/api/stock-cost-overrides${q}`, { credentials: 'include' })
       .then(r => r.json())
       .then(json => {
         if (!json.success) return
@@ -130,17 +135,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         if (Object.keys(serverData).length > 0) {
           // Server has data — use it as source of truth
           setCostOverrides(serverData)
-          localStorage.setItem(LS_COST_KEY, JSON.stringify(serverData))
-        } else if (Object.keys(localData).length > 0) {
-          // Server empty (e.g. after redeploy) but localStorage has data — restore to server
+          localStorage.setItem(key, JSON.stringify(serverData))
+        } else if (Object.keys(localData).length > 0 && broker && broker !== 'all') {
+          // Server empty (e.g. after redeploy) but localStorage has data — restore
+          // to server. Only from a single-broker tab: a merged-view cache has no
+          // one broker to restore it to.
           setCostOverrides(localData)
           Object.entries(localData).forEach(([symbol, avgCost]) => {
             fetch(`/api/stock-cost-overrides/${symbol}`, {
               method: 'PUT', credentials: 'include',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ avgCost })
+              body: JSON.stringify({ avgCost, broker })
             }).catch(() => {})
           })
+        } else {
+          setCostOverrides(serverData)
         }
       })
       .catch(() => {})
@@ -190,33 +199,48 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     fetchData(globalStart, updated)
   }
 
+  // An override belongs to one broker's shares, so it can only be set from a
+  // single-broker tab. From "All brokers" there is no unambiguous target.
   const saveCostOverride = async (ticker, value) => {
     const num = parseFloat(value)
     if (!num || num <= 0) return
+    if (!broker || broker === 'all') {
+      setError('Pick a broker tab before editing cost. An override applies to a single broker position.')
+      setEditingCost(null)
+      return
+    }
     const rounded = Math.round(num * 100) / 100
     const updated = { ...costOverrides, [ticker]: rounded }
     setCostOverrides(updated)
-    localStorage.setItem(LS_COST_KEY, JSON.stringify(updated))
+    localStorage.setItem(costKey(broker), JSON.stringify(updated))
     setEditingCost(null)
     try {
       await fetch(`/api/stock-cost-overrides/${ticker}`, {
         method: 'PUT', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ avgCost: rounded })
+        body: JSON.stringify({ avgCost: rounded, broker })
       })
+      fetchData(undefined, undefined, true)
     } catch (e) {
       console.error('Failed to persist cost override:', e)
     }
   }
 
   const clearCostOverride = async (ticker) => {
+    if (!broker || broker === 'all') {
+      setError('Pick a broker tab before clearing cost. An override applies to a single broker position.')
+      setEditingCost(null)
+      return
+    }
     const updated = { ...costOverrides }
     delete updated[ticker]
     setCostOverrides(updated)
-    localStorage.setItem(LS_COST_KEY, JSON.stringify(updated))
+    localStorage.setItem(costKey(broker), JSON.stringify(updated))
     setEditingCost(null)
     try {
-      await fetch(`/api/stock-cost-overrides/${ticker}`, { method: 'DELETE', credentials: 'include' })
+      await fetch(`/api/stock-cost-overrides/${ticker}?broker=${encodeURIComponent(broker)}`,
+        { method: 'DELETE', credentials: 'include' })
+      fetchData(undefined, undefined, true)
     } catch (e) {
       console.error('Failed to delete cost override:', e)
     }

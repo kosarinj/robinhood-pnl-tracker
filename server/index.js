@@ -2524,7 +2524,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // Stock positions + prices — as of the chosen date, or live. Position/cost bounded
     // to trades on/before asOf; price is that day's historical close (else live).
     const stockPositions = databaseService.getStockPositionsWithCost(userId, asOf, brokerFilter)
-    const stockCostOverrides = databaseService.getCostOverrides(userId)
+    const stockCostOverrides = databaseService.getCostOverrides(userId, brokerFilter)
     const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides, asOf)
 
     // Rows so far come only from option activity, so a stock held without any
@@ -3515,7 +3515,8 @@ app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
 app.get('/api/stock-cost-overrides', requireAuth, (req, res) => {
   try {
     const userId = req.user.userId
-    res.json({ success: true, overrides: databaseService.getCostOverrides(userId) })
+    const broker = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    res.json({ success: true, overrides: databaseService.getCostOverrides(userId, broker) })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
@@ -3527,7 +3528,16 @@ app.put('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
     const symbol = req.params.symbol.toUpperCase()
     const avgCost = parseFloat(req.body.avgCost)
     if (!avgCost || avgCost <= 0) return res.status(400).json({ success: false, error: 'Invalid avgCost' })
-    databaseService.setCostOverride(userId, symbol, avgCost)
+    // An override belongs to one broker's lot. Editing from the merged view has
+    // no single target, so refuse rather than guess and corrupt a basis.
+    const broker = req.body.broker || req.query.broker
+    if (!broker || broker === 'all') {
+      return res.status(400).json({
+        success: false,
+        error: 'Pick a broker tab before editing cost. An override applies to a single broker position.',
+      })
+    }
+    databaseService.setCostOverride(userId, symbol, avgCost, broker)
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
@@ -3537,7 +3547,14 @@ app.put('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
 app.delete('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
   try {
     const userId = req.user.userId
-    databaseService.deleteCostOverride(userId, req.params.symbol)
+    const broker = req.body?.broker || req.query.broker
+    if (!broker || broker === 'all') {
+      return res.status(400).json({
+        success: false,
+        error: 'Pick a broker tab before clearing cost. An override applies to a single broker position.',
+      })
+    }
+    databaseService.deleteCostOverride(userId, req.params.symbol, broker)
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
