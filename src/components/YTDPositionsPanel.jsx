@@ -6,6 +6,7 @@ const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
 const LS_SYMBOL_KEY = 'ytdPanel_symbolDates'
 const LS_COST_KEY = 'ytdPanel_costOverrides'
 const LS_HIDDEN_KEY = 'ytdPanel_hiddenTickers'
+const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
 
 const fmt = (n) => {
   if (n == null || isNaN(n)) return '—'
@@ -31,6 +32,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)
+  // Which rows to show: everything, only names with option activity, or only
+  // stocks held without options. Remembered between visits.
+  const [rowView, setRowView] = useState(() => localStorage.getItem(LS_ROWVIEW_KEY) || 'all')
+  const changeRowView = (v) => { setRowView(v); localStorage.setItem(LS_ROWVIEW_KEY, v) }
   const [symbolDates, setSymbolDates] = useState(() => {
     try { return JSON.parse(localStorage.getItem(LS_SYMBOL_KEY) || '{}') } catch { return {} }
   })
@@ -263,8 +268,15 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
 
   const q = search.trim().toUpperCase()
   const hiddenSet = new Set(hiddenTickers)
+  // Rows now include stocks held without any options (hasOptions false). The
+  // view filter narrows to one kind; totals below follow whatever is shown.
   const rows = (data?.byUnderlying || []).filter(r =>
-    !hiddenSet.has(r.ticker) && (!q || (r.ticker || '').toUpperCase().includes(q)))
+    !hiddenSet.has(r.ticker) &&
+    (!q || (r.ticker || '').toUpperCase().includes(q)) &&
+    (rowView === 'all' ||
+     (rowView === 'options' && r.hasOptions) ||
+     (rowView === 'stock' && !r.hasOptions)))
+  const stockOnlyCount = (data?.byUnderlying || []).filter(r => !r.hasOptions).length
   const sorted = [...rows].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
     const av = a[sortField], bv = b[sortField]
@@ -365,6 +377,32 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               updated {new Date(lastUpdated).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
+        </div>
+        {/* Row view: everything / only names with options / only held stocks */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {[
+            ['all', 'All', 'Every row — names with option activity plus stocks you hold without options'],
+            ['options', 'Has options', 'Only names with option activity in the selected period'],
+            ['stock', 'Stock only', 'Only stocks you currently hold that have no option activity'],
+          ].map(([key, label, tip]) => (
+            <button
+              key={key}
+              onClick={() => changeRowView(key)}
+              title={tip}
+              style={{
+                padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                borderRadius: 6,
+                border: `1px solid ${rowView === key ? '#667eea' : border}`,
+                background: rowView === key ? '#667eea' : 'transparent',
+                color: rowView === key ? '#fff' : textMid,
+              }}
+            >
+              {label}
+              {key === 'stock' && stockOnlyCount > 0 && (
+                <span style={{ marginLeft: 5, opacity: 0.75, fontWeight: 500, fontSize: 11 }}>{stockOnlyCount}</span>
+              )}
+            </button>
+          ))}
         </div>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <input
@@ -549,6 +587,16 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                   >
                     <td style={{ padding: '10px 4px', fontWeight: '700', color: text, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: tickerBg, boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
                       {row.ticker}
+                      {!row.hasOptions && (
+                        <span
+                          title="Stock only — no option activity in this period. Option columns are blank by fact, not for want of data."
+                          style={{
+                            marginLeft: 5, fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                            padding: '1px 4px', borderRadius: 3, verticalAlign: 'middle',
+                            color: textMid, border: `1px solid ${border}`,
+                          }}
+                        >STK</span>
+                      )}
                       <button
                         className="ytd-hide"
                         onClick={(e) => { e.stopPropagation(); hideTicker(row.ticker) }}

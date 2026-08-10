@@ -2526,6 +2526,23 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const stockPositions = databaseService.getStockPositionsWithCost(userId, asOf, brokerFilter)
     const stockCostOverrides = databaseService.getCostOverrides(userId)
     const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides, asOf)
+
+    // Rows so far come only from option activity, so a stock held without any
+    // options never appeared at all. Add those as stock-only rows.
+    // getStockPositionsWithCost already filters to HAVING position > 0, so this
+    // can only introduce currently-held names — sold-out tickers never appear
+    // and the panel doesn't accumulate history.
+    Object.keys(stockPositions).forEach(ticker => {
+      if (byUnderlying[ticker]) return
+      if (!(stockPositions[ticker]?.position > 0)) return
+      byUnderlying[ticker] = {
+        ticker, startDate: perSymbolDates[ticker] || globalStart,
+        realizedShortCalls: 0, realizedLongCalls: 0,
+        realizedShortPuts: 0, realizedLongPuts: 0,
+        totalRealized: 0, tradeCount: 0,
+        stockOnly: true,
+      }
+    })
     const allTickers = [...new Set([...Object.keys(byUnderlying), ...Object.keys(stockPositions)])]
     const stockPrices = {}
     if (allTickers.length > 0 && asOf) {
@@ -2580,6 +2597,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const isOpen = sp && sp.position > 0
         return {
           ...e,
+          // True when this row has option activity in the window; false for the
+          // stock-only rows added above. Drives the All / Has options / Stock
+          // only view filter.
+          hasOptions: !e.stockOnly && e.tradeCount > 0,
           realizedShortCalls: r2(e.realizedShortCalls),
           realizedLongCalls: r2(e.realizedLongCalls),
           realizedShortPuts: r2(e.realizedShortPuts),
