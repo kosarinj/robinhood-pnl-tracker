@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import CSVUpload from './components/CSVUpload'
 import TradesTable from './components/TradesTable'
 import TradingSignals from './components/TradingSignals'
 import MarketAnalysis from './components/MarketAnalysis'
@@ -12,6 +11,7 @@ import OptionsPnLPanel from './components/OptionsPnLPanel'
 import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
 import ExtendedHoursPanel from './components/ExtendedHoursPanel'
 import BrokerTabs from './components/BrokerTabs'
+import UploadButton from './components/UploadButton'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
 import DCAAlertPanel from './components/DCAAlertPanel'
@@ -48,6 +48,8 @@ function AuthenticatedApp({ user }) {
   const [allTrades, setAllTrades] = useState([])
   // 'all' = merged view across brokers; otherwise a single broker key
   const [brokerFilter, setBrokerFilter] = useState('all')
+  // Broker the next CSV upload will be parsed as
+  const [uploadBroker, setUploadBroker] = useState('robinhood')
   const [pnlData, setPnlData] = useState([])
   const [showOpenOnly, setShowOpenOnly] = useState(true)
   const [symbolFilter, setSymbolFilter] = useState('')
@@ -1217,10 +1219,11 @@ function AuthenticatedApp({ user }) {
           <span style={{ fontSize: '11px', opacity: 0.4 }}>
             {new Date(__BUILD_TIME__).toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </span>
-          <label className="upload-button" style={{ margin: 0 }}>
-            📁 Upload CSV
-            <input type="file" accept=".csv" onChange={(e) => { const file = e.target.files[0]; if (file) handleFileUpload(file) }} style={{ display: 'none' }} />
-          </label>
+          <UploadButton
+            broker={uploadBroker}
+            onBrokerChange={setUploadBroker}
+            onFile={handleFileUpload}
+          />
           <ThemeToggle />
         </div>
       </div>
@@ -1323,18 +1326,11 @@ function AuthenticatedApp({ user }) {
               </select>
             </div>
           )}
-          <label className="upload-button">
-            📁 Upload CSV
-            <input
-              type="file"
-              accept=".csv"
-              onChange={(e) => {
-                const file = e.target.files[0]
-                if (file) handleFileUpload(file)
-              }}
-              style={{ display: 'none' }}
-            />
-          </label>
+          <UploadButton
+            broker={uploadBroker}
+            onBrokerChange={setUploadBroker}
+            onFile={handleFileUpload}
+          />
           <button
             className="upload-button"
             onClick={handleRobinhoodDownload}
