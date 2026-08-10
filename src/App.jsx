@@ -46,10 +46,20 @@ function AuthenticatedApp({ user }) {
   const { logout } = useAuth()
   const [trades, setTrades] = useState([])
   const [allTrades, setAllTrades] = useState([])
-  // 'all' = merged view across brokers; otherwise a single broker key
-  const [brokerFilter, setBrokerFilter] = useState('all')
-  // Broker the next CSV upload will be parsed as
-  const [uploadBroker, setUploadBroker] = useState('robinhood')
+  // 'all' = merged view across brokers; otherwise a single broker key.
+  // Persisted so you can sit on one broker and stay there across reloads.
+  const [brokerFilter, setBrokerFilter] = useState(() => localStorage.getItem('brokerFilter') || 'all')
+  const changeBrokerFilter = (b) => {
+    setBrokerFilter(b)
+    localStorage.setItem('brokerFilter', b)
+  }
+  // Broker the next CSV upload will be parsed as — also remembered, since
+  // you're usually importing from the same place repeatedly.
+  const [uploadBroker, setUploadBroker] = useState(() => localStorage.getItem('uploadBroker') || 'robinhood')
+  const changeUploadBroker = (b) => {
+    setUploadBroker(b)
+    localStorage.setItem('uploadBroker', b)
+  }
   const [pnlData, setPnlData] = useState([])
   const [showOpenOnly, setShowOpenOnly] = useState(true)
   const [symbolFilter, setSymbolFilter] = useState('')
@@ -1201,6 +1211,15 @@ function AuthenticatedApp({ user }) {
     ? tradesSource
     : tradesSource.filter(t => (t.broker || 'robinhood') === brokerFilter)
 
+  // calculatePnL merges brokers into one row per symbol but keeps each broker's
+  // own untouched numbers on byBroker — so narrowing is a lookup, not a recompute.
+  // Rows with nothing at the selected broker drop out entirely.
+  const brokerScopedPnl = brokerFilter === 'all'
+    ? pnlData
+    : (pnlData || [])
+        .map(p => (p.byBroker?.[brokerFilter] ? { ...p, ...p.byBroker[brokerFilter] } : null))
+        .filter(Boolean)
+
   return (
     <div className="app-container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -1221,7 +1240,7 @@ function AuthenticatedApp({ user }) {
           </span>
           <UploadButton
             broker={uploadBroker}
-            onBrokerChange={setUploadBroker}
+            onBrokerChange={changeUploadBroker}
             onFile={handleFileUpload}
           />
           <ThemeToggle />
@@ -1328,7 +1347,7 @@ function AuthenticatedApp({ user }) {
           )}
           <UploadButton
             broker={uploadBroker}
-            onBrokerChange={setUploadBroker}
+            onBrokerChange={changeUploadBroker}
             onFile={handleFileUpload}
           />
           <button
@@ -2462,7 +2481,7 @@ function AuthenticatedApp({ user }) {
 
       {/* Broker filter — hides itself when only one broker has data */}
       {(activeMainTab === 'dashboard' || activeMainTab === 'positions' || activeMainTab === 'tax') && (
-        <BrokerTabs value={brokerFilter} onChange={setBrokerFilter} />
+        <BrokerTabs value={brokerFilter} onChange={changeBrokerFilter} />
       )}
 
       {/* Daily P&L Chart */}
@@ -2478,7 +2497,7 @@ function AuthenticatedApp({ user }) {
       {/* Positions tab */}
       {activeMainTab === 'positions' && (
         <div style={{ padding: '8px 0' }}>
-          <YTDPositionsPanel pnlData={pnlData} broker={brokerFilter} />
+          <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
           <ShortCallTracker />
         </div>
       )}

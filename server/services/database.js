@@ -312,6 +312,14 @@ try {
     )
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_short_call_entries_user ON short_call_entries(user_id, sale_date DESC)`)
+  // Short call entries carry a broker so the Open Premium / Open P&L / Theta
+  // columns follow the broker tab like everything else.
+  const sceInfo = db.pragma('table_info(short_call_entries)')
+  if (!sceInfo.some(c => c.name === 'broker')) {
+    db.exec(`ALTER TABLE short_call_entries ADD COLUMN broker TEXT DEFAULT 'robinhood'`)
+    db.exec(`UPDATE short_call_entries SET broker = 'robinhood' WHERE broker IS NULL`)
+    console.log('✅ Added broker column to short_call_entries')
+  }
 } catch (e) {
   console.error('short_call_entries migration error:', e.message)
 }
@@ -1962,7 +1970,7 @@ export class DatabaseService {
     }
   }
 
-  getOpenOptionPositions(userId = 1) {
+  getOpenOptionPositions(userId = 1, broker = null) {
     const rows = db.prepare(`
       SELECT
         symbol,
@@ -1975,8 +1983,9 @@ export class DatabaseService {
         MAX(trans_date) as last_trade_date
       FROM trades
       WHERE is_option = 1 AND user_id = ?
+        ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
       GROUP BY symbol
-    `).all(userId)
+    `).all(...[userId, ...(broker ? [broker] : [])])
 
     return rows
       .map(r => ({
@@ -2005,7 +2014,7 @@ export class DatabaseService {
     }
   }
 
-  getStockPositionsWithCost(userId = 1, asOf = null) {
+  getStockPositionsWithCost(userId = 1, asOf = null, broker = null) {
     try {
       // Use COALESCE so NULL quantity/amount don't silently zero out rows.
       // asOf (YYYY-MM-DD) bounds to trades on/before that date for a point-in-time view.
@@ -2018,9 +2027,10 @@ export class DatabaseService {
         FROM trades
         WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
           ${asOf ? 'AND trans_date <= ?' : ''}
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
         GROUP BY symbol
         HAVING position > 0
-      `).all(...(asOf ? [userId, asOf] : [userId]))
+      `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
       console.log(`getStockPositionsWithCost: ${rows.length} stock positions for user ${userId}`)
       if (rows.length > 0) console.log('  sample:', JSON.stringify(rows.slice(0,3)))
       const result = {}
@@ -2128,8 +2138,15 @@ export class DatabaseService {
   }
 
   // Short call entry helpers
-  getShortCallEntries(userId = 1) {
+  getShortCallEntries(userId = 1, broker = null) {
     try {
+      if (broker) {
+        return db.prepare(`
+          SELECT * FROM short_call_entries
+          WHERE user_id = ? AND COALESCE(broker,'robinhood') = ?
+          ORDER BY sale_date DESC, ticker ASC
+        `).all(userId, broker)
+      }
       return db.prepare(`
         SELECT * FROM short_call_entries WHERE user_id = ? ORDER BY sale_date DESC, ticker ASC
       `).all(userId)
@@ -2139,11 +2156,11 @@ export class DatabaseService {
     }
   }
 
-  upsertShortCallEntry(userId, { symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose }) {
+  upsertShortCallEntry(userId, { symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose, broker = 'robinhood' }) {
     try {
       return db.prepare(`
-        INSERT INTO short_call_entries (user_id, symbol, ticker, strike, expiry, contracts, premium, sale_date, underlying_close)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO short_call_entries (user_id, symbol, ticker, strike, expiry, contracts, premium, sale_date, underlying_close, broker)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, symbol, sale_date) DO UPDATE SET
           -- Keep the stored value (incl. manual overrides) if present; only fill from the
           -- auto-fetched price when nothing is stored yet. Otherwise a CSV re-upload would
@@ -2151,7 +2168,7 @@ export class DatabaseService {
           underlying_close = COALESCE(short_call_entries.underlying_close, excluded.underlying_close),
           premium = excluded.premium,
           contracts = excluded.contracts
-      `).run(userId, symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose ?? null)
+      `).run(userId, symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose ?? null, broker)
     } catch (e) {
       console.error('Error upserting short call entry:', e)
     }

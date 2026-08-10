@@ -86,12 +86,20 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   useEffect(() => { fetchData() }, [])
   // Refetch when the as-of date changes (or is cleared back to live)
   useEffect(() => { fetchData(undefined, undefined, true) }, [asOf])
-  // ...and when the broker tab changes
-  useEffect(() => { fetchData(undefined, undefined, true) }, [broker])
+  // ...and when the broker tab changes. Stock holdings have to refetch too, or
+  // the Shares / Avg Cost / Stock P&L columns would keep showing every broker
+  // while the options columns beside them show only the selected one.
+  useEffect(() => {
+    fetchData(undefined, undefined, true)
+    fetchStockHoldings()
+  }, [broker])
 
-  // Fetch stock holdings + cost overrides from server on mount
+  // Fetch stock holdings + cost overrides from server on mount.
+  // Scoped to the broker tab so Shares / Avg Cost / Stock P&L match the
+  // options columns beside them.
   const fetchStockHoldings = () => {
-    fetch('/api/stock-positions-with-prices', { credentials: 'include' })
+    const q = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+    fetch(`/api/stock-positions-with-prices${q}`, { credentials: 'include' })
       .then(r => r.json())
       .then(json => {
         setStockDebug(json)

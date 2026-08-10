@@ -2297,8 +2297,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const openProjectedLegs = { 1: {}, 2: {}, 3: {} }   // { ticker: {expired, total} }
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!asOf) {
-      const shortEntries = databaseService.getShortCallEntries(userId)
-      const openPositions = databaseService.getOpenOptionPositions(userId)
+      const shortEntries = databaseService.getShortCallEntries(userId, brokerFilter)
+      const openPositions = databaseService.getOpenOptionPositions(userId, brokerFilter)
       const netShortBySymbol = {}
       openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
       const openShortSymbols = new Set(openPositions.filter(p => p.net_short > 0).map(p => p.symbol))
@@ -2452,7 +2452,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // Black-Scholes ESTIMATE — the short call repriced at the underlying's close
       // on asOf (no historical option quotes exist to price it exactly).
       const shortEntryBySymbol = {}
-      for (const e of databaseService.getShortCallEntries(userId)) shortEntryBySymbol[e.symbol] = e
+      for (const e of databaseService.getShortCallEntries(userId, brokerFilter)) shortEntryBySymbol[e.symbol] = e
       const openShortLots = []
       Object.values(lifoStacks).forEach(stacks => {
         stacks.short.forEach(lot => {
@@ -2523,7 +2523,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
     // Stock positions + prices — as of the chosen date, or live. Position/cost bounded
     // to trades on/before asOf; price is that day's historical close (else live).
-    const stockPositions = databaseService.getStockPositionsWithCost(userId, asOf)
+    const stockPositions = databaseService.getStockPositionsWithCost(userId, asOf, brokerFilter)
     const stockCostOverrides = databaseService.getCostOverrides(userId)
     const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides, asOf)
     const allTickers = [...new Set([...Object.keys(byUnderlying), ...Object.keys(stockPositions)])]
@@ -3242,7 +3242,8 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
     // getStockPositionsWithCost lives in database.js where db is in scope
-    const stockData = databaseService.getStockPositionsWithCost(userId)
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const stockData = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
     const symbols = Object.keys(stockData)
     console.log(`/api/stock-positions-with-prices: getStockPositionsWithCost returned ${symbols.length} symbols: ${symbols.join(', ')}`)
 
