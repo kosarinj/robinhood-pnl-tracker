@@ -24,7 +24,7 @@ const pnlColor = (n, isDark) => {
   return n > 0 ? '#22c55e' : '#ef4444'
 }
 
-export default function YTDPositionsPanel({ pnlData = [] }) {
+export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const { isDark } = useTheme()
 
   const [globalStart, setGlobalStart] = useState(() => localStorage.getItem(LS_GLOBAL_KEY) || DEFAULT_GLOBAL_START)
@@ -71,6 +71,7 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
       const params = new URLSearchParams({ startDate: gs })
       if (Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
       if (asOf) params.set('asOf', asOf)
+      if (broker && broker !== 'all') params.set('broker', broker)
       const res = await fetch(`/api/options-pnl/ytd?${params}`, { credentials: 'include' })
       const json = await res.json()
       if (json.success) { setData(json); setLastUpdated(Date.now()) }
@@ -80,11 +81,13 @@ export default function YTDPositionsPanel({ pnlData = [] }) {
     } finally {
       if (!quiet) setLoading(false)
     }
-  }, [globalStart, symbolDates, asOf])
+  }, [globalStart, symbolDates, asOf, broker])
 
   useEffect(() => { fetchData() }, [])
   // Refetch when the as-of date changes (or is cleared back to live)
   useEffect(() => { fetchData(undefined, undefined, true) }, [asOf])
+  // ...and when the broker tab changes
+  useEffect(() => { fetchData(undefined, undefined, true) }, [broker])
 
   // Fetch stock holdings + cost overrides from server on mount
   const fetchStockHoldings = () => {

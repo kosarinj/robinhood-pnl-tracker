@@ -11,6 +11,7 @@ import PriceChart from './components/PriceChart'
 import OptionsPnLPanel from './components/OptionsPnLPanel'
 import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
 import ExtendedHoursPanel from './components/ExtendedHoursPanel'
+import BrokerTabs from './components/BrokerTabs'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
 import DCAAlertPanel from './components/DCAAlertPanel'
@@ -45,6 +46,8 @@ function AuthenticatedApp({ user }) {
   const { logout } = useAuth()
   const [trades, setTrades] = useState([])
   const [allTrades, setAllTrades] = useState([])
+  // 'all' = merged view across brokers; otherwise a single broker key
+  const [brokerFilter, setBrokerFilter] = useState('all')
   const [pnlData, setPnlData] = useState([])
   const [showOpenOnly, setShowOpenOnly] = useState(true)
   const [symbolFilter, setSymbolFilter] = useState('')
@@ -926,7 +929,7 @@ function AuthenticatedApp({ user }) {
     }
   }
 
-  const handleFileUpload = async (file) => {
+  const handleFileUpload = async (file, broker = 'robinhood') => {
     try {
       setLoading(true)
       setError(null)
@@ -939,7 +942,7 @@ function AuthenticatedApp({ user }) {
         const csvContent = await file.text()
 
         // Upload to server
-        const response = await socketService.uploadCSV(csvContent)
+        const response = await socketService.uploadCSV(csvContent, broker)
 
         console.log('✅ CSV processed by server')
 
@@ -980,6 +983,12 @@ function AuthenticatedApp({ user }) {
 
         console.log(`Server response: ${response.pnlData.length} symbols, principal: ${response.totalPrincipal}`)
 
+      } else if (broker !== 'robinhood') {
+        // Standalone mode parses with the Robinhood parser only. Silently
+        // mangling a Webull file would be worse than refusing it.
+        throw new Error(
+          `${broker} files need the server connection — standalone mode only reads Robinhood exports.`
+        )
       } else {
         // STANDALONE MODE: Process locally (original logic)
         console.log('💻 Processing CSV locally (standalone mode)...')
@@ -1182,6 +1191,13 @@ function AuthenticatedApp({ user }) {
     if (value < 0) return 'negative'
     return ''
   }
+
+  // Trades feeding the panels, narrowed to the selected broker tab. Trades from
+  // before multi-broker support carry no broker, so they read as robinhood.
+  const tradesSource = allTrades.length > 0 ? allTrades : trades
+  const brokerScopedTrades = brokerFilter === 'all'
+    ? tradesSource
+    : tradesSource.filter(t => (t.broker || 'robinhood') === brokerFilter)
 
   return (
     <div className="app-container">
@@ -2448,6 +2464,11 @@ function AuthenticatedApp({ user }) {
         </div>
       )}
 
+      {/* Broker filter — hides itself when only one broker has data */}
+      {(activeMainTab === 'dashboard' || activeMainTab === 'positions' || activeMainTab === 'tax') && (
+        <BrokerTabs value={brokerFilter} onChange={setBrokerFilter} />
+      )}
+
       {/* Daily P&L Chart */}
       {activeMainTab === 'analytics' && (
         <DailyPnLChart
@@ -2461,7 +2482,7 @@ function AuthenticatedApp({ user }) {
       {/* Positions tab */}
       {activeMainTab === 'positions' && (
         <div style={{ padding: '8px 0' }}>
-          <YTDPositionsPanel pnlData={pnlData} />
+          <YTDPositionsPanel pnlData={pnlData} broker={brokerFilter} />
           <ShortCallTracker />
         </div>
       )}
@@ -2469,7 +2490,7 @@ function AuthenticatedApp({ user }) {
       {/* Tax tab */}
       {activeMainTab === 'tax' && (
         <TaxCenter
-          trades={allTrades.length > 0 ? allTrades : trades}
+          trades={brokerScopedTrades}
           dividendsAndInterest={dividendsAndInterest}
           pnlData={pnlData}
           currentPrices={currentPrices}
@@ -2489,7 +2510,7 @@ function AuthenticatedApp({ user }) {
       {activeMainTab === 'dashboard' && <ExtendedHoursPanel />}
 
       {/* Daily Realized P&L Panel */}
-      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={allTrades.length > 0 ? allTrades : trades} />}
+      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
 
       {/* Options P&L Weekly Panel */}
       {activeMainTab === 'dashboard' && <OptionsPnLPanel />}

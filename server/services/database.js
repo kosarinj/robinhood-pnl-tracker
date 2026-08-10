@@ -1358,10 +1358,28 @@ export class DatabaseService {
         amount: row.amount,
         description: row.description,
         isBuy: row.is_buy === 1,
-        isOption: row.is_option === 1
+        isOption: row.is_option === 1,
+        contracts: row.contracts || 1,
+        broker: row.broker || 'robinhood'
       }))
     } catch (error) {
       console.error('Error getting all trades:', error)
+      return []
+    }
+  }
+
+  // Which brokers this user actually has data for — drives the tab bar, so the
+  // UI never shows a tab that would be empty.
+  getBrokersForUser(userId = 1) {
+    try {
+      return db.prepare(`
+        SELECT COALESCE(broker,'robinhood') AS broker, COUNT(*) AS trade_count
+        FROM trades WHERE user_id = ?
+        GROUP BY COALESCE(broker,'robinhood')
+        ORDER BY trade_count DESC
+      `).all(userId)
+    } catch (error) {
+      console.error('Error getting brokers:', error)
       return []
     }
   }
@@ -2079,10 +2097,13 @@ export class DatabaseService {
   getOptionTradesForYTD(userId = 1) {
     try {
       return db.prepare(`
-        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy, COALESCE(contracts, 1) as contracts
+        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy,
+               COALESCE(contracts, 1) as contracts, COALESCE(broker,'robinhood') as broker
         FROM trades
         WHERE is_option = 1 AND user_id = ?
-        GROUP BY trans_date, symbol, trans_code, is_buy, amount
+        -- broker is in the GROUP BY too: the same contract traded at two
+        -- brokers on the same day is two positions, not one.
+        GROUP BY trans_date, symbol, trans_code, is_buy, amount, COALESCE(broker,'robinhood')
         ORDER BY trans_date ASC, id ASC
       `).all(userId)
     } catch (e) {

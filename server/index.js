@@ -490,7 +490,7 @@ io.on('connection', (socket) => {
       // broker defaults to robinhood so existing clients keep working unchanged
       const { csvContent, broker = 'robinhood' } = data
       if (!SUPPORTED_BROKERS.includes(broker)) {
-        socket.emit('upload-error', { message: `Unknown broker "${broker}"` })
+        socket.emit('csv-processed', { success: false, error: `Unknown broker "${broker}"` })
         return
       }
 
@@ -506,7 +506,7 @@ io.on('connection', (socket) => {
         dividendsAndInterest = []
         if (parsed.warnings.length) console.log(`Webull parser warnings: ${parsed.warnings.join(' | ')}`)
         if (!trades.length) {
-          socket.emit('upload-error', { message: 'No filled orders found in that Webull export.' })
+          socket.emit('csv-processed', { success: false, error: 'No filled orders found in that Webull export. Check that the export includes filled orders.' })
           return
         }
       } else {
@@ -2225,8 +2225,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // everything as of that day's close. When absent, this is the normal live view.
     const asOf = /^\d{4}-\d{2}-\d{2}$/.test(req.query.asOf || '') ? req.query.asOf : null
 
+    // Broker tab: 'all' (or absent) keeps every broker. Filtering here rather
+    // than in the query keeps the LIFO pass below matching only within the
+    // selected broker, which is the same rule the stock P&L follows.
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+
     const allTrades0 = databaseService.getOptionTradesForYTD(userId)
-    const allTrades = asOf ? allTrades0.filter(t => t.trans_date <= asOf) : allTrades0
+    let allTrades = asOf ? allTrades0.filter(t => t.trans_date <= asOf) : allTrades0
+    if (brokerFilter) allTrades = allTrades.filter(t => (t.broker || 'robinhood') === brokerFilter)
 
     // LIFO pass over ALL trades
     const lifoStacks = {}
@@ -2238,9 +2244,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     sortedTrades.forEach(t => {
       const tc = (t.trans_code || '').toUpperCase()
       const parsed = parseOptionDescription(t.symbol || '')
-      const sym = parsed
+      // Broker is part of the stack key for the same reason it's part of the
+      // stock matching: a close at one broker can't lift a position opened at
+      // another. With no filter this keeps each broker's stack separate and
+      // the realized totals simply add up.
+      const contractKey = parsed
         ? `${parsed.ticker}|${parsed.year}${parsed.month}${parsed.day}|${parsed.type}|${parsed.strike}`
         : (t.symbol || '')
+      const sym = `${t.broker || 'robinhood'}::${contractKey}`
       const contracts = Math.abs(t.contracts || 1)
       const amount = Math.abs(t.amount)
       const ppc = contracts > 0 ? amount / contracts : amount
@@ -2672,6 +2683,16 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
 
     results.sort((a, b) => (b.ivHvRatio || 0) - (a.ivHvRatio || 0))
     res.json({ success: true, count: results.length, results })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// GET /api/brokers — which brokers this user has data for, for the tab bar.
+app.get('/api/brokers', requireAuth, (req, res) => {
+  try {
+    const rows = databaseService.getBrokersForUser(req.user.userId)
+    res.json({ success: true, brokers: rows, supported: SUPPORTED_BROKERS })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }

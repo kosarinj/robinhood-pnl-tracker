@@ -72,14 +72,14 @@ class SocketService {
   }
 
   // Upload CSV
-  uploadCSV(csvContent) {
+  uploadCSV(csvContent, broker = 'robinhood') {
     return new Promise((resolve, reject) => {
       if (!this.socket || !this.connected) {
         reject(new Error('Not connected to server'))
         return
       }
 
-      this.socket.emit('upload-csv', { csvContent })
+      this.socket.emit('upload-csv', { csvContent, broker })
 
       this.socket.once('csv-processed', (response) => {
         if (response.success) {

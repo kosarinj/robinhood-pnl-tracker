@@ -57,7 +57,7 @@ export const calculatePnL = (trades, currentPrices, rollupOptions = true, debugC
   // mergeAcrossBrokers) so callers still see one entry per symbol.
   const brokerOf = (t) => t.broker || 'robinhood'
   const tradesBySymbol = trades.reduce((acc, trade) => {
-    const key = `${brokerOf(trade)}\u0000${trade.symbol}`
+    const key = `${brokerOf(trade)}::${trade.symbol}`
     if (!acc[key]) acc[key] = []
     acc[key].push(trade)
     return acc
