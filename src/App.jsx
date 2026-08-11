@@ -1259,16 +1259,57 @@ function AuthenticatedApp({ user }) {
         </div>
       </div>
 
-      {/* Main tab navigation */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '2px solid #e2e8f0', paddingBottom: '0' }}>
-        {[['dashboard', '📊 Dashboard'], ['positions', '📈 Positions'], ['analytics', '🔬 Analytics'], ['tax', '🧾 Tax'], ['research', '🔍 Research']].map(([key, label]) => (
-          <button key={key} onClick={() => setActiveMainTab(key)} style={{
-            padding: '8px 24px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
-            background: 'none', borderBottom: activeMainTab === key ? '2px solid #667eea' : '2px solid transparent',
-            marginBottom: '-2px', color: activeMainTab === key ? '#667eea' : '#64748b', transition: 'color 0.15s'
-          }}>{label}</button>
-        ))}
-      </div>
+      {/* ── Navigation: destination on top, context underneath ──────────────
+          Colours come from theme tokens. They used to be literal hex, so the
+          bar ignored the theme entirely and drew a pale grey rule even in dark
+          mode. Emoji are gone — they were decoration, not information.        */}
+      <nav style={{
+        display: 'flex', alignItems: 'center', gap: 0, padding: '0 8px',
+        background: 'var(--panel)',
+        borderBottom: '1px solid var(--border)',
+      }}>
+        {[
+          ['dashboard', 'Dashboard'],
+          ['positions', 'Positions'],
+          ['analytics', 'Analytics'],
+          ['tax', 'Tax'],
+          ['research', 'Research'],
+        ].map(([key, label]) => {
+          const active = activeMainTab === key
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveMainTab(key)}
+              aria-current={active ? 'page' : undefined}
+              style={{
+                padding: '10px 16px', fontSize: '13px', fontWeight: 600,
+                border: 'none', cursor: 'pointer', background: 'none',
+                fontFamily: 'inherit', whiteSpace: 'nowrap',
+                color: active ? 'var(--text)' : 'var(--textSecondary)',
+                borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+                marginBottom: '-1px', transition: 'color 0.15s',
+              }}
+            >{label}</button>
+          )
+        })}
+      </nav>
+
+      {/* Context row. Its contents change with the tab — the broker filter used
+          to float loose in the page body and disappear on tabs that don't use
+          it, which made it look broken. Here it has a fixed home. */}
+      {(activeMainTab === 'dashboard' || activeMainTab === 'positions' || activeMainTab === 'tax') && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          padding: '8px 14px', marginBottom: '16px',
+          background: 'var(--surface)',
+          borderBottom: '1px solid var(--border)',
+        }}>
+          <BrokerTabs value={brokerFilter} onChange={changeBrokerFilter} refreshKey={brokerRefreshKey} inline />
+        </div>
+      )}
+      {(activeMainTab === 'analytics' || activeMainTab === 'research') && (
+        <div style={{ marginBottom: '16px' }} />
+      )}
 
       {activeMainTab === 'analytics' && <AvgCostCalculator pnlData={pnlData} />}
 
@@ -2491,10 +2532,7 @@ function AuthenticatedApp({ user }) {
         </div>
       )}
 
-      {/* Broker filter — hides itself when only one broker has data */}
-      {(activeMainTab === 'dashboard' || activeMainTab === 'positions' || activeMainTab === 'tax') && (
-        <BrokerTabs value={brokerFilter} onChange={changeBrokerFilter} refreshKey={brokerRefreshKey} />
-      )}
+      {/* The broker filter now lives in the context row under the tabs. */}
 
       {/* Daily P&L Chart */}
       {activeMainTab === 'analytics' && (

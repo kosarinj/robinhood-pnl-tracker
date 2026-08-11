@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import { useTheme } from '../contexts/ThemeContext'
 
 /**
  * Broker selector for the dashboard.
@@ -19,8 +18,11 @@ const LABELS = {
   schwab: 'Schwab',
 }
 
-export default function BrokerTabs({ value, onChange, refreshKey = 0 }) {
-  const { isDark } = useTheme()
+/**
+ * `inline` drops the card chrome so this can sit inside the context row under
+ * the main tabs, rather than being its own panel floating in the page body.
+ */
+export default function BrokerTabs({ value, onChange, refreshKey = 0, inline = false }) {
   const [brokers, setBrokers] = useState(null)   // null = not loaded yet
 
   useEffect(() => {
@@ -32,8 +34,6 @@ export default function BrokerTabs({ value, onChange, refreshKey = 0 }) {
 
   if (brokers === null) return null
 
-  const border = isDark ? '#2d3748' : '#e2e8f0'
-  const textMid = isDark ? '#94a3b8' : '#64748b'
 
   // With one broker there's nothing to switch between, but staying silent made
   // it look like the feature was missing. Say what the server actually has —
@@ -41,13 +41,13 @@ export default function BrokerTabs({ value, onChange, refreshKey = 0 }) {
   if (brokers.length < 2) {
     const only = brokers[0]
     return (
-      <div style={{
-        marginBottom: 16, padding: '7px 12px', fontSize: 12, color: textMid,
-        background: isDark ? '#1e2130' : '#ffffff',
-        border: `1px solid ${border}`, borderRadius: 10,
+      <div style={inline ? { fontSize: 12, color: 'var(--textSecondary)' } : {
+        marginBottom: 16, padding: '7px 12px', fontSize: 12, color: 'var(--textSecondary)',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)', borderRadius: 10,
       }}>
         {only
-          ? <>Showing <strong style={{ color: isDark ? '#e2e8f0' : '#1a202c' }}>{LABELS[only.broker] || only.broker}</strong> only
+          ? <>Showing <strong style={{ color: 'var(--text)' }}>{LABELS[only.broker] || only.broker}</strong> only
               {' '}({only.trade_count} trades). Upload another broker's CSV — using the dropdown
               next to the Upload button — and broker tabs will appear here.</>
           : <>No trades yet. Upload a CSV to get started.</>}
@@ -61,13 +61,15 @@ export default function BrokerTabs({ value, onChange, refreshKey = 0 }) {
   ]
 
   return (
-    <div style={{
+    <div style={inline ? {
+      display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+    } : {
       display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
       marginBottom: 16, padding: '8px 12px',
-      background: isDark ? '#1e2130' : '#ffffff',
-      border: `1px solid ${border}`, borderRadius: 10,
+      background: 'var(--surface)',
+      border: '1px solid var(--border)', borderRadius: 10,
     }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: textMid, textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 4 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--textSecondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 4 }}>
         Broker
       </span>
       {tabs.map(t => {
@@ -82,9 +84,9 @@ export default function BrokerTabs({ value, onChange, refreshKey = 0 }) {
             style={{
               padding: '5px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
               borderRadius: 6,
-              border: `1px solid ${activeTab ? '#667eea' : border}`,
-              background: activeTab ? '#667eea' : 'transparent',
-              color: activeTab ? '#fff' : textMid,
+              border: `1px solid ${activeTab ? 'var(--accent)' : 'var(--border)'}`,
+              background: activeTab ? 'var(--accent)' : 'transparent',
+              color: activeTab ? 'var(--accentText)' : 'var(--textSecondary)',
             }}
           >
             {LABELS[t.key] || t.key}
