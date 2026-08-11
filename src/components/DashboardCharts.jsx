@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, Cell, LabelList,
 } from 'recharts'
 import { useTheme } from '../contexts/ThemeContext'
@@ -47,15 +47,42 @@ export default function DashboardCharts({ broker = 'all' }) {
       .catch(e => { setError(e.message); setWeeks([]) })
   }, [broker])
 
-  // Running total, oldest week first — the shape of the account over time.
-  const curve = useMemo(() => {
-    if (!weeks?.length) return []
+  // These buckets are keyed by the contract's EXPIRY week, not the week it was
+  // traded (server: weekKey = getWeekStart(expiryDateStr)). So this is premium
+  // per expiry, and a running cumulative total across it would be meaningless —
+  // it isn't a time axis, and a LEAP expiring in 2028 sits at the far right.
+  //
+  // Drawn as what it is: premium by expiry week, with weeks still ahead marked
+  // as not yet expired. Windowed around today so one long-dated contract can't
+  // stretch the axis years out; anything outside is counted, not silently cut.
+  const PAST_WEEKS = 16
+  const FUTURE_WEEKS = 12
+  const { byExpiry, outside, bookedTotal, aheadTotal } = useMemo(() => {
+    if (!weeks?.length) return { byExpiry: [], outside: 0, bookedTotal: 0, aheadTotal: 0 }
+    const today = new Date().toISOString().slice(0, 10)
+    const ms = 7 * 24 * 3600 * 1000
+    const now = new Date(today + 'T00:00:00').getTime()
+    const lo = new Date(now - PAST_WEEKS * ms).toISOString().slice(0, 10)
+    const hi = new Date(now + FUTURE_WEEKS * ms).toISOString().slice(0, 10)
+
     const sorted = [...weeks].sort((a, b) => a.weekStart.localeCompare(b.weekStart))
-    let run = 0
-    return sorted.map(w => {
-      run += Number(w.totalDelta) || 0
-      return { week: w.weekStart, label: shortDate(w.weekStart), cumulative: Math.round(run * 100) / 100, delta: Number(w.totalDelta) || 0 }
+    const inRange = sorted.filter(w => w.weekStart >= lo && w.weekStart <= hi)
+    let booked = 0, ahead = 0
+    sorted.forEach(w => {
+      const v = Number(w.totalDelta) || 0
+      if (w.weekStart <= today) booked += v; else ahead += v
     })
+    return {
+      byExpiry: inRange.map(w => ({
+        week: w.weekStart,
+        label: shortDate(w.weekStart),
+        premium: Math.round((Number(w.totalDelta) || 0) * 100) / 100,
+        expired: w.weekStart <= today,
+      })),
+      outside: sorted.length - inRange.length,
+      bookedTotal: Math.round(booked * 100) / 100,
+      aheadTotal: Math.round(ahead * 100) / 100,
+    }
   }, [weeks])
 
   // Biggest movers, by absolute size — the tail of tiny names says nothing.
@@ -77,11 +104,7 @@ export default function DashboardCharts({ broker = 'all' }) {
 
   if (weeks === null) return null
   if (error) return null
-  if (!curve.length) return null
-
-  const last = curve[curve.length - 1]?.cumulative ?? 0
-  const up = last >= 0
-  const curveColor = up ? tokens.chartPositive : tokens.chartNegative
+  if (!byExpiry.length) return null
 
   const card = {
     background: 'var(--surface)', border: '1px solid var(--border)',
@@ -98,44 +121,54 @@ export default function DashboardCharts({ broker = 'all' }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16, marginBottom: 20 }}>
 
-      {/* ── Cumulative P&L ── single series, so no legend: the title names it ── */}
+      {/* ── Premium by expiry week ─────────────────────────────────────────
+          Solid = expired, so the premium is booked. Outlined = still open. The
+          two are genuinely different things and shouldn't read as one series. */}
       <div className="floating-panel" style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
-          <h3 style={title}>Cumulative P&amp;L</h3>
-          <span style={{ fontSize: 18, fontWeight: 700, color: curveColor, fontVariantNumeric: 'tabular-nums' }}>
-            {moneySigned(last)}
+          <h3 style={title}>Premium by expiry week</h3>
+          <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+                         color: bookedTotal >= 0 ? tokens.chartPositive : tokens.chartNegative }}>
+            {moneySigned(bookedTotal)}
           </span>
         </div>
-        <div style={sub}>{curve.length} week{curve.length !== 1 ? 's' : ''}</div>
+        <div style={sub}>
+          Booked · {moneySigned(aheadTotal)} still open
+        </div>
         <ResponsiveContainer width="100%" height={190}>
-          <AreaChart data={curve} margin={{ top: 14, right: 8, bottom: 0, left: -12 }}>
-            <defs>
-              <linearGradient id="pnlfill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={curveColor} stopOpacity={0.22} />
-                <stop offset="100%" stopColor={curveColor} stopOpacity={0.02} />
-              </linearGradient>
-            </defs>
+          <BarChart data={byExpiry} margin={{ top: 14, right: 8, bottom: 0, left: -12 }}>
             <CartesianGrid stroke={tokens.chartGrid} strokeDasharray="2 4" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: tokens.chartText }}
-                   axisLine={false} tickLine={false} minTickGap={22} />
+                   axisLine={false} tickLine={false} minTickGap={18} />
             <YAxis tick={{ fontSize: 10, fill: tokens.chartText }} axisLine={false} tickLine={false}
                    width={54} tickFormatter={money} />
             <ReferenceLine y={0} stroke={tokens.border} />
             <Tooltip
               contentStyle={tooltipStyle}
               labelStyle={{ color: 'var(--textSecondary)', fontSize: 11 }}
-              cursor={{ stroke: tokens.textSecondary, strokeDasharray: '3 3' }}
+              cursor={{ fill: tokens.surfaceHover }}
               formatter={(v, _n, p) => [
-                `${moneySigned(v)}  (week ${moneySigned(p?.payload?.delta)})`, 'Cumulative',
+                `${moneySigned(v)} ${p?.payload?.expired ? '(expired)' : '(still open)'}`, 'Premium',
               ]}
-              labelFormatter={(l, p) => `Week of ${p?.[0]?.payload?.week || l}`}
+              labelFormatter={(l, p) => `Expiring week of ${p?.[0]?.payload?.week || l}`}
             />
-            <Area type="monotone" dataKey="cumulative" stroke={curveColor} strokeWidth={2}
-                  fill="url(#pnlfill)"
-                  dot={false}
-                  activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)' }} />
-          </AreaChart>
+            <Bar dataKey="premium" radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false}>
+              {byExpiry.map(d => {
+                const c = d.premium >= 0 ? tokens.chartPositive : tokens.chartNegative
+                return (
+                  <Cell key={d.week}
+                        fill={d.expired ? c : 'transparent'}
+                        stroke={c} strokeWidth={d.expired ? 0 : 1.5} />
+                )
+              })}
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
+        <div style={{ fontSize: 10.5, color: 'var(--textSecondary)', marginTop: -4, lineHeight: 1.45 }}>
+          Grouped by the week each contract <strong>expires</strong>, not when it was traded.
+          Solid bars have expired; outlined ones are still open.
+          {outside > 0 && ` ${outside} week${outside !== 1 ? 's' : ''} outside this window not shown.`}
+        </div>
       </div>
 
       {/* ── By underlying ── signed labels carry gain/loss, not the hue alone ── */}
