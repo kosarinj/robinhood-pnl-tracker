@@ -376,7 +376,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   return (
     <div style={{ marginBottom: '24px' }}>
       {/* Header controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+      {/* position + z-index so the toolbar's popovers stay above the table.
+          .floating-panel:hover applies a transform, and a transform creates a
+          stacking context — so hovering the table promoted the whole panel above
+          this row and swallowed the open "hidden tickers" list. That's why it
+          only misbehaved sometimes: it depended on where the cursor was. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px', flexWrap: 'wrap', position: 'relative', zIndex: 30 }}>
         <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: text }}>Options YTD by Underlying</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label style={{ fontSize: '13px', color: textMid, fontWeight: '500' }}>Default Start:</label>
