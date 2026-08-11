@@ -18,6 +18,7 @@ export const themes = {
   light: {
     name: 'light', label: 'Light', dark: false,
     chartPositive: '#12805c', chartNegative: '#d9534a',
+    chartSeriesStock: '#0b6bcb', chartSeriesOptions: '#9a6700',
     accent: '#5a6fd6', accentHover: '#4c5fc4', accentText: '#ffffff',
     panel: '#f8fafc', rule: '#e2e8f0', severity: '#dc2626',
     background: '#f8f9fa',
@@ -61,6 +62,7 @@ export const themes = {
   dark: {
     name: 'dark', label: 'Dark', dark: true,
     chartPositive: '#26a072', chartNegative: '#d9534a',
+    chartSeriesStock: '#3f86c9', chartSeriesOptions: '#b08536',
     accent: '#8b9bf0', accentHover: '#7a8ce8', accentText: '#12141c',
     panel: '#232323', rule: '#404040', severity: '#ef4444',
     background: '#1a1a1a',
@@ -104,6 +106,7 @@ export const themes = {
   midnight: {
     name: 'midnight', label: 'Midnight', dark: true,
     chartPositive: '#26a072', chartNegative: '#d9534a',
+    chartSeriesStock: '#3f86c9', chartSeriesOptions: '#b08536',
     accent: '#818cf8', accentHover: '#6f7bf0', accentText: '#0f1629',
     panel: '#151b33', rule: '#2d3a63', severity: '#f87171',
     background: '#0f1629',
@@ -142,6 +145,7 @@ export const themes = {
   sepia: {
     name: 'sepia', label: 'Sepia', dark: false,
     chartPositive: '#12805c', chartNegative: '#d9534a',
+    chartSeriesStock: '#0b6bcb', chartSeriesOptions: '#9a6700',
     accent: '#b06b2c', accentHover: '#95591f', accentText: '#fbf6ea',
     panel: '#efe4cc', rule: '#e0d3b8', severity: '#c0392b',
     background: '#f4ecd8',
@@ -184,6 +188,7 @@ export const themes = {
   instrument: {
     name: 'instrument', label: 'Instrument', dark: false,
     chartPositive: '#12805c', chartNegative: '#d9534a',
+    chartSeriesStock: '#0b6bcb', chartSeriesOptions: '#9a6700',
     accent: '#0b6bcb', accentHover: '#0a5aad', accentText: '#ffffff',
     panel: '#f5f6f8', rule: '#dee2e7', severity: '#c0392f',
     background: '#f5f6f8',
@@ -223,6 +228,7 @@ export const themes = {
   instrumentDark: {
     name: 'instrumentDark', label: 'Instrument Dark', dark: true,
     chartPositive: '#26a072', chartNegative: '#d9534a',
+    chartSeriesStock: '#3f86c9', chartSeriesOptions: '#b08536',
     // Accent sits lower in saturation than the sampled #4c9aff: on this ground
     // a brighter blue reads at nearly the same weight as the positive green,
     // and the two blur together down a dense column of figures.
