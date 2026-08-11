@@ -1,6 +1,24 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Tokens every theme must define. Components read these as CSS custom
+// properties (`var(--surface)`), never as hard-coded hex — a panel that inlines
+// `isDark ? '#1e2130' : '#fff'` silently opts out of theming and won't follow a
+// theme switch.
+//
+// Four groups, and the separation matters:
+//   surfaces   background / surface / panel / border / rule
+//   text       text / textSecondary
+//   accent     accent — selection and branding ONLY
+//   semantic   positive / negative / warning / severity — meaning, never brand
+//
+// Accent and semantic are deliberately different hues in every theme. Where they
+// share a family the eye stops trusting colour to mean anything.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const themes = {
   light: {
     name: 'light', label: 'Light', dark: false,
+    accent: '#5a6fd6', accentHover: '#4c5fc4', accentText: '#ffffff',
+    panel: '#f8fafc', rule: '#e2e8f0', severity: '#dc2626',
     background: '#f8f9fa',
     surface: '#ffffff',
     surfaceHover: '#f8f9fa',
@@ -41,6 +59,8 @@ export const themes = {
 
   dark: {
     name: 'dark', label: 'Dark', dark: true,
+    accent: '#8b9bf0', accentHover: '#7a8ce8', accentText: '#12141c',
+    panel: '#232323', rule: '#404040', severity: '#ef4444',
     background: '#1a1a1a',
     surface: '#2d2d2d',
     surfaceHover: '#3a3a3a',
@@ -81,6 +101,8 @@ export const themes = {
 
   midnight: {
     name: 'midnight', label: 'Midnight', dark: true,
+    accent: '#818cf8', accentHover: '#6f7bf0', accentText: '#0f1629',
+    panel: '#151b33', rule: '#2d3a63', severity: '#f87171',
     background: '#0f1629',
     surface: '#1a2140',
     surfaceHover: '#232c52',
@@ -116,6 +138,8 @@ export const themes = {
 
   sepia: {
     name: 'sepia', label: 'Sepia', dark: false,
+    accent: '#b06b2c', accentHover: '#95591f', accentText: '#fbf6ea',
+    panel: '#efe4cc', rule: '#e0d3b8', severity: '#c0392b',
     background: '#f4ecd8',
     surface: '#fbf6ea',
     surfaceHover: '#f1e7cf',
@@ -147,6 +171,88 @@ export const themes = {
     buttonSecondaryHover: '#6f5c43',
     buttonDanger: '#c0392b',
     buttonDangerHover: '#a52f22'
+  },
+
+  // ── Instrument ────────────────────────────────────────────────────────────
+  // Precision-equipment discipline: flat surfaces, no coloured shadows, one
+  // measured blue used only for selection. Neutrals carry a slight blue bias so
+  // they read as chosen rather than as default grey.
+  instrument: {
+    name: 'instrument', label: 'Instrument', dark: false,
+    accent: '#0b6bcb', accentHover: '#0a5aad', accentText: '#ffffff',
+    panel: '#f5f6f8', rule: '#dee2e7', severity: '#c0392f',
+    background: '#f5f6f8',
+    surface: '#ffffff',
+    surfaceHover: '#f5f6f8',
+    text: '#10141a',
+    textSecondary: '#5c6672',
+    border: '#dee2e7',
+    // Flat by design — depth comes from rules, not shadow.
+    shadow: 'rgba(16, 20, 26, 0.06)',
+
+    positive: '#12805c',
+    negative: '#c0392f',
+    neutral: '#5c6672',
+    warning: '#9a6700',
+
+    cardPositive: '#e6f4ef',
+    cardNegative: '#fbecea',
+    cardNeutral: '#f5f6f8',
+
+    chartLine: '#0b6bcb',
+    chartGrid: '#dee2e7',
+    chartText: '#5c6672',
+
+    tableHeader: '#f5f6f8',
+    tableRowHover: '#f5f6f8',
+    tableRowExpanded: '#eceff3',
+
+    buttonPrimary: '#0b6bcb',
+    buttonPrimaryHover: '#0a5aad',
+    buttonSecondary: '#5c6672',
+    buttonSecondaryHover: '#48515b',
+    buttonDanger: '#c0392f',
+    buttonDangerHover: '#a32f26'
+  },
+
+  instrumentDark: {
+    name: 'instrumentDark', label: 'Instrument Dark', dark: true,
+    // Accent sits lower in saturation than the sampled #4c9aff: on this ground
+    // a brighter blue reads at nearly the same weight as the positive green,
+    // and the two blur together down a dense column of figures.
+    accent: '#3d8bdb', accentHover: '#4c9aff', accentText: '#0e1116',
+    panel: '#151a21', rule: '#242b35', severity: '#ff6b5e',
+    background: '#0e1116',
+    surface: '#131820',
+    surfaceHover: '#1a212a',
+    text: '#e6eaef',
+    textSecondary: '#8b95a1',
+    border: '#242b35',
+    shadow: 'rgba(0, 0, 0, 0.45)',
+
+    positive: '#3ecf8e',
+    negative: '#ff6b5e',
+    neutral: '#8b95a1',
+    warning: '#d9a441',
+
+    cardPositive: '#10261f',
+    cardNegative: '#2a1614',
+    cardNeutral: '#151a21',
+
+    chartLine: '#3d8bdb',
+    chartGrid: '#242b35',
+    chartText: '#8b95a1',
+
+    tableHeader: '#151a21',
+    tableRowHover: '#1a212a',
+    tableRowExpanded: '#242b35',
+
+    buttonPrimary: '#3d8bdb',
+    buttonPrimaryHover: '#4c9aff',
+    buttonSecondary: '#8b95a1',
+    buttonSecondaryHover: '#6f7986',
+    buttonDanger: '#ff6b5e',
+    buttonDangerHover: '#e0574b'
   }
 }
 
