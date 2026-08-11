@@ -2576,16 +2576,17 @@ function AuthenticatedApp({ user }) {
           sit above the totals, which meant the first thing on screen was a list
           rather than an answer.                                                */}
 
-      {/* Anything demanding attention right now */}
-      {activeMainTab === 'dashboard' && <DCAAlertPanel />}
-      {/* Pre/post market option estimates — self-hides during regular hours */}
-      {activeMainTab === 'dashboard' && <ExtendedHoursPanel broker={brokerFilter} />}
-
-      {/* Totals */}
+      {/* Totals — Cumulative P&L and the week's figures, above the charts */}
       {activeMainTab === 'dashboard' && <OptionsPnLPanel broker={brokerFilter} />}
 
       {/* Trend */}
       {activeMainTab === 'dashboard' && <DashboardCharts broker={brokerFilter} />}
+
+      {/* Pre/post market option estimates — self-hides during regular hours */}
+      {activeMainTab === 'dashboard' && <ExtendedHoursPanel broker={brokerFilter} />}
+
+      {/* Buy schedule */}
+      {activeMainTab === 'dashboard' && <DCAAlertPanel />}
 
       {/* Detail */}
       {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
