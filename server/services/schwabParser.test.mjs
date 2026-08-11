@@ -96,6 +96,30 @@ test('a withdrawal is not counted as principal', () => {
   assert.equal(r.totalPrincipal, 0)
 })
 
+test('a share journal is separated from cash, not swallowed', () => {
+  // "Journaled Shares" matches the same words as a cash transfer but moves
+  // STOCK. Treating it as cash would drop it silently and leave the position
+  // wrong — the exact failure mode that hides a broker-to-broker move.
+  const r = parseSchwabTransactions(csv(
+    '"08/01/2026","Journaled Shares","AAPL","JOURNALED SHARES OUT","1","","",""',
+  ))
+  assert.equal(r.deposits.length, 0, 'a share move was counted as cash')
+  assert.equal(r.trades.length, 0, 'a share move was counted as a trade with no basis')
+  assert.equal(r.transfers.length, 1)
+  assert.equal(r.transfers[0].symbol, 'AAPL')
+  assert.equal(r.transfers[0].quantity, 1)
+  assert.equal(r.transfers[0].direction, 'out')
+  assert.match(r.warnings.join(' '), /cost basis/i)
+})
+
+test('a cash transfer with no symbol is still a deposit', () => {
+  const r = parseSchwabTransactions(csv(
+    '"08/11/2025","MoneyLink Transfer","","FUNDS RECEIVED","","","","$1000.00"',
+  ))
+  assert.equal(r.transfers.length, 0, 'cash was misread as a share move')
+  assert.equal(r.deposits.length, 1)
+})
+
 test('rejects a file that is not a Schwab export', () => {
   assert.throws(() => parseSchwabTransactions('Name,Symbol,Side,Status\nApple,AAPL,Buy,Filled'))
 })

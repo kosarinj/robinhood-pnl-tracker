@@ -104,7 +104,7 @@ export function normalizeSchwabOption(symbol, description) {
 /**
  * Parse a Schwab transactions CSV.
  *
- * Returns { trades, dividendsAndInterest, deposits, totalPrincipal, skipped, warnings }.
+ * Returns { trades, dividendsAndInterest, deposits, transfers, totalPrincipal, skipped, warnings }.
  */
 export function parseSchwabTransactions(input) {
   const text = Buffer.isBuffer(input) ? input.toString('utf8') : String(input)
@@ -123,6 +123,7 @@ export function parseSchwabTransactions(input) {
   const trades = []
   const dividendsAndInterest = []
   const deposits = []
+  const transfers = []   // share movements (journals), not cash
   const warnings = []
   let skipped = 0
 
@@ -154,8 +155,28 @@ export function parseSchwabTransactions(input) {
       return
     }
 
-    // ── Cash in/out ──
+    // ── Cash in/out, and share movements that look like it ──
     if (DEPOSIT_ACTIONS.test(action)) {
+      // "Journaled Shares" and similar match the same words as a cash transfer
+      // but carry a symbol and a quantity — they move STOCK, not money. Routing
+      // them to deposits would swallow them silently and leave the position
+      // wrong, so they're separated out and surfaced.
+      if (symbol && qty(row['Quantity']) > 0) {
+        transfers.push({
+          date,
+          symbol,
+          quantity: qty(row['Quantity']),
+          direction: amount < 0 || /out|deliver|sent/i.test(description) ? 'out' : 'in',
+          description: description || action,
+          broker: 'schwab',
+        })
+        warnings.push(
+          `${date}: ${qty(row['Quantity'])} ${symbol} moved by "${action}". ` +
+          'Share transfers carry no cost basis in this file — the position and its ' +
+          'basis will not be right until the original purchase is entered.'
+        )
+        return
+      }
       // Only money coming IN is principal; withdrawals would overstate it.
       if (amount > 0) {
         deposits.push({
@@ -213,7 +234,7 @@ export function parseSchwabTransactions(input) {
   }
 
   const totalPrincipal = deposits.reduce((s, d) => s + d.amount, 0)
-  return { trades, dividendsAndInterest, deposits, totalPrincipal, skipped, warnings }
+  return { trades, dividendsAndInterest, deposits, transfers, totalPrincipal, skipped, warnings }
 }
 
 export default parseSchwabTransactions

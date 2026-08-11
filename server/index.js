@@ -499,13 +499,15 @@ io.on('connection', (socket) => {
 
       // Parse trades, dividends/interest, and deposits
       let trades, dividendsAndInterest, deposits = [], totalPrincipal = 0
+      let importWarnings = []
       if (broker === 'webull') {
         // Webull's orders export carries no cash movements, so there are no
         // deposits or dividends to pull out of it.
         const parsed = parseWebullOrders(csvContent)
         trades = parsed.trades
         dividendsAndInterest = []
-        if (parsed.warnings.length) console.log(`Webull parser warnings: ${parsed.warnings.join(' | ')}`)
+        importWarnings = parsed.warnings
+        if (importWarnings.length) console.log(`Webull parser warnings: ${importWarnings.join(' | ')}`)
         if (!trades.length) {
           socket.emit('csv-processed', { success: false, error: 'No filled orders found in that Webull export. Check that the export includes filled orders.' })
           return
@@ -518,7 +520,8 @@ io.on('connection', (socket) => {
         dividendsAndInterest = parsed.dividendsAndInterest
         deposits = parsed.deposits
         totalPrincipal = parsed.totalPrincipal
-        if (parsed.warnings.length) console.log(`Schwab parser warnings: ${parsed.warnings.join(' | ')}`)
+        importWarnings = parsed.warnings
+        if (importWarnings.length) console.log(`Schwab parser warnings: ${importWarnings.join(' | ')}`)
         if (!trades.length && !dividendsAndInterest.length) {
           socket.emit('csv-processed', { success: false, error: 'No transactions found in that Schwab export.' })
           return
@@ -646,6 +649,8 @@ io.on('connection', (socket) => {
           asofDate,
           uploadDate: asofDate,
           madeUpGroundDate: weekAgoDate,
+          // Parser notes worth showing — e.g. a share journal with no cost basis
+          importWarnings,
           pricesLoading: stockSymbols.length > 0  // signal to UI that prices are still loading
         }
       })

@@ -963,6 +963,13 @@ function AuthenticatedApp({ user }) {
         // A new broker may now have data — refresh the broker bar.
         setBrokerRefreshKey(k => k + 1)
 
+        // Parser notes the import couldn't resolve on its own — a share journal
+        // with no cost basis, an unverified option format. Shown rather than
+        // logged, since they change whether the numbers can be trusted.
+        if (response.importWarnings?.length) {
+          setError(`Imported with notes — ${response.importWarnings.join(' · ')}`)
+        }
+
         // Set state from server response
         setTrades(response.trades)
         setDeposits(response.deposits)
