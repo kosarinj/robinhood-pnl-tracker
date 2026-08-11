@@ -44,15 +44,31 @@ export default function DashboardCharts({ broker = 'all' }) {
       .catch(() => setRows([]))
   }, [broker])
 
+  // Open positions only. A name fully exited earlier in the year still carries
+  // realized P&L and would otherwise sit near the top of "biggest movers" — but
+  // it isn't moving anything now, and there's nothing to act on.
+  //
+  // Open means shares held, or an option position still on: a live option mark,
+  // premium outstanding, or a theta projection (which only exists for contracts
+  // that haven't expired).
+  const isOpen = (r) => (
+    (Number(r.stockPosition) || 0) > 0 ||
+    r.openUnrealizedPnL != null ||
+    (Number(r.openPremium) || 0) !== 0 ||
+    Object.keys(r.openProjected || {}).length > 0
+  )
+
   // Per ticker: what the stock did, what the options did, and the sum. Stock is
   // realized + unrealized so a name held but not sold still shows its position.
-  const data = useMemo(() => {
-    if (!rows?.length) return []
-    return rows.map(r => {
+  const { data, closedCount } = useMemo(() => {
+    if (!rows?.length) return { data: [], closedCount: 0 }
+    const open = rows.filter(isOpen)
+    const mapped = open.map(r => {
       const options = Number(r.totalRealized) || 0
       const stock = (Number(r.stockUnrealizedPnL) || 0) + (Number(r.stockRealizedPnL) || 0)
       return { ticker: r.ticker, stock: Math.round(stock * 100) / 100, options: Math.round(options * 100) / 100, net: Math.round((stock + options) * 100) / 100 }
     }).filter(d => Math.abs(d.net) >= 1 || Math.abs(d.stock) >= 1 || Math.abs(d.options) >= 1)
+    return { data: mapped, closedCount: rows.length - open.length }
   }, [rows])
 
   const top = useMemo(
@@ -94,7 +110,10 @@ export default function DashboardCharts({ broker = 'all' }) {
             {moneySigned(totals.net)}
           </span>
         </div>
-        <div style={sub}>Stock + options · {top.length} of {data.length}</div>
+        <div style={sub}>
+          Open positions · {top.length} of {data.length}
+          {closedCount > 0 && ` · ${closedCount} closed hidden`}
+        </div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={top} layout="vertical" margin={{ top: 12, right: 58, bottom: 0, left: 4 }}>
             <CartesianGrid stroke={tokens.chartGrid} strokeDasharray="2 4" horizontal={false} />
@@ -131,7 +150,9 @@ export default function DashboardCharts({ broker = 'all' }) {
               : `${moneySigned(totals.stock)} total`}
           </span>
         </div>
-        <div style={sub}>{hasOptions ? 'Where the P&L came from' : 'No option activity at this broker'}</div>
+        <div style={sub}>
+          {hasOptions ? 'Open positions · where the P&L came from' : 'Open positions · no option activity at this broker'}
+        </div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={top} margin={{ top: 12, right: 8, bottom: 0, left: -12 }}
                     barGap={2}>
