@@ -12,6 +12,7 @@ import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
 import ExtendedHoursPanel from './components/ExtendedHoursPanel'
 import BrokerTabs from './components/BrokerTabs'
 import DashboardCharts from './components/DashboardCharts'
+import EarningsPanel from './components/EarningsPanel'
 import UploadButton from './components/UploadButton'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
@@ -2587,6 +2588,9 @@ function AuthenticatedApp({ user }) {
 
       {/* Pre/post market option estimates — self-hides during regular hours */}
       {activeMainTab === 'dashboard' && <ExtendedHoursPanel broker={brokerFilter} />}
+
+      {/* Upcoming earnings — next to the estimates it invalidates */}
+      {activeMainTab === 'dashboard' && <EarningsPanel broker={brokerFilter} />}
 
       {/* Buy schedule */}
       {activeMainTab === 'dashboard' && <DCAAlertPanel />}

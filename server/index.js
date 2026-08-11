@@ -2731,6 +2731,97 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
 })
 
 // GET /api/brokers — which brokers this user has data for, for the tab bar.
+// ─── Upcoming earnings ───────────────────────────────────────────────────────
+// The earnings_cache table existed but nothing ever wrote to it, and the vol
+// scanner's earnings_date column is fed by a field nothing sets — so the app had
+// no earnings data at all. This fills it.
+//
+// Source is Nasdaq, which returns a sentence rather than a date:
+//   "Earnings announcement* for NVDA: Aug 26, 2026"
+// Yahoo's quoteSummary would be tidier but now 401s without a crumb, same as the
+// quote endpoint that broke price updates.
+const EARNINGS_TTL_MS = 24 * 60 * 60 * 1000
+
+function parseNasdaqEarnings(announcement) {
+  if (!announcement) return null
+  const m = String(announcement).match(/:\s*([A-Z][a-z]{2}\s+\d{1,2},\s*\d{4})\s*$/)
+  if (!m) return null            // no date scheduled — a normal, common answer
+  const d = new Date(m[1])
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
+async function fetchEarningsDate(ticker) {
+  const url = `https://api.nasdaq.com/api/analyst/${encodeURIComponent(ticker)}/earnings-date`
+  const resp = await axios.get(url, {
+    timeout: 8000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+    },
+  })
+  return parseNasdaqEarnings(resp.data?.data?.announcement)
+}
+
+app.get('/api/earnings', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+
+    // Holdings that matter: shares held, plus the underlyings of open options.
+    const stock = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
+    const optionUnderlyings = databaseService.getOpenOptionPositions(userId, brokerFilter)
+      .map(p => parseOptionDescription(p.symbol)?.ticker)
+      .filter(Boolean)
+    const tickers = [...new Set([...Object.keys(stock), ...optionUnderlyings])]
+      .filter(t => /^[A-Z.]{1,6}$/.test(t))
+      .slice(0, 40)   // a hard bound on how many upstream calls one request can make
+
+    const now = Date.now()
+    const out = []
+    const stale = []
+    for (const t of tickers) {
+      const hit = databaseService.getEarnings(t)
+      if (hit && hit.updated_at && (now - hit.updated_at * 1000) < EARNINGS_TTL_MS) {
+        out.push({ ticker: t, earningsDate: hit.earnings_date || null, cached: true })
+      } else {
+        stale.push(t)
+      }
+    }
+
+    // Nasdaq is not a bulk API, so this is one call per stale ticker, spaced out.
+    // Anything that fails keeps whatever was cached rather than blanking the row.
+    for (const t of stale) {
+      let date = null
+      try { date = await fetchEarningsDate(t) } catch { date = databaseService.getEarnings(t)?.earnings_date ?? null }
+      databaseService.setEarnings(t, date)
+      out.push({ ticker: t, earningsDate: date, cached: false })
+      await new Promise(r => setTimeout(r, 350))
+    }
+
+    const today = new Date().toISOString().slice(0, 10)
+    const upcoming = out
+      .filter(r => r.earningsDate && r.earningsDate >= today)
+      .map(r => ({
+        ...r,
+        daysAway: Math.round((new Date(r.earningsDate).getTime() - new Date(today).getTime()) / 86400000),
+        shares: stock[r.ticker]?.position ?? null,
+        hasOptions: optionUnderlyings.includes(r.ticker),
+      }))
+      .sort((a, b) => a.earningsDate.localeCompare(b.earningsDate))
+
+    res.json({
+      success: true,
+      upcoming,
+      // Said out loud rather than implied by an empty list: a holding with no
+      // scheduled date is normal, not a failure.
+      noDate: out.filter(r => !r.earningsDate).map(r => r.ticker),
+      checked: out.length,
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 app.get('/api/brokers', requireAuth, (req, res) => {
   try {
     const rows = databaseService.getBrokersForUser(req.user.userId)
