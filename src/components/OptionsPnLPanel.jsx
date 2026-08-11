@@ -142,7 +142,15 @@ export default function OptionsPnLPanel({ broker = 'all' }) {
   const [whatIfWeek, setWhatIfWeek] = useState(null) // null = current week, or 'YYYY-MM-DD'
   const [showScenario, setShowScenario] = useState(false)
   const [scenarioMarks, setScenarioMarks] = useState({})
-  const [cumulativeWeeks, setCumulativeWeeks] = useState(10)
+  // 0 = All. Defaults to the whole history rather than the last 10 weeks, and
+  // remembers the choice.
+  const [cumulativeWeeks, setCumulativeWeeks] = useState(
+    () => { const v = localStorage.getItem('optionsPnl_cumulativeWeeks'); return v === null ? 0 : Number(v) }
+  )
+  const changeCumulativeWeeks = (v) => {
+    setCumulativeWeeks(v)
+    localStorage.setItem('optionsPnl_cumulativeWeeks', String(v))
+  }
   const [shareOverrides, setShareOverrides] = useState(() => {
     try { return JSON.parse(localStorage.getItem('shareOverrides') || '{}') } catch { return {} }
   })
@@ -652,7 +660,7 @@ export default function OptionsPnLPanel({ broker = 'all' }) {
           </div>
           <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
             {[[1,1],[2,2],[3,3],[4,4],[5,5],[6,6],[7,7],[8,8],[9,9],[10,10],[0,'All']].map(([val, label]) => (
-              <button key={val} onClick={() => setCumulativeWeeks(val)} style={{ ...btnStyle(cumulativeWeeks === val), padding: '3px 10px', fontSize: '11px' }}>{label === 'All' ? 'All' : `${label}W`}</button>
+              <button key={val} onClick={() => changeCumulativeWeeks(val)} style={{ ...btnStyle(cumulativeWeeks === val), padding: '3px 10px', fontSize: '11px' }}>{label === 'All' ? 'All' : `${label}W`}</button>
             ))}
           </div>
         </div>

@@ -11,6 +11,7 @@ import OptionsPnLPanel from './components/OptionsPnLPanel'
 import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
 import ExtendedHoursPanel from './components/ExtendedHoursPanel'
 import BrokerTabs from './components/BrokerTabs'
+import DashboardCharts from './components/DashboardCharts'
 import UploadButton from './components/UploadButton'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
@@ -2569,17 +2570,25 @@ function AuthenticatedApp({ user }) {
       {activeMainTab === 'research' && <PreMoveVolumePanel />}
       {activeMainTab === 'research' && <ScreenerPanel />}
 
-      {/* DCA Alert Panel */}
-      {activeMainTab === 'dashboard' && <DCAAlertPanel />}
+      {/* ── Dashboard, top to bottom ────────────────────────────────────────
+          Summary before detail: the totals and the shape of the account come
+          first, then the trend, then the day-by-day ledger. Realized P&L used to
+          sit above the totals, which meant the first thing on screen was a list
+          rather than an answer.                                                */}
 
+      {/* Anything demanding attention right now */}
+      {activeMainTab === 'dashboard' && <DCAAlertPanel />}
       {/* Pre/post market option estimates — self-hides during regular hours */}
       {activeMainTab === 'dashboard' && <ExtendedHoursPanel broker={brokerFilter} />}
 
-      {/* Daily Realized P&L Panel */}
-      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
-
-      {/* Options P&L Weekly Panel */}
+      {/* Totals */}
       {activeMainTab === 'dashboard' && <OptionsPnLPanel broker={brokerFilter} />}
+
+      {/* Trend */}
+      {activeMainTab === 'dashboard' && <DashboardCharts broker={brokerFilter} />}
+
+      {/* Detail */}
+      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
 
       {/* Support & Resistance Levels */}
       {activeMainTab === 'analytics' && connected && (
