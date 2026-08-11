@@ -20,6 +20,16 @@ const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100
 // Is this trade a stock (vs an option contract)?
 const isStock = (t) => !t.isOption
 
+// Which broker a trade came from. Trades imported before multi-broker support
+// carry none and are Robinhood by definition.
+const brokerOf = (t) => t.broker || 'robinhood'
+
+// Lot matching is keyed per broker, not per symbol: a sale at one broker cannot
+// consume a lot held at another. Keying this way regardless of which trades the
+// caller passed in is what makes the per-broker tabs sum exactly to the All
+// Brokers total — the grouping no longer depends on the slice it was handed.
+const lotKey = (t) => `${brokerOf(t)}::${t.symbol}`
+
 // ---------------------------------------------------------------------------
 // Realized gains via FIFO lot matching (long positions only for stocks).
 // Returns an array of realized "sale" records, each with term + wash-sale flag.
@@ -28,13 +38,17 @@ export function computeStockRealized(trades) {
   const bySymbol = {}
   for (const t of trades) {
     if (!isStock(t)) continue
-    if (!bySymbol[t.symbol]) bySymbol[t.symbol] = []
-    bySymbol[t.symbol].push(t)
+    const k = lotKey(t)
+    if (!bySymbol[k]) bySymbol[k] = []
+    bySymbol[k].push(t)
   }
 
   const realized = []
+  const unreconciled = []
 
-  for (const [symbol, list] of Object.entries(bySymbol)) {
+  for (const [, list] of Object.entries(bySymbol)) {
+    const symbol = list[0].symbol
+    const broker = brokerOf(list[0])
     // chronological order
     const sorted = [...list].sort((a, b) => toDate(a.date) - toDate(b.date))
     const lots = [] // open buy lots: { date, qty, costPerShare }
@@ -57,6 +71,7 @@ export function computeStockRealized(trades) {
           const holdingDays = Math.floor((toDate(t.date) - lot.date) / MS_PER_DAY)
           realized.push({
             symbol,
+            broker,
             type: 'stock',
             quantity: round2(take),
             buyDate: lot.date,
@@ -72,13 +87,31 @@ export function computeStockRealized(trades) {
           remaining -= take
           if (lot.qty <= 0.0000001) lots.shift()
         }
-        // If selling more than held (short/oversold from partial data), ignore excess.
+        // Sold more than this broker ever bought. The excess used to be dropped
+        // silently, which quietly under-reports the gain. The usual cause is
+        // shares transferred in from another broker: the buy lives in the other
+        // broker's history, so there is no basis here to match against. Record
+        // it so the UI can flag the position rather than hide it.
+        if (remaining > 0.0000001) {
+          unreconciled.push({
+            symbol,
+            broker,
+            type: 'stock',
+            quantity: round2(remaining),
+            sellDate: toDate(t.date),
+            proceeds: round2(remaining * pricePerShare),
+            reason: 'No matching buy at this broker — shares may have been transferred in'
+          })
+        }
       }
     }
   }
 
   flagWashSales(realized, trades)
-  return realized.sort((a, b) => a.sellDate - b.sellDate)
+  realized.sort((a, b) => a.sellDate - b.sellDate)
+  // Carried alongside the results so callers can surface it without another pass.
+  realized.unreconciled = unreconciled
+  return realized
 }
 
 // ---------------------------------------------------------------------------
@@ -91,12 +124,14 @@ export function computeOptionsRealized(trades) {
   const byContract = {}
   for (const t of trades) {
     if (isStock(t)) continue
-    if (!byContract[t.symbol]) byContract[t.symbol] = []
-    byContract[t.symbol].push(t)
+    const k = lotKey(t)
+    if (!byContract[k]) byContract[k] = []
+    byContract[k].push(t)
   }
 
   const realized = []
-  for (const [symbol, list] of Object.entries(byContract)) {
+  for (const [, list] of Object.entries(byContract)) {
+    const symbol = list[0].symbol
     const sorted = [...list].sort((a, b) => toDate(a.date) - toDate(b.date))
     let buyAmt = 0
     let sellAmt = 0
@@ -183,12 +218,15 @@ export function computeOpenLots(trades) {
   const bySymbol = {}
   for (const t of trades) {
     if (!isStock(t)) continue
-    if (!bySymbol[t.symbol]) bySymbol[t.symbol] = []
-    bySymbol[t.symbol].push(t)
+    const k = lotKey(t)
+    if (!bySymbol[k]) bySymbol[k] = []
+    bySymbol[k].push(t)
   }
 
   const open = []
-  for (const [symbol, list] of Object.entries(bySymbol)) {
+  for (const [, list] of Object.entries(bySymbol)) {
+    const symbol = list[0].symbol
+    const broker = brokerOf(list[0])
     const sorted = [...list].sort((a, b) => toDate(a.date) - toDate(b.date))
     const lots = []
     for (const t of sorted) {
@@ -213,6 +251,7 @@ export function computeOpenLots(trades) {
     const earliestDate = lots.reduce((min, l) => (l.date < min ? l.date : min), lots[0].date)
     open.push({
       symbol,
+      broker,
       quantity: round2(totalQty),
       costBasis: round2(totalCost),
       avgCost: round2(totalCost / totalQty),
@@ -315,6 +354,12 @@ export function summarizeTaxYear(base, year) {
   const withholding = detectWithholding(base.trades, base.dividendsAndInterest, year)
   const openLots = base.openLots
   const washSales = allRealized.filter((r) => r.washSale)
+  // Sales with no matching buy at the same broker — usually transferred-in
+  // shares, whose cost basis lives in the other broker's history. Their gain is
+  // NOT in the totals above, so it has to be shown rather than quietly omitted.
+  const unreconciled = (base.stockRealized.unreconciled || []).filter(
+    (r) => !year || r.sellDate.getFullYear() === year
+  )
 
   return {
     year,
@@ -334,7 +379,9 @@ export function summarizeTaxYear(base, year) {
     openLots,
     openCostBasis: sum(openLots, 'costBasis'),
     washSales,
-    washSaleDisallowed: Math.abs(sum(washSales, 'gain'))
+    washSaleDisallowed: Math.abs(sum(washSales, 'gain')),
+    unreconciled,
+    unreconciledProceeds: sum(unreconciled, 'proceeds')
   }
 }
 

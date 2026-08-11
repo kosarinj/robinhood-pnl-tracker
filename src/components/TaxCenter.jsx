@@ -795,6 +795,31 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
                     </div>
                   </div>
                 )}
+                {summary.unreconciled?.length > 0 && (
+                  <div style={{
+                    border: '1px solid #ef4444', borderRadius: '8px', padding: '10px 12px',
+                    background: isDark ? 'rgba(239,68,68,0.08)' : '#fef2f2',
+                  }}>
+                    <div style={{ fontWeight: 700, color: '#ef4444', marginBottom: '4px' }}>
+                      ⚠️ {summary.unreconciled.length} sale{summary.unreconciled.length !== 1 ? 's' : ''} with no cost basis at that broker
+                    </div>
+                    <div style={{ fontSize: '12px', color: textMid, marginBottom: '6px' }}>
+                      These sold more shares than the broker's own history shows being bought — the usual
+                      cause is shares transferred in from another broker, whose purchase (and cost basis)
+                      lives in the other account. <strong style={{ color: text }}>Their gain is excluded from
+                      the totals above</strong>, so realized gains are understated by whatever basis applies
+                      to {fmt(summary.unreconciledProceeds)} of proceeds. Enter the original purchase in the
+                      receiving broker's history, or take these figures from your 1099-B.
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {summary.unreconciled.slice(0, 12).map((u, i) => (
+                        <span key={`${u.symbol}-${i}`} style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', background: isDark ? '#3a1f1f' : '#fee2e2', color: '#ef4444', fontWeight: 600 }}>
+                          {u.symbol} · {u.quantity} sh @ {u.broker}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {summary.washSales.length > 0 && (
                   <div>
                     <div style={{ fontWeight: 600, color: text, marginBottom: '4px' }}>🚫 Possible wash sales ({summary.washSales.length})</div>
