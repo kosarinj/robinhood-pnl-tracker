@@ -23,9 +23,10 @@ import { parseOptionDescription, toPolygonTicker, calcPremiumLeft, toYahooOption
 import { calculateRSI, calculateEMA, calculateStochastic } from './services/technicalAnalysis.js'
 import { RISK_FREE_RATE, bsCall, impliedVol, impliedVolCall, repriceFromClose } from './utils/blackScholes.js'
 import { parseWebullOrders } from './services/webullParser.js'
+import { parseSchwabTransactions } from './services/schwabParser.js'
 
 // Brokers whose exports we can parse. Adding one means a parser + a tab.
-const SUPPORTED_BROKERS = ['robinhood', 'webull']
+const SUPPORTED_BROKERS = ['robinhood', 'webull', 'schwab']
 
 // Best current per-share mark from a Polygon option snapshot.
 // Priority: live quote midpoint → a trade that actually happened TODAY → the daily
@@ -507,6 +508,19 @@ io.on('connection', (socket) => {
         if (parsed.warnings.length) console.log(`Webull parser warnings: ${parsed.warnings.join(' | ')}`)
         if (!trades.length) {
           socket.emit('csv-processed', { success: false, error: 'No filled orders found in that Webull export. Check that the export includes filled orders.' })
+          return
+        }
+      } else if (broker === 'schwab') {
+        // Schwab's transactions export carries dividends, interest and cash
+        // transfers alongside trades, so it feeds all three paths.
+        const parsed = parseSchwabTransactions(csvContent)
+        trades = parsed.trades
+        dividendsAndInterest = parsed.dividendsAndInterest
+        deposits = parsed.deposits
+        totalPrincipal = parsed.totalPrincipal
+        if (parsed.warnings.length) console.log(`Schwab parser warnings: ${parsed.warnings.join(' | ')}`)
+        if (!trades.length && !dividendsAndInterest.length) {
+          socket.emit('csv-processed', { success: false, error: 'No transactions found in that Schwab export.' })
           return
         }
       } else {

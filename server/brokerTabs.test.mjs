@@ -14,6 +14,7 @@ import { io as ioClient } from 'socket.io-client'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const TMP_DB = join(__dirname, `test_tabs_${process.pid}.db`)
 const REAL_WEBULL = 'C:/Users/jeffk/Downloads/Webull_Orders_Records (2).csv'
+const REAL_SCHWAB = 'C:/Users/jeffk/Downloads/Custodial_Brokerage_XXX562_Transactions_20260811-072856.csv'
 
 process.env.DATABASE_PATH = TMP_DB
 process.env.PORT = '38474'
@@ -95,8 +96,22 @@ try {
     assert.ok(wbRes.success !== false, `error: ${wbRes.error}`)
   })
 
-  // An unsupported broker must be refused outright — parsing a Schwab file
-  // with the Robinhood parser would produce plausible-looking wrong numbers.
+  // ── Schwab upload, real file ──
+  const haveSchwab = fs.existsSync(REAL_SCHWAB)
+  if (!haveSchwab) console.log('  (real Schwab file missing — using a fixture)')
+  const scCsv = haveSchwab ? fs.readFileSync(REAL_SCHWAB, 'utf8') : [
+    '"Date","Action","Symbol","Description","Quantity","Price","Fees & Comm","Amount"',
+    '"07/31/2026","Buy","AAPL","APPLE INC","1","$301.55","","-$301.55"',
+    '"08/11/2025 as of 08/08/2025","MoneyLink Transfer","","FUNDS RECEIVED","","","","$1000.00"',
+  ].join('\n')
+  const scRes = await uploadCsv(scCsv, 'schwab')
+
+  test('schwab upload succeeds through the real socket path', () => {
+    assert.ok(scRes.success !== false, `error: ${scRes.error}`)
+  })
+
+  // An unsupported broker must be refused outright — parsing one broker's file
+  // with another's parser would produce plausible-looking wrong numbers.
   const badRes = await uploadCsv(wbCsv, 'etrade')
   test('unknown broker is rejected rather than mis-parsed', () => {
     assert.equal(badRes.success, false)
@@ -107,16 +122,18 @@ try {
 
   const brokersRes = await (await fetch(`${BASE}/api/brokers`, { headers: { cookie } })).json()
 
-  test('lists both brokers with trade counts', () => {
+  test('lists all three brokers with trade counts', () => {
     assert.equal(brokersRes.success, true)
     const names = brokersRes.brokers.map(b => b.broker).sort()
-    assert.deepEqual(names, ['robinhood', 'webull'], JSON.stringify(brokersRes.brokers))
+    assert.deepEqual(names, ['robinhood', 'schwab', 'webull'], JSON.stringify(brokersRes.brokers))
     brokersRes.brokers.forEach(b => assert.ok(b.trade_count > 0, `${b.broker} has no trades`))
   })
 
-  test('robinhood trades were not clobbered by the webull upload', () => {
+  test('earlier brokers survived each later upload', () => {
     const rh = brokersRes.brokers.find(b => b.broker === 'robinhood')
     assert.equal(rh.trade_count, 2, `expected 2 robinhood trades, got ${rh.trade_count}`)
+    const wb = brokersRes.brokers.find(b => b.broker === 'webull')
+    assert.ok(wb.trade_count > 0, 'webull trades were lost by the schwab upload')
   })
 
   console.log('\nBroker filter on YTD')

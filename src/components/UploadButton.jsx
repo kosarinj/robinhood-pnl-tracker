@@ -12,6 +12,7 @@ import React, { useRef } from 'react'
 const BROKERS = [
   { key: 'robinhood', label: 'Robinhood' },
   { key: 'webull', label: 'Webull' },
+  { key: 'schwab', label: 'Schwab' },
 ]
 
 export default function UploadButton({ broker, onBrokerChange, onFile, style = {} }) {
