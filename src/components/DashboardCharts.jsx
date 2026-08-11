@@ -63,11 +63,22 @@ export default function DashboardCharts({ broker = 'all' }) {
   const { data, closedCount } = useMemo(() => {
     if (!rows?.length) return { data: [], closedCount: 0 }
     const open = rows.filter(isOpen)
+    // No magnitude filter. stockUnrealizedPnL is null until BOTH a position and
+    // a live price resolve, so a held stock whose price hasn't loaded yet
+    // computes to net 0 — dropping those emptied the whole chart. Restricting to
+    // open positions is the filter that matters; size isn't.
     const mapped = open.map(r => {
       const options = Number(r.totalRealized) || 0
       const stock = (Number(r.stockUnrealizedPnL) || 0) + (Number(r.stockRealizedPnL) || 0)
-      return { ticker: r.ticker, stock: Math.round(stock * 100) / 100, options: Math.round(options * 100) / 100, net: Math.round((stock + options) * 100) / 100 }
-    }).filter(d => Math.abs(d.net) >= 1 || Math.abs(d.stock) >= 1 || Math.abs(d.options) >= 1)
+      return {
+        ticker: r.ticker,
+        stock: Math.round(stock * 100) / 100,
+        options: Math.round(options * 100) / 100,
+        net: Math.round((stock + options) * 100) / 100,
+        shares: Number(r.stockPosition) || 0,
+        priced: r.stockUnrealizedPnL != null,
+      }
+    })
     return { data: mapped, closedCount: rows.length - open.length }
   }, [rows])
 
@@ -82,7 +93,18 @@ export default function DashboardCharts({ broker = 'all' }) {
     net: Math.round(data.reduce((s, d) => s + d.net, 0) * 100) / 100,
   }), [data])
 
-  if (rows === null || !top.length) return null
+  if (rows === null) return null
+  if (!top.length) {
+    return (
+      <div className="floating-panel" style={{
+        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+        padding: '14px 16px', marginBottom: 20, color: 'var(--textSecondary)', fontSize: 12.5,
+      }}>
+        No open positions to chart
+        {closedCount > 0 ? ` — ${closedCount} closed position${closedCount !== 1 ? 's' : ''} are excluded.` : '.'}
+      </div>
+    )
+  }
 
   // Only worth splitting stock from options where options actually exist.
   const hasOptions = data.some(d => Math.abs(d.options) >= 1)
