@@ -4,7 +4,27 @@ import { useTheme } from '../contexts/ThemeContext'
 const DEFAULT_GLOBAL_START = '2026-03-15'
 const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
 const LS_SYMBOL_KEY = 'ytdPanel_symbolDates'
-const LS_HIDDEN_KEY = 'ytdPanel_hiddenTickers'
+const LS_HIDDEN_KEY = 'ytdPanel_hiddenTickers'   // legacy single-broker list
+
+// Hidden tickers are per broker: a name you don't want cluttering one account
+// is often a real position at another.
+const hiddenKey = (broker) => `ytdPanel_hiddenTickers_${broker || 'all'}`
+
+// Existing hides were made when everything was Robinhood, so they carry over to
+// the Robinhood and All views. Brokers added later start with nothing hidden,
+// which is the point — a name hidden at one broker shouldn't vanish at another.
+const loadHidden = (broker) => {
+  try {
+    const own = localStorage.getItem(hiddenKey(broker))
+    if (own != null) return JSON.parse(own)
+    const legacy = localStorage.getItem(LS_HIDDEN_KEY)
+    if (legacy != null && (broker === 'robinhood' || broker === 'all')) {
+      localStorage.setItem(hiddenKey(broker), legacy)
+      return JSON.parse(legacy)
+    }
+    return []
+  } catch { return [] }
+}
 const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
 // Cost overrides are cached per broker — one shared key was how the Robinhood
 // cost ended up showing on Webull rows.
@@ -57,9 +77,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [stockHoldings, setStockHoldings] = useState({})
   const [stockDebug, setStockDebug] = useState(null)
   const [search, setSearch] = useState('')
-  const [hiddenTickers, setHiddenTickers] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(LS_HIDDEN_KEY) || '[]') } catch { return [] }
-  })
+  const [hiddenTickers, setHiddenTickers] = useState(() => loadHidden(broker))
   const [showHiddenList, setShowHiddenList] = useState(false)
 
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -100,6 +118,9 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     fetchData(undefined, undefined, true)
     fetchStockHoldings()
     fetchCostOverrides()
+    // Hidden tickers are per broker, so swap in this tab's list.
+    setHiddenTickers(loadHidden(broker))
+    setShowHiddenList(false)
   }, [broker])
 
   // Fetch stock holdings + cost overrides from server on mount.
@@ -249,19 +270,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const hideTicker = (t) => {
     const updated = [...new Set([...hiddenTickers, t])]
     setHiddenTickers(updated)
-    localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify(updated))
+    localStorage.setItem(hiddenKey(broker), JSON.stringify(updated))
   }
 
   const restoreTicker = (t) => {
     const updated = hiddenTickers.filter(x => x !== t)
     setHiddenTickers(updated)
-    localStorage.setItem(LS_HIDDEN_KEY, JSON.stringify(updated))
+    localStorage.setItem(hiddenKey(broker), JSON.stringify(updated))
     if (updated.length === 0) setShowHiddenList(false)
   }
 
   const restoreAllTickers = () => {
     setHiddenTickers([])
-    localStorage.setItem(LS_HIDDEN_KEY, '[]')
+    localStorage.setItem(hiddenKey(broker), '[]')
     setShowHiddenList(false)
   }
 
@@ -448,6 +469,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         {hiddenTickers.length > 0 && (
           <div style={{ position: 'relative' }}>
             <button onClick={() => setShowHiddenList(v => !v)}
+              title={`Hidden on the ${broker === 'all' ? 'All brokers' : broker} tab only. Hidden rows are excluded from the totals below.`}
               style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>
               🚫 {hiddenTickers.length} hidden ▾
             </button>
@@ -461,6 +483,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                     </button>
                   ))}
                 </div>
+                <div style={{ fontSize: '10px', color: textMid, marginBottom: '6px', lineHeight: 1.4 }}>
+                  Hidden on <strong style={{ color: text }}>{broker === 'all' ? 'All brokers' : broker}</strong> only —
+                  other broker tabs are unaffected. Hidden rows are left out of the totals.
+                </div>
                 <button onClick={restoreAllTickers}
                   style={{ width: '100%', padding: '5px', borderRadius: '4px', border: 'none', background: '#3b82f6', color: 'white', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
                   Show all
@@ -470,7 +496,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           </div>
         )}
         <span style={{ fontSize: '12px', color: textMid }}>
-          Click a date cell to set a per-symbol start date · hover a row to hide it
+          Click a date cell to set a per-symbol start date · hover a row to hide it (per broker)
         </span>
         {stockDebug && (
           <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px',
