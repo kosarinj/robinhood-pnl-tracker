@@ -23,14 +23,16 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [error, setError] = useState(null)
   const [chartReady, setChartReady] = useState(false)
   const [supportResistanceLevels, setSupportResistanceLevels] = useState([])
-  const [showSupportResistance, setShowSupportResistance] = useState(true)
-  const [showFib, setShowFib] = useState(false)
-  const [showStockPnL, setShowStockPnL] = useState(true)
-  const [showOptionsPnL, setShowOptionsPnL] = useState(true)
+  // Opens with Fibonacci and RSI only — everything else off. Four overlays at
+  // once buried the price line they're drawn over.
+  const [showSupportResistance, setShowSupportResistance] = useState(false)
+  const [showFib, setShowFib] = useState(true)
+  const [showStockPnL, setShowStockPnL] = useState(false)
+  const [showOptionsPnL, setShowOptionsPnL] = useState(false)
   const [dateRange, setDateRange] = useState('6mo') // '1mo', '3mo', '6mo', '1y', 'max'
   const [indicators, setIndicators] = useState({
-    showEMA9: true,
-    showEMA21: true,
+    showEMA9: false,
+    showEMA21: false,
     showRSI: true,
     showMACD: false
   })

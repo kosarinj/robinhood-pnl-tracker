@@ -115,7 +115,7 @@ const getMondayOfWeek = (dateStr) => {
   return { monday: monday.toISOString().slice(0, 10), friday: fri.toISOString().slice(0, 10) }
 }
 
-export default function OptionsPnLPanel({ broker = 'all' }) {
+export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null }) {
   const { isDark } = useTheme()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -680,6 +680,11 @@ export default function OptionsPnLPanel({ broker = 'all' }) {
           ))}
         </div>
       </div>
+
+      {/* Slot directly beneath the Cumulative P&L figures — the charts land here
+          so the trend sits with the number it's a picture of, rather than after
+          the ~1600 lines of week/history detail that follow. */}
+      {afterCumulative}
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: `2px solid ${border}`, paddingBottom: '0' }}>
