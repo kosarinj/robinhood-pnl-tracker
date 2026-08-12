@@ -1941,16 +1941,18 @@ export class DatabaseService {
   }
 
   // Get stock positions as of a specific date (for historical share counts)
-  getPositionsAsOf(userId = 1, dateStr) {
+  getPositionsAsOf(userId = 1, dateStr, broker = null) {
     try {
       const stmt = db.prepare(`
         SELECT symbol, SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS position
         FROM trades
-        WHERE is_option = 0 AND user_id = ? AND trans_date <= ?
+        WHERE is_option = 0 AND user_id = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+          AND trans_date <= ?
         GROUP BY symbol
         HAVING position > 0
       `)
-      const rows = stmt.all(userId, dateStr)
+      const rows = stmt.all(...[userId, ...(broker ? [broker] : []), dateStr])
       const result = {}
       rows.forEach(r => { result[r.symbol] = r.position })
       return result

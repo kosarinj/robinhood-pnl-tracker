@@ -198,6 +198,24 @@ try {
       `webull should have none, got ${JSON.stringify(wbH.openOptionPositions)}`)
   })
 
+  test('a broker with no options reports no option underlyings', () => {
+    // Webull holds stock only. optionUnderlyingPrices is built from option
+    // trades; unscoped, Robinhood's underlyings leaked onto every tab — which
+    // is why Schwab showed option values it couldn't have.
+    const wbUnderlyings = Object.keys(wbH.optionUnderlyingPrices || {})
+    assert.equal(wbUnderlyings.length, 0,
+      `webull has no options but reported underlyings: ${wbUnderlyings.join(',')}`)
+  })
+
+  test('two brokers do not report identical stock figures', () => {
+    // The tell that the filter isn't reaching a calculation at all.
+    const total = (h) =>
+      Object.values(h.weeklyStockPnL || {}).reduce((s, v) => s + (v?.pnl || 0), 0) + (h.otherStockPnL || 0)
+    if (total(rhH) === 0 && total(wbH) === 0) return
+    assert.notEqual(total(rhH), total(wbH),
+      `both brokers reported ${total(rhH)} — the stock side isn't scoped`)
+  })
+
   console.log('\nExtended hours')
 
   const extHours = async (broker) => {

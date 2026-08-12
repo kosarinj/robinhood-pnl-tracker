@@ -2093,7 +2093,7 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
     console.log(`Open option positions: ${openOpts.length} total, ${activeOpts.length} non-expired`)
 
     // Collect all unique underlying tickers (active + historical) for stock price fetch
-    const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
+    const allOptionTrades = databaseService.getOptionTrades(req.user.userId, brokerFilter)
     const allUnderlyingTickers = [...new Set([
       ...activeOpts.map(pos => parseOptionDescription(pos.symbol)?.ticker),
       ...allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker)
@@ -4675,7 +4675,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
      const allPositions = databaseService.getAllPositions(req.user.userId, brokerFilter)
     const otherSymbols = Object.keys(allPositions).filter(s => !thisWeekSymbols.includes(s))
     // Also include option-only underlyings (user holds options but not the stock)
-    const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
+    const allOptionTrades = databaseService.getOptionTrades(req.user.userId, brokerFilter)
     const optionOnlyTickers = [...new Set(allOptionTrades.map(t => parseOptionDescription(t.symbol)?.ticker).filter(Boolean))]
       .filter(t => !allPositions[t])
     const allSymbols = [...new Set([...thisWeekSymbols, ...otherSymbols, ...optionOnlyTickers])]
@@ -4692,7 +4692,10 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
 
       const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols, brokerFilter)
       const thisWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, lastFridayStr, todayStr, thisWeekSymbols, brokerFilter)
-      const lastFriPositions = databaseService.getPositionsAsOf(req.user.userId, lastFridayStr)
+      // Must be scoped to match allPositions above. Comparing a broker-scoped
+      // position today against an unscoped one last Friday produced nonsense
+      // deltas — that's what turned Other Stocks from +1800 into -368.
+      const lastFriPositions = databaseService.getPositionsAsOf(req.user.userId, lastFridayStr, brokerFilter)
       const tqqqAllPos = allPositions['TQQQ'], tqqqLastFriPos = lastFriPositions['TQQQ']
       console.log(`[TQQQ stock] allPositions=${tqqqAllPos} lastFriPos=${tqqqLastFriPos} lastFri=${lastFridayStr} lastFriPrice=${lastFridayPrices['TQQQ']} curPrice=${currentPrices['TQQQ']} buys=${JSON.stringify(thisWeekBuys['TQQQ'])} sells=${JSON.stringify(thisWeekSells['TQQQ'])}`)
       thisWeekSymbols.forEach(sym => {
@@ -4768,7 +4771,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         const thisFriStr = new Date(monday.getTime() + 4 * 86400000).toISOString().slice(0, 10)
         const prevPrevFriStr = new Date(monday.getTime() - 10 * 86400000).toISOString().slice(0, 10)
 
-        const weekPositions = databaseService.getPositionsAsOf(req.user.userId, prevFriStr)
+        const weekPositions = databaseService.getPositionsAsOf(req.user.userId, prevFriStr, brokerFilter)
         const weekComplete = thisFriStr <= todayStr
 
         // Check stock for ALL tickers ever seen, not just those with options expiring this week.
