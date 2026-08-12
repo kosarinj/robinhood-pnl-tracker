@@ -244,6 +244,10 @@ function AuthenticatedApp({ user }) {
             console.log(`✅ Auto-loaded ${result.trades.length} trades from ${result.uploadDate}`)
             setTrades(result.trades)
             socketService.getAllTrades().then(setAllTrades).catch(() => {})
+            // Detect splits once per session. Cost basis is stored in the terms
+            // of the trade date, so without this a post-split holding reads with
+            // a pre-split average — NFLX showed roughly -$11k on that alone.
+            fetch('/api/splits/refresh', { method: 'POST', credentials: 'include' }).catch(() => {})
             setDeposits(result.deposits || [])
             setTotalPrincipal(result.totalPrincipal || 0)
             setDividendsAndInterest(result.dividendsAndInterest || [])
