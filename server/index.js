@@ -4670,7 +4670,9 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
     let otherStockPnLBySymbol = {}
 
     // All positions — used for both options-linked and other stocks
-    const allPositions = databaseService.getAllPositions(req.user.userId)
+    // Broker-scoped like the option side. Without this the stock half of
+     // Cumulative P&L showed every broker regardless of the selected tab.
+     const allPositions = databaseService.getAllPositions(req.user.userId, brokerFilter)
     const otherSymbols = Object.keys(allPositions).filter(s => !thisWeekSymbols.includes(s))
     // Also include option-only underlyings (user holds options but not the stock)
     const allOptionTrades = databaseService.getOptionTrades(req.user.userId)
@@ -4688,8 +4690,8 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         if (currentPrices[sym] > 0) optionUnderlyingPrices[sym] = currentPrices[sym]
       })
 
-      const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols)
-      const thisWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, lastFridayStr, todayStr, thisWeekSymbols)
+      const thisWeekSells = databaseService.getThisWeekStockSells(req.user.userId, mondayStr, thisWeekSymbols, brokerFilter)
+      const thisWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, lastFridayStr, todayStr, thisWeekSymbols, brokerFilter)
       const lastFriPositions = databaseService.getPositionsAsOf(req.user.userId, lastFridayStr)
       const tqqqAllPos = allPositions['TQQQ'], tqqqLastFriPos = lastFriPositions['TQQQ']
       console.log(`[TQQQ stock] allPositions=${tqqqAllPos} lastFriPos=${tqqqLastFriPos} lastFri=${lastFridayStr} lastFriPrice=${lastFridayPrices['TQQQ']} curPrice=${currentPrices['TQQQ']} buys=${JSON.stringify(thisWeekBuys['TQQQ'])} sells=${JSON.stringify(thisWeekSells['TQQQ'])}`)
@@ -4774,14 +4776,14 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         // options expire a different week — allHistoryTickers catches those cases.
         const allWeekTickers = [...new Set([...Object.keys(week.byUnderlying), ...allHistoryTickers])]
         const weekBuys = weekComplete
-          ? databaseService.getStockBuysInPeriod(req.user.userId, prevFriStr, thisFriStr, allWeekTickers)
+          ? databaseService.getStockBuysInPeriod(req.user.userId, prevFriStr, thisFriStr, allWeekTickers, brokerFilter)
           : {}
 
         // Buys during the PREVIOUS week (prevPrevFri exclusive → prevFri inclusive).
         // getPositionsAsOf(prevFriStr) is inclusive, so shares bought ON prevFriStr are already
         // in pos — but weekBuys uses prevFriStr as exclusive lower bound and misses them.
         // We need prevWeekBuys to detect and correctly price those shares.
-        const prevWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, prevPrevFriStr, prevFriStr, allWeekTickers)
+        const prevWeekBuys = databaseService.getStockBuysInPeriod(req.user.userId, prevPrevFriStr, prevFriStr, allWeekTickers, brokerFilter)
 
         const stockDelta = {}
         allWeekTickers.forEach(ticker => {

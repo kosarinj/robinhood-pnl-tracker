@@ -178,6 +178,15 @@ try {
   }
   const [rhH, wbH] = await Promise.all([history('robinhood'), history('webull')])
 
+  test('the stock side of weekly history follows the broker tab too', () => {
+    // Robinhood holds 100 AAPL, Webull 7. The stock half of Cumulative P&L was
+    // unscoped, so both tabs showed all 107.
+    const shares = (h) => Object.values(h.weeklyStockPnL || {}).reduce((s, v) => s + (v?.shares || 0), 0)
+    const rhShares = shares(rhH), wbShares = shares(wbH)
+    if (rhShares === 0 && wbShares === 0) return   // no weekly stock rows in this fixture
+    assert.notEqual(rhShares, wbShares, `both brokers reported ${rhShares} shares — not scoped`)
+  })
+
   test('weekly history follows the broker tab', () => {
     assert.equal(rhH.success, true, `robinhood history failed: ${rhH.error}`)
     assert.equal(wbH.success, true, `webull history failed: ${wbH.error}`)

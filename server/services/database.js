@@ -1961,16 +1961,17 @@ export class DatabaseService {
   }
 
   // Get all stock positions computed from trades (net shares = buys - sells)
-  getAllPositions(userId = 1) {
+  getAllPositions(userId = 1, broker = null) {
     try {
       const stmt = db.prepare(`
         SELECT symbol, SUM(CASE WHEN is_buy = 1 THEN quantity ELSE -quantity END) AS position
         FROM trades
         WHERE is_option = 0 AND user_id = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
         GROUP BY symbol
         HAVING position > 0
       `)
-      const rows = stmt.all(userId)
+      const rows = stmt.all(...[userId, ...(broker ? [broker] : [])])
       const result = {}
       rows.forEach(r => { result[r.symbol] = r.position })
       return result
@@ -1980,7 +1981,7 @@ export class DatabaseService {
     }
   }
 
-  getThisWeekStockSells(userId, since, symbols) {
+  getThisWeekStockSells(userId, since, symbols, broker = null) {
     if (!symbols || symbols.length === 0) return {}
     try {
       const placeholders = symbols.map(() => '?').join(',')
@@ -1990,10 +1991,11 @@ export class DatabaseService {
           SUM(ABS(amount)) AS total_proceeds
         FROM trades
         WHERE is_option = 0 AND is_buy = 0 AND user_id = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
           AND trans_date >= ?
           AND symbol IN (${placeholders})
         GROUP BY symbol
-      `).all(userId, since, ...symbols)
+      `).all(...[userId, ...(broker ? [broker] : []), since, ...symbols])
       const result = {}
       rows.forEach(r => {
         result[r.symbol] = { sharesSold: r.shares_sold, avgPrice: r.shares_sold > 0 ? r.total_proceeds / r.shares_sold : 0 }
@@ -2008,7 +2010,7 @@ export class DatabaseService {
   // Get net stock activity within a date range — used to detect positions started mid-week.
   // Returns netChange (buys - sells) and avgBuyPrice. Only trigger mid-week P&L when
   // netChange >= 100, so buy-and-sell-same-week (assignments that were quickly sold) are excluded.
-  getStockBuysInPeriod(userId, fromDateExclusive, toDateInclusive, symbols) {
+  getStockBuysInPeriod(userId, fromDateExclusive, toDateInclusive, symbols, broker = null) {
     if (!symbols || symbols.length === 0) return {}
     try {
       const placeholders = symbols.map(() => '?').join(',')
@@ -2019,10 +2021,11 @@ export class DatabaseService {
           SUM(CASE WHEN is_buy = 1 THEN ABS(amount) ELSE 0 END) AS total_cost
         FROM trades
         WHERE is_option = 0 AND user_id = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
           AND trans_date > ? AND trans_date <= ?
           AND symbol IN (${placeholders})
         GROUP BY symbol
-      `).all(userId, fromDateExclusive, toDateInclusive, ...symbols)
+      `).all(...[userId, ...(broker ? [broker] : []), fromDateExclusive, toDateInclusive, ...symbols])
       const result = {}
       rows.forEach(r => {
         result[r.symbol] = {
