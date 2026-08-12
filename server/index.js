@@ -2731,6 +2731,51 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
 })
 
 // GET /api/brokers — which brokers this user has data for, for the tab bar.
+// ─── Stock splits ────────────────────────────────────────────────────────────
+// Detected from Yahoo rather than entered by hand. The chart endpoint reports
+// them via events=split and, unlike quoteSummary, still works without a crumb.
+app.post('/api/splits/refresh', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const symbols = Object.keys(databaseService.getStockPositionsWithCost(userId))
+      .concat(Object.keys(databaseService.getAllPositions?.(userId) || {}))
+    const unique = [...new Set(symbols)].filter(t => /^[A-Z.]{1,6}$/.test(t)).slice(0, 40)
+
+    const found = []
+    for (const sym of unique) {
+      try {
+        const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}` +
+                    `?range=10y&interval=1mo&events=split`
+        const resp = await axios.get(url, {
+          timeout: 10000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' },
+        })
+        const splits = resp.data?.chart?.result?.[0]?.events?.splits || {}
+        Object.values(splits).forEach(sp => {
+          const ratio = (sp.numerator || 0) / (sp.denominator || 1)
+          if (!(ratio > 0) || ratio === 1) return
+          const date = new Date(sp.date * 1000).toISOString().slice(0, 10)
+          databaseService.saveSplit(sym, date, ratio, 'yahoo')
+          found.push({ symbol: sym, date, ratio })
+        })
+      } catch { /* one symbol failing shouldn't abort the sweep */ }
+      await new Promise(r => setTimeout(r, 150))
+    }
+    await logActivity(req, 'refresh_splits', `Found ${found.length} splits across ${unique.length} symbols`)
+    res.json({ success: true, checked: unique.length, found })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.get('/api/splits', requireAuth, (req, res) => {
+  try {
+    res.json({ success: true, splits: databaseService.getSplits() })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ─── Upcoming earnings ───────────────────────────────────────────────────────
 // The earnings_cache table existed but nothing ever wrote to it, and the vol
 // scanner's earnings_date column is fed by a field nothing sets — so the app had

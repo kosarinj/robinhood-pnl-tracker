@@ -964,6 +964,12 @@ function AuthenticatedApp({ user }) {
         console.log('✅ CSV processed by server')
         // A new broker may now have data — refresh the broker bar.
         setBrokerRefreshKey(k => k + 1)
+        // Newly imported symbols may have split. Detected in the background so
+        // share counts and cost basis are right without anyone entering a ratio.
+        fetch('/api/splits/refresh', { method: 'POST', credentials: 'include' })
+          .then(r => r.json())
+          .then(d => { if (d?.found?.length) console.log(`↔ ${d.found.length} split(s) detected`) })
+          .catch(() => {})
 
         // Parser notes the import couldn't resolve on its own — a share journal
         // with no cost basis, an unverified option format. Shown rather than

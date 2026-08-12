@@ -352,6 +352,25 @@ try {
   console.error('option_iv_marks migration error:', e.message)
 }
 
+// Migration: stock splits. A split is a market fact, not per-user, so there's no
+// user_id. Trades BEFORE split_date are recorded in pre-split terms: the share
+// count needs multiplying and the per-share price dividing. The dollar amount is
+// untouched — you paid what you paid.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_splits (
+      symbol TEXT NOT NULL,
+      split_date TEXT NOT NULL,
+      ratio REAL NOT NULL,
+      source TEXT,
+      updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+      PRIMARY KEY (symbol, split_date)
+    )
+  `)
+} catch (e) {
+  console.error('stock_splits migration error:', e.message)
+}
+
 // Migration: stock cost overrides — manual avg cost per symbol for YTD panel
 try {
   db.exec(`
@@ -1391,20 +1410,30 @@ export class DatabaseService {
         ORDER BY trans_date ASC, symbol
       `).all(userId)
 
-      return rows.map(row => ({
-        date: row.trans_date,
-        transDate: row.trans_date,
-        transCode: row.trans_code,
-        symbol: row.symbol,
-        quantity: row.quantity,
-        price: row.price,
-        amount: row.amount,
-        description: row.description,
-        isBuy: row.is_buy === 1,
-        isOption: row.is_option === 1,
-        contracts: row.contracts || 1,
-        broker: row.broker || 'robinhood'
-      }))
+      // Stock trades are split-adjusted here so every consumer — the tax
+      // engine, realized P&L, the trades table — sees consistent share counts.
+      // Options are deliberately left alone: a split rewrites strikes and
+      // deliverables in ways this can't infer, so quietly scaling them would
+      // invent numbers.
+      const splits = this.getSplits([...new Set(rows.filter(r => !r.is_option).map(r => r.symbol))])
+      return rows.map(row => {
+        const f = row.is_option ? 1 : this.splitFactor(splits[row.symbol], row.trans_date)
+        return {
+          date: row.trans_date,
+          transDate: row.trans_date,
+          transCode: row.trans_code,
+          symbol: row.symbol,
+          quantity: f === 1 ? row.quantity : row.quantity * f,
+          price: f === 1 ? row.price : row.price / f,
+          amount: row.amount,          // cash paid doesn't change
+          description: row.description,
+          isBuy: row.is_buy === 1,
+          isOption: row.is_option === 1,
+          contracts: row.contracts || 1,
+          broker: row.broker || 'robinhood',
+          splitAdjusted: f !== 1 ? f : undefined,
+        }
+      })
     } catch (error) {
       console.error('Error getting all trades:', error)
       return []
@@ -2062,23 +2091,38 @@ export class DatabaseService {
           symbol,
           SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE -COALESCE(quantity,0) END) AS position,
           SUM(CASE WHEN is_buy = 1 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_cost,
-          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought
+          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought,
+          trans_date
         FROM trades
         WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
           ${asOf ? 'AND trans_date <= ?' : ''}
           ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
-        GROUP BY symbol
-        HAVING position > 0
+        GROUP BY symbol, trans_date
       `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
-      console.log(`getStockPositionsWithCost: ${rows.length} stock positions for user ${userId}`)
-      if (rows.length > 0) console.log('  sample:', JSON.stringify(rows.slice(0,3)))
-      const result = {}
+
+      // Split adjustment has to happen per trade date, so this groups by
+      // (symbol, date) and aggregates here rather than in SQL. A pre-split buy
+      // is recorded in pre-split terms: 1 NFLX share at $1,200 became 10 at
+      // $120 after the 10:1. Share counts scale; the dollar amount does not.
+      const splits = this.getSplits([...new Set(rows.map(r => r.symbol))])
+      const acc = {}
       rows.forEach(r => {
-        result[r.symbol] = {
-          position: r.position,
-          avgCost: r.total_bought > 0 ? Math.round(r.total_cost / r.total_bought * 100) / 100 : 0
+        const f = this.splitFactor(splits[r.symbol], r.trans_date)
+        const a = acc[r.symbol] || (acc[r.symbol] = { position: 0, total_cost: 0, total_bought: 0 })
+        a.position += (r.position || 0) * f
+        a.total_bought += (r.total_bought || 0) * f
+        a.total_cost += (r.total_cost || 0)      // cash paid is unchanged by a split
+      })
+
+      const result = {}
+      Object.entries(acc).forEach(([symbol, a]) => {
+        if (!(a.position > 0)) return
+        result[symbol] = {
+          position: Math.round(a.position * 1e6) / 1e6,
+          avgCost: a.total_bought > 0 ? Math.round(a.total_cost / a.total_bought * 100) / 100 : 0
         }
       })
+      console.log(`getStockPositionsWithCost: ${Object.keys(result).length} stock positions for user ${userId}`)
       return result
     } catch (e) {
       console.error('Error getting stock positions with cost:', e)
@@ -2456,6 +2500,48 @@ export class DatabaseService {
   // Returns list of dates (desc) that have daily price snapshots for a given user
   getDailySnapshotDates(userId, limit = 30) {
     return db.prepare(`SELECT DISTINCT price_date FROM daily_price_snapshots WHERE user_id = ? ORDER BY price_date DESC LIMIT ?`).all(userId, limit).map(r => r.price_date)
+  }
+
+  // ── Stock splits ────────────────────────────────────────────────────────
+  getSplits(symbols = null) {
+    try {
+      const rows = symbols?.length
+        ? db.prepare(`SELECT symbol, split_date, ratio FROM stock_splits WHERE symbol IN (${symbols.map(() => '?').join(',')})`).all(...symbols)
+        : db.prepare('SELECT symbol, split_date, ratio FROM stock_splits').all()
+      const bySymbol = {}
+      rows.forEach(r => {
+        if (!bySymbol[r.symbol]) bySymbol[r.symbol] = []
+        bySymbol[r.symbol].push({ date: r.split_date, ratio: r.ratio })
+      })
+      // Applied oldest-first so two splits compound correctly.
+      Object.values(bySymbol).forEach(list => list.sort((a, b) => a.date.localeCompare(b.date)))
+      return bySymbol
+    } catch (e) {
+      console.error('Error getting splits:', e)
+      return {}
+    }
+  }
+
+  saveSplit(symbol, splitDate, ratio, source = 'yahoo') {
+    try {
+      db.prepare(`
+        INSERT INTO stock_splits (symbol, split_date, ratio, source, updated_at)
+        VALUES (?, ?, ?, ?, strftime('%s','now'))
+        ON CONFLICT(symbol, split_date) DO UPDATE SET ratio = excluded.ratio, source = excluded.source, updated_at = excluded.updated_at
+      `).run(String(symbol).toUpperCase(), splitDate, ratio, source)
+    } catch (e) {
+      console.error('Error saving split:', e)
+    }
+  }
+
+  /**
+   * Cumulative factor for a trade dated `transDate`: the product of every split
+   * that happened AFTER it. A pre-split share count is multiplied by this and a
+   * pre-split per-share price divided by it.
+   */
+  splitFactor(splitsForSymbol, transDate) {
+    if (!splitsForSymbol?.length || !transDate) return 1
+    return splitsForSymbol.reduce((f, s) => (transDate < s.date ? f * s.ratio : f), 1)
   }
 
   // ── Closing implied vol per contract (for extended-hours repricing) ──
