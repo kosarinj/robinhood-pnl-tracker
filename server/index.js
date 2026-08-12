@@ -2565,6 +2565,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       }
     })
     const allTickers = [...new Set([...Object.keys(byUnderlying), ...Object.keys(stockPositions)])]
+    // Price at the START of the window. stockUnrealizedPnL is gain since
+    // PURCHASE, which ignores the selected period entirely — a name bought
+    // years ago shows its whole lifetime move no matter what period is chosen.
+    // This gives callers a genuinely period-scoped figure instead.
+    const periodStartPrices = {}
+    if (!asOf && allTickers.length > 0 && req.query.startDate) {
+      await Promise.all(allTickers.map(async t => {
+        try {
+          const p = await priceService.getPriceForDate(t, globalStart)
+          if (p > 0) periodStartPrices[t] = p
+        } catch { /* no historical price — caller falls back */ }
+      }))
+    }
+
     const stockPrices = {}
     if (allTickers.length > 0 && asOf) {
       // Historical close on the as-of date.
@@ -2643,6 +2657,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
           stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null,
+          // Movement over the selected period on the shares currently held —
+          // shares x (price now - price at period start). Null when there's no
+          // historical price, so callers can tell "no data" from "no move".
+          stockPeriodPnl: (sp && cp && periodStartPrices[e.ticker] > 0)
+            ? r2(sp.position * (cp - periodStartPrices[e.ticker]))
+            : null,
+          periodStartPrice: periodStartPrices[e.ticker] ?? null,
           stockRealizedPnL: (!isOpen && stockRealized[e.ticker] != null) ? r2(stockRealized[e.ticker]) : null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null,

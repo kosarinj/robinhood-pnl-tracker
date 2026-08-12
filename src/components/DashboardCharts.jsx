@@ -99,8 +99,15 @@ export default function DashboardCharts({ broker = 'all' }) {
     // open positions is the filter that matters; size isn't.
     const mapped = open.map(r => {
       const options = Number(r.totalRealized) || 0
-      const stock = (Number(r.stockUnrealizedPnL) || 0) + (Number(r.stockRealizedPnL) || 0)
+      // Movement over the chosen period, not gain since purchase. Falls back to
+      // since-purchase only when no historical price exists — flagged so the
+      // row can say which it is rather than quietly mixing the two.
+      const scoped = r.stockPeriodPnl != null
+      const stock = scoped
+        ? Number(r.stockPeriodPnl) || 0
+        : (Number(r.stockUnrealizedPnL) || 0) + (Number(r.stockRealizedPnL) || 0)
       return {
+        scoped,
         ticker: r.ticker,
         stock: Math.round(stock * 100) / 100,
         options: Math.round(options * 100) / 100,
@@ -164,7 +171,7 @@ export default function DashboardCharts({ broker = 'all' }) {
         </div>
         <div style={{ ...sub, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span>
-            Open positions
+            Move over period · stock + options
             {closedCount > 0 && ` · ${closedCount} closed hidden`}
           </span>
           <span style={{ display: 'inline-flex', gap: 2, marginLeft: 'auto' }}>
@@ -196,7 +203,7 @@ export default function DashboardCharts({ broker = 'all' }) {
             <Tooltip contentStyle={tip} cursor={{ fill: tokens.surfaceHover }}
                      labelStyle={{ color: 'var(--textSecondary)', fontSize: 11 }}
                      formatter={(v, _n, p) => [
-                       `${moneySigned(v)}  (stock ${moneySigned(p?.payload?.stock)}, options ${moneySigned(p?.payload?.options)})`,
+                       `${moneySigned(v)}  (stock ${moneySigned(p?.payload?.stock)}${p?.payload?.scoped ? '' : ' since purchase'}, options ${moneySigned(p?.payload?.options)})`,
                        'Net',
                      ]} />
             <Bar dataKey="net" radius={[0, 4, 4, 0]} barSize={14} isAnimationActive={false}
