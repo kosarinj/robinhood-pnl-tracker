@@ -29,6 +29,7 @@ const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
 // Cost overrides are cached per broker — one shared key was how the Robinhood
 // cost ended up showing on Webull rows.
 const costKey = (broker) => `ytdPanel_costOverrides_${broker || 'all'}`
+const colKey = (broker) => `ytdPanel_columnOrder_${broker || 'all'}`
 
 const fmt = (n) => {
   if (n == null || isNaN(n)) return '—'
@@ -79,6 +80,17 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [search, setSearch] = useState('')
   const [hiddenTickers, setHiddenTickers] = useState(() => loadHidden(broker))
   const [showHiddenList, setShowHiddenList] = useState(false)
+  // Column order, per broker tab — the columns worth seeing differ between a
+  // stocks-only account and one full of covered calls.
+  const [columnOrder, setColumnOrder] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(colKey(broker)) || '[]') } catch { return [] }
+  })
+  const saveColumnOrder = (next) => {
+    setColumnOrder(next)
+    localStorage.setItem(colKey(broker), JSON.stringify(next))
+  }
+  const [dragKey, setDragKey] = useState(null)
+  const [dragOverKey, setDragOverKey] = useState(null)
 
   const [lastUpdated, setLastUpdated] = useState(null)
   // Ordinary tax rate reused from the Tax Center's saved plan (options + short-term
@@ -120,6 +132,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     fetchCostOverrides()
     // Hidden tickers are per broker, so swap in this tab's list.
     setHiddenTickers(loadHidden(broker))
+    try { setColumnOrder(JSON.parse(localStorage.getItem(colKey(broker)) || '[]')) } catch { setColumnOrder([]) }
     setShowHiddenList(false)
   }, [broker])
 
@@ -373,6 +386,253 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     borderBottom: `2px solid ${border}`
   })
 
+
+  // ── Column model ────────────────────────────────────────────────────────
+  // Header, body and footer all map over ONE array, so their cell counts can't
+  // drift apart — they were three hand-maintained lists of 21, 23 and 19 cells,
+  // which is how a new column could silently misalign the whole table.
+  //
+  // Ticker is pinned: its sticky-left positioning depends on being first, and
+  // that frozen column is what makes 20-odd columns of sideways scroll usable.
+
+  // Everything a row's cells need, computed once per row instead of per cell.
+  const rowCtx = (row, i) => {
+    const sh = asOf ? null : stockHoldings[row.ticker]
+    const fb = asOf ? null : pnlLookup[row.ticker]
+    const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
+    const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
+    const hasManualCost = !!costOverrides[row.ticker]
+    const avgCost = costOverrides[row.ticker] || computedCost
+    const effectiveCost = (pos > 0 && avgCost > 0)
+      ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
+      : null
+    const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (!asOf && livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
+    const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0) ? Math.round(pos * (price - avgCost) * 100) / 100 : 0
+    const stockRealized = row.stockRealizedPnL || 0
+    const hasStock = (pos > 0 && avgCost > 0 && price > 0) || row.stockRealizedPnL != null
+    const stockPnl = hasStock ? Math.round((stockUnrealized + stockRealized) * 100) / 100 : null
+    const net = Math.round(((row.totalRealized || 0) + (stockPnl || 0)) * 100) / 100
+    const netPlusOpen = Math.round((net + (row.openUnrealizedPnL || 0)) * 100) / 100
+    const costBasis = (pos > 0 && avgCost > 0) ? pos * avgCost : null
+    const returnPct = (costBasis && costBasis > 0) ? Math.round((netPlusOpen / costBasis) * 1000) / 10 : null
+    const vsStockPct = (stockPnl != null && stockPnl !== 0) ? Math.round(((netPlusOpen - stockPnl) / Math.abs(stockPnl)) * 1000) / 10 : null
+    const taxableRealized = (row.totalRealized || 0) + (row.stockRealizedPnL || 0)
+    return {
+      i, pos, hasManualCost, avgCost, effectiveCost, price,
+      stockUnrealized, stockRealized, stockPnl, net, netPlusOpen, costBasis,
+      returnPct, vsStockPct, optionsHelped: stockPnl != null && netPlusOpen >= stockPnl,
+      estTax: Math.round(taxableRealized * taxRate) / 100,
+      isCostEditing: editingCost === row.ticker,
+      isEditing: editingSymbol === row.ticker,
+      effectiveDate: symbolDates[row.ticker] || globalStart,
+      hasOverride: !!symbolDates[row.ticker],
+      tickerBg: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff'),
+      proj: row.openProjected?.[projectMonths],
+    }
+  }
+
+  const ALL_COLUMNS = [
+    { key: 'ticker', label: 'Ticker', pinned: true, sort: 'ticker', align: 'left' },
+
+    { key: 'realizedShortCalls', label: 'Short Calls', sort: 'realizedShortCalls', title: 'Realized P&L from short calls (covered calls sold)',
+      cell: (r) => <span style={{ color: pnlColor(r.realizedShortCalls, isDark), fontWeight: 600 }}>{fmt(r.realizedShortCalls)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.realizedShortCalls, isDark), fontWeight: 700 }}>{fmt(t.realizedShortCalls)}</span> },
+
+    { key: 'realizedLongCalls', label: 'Long Calls', sort: 'realizedLongCalls', title: 'Realized P&L from long calls (calls bought)',
+      cell: (r) => <span style={{ color: pnlColor(r.realizedLongCalls, isDark), fontWeight: 600 }}>{fmt(r.realizedLongCalls)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.realizedLongCalls, isDark), fontWeight: 700 }}>{fmt(t.realizedLongCalls)}</span> },
+
+    { key: 'realizedShortPuts', label: 'Short Puts', sort: 'realizedShortPuts', title: 'Realized P&L from short puts (cash-secured puts)',
+      cell: (r) => <span style={{ color: pnlColor(r.realizedShortPuts, isDark), fontWeight: 600 }}>{fmt(r.realizedShortPuts)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.realizedShortPuts, isDark), fontWeight: 700 }}>{fmt(t.realizedShortPuts)}</span> },
+
+    { key: 'realizedLongPuts', label: 'Long Puts', sort: 'realizedLongPuts', title: 'Realized P&L from long puts (protective puts bought)',
+      cell: (r) => <span style={{ color: pnlColor(r.realizedLongPuts, isDark), fontWeight: 600 }}>{fmt(r.realizedLongPuts)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.realizedLongPuts, isDark), fontWeight: 700 }}>{fmt(t.realizedLongPuts)}</span> },
+
+    { key: 'totalRealized', label: 'Options Total', sort: 'totalRealized',
+      cell: (r) => <span style={{ color: pnlColor(r.totalRealized, isDark), fontWeight: 700, fontSize: 14 }}>{fmt(r.totalRealized)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.totalRealized, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.totalRealized)}</span> },
+
+    { key: 'estTax', label: 'Est. Tax',
+      title: 'Estimated tax on this year’s REALIZED gains (options + stock sold) at your ordinary rate from the Tax tab. Unrealized gains aren’t taxed until sold; losses show as a negative (tax benefit).',
+      cell: (r, c) => <span title={`(${fmt(r.totalRealized)} options + ${fmt(r.stockRealizedPnL || 0)} stock realized) × ${taxRate}% = ${fmt(c.estTax)}`}
+        style={{ fontWeight: 600, color: c.estTax > 0 ? '#ef4444' : c.estTax < 0 ? '#22c55e' : textMid }}>{fmt(c.estTax)}</span>,
+      foot: (t) => {
+        const ft = Math.round(t.taxableRealized * taxRate) / 100
+        return <span title={`Estimated tax on all realized gains this year at ${taxRate}%`}
+          style={{ fontWeight: 700, fontSize: 15, color: ft > 0 ? '#ef4444' : ft < 0 ? '#22c55e' : textMid }}>{fmt(ft)}</span>
+      } },
+
+    { key: 'openPremium', label: 'Open Premium', sort: 'openPremium',
+      title: 'Credit collected on currently-open SHORT options (covered calls / cash-secured puts). Long options are not netted in.',
+      cell: (r) => <span style={{ color: pnlColor(r.openPremium, isDark), fontWeight: 500 }}>{fmt(r.openPremium)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.openPremium, isDark), fontWeight: 700 }}>{fmt(t.openPremium)}</span> },
+
+    { key: 'openUnrealizedPnL', label: 'Open P&L', sort: 'openUnrealizedPnL',
+      title: 'Unrealized P&L on open short options: premium collected minus current cost to buy them back',
+      cell: (r) => <span title={r.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available'}
+        style={{ fontWeight: 700, color: pnlColor(r.openUnrealizedPnL, isDark) }}>
+        {r.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(r.openUnrealizedPnL)}` : '—'}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.openUnrealizedPnL, isDark), fontWeight: 700 }}>{fmt(t.openUnrealizedPnL)}</span> },
+
+    { key: 'theta', label: 'Theta',
+      title: 'Estimated Open P&L if the stock doesn’t move — decay only. Volatility is held constant and backed out of today’s mark. Contracts expiring before then settle at intrinsic.',
+      header: () => (<>
+        <div>Theta {projectMonths}M</div>
+        <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', marginTop: 3 }}>
+          {[1, 2, 3].map(m => (
+            <span key={m} onClick={e => { e.stopPropagation(); setProjectMonths(m) }}
+              style={{ cursor: 'pointer', fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 3, lineHeight: 1.4,
+                background: projectMonths === m ? 'var(--accent)' : 'transparent',
+                color: projectMonths === m ? 'var(--accentText)' : textMid,
+                border: `1px solid ${projectMonths === m ? 'var(--accent)' : 'transparent'}` }}>{m}M</span>
+          ))}
+        </div>
+      </>),
+      cell: (r, c) => {
+        if (!c.proj) return <span style={{ color: isDark ? '#475569' : '#cbd5e1' }}>{'—'}</span>
+        const gain = c.proj.pnl - (r.openUnrealizedPnL || 0)
+        const allExpired = c.proj.totalLegs > 0 && c.proj.expiredLegs === c.proj.totalLegs
+        return (
+          <span title={`In ${projectMonths} month(s) with ${r.ticker} unchanged: ${fmt(c.proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).`}
+            style={{ fontWeight: 700, color: pnlColor(c.proj.pnl, isDark) }}>
+            {fmt(c.proj.pnl)}
+            <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
+              {gain >= 0 ? '+' : ''}{fmt(gain)}
+              {c.proj.expiredLegs > 0 && <span title={allExpired ? 'All contracts expired by then' : 'Some expired by then'}>{' '}{allExpired ? '✓' : `✓${c.proj.expiredLegs}`}</span>}
+            </div>
+          </span>
+        )
+      },
+      foot: (t) => (
+        <span title="Total Open P&L at the selected horizon with every stock unchanged."
+          style={{ color: pnlColor(t.openProjectedPnL, isDark), fontWeight: 700 }}>
+          {fmt(t.openProjectedPnL)}
+          <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
+            {t.openProjectedPnL - t.openUnrealizedPnL >= 0 ? '+' : ''}{fmt(t.openProjectedPnL - t.openUnrealizedPnL)}
+          </div>
+        </span>) },
+
+    { key: 'shares', label: 'Shares', title: 'Shares held', borderLeft: '1px',
+      cell: (r, c) => <span style={{ color: textMid }}>{c.pos != null && c.pos > 0 ? c.pos.toLocaleString() : '—'}</span> },
+
+    { key: 'avgCost', label: 'Avg Cost', title: 'Average cost per share',
+      cell: (r, c) => c.isCostEditing ? (
+        <span style={{ display: 'flex', gap: 3, justifyContent: 'flex-end', alignItems: 'center' }}>
+          <input type="number" step="0.01" value={costDraft} onChange={e => setCostDraft(e.target.value)} autoFocus
+            onKeyDown={e => { if (e.key === 'Enter') saveCostOverride(r.ticker, costDraft); if (e.key === 'Escape') setEditingCost(null) }}
+            style={{ width: 72, padding: '2px 5px', borderRadius: 4, border: `1px solid ${border}`, background: surface, color: text, fontSize: 12, textAlign: 'right' }} />
+          <button onClick={() => saveCostOverride(r.ticker, costDraft)} style={{ padding: '2px 6px', borderRadius: 4, border: 'none', background: '#22c55e', color: '#fff', fontSize: 11, cursor: 'pointer' }}>{'✓'}</button>
+          <button onClick={() => setEditingCost(null)} style={{ padding: '2px 6px', borderRadius: 4, border: 'none', background: '#94a3b8', color: '#fff', fontSize: 11, cursor: 'pointer' }}>{'✗'}</button>
+          {c.hasManualCost && <button onClick={() => clearCostOverride(r.ticker)} style={{ padding: '2px 6px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', fontSize: 11, cursor: 'pointer' }}>Reset</button>}
+        </span>
+      ) : (
+        <button onClick={() => { setEditingCost(r.ticker); setCostDraft(c.avgCost?.toFixed(2) || '') }}
+          title={c.hasManualCost ? `Manual override: ${fmt(c.avgCost)} (click to edit)` : `Computed: ${c.avgCost ? fmt(c.avgCost) : '—'} (click to override)`}
+          style={{ background: 'transparent', border: `1px solid ${c.hasManualCost ? '#f59e0b' : 'transparent'}`, padding: '2px 6px', borderRadius: 4,
+            cursor: 'pointer', color: c.hasManualCost ? '#f59e0b' : textMid, fontSize: 12, fontWeight: c.hasManualCost ? 600 : 400 }}>
+          {c.avgCost ? fmt(c.avgCost) : '—'}{c.hasManualCost ? ' ✎' : ''}
+        </button>) },
+
+    { key: 'effCost', label: 'Eff. Cost',
+      title: 'Effective cost per share after options income = Avg Cost − (realized Options Total ÷ shares). Uses booked option P&L only.',
+      cell: (r, c) => <span title={c.effectiveCost != null ? `Avg cost ${fmt(c.avgCost)} − realized options ${fmt(r.totalRealized)} ÷ ${c.pos?.toLocaleString()} sh` : 'Needs shares held + an avg cost'}
+        style={{ fontWeight: 600, color: c.effectiveCost == null ? textMid : c.effectiveCost < c.avgCost ? '#22c55e' : c.effectiveCost > c.avgCost ? '#ef4444' : text }}>
+        {c.effectiveCost != null ? fmt(c.effectiveCost) : '—'}</span> },
+
+    { key: 'stockPrice', label: 'Stock Price', title: 'Current stock price',
+      cell: (r, c) => <span style={{ color: text }}>{c.price ? fmt(c.price) : '—'}</span> },
+
+    { key: 'stockPnL', label: 'Stock P&L', sort: 'stockPnL', title: 'Stock P&L = realized (buy/sell gains) + unrealized (open shares)',
+      cell: (r, c) => <span title={`Realized: ${fmt(c.stockRealized)} · Unrealized: ${fmt(c.stockUnrealized)}`}
+        style={{ fontWeight: 700, color: pnlColor(c.stockPnl, isDark) }}>{c.stockPnl != null ? fmt(c.stockPnl) : '—'}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.stockUnrealizedPnL, isDark), fontWeight: 700 }}>{fmt(t.stockUnrealizedPnL)}</span> },
+
+    { key: 'net', label: 'Net', sort: 'net', borderLeft: '2px', title: 'Options Total (realized) + Stock P&L.',
+      cell: (r, c) => <span style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.net, isDark) }}>{fmt(c.net)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.net, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net)}</span> },
+
+    { key: 'netPlusOpen', label: 'Net + Open P&L', borderLeft: '1px', title: 'Net + Open P&L — marks open short options to market on top of Net.',
+      cell: (r, c) => <span title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`}
+        style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.netPlusOpen, isDark) }}>{fmt(c.netPlusOpen)}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.net + t.openUnrealizedPnL, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net + t.openUnrealizedPnL)}</span> },
+
+    { key: 'returnPct', label: 'Return %', borderLeft: '1px',
+      title: 'Total return = (Net + Open P&L) ÷ cost basis of the shares.',
+      cell: (r, c) => <span title={c.returnPct == null ? 'No open shares to compute a return on' : `On the ${fmt(c.costBasis)} cost basis`}
+        style={{ fontWeight: 700, color: c.returnPct == null ? textMid : pnlColor(c.returnPct, isDark) }}>
+        {c.returnPct != null ? `${c.returnPct >= 0 ? '+' : ''}${c.returnPct.toFixed(1)}%` : '—'}</span>,
+      foot: (t) => {
+        const npo = t.net + t.openUnrealizedPnL
+        const ret = t.costBasis > 0 ? Math.round((npo / t.costBasis) * 1000) / 10 : null
+        return <span style={{ fontWeight: 700, fontSize: 15, color: ret == null ? textMid : pnlColor(ret, isDark) }}>
+          {ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(1)}%` : '—'}</span>
+      } },
+
+    { key: 'dayPnl', label: 'Day P&L', sort: 'dayPnl', borderLeft: '1px',
+      title: 'Today’s mark-to-market move: shares × stock move since yesterday’s close, plus open options.',
+      cell: (r) => <span title={r.dayPnl != null ? `Stock ${r.dayStockPnl != null ? fmt(r.dayStockPnl) : '—'} + options ${r.dayOptionPnl != null ? fmt(r.dayOptionPnl) : '—'}` : 'No prior-day close available yet'}
+        style={{ fontWeight: 700, color: pnlColor(r.dayPnl, isDark) }}>
+        {r.dayPnl != null ? `${r.dayPnl >= 0 ? '+' : ''}${fmt(r.dayPnl)}` : '—'}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.dayPnl, isDark), fontWeight: 700, fontSize: 15 }}>{t.dayPnl != null ? `${t.dayPnl >= 0 ? '+' : ''}${fmt(t.dayPnl)}` : '—'}</span> },
+
+    { key: 'vsStockPct', label: 'vs Stock %', borderLeft: '1px',
+      title: 'How much better (or worse) options+stock did than just holding the shares, as a % of the stock result.',
+      cell: (r, c) => <span title={c.vsStockPct == null ? 'No stock P&L to compare against' : `Net+Open ${fmt(c.netPlusOpen)} vs Stock ${fmt(c.stockPnl)}`}
+        style={{ fontWeight: 700, color: c.vsStockPct == null ? textMid : pnlColor(c.optionsHelped ? 1 : -1, isDark) }}>
+        {c.vsStockPct != null ? `${c.vsStockPct >= 0 ? '+' : ''}${c.vsStockPct.toFixed(1)}%` : '—'}</span>,
+      foot: (t) => {
+        const npo = t.net + t.openUnrealizedPnL
+        const sp = t.stockUnrealizedPnL
+        const pct = sp !== 0 ? Math.round(((npo - sp) / Math.abs(sp)) * 1000) / 10 : null
+        return <span style={{ fontWeight: 700, color: pct == null ? textMid : pnlColor(npo >= sp ? 1 : -1, isDark) }}>
+          {pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : '—'}</span>
+      } },
+
+    { key: 'startDate', label: 'Start Date', borderLeft: '1px', align: 'center',
+      cell: (r, c) => c.isEditing ? (
+        <span style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+          <input type="date" value={editDraft} onChange={e => setEditDraft(e.target.value)} autoFocus
+            style={{ padding: '3px 6px', borderRadius: 4, border: `1px solid ${border}`, background: surface, color: text, fontSize: 12, width: 120 }} />
+          <button onClick={() => saveSymbolDate(r.ticker, editDraft)} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: '#22c55e', color: '#fff', fontSize: 11, cursor: 'pointer' }}>{'✓'}</button>
+          <button onClick={() => setEditingSymbol(null)} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: '#94a3b8', color: '#fff', fontSize: 11, cursor: 'pointer' }}>{'✗'}</button>
+          {c.hasOverride && <button onClick={() => { clearSymbolDate(r.ticker); setEditingSymbol(null) }} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', fontSize: 11, cursor: 'pointer' }}>Reset</button>}
+        </span>
+      ) : (
+        <button onClick={() => { setEditingSymbol(r.ticker); setEditDraft(c.effectiveDate) }}
+          title={c.hasOverride ? `Custom: ${c.effectiveDate}` : `Using global: ${c.effectiveDate}`}
+          style={{ padding: '3px 10px', borderRadius: 4, border: `1px solid ${c.hasOverride ? '#3b82f6' : border}`,
+            background: c.hasOverride ? (isDark ? '#1e3a5f' : '#eff6ff') : 'transparent',
+            color: c.hasOverride ? '#3b82f6' : textMid, fontSize: 12, cursor: 'pointer', fontWeight: c.hasOverride ? 600 : 400 }}>
+          {fmtDate(c.effectiveDate)}{c.hasOverride ? ' ✎' : ''}
+        </button>) },
+
+    { key: 'weeklyChangePct', label: 'Wk %', sort: 'weeklyChangePct', borderLeft: '1px',
+      title: 'Stock price change over the past ~week (5 trading days)',
+      cell: (r) => <span title={r.weeklyChange != null ? `${r.weeklyChange >= 0 ? '+' : ''}${fmt(r.weeklyChange)} over ~1 week` : ''}
+        style={{ fontWeight: 700, color: pnlColor(r.weeklyChangePct, isDark) }}>
+        {r.weeklyChangePct != null ? `${r.weeklyChangePct >= 0 ? '+' : ''}${r.weeklyChangePct.toFixed(2)}%` : '—'}</span> },
+  ]
+
+  const MOVABLE_KEYS = ALL_COLUMNS.filter(c => !c.pinned).map(c => c.key)
+  // Saved order first, then any column added since — new columns append rather
+  // than disappearing because they weren't in the stored list.
+  const orderedKeys = (() => {
+    const saved = (columnOrder || []).filter(k => MOVABLE_KEYS.includes(k))
+    return [...saved, ...MOVABLE_KEYS.filter(k => !saved.includes(k))]
+  })()
+  const orderedColumns = [ALL_COLUMNS[0], ...orderedKeys.map(k => ALL_COLUMNS.find(c => c.key === k)).filter(Boolean)]
+
+  const moveColumn = (fromKey, toKey) => {
+    if (!fromKey || !toKey || fromKey === toKey) return
+    const next = orderedKeys.filter(k => k !== fromKey)
+    next.splice(next.indexOf(toKey), 0, fromKey)
+    saveColumnOrder(next)
+  }
+
+  const cellBorder = (c) => c.borderLeft ? { borderLeft: `${c.borderLeft} solid ${border}` } : {}
+
   return (
     <div style={{ marginBottom: '24px' }}>
       {/* Header controls */}
@@ -454,6 +714,17 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             </button>
           ))}
         </div>
+        {columnOrder.length > 0 && (
+          <button
+            onClick={() => saveColumnOrder([])}
+            title="Put the columns back in their original order for this broker tab"
+            style={{
+              padding: '5px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              borderRadius: 6, fontFamily: 'inherit',
+              border: `1px solid ${border}`, background: 'transparent', color: textMid,
+            }}
+          >Reset columns</button>
+        )}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <input
             type="text"
@@ -501,7 +772,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           </div>
         )}
         <span style={{ fontSize: '12px', color: textMid }}>
-          Click a date cell to set a per-symbol start date · hover a row to hide it (per broker)
+          Click a date cell to set a per-symbol start date · hover a row to hide it · drag a column header to reorder (both saved per broker)
         </span>
         {stockDebug && (
           <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px',
@@ -543,373 +814,104 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               <col style={{ width: '44px' }} />
             </colgroup>
             <thead>
-              <tr>
-                <th style={{ ...thStyle('ticker'), textAlign: 'left', padding: '10px 4px', position: 'sticky', left: 0, zIndex: 2, background: sortField === 'ticker' ? (isDark ? '#1a2035' : '#f0f4ff') : (isDark ? '#151929' : '#f8fafc'), boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }} onClick={() => toggleSort('ticker')}>Ticker<SortIcon field="ticker" /></th>
-                <th style={thStyle('realizedShortCalls')} onClick={() => toggleSort('realizedShortCalls')} title="Realized P&L from short calls (covered calls sold)">
-                  Short Calls<SortIcon field="realizedShortCalls" />
-                </th>
-                <th style={thStyle('realizedLongCalls')} onClick={() => toggleSort('realizedLongCalls')} title="Realized P&L from long calls (calls bought)">
-                  Long Calls<SortIcon field="realizedLongCalls" />
-                </th>
-                <th style={thStyle('realizedShortPuts')} onClick={() => toggleSort('realizedShortPuts')} title="Realized P&L from short puts (cash-secured puts)">
-                  Short Puts<SortIcon field="realizedShortPuts" />
-                </th>
-                <th style={thStyle('realizedLongPuts')} onClick={() => toggleSort('realizedLongPuts')} title="Realized P&L from long puts (protective puts bought)">
-                  Long Puts<SortIcon field="realizedLongPuts" />
-                </th>
-                <th style={thStyle('totalRealized')} onClick={() => toggleSort('totalRealized')}>
-                  Options Total<SortIcon field="totalRealized" />
-                </th>
-                <th style={{ ...thStyle(null), cursor: 'default' }}
-                    title={`Estimated tax on this year's REALIZED gains (options + stock sold) at your ${taxRate}% ordinary rate from the Tax tab. Unrealized gains aren't taxed until sold; losses show as a negative (tax benefit). Simplified — see the Tax tab for the full calc.`}>
-                  Est. Tax
-                </th>
-                <th style={thStyle('openPremium')} onClick={() => toggleSort('openPremium')}
-                    title="Credit collected on currently-open SHORT options (covered calls / cash-secured puts). Long options are not netted in.">
-                  Open Premium<SortIcon field="openPremium" />
-                </th>
-                <th style={thStyle('openUnrealizedPnL')} onClick={() => toggleSort('openUnrealizedPnL')}
-                    title="Unrealized P&L on open short options: premium collected minus current cost to buy them back (live option prices)">
-                  Open P&L<SortIcon field="openUnrealizedPnL" />
-                </th>
-                <th style={{ ...thStyle(null), cursor: 'default' }}
-                    title={`Estimated Open P&L in ${projectMonths} month${projectMonths > 1 ? 's' : ''} if the stock doesn't move — decay only. Volatility is held constant and backed out of today's mark, so at zero months it equals Open P&L exactly. Contracts that expire before then settle at intrinsic (marked ✓). An estimate, not a forecast: it assumes the stock stands still, which it won't.`}>
-                  <div>Theta {projectMonths}M</div>
-                  <div style={{ display: 'flex', gap: '2px', justifyContent: 'flex-end', marginTop: '3px' }}>
-                    {[1, 2, 3].map(m => (
-                      <span key={m}
-                        onClick={e => { e.stopPropagation(); setProjectMonths(m) }}
-                        style={{
-                          cursor: 'pointer', fontSize: '9px', fontWeight: 700, padding: '1px 4px',
-                          borderRadius: '3px', lineHeight: 1.4,
-                          background: projectMonths === m ? '#667eea' : 'transparent',
-                          color: projectMonths === m ? '#fff' : (isDark ? '#64748b' : '#94a3b8'),
-                          border: `1px solid ${projectMonths === m ? '#667eea' : 'transparent'}`,
-                        }}>{m}M</span>
-                    ))}
-                  </div>
-                </th>
-                <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }} title="Shares held">Shares</th>
-                <th style={{ ...thStyle(null), cursor: 'default' }} title="Average cost per share">Avg Cost</th>
-                <th style={{ ...thStyle(null), cursor: 'default' }} title="Effective cost per share after options income = Avg Cost − (realized Options Total ÷ shares). Uses booked option P&L only (excludes unrealized open-option P&L) so it's a stable cost basis. Lower than avg cost when options have net paid you; higher when options net lost.">Eff. Cost</th>
-                <th style={{ ...thStyle(null), cursor: 'default' }} title="Current stock price">Stock Price</th>
-                <th style={{ ...thStyle('stockPnL') }} onClick={() => toggleSort('stockPnL')}
-                    title="Stock P&L = realized (buy/sell gains) + unrealized (open shares)">
-                  Stock P&L<SortIcon field="stockPnL" />
-                </th>
-                <th style={{ ...thStyle('net'), borderLeft: `2px solid ${border}` }} onClick={() => toggleSort('net')}
-                    title="Options Total (realized) + Stock P&L. Open Premium is excluded — it isn't marked to market.">
-                  Net<SortIcon field="net" />
-                </th>
-                <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }}
-                    title="Net + Open P&L — marks open short options to market on top of Net.">
-                  Net + Open P&L
-                </th>
-                <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }}
-                    title="Total return = (Net + Open P&L) ÷ cost basis of the shares (shares × avg cost). The combined options + stock return on the capital invested. '—' when there are no open shares to size against.">
-                  Return %
-                </th>
-                <th style={{ ...thStyle('dayPnl'), borderLeft: `1px solid ${border}` }} onClick={() => toggleSort('dayPnl')}
-                    title="Today's mark-to-market move: shares × stock's move since yesterday's close, plus open short options × 100 × their move since yesterday's close.">
-                  Day P&L<SortIcon field="dayPnl" />
-                </th>
-                <th style={{ ...thStyle(null), cursor: 'default', borderLeft: `1px solid ${border}` }}
-                    title="How much better (or worse) options+stock did than just holding the shares, as a % of the stock result's size: (Net+Open − Stock) ÷ |Stock|. Positive = options added value (bigger = more); negative = options detracted. Consistent across gains and losses.">
-                  vs Stock %
-                </th>
-                <th style={{ ...thStyle(null), textAlign: 'center', cursor: 'default', borderLeft: `1px solid ${border}` }}>Start Date</th>
-                <th style={{ ...thStyle('weeklyChangePct'), borderLeft: `1px solid ${border}` }} onClick={() => toggleSort('weeklyChangePct')}
-                    title="Stock price change over the past ~week (5 trading days)">
-                  Wk %<SortIcon field="weeklyChangePct" />
-                </th>
+              <tr style={{ background: headerBg, borderBottom: `2px solid ${border}` }}>
+                {orderedColumns.map(col => {
+                  const pinned = !!col.pinned
+                  const base = col.sort ? thStyle(col.sort) : { ...thStyle(null), cursor: 'default' }
+                  const isDragTarget = dragOverKey === col.key && dragKey && dragKey !== col.key
+                  return (
+                    <th
+                      key={col.key}
+                      draggable={!pinned}
+                      onDragStart={e => { if (pinned) return; setDragKey(col.key); e.dataTransfer.effectAllowed = 'move' }}
+                      onDragOver={e => { if (pinned || !dragKey) return; e.preventDefault(); if (dragOverKey !== col.key) setDragOverKey(col.key) }}
+                      onDrop={e => { if (pinned) return; e.preventDefault(); moveColumn(dragKey, col.key); setDragKey(null); setDragOverKey(null) }}
+                      onDragEnd={() => { setDragKey(null); setDragOverKey(null) }}
+                      onClick={col.sort ? () => toggleSort(col.sort) : undefined}
+                      title={col.title || (pinned ? undefined : 'Drag to reorder')}
+                      style={{
+                        ...base,
+                        ...(col.align === 'left' ? { textAlign: 'left', padding: '10px 4px' } : {}),
+                        ...(col.align === 'center' ? { textAlign: 'center' } : {}),
+                        ...cellBorder(col),
+                        ...(pinned
+                          ? {
+                              position: 'sticky', left: 0, zIndex: 2,
+                              background: sortField === 'ticker' ? (isDark ? '#1a2035' : '#f0f4ff') : (isDark ? '#151929' : '#f8fafc'),
+                              boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
+                            }
+                          : { cursor: dragKey ? 'grabbing' : 'grab' }),
+                        ...(isDragTarget ? { boxShadow: 'inset 3px 0 0 var(--accent)' } : {}),
+                        ...(dragKey === col.key ? { opacity: 0.4 } : {}),
+                      }}
+                    >
+                      {col.header ? col.header() : col.label}
+                      {col.sort && <SortIcon field={col.sort} />}
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             <tbody>
               {sorted.map((row, i) => {
-                const isEditing = editingSymbol === row.ticker
-                const effectiveDate = symbolDates[row.ticker] || globalStart
-                const hasOverride = !!symbolDates[row.ticker]
-                const tickerBg = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')
-                // Est. tax on realized gains only (options + stock sold); unrealized isn't taxed yet.
-                const taxableRealized = (row.totalRealized || 0) + (row.stockRealizedPnL || 0)
-                const estTax = Math.round(taxableRealized * taxRate) / 100
+                const c = rowCtx(row, i)
                 return (
                   <tr
                     key={row.ticker}
-                    style={{ borderBottom: `1px solid ${border}`, background: i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff') }}
-                    onMouseEnter={e => e.currentTarget.style.background = rowHover}
-                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? surface : (isDark ? '#1a2035' : '#fafbff')}
+                    style={{ borderBottom: `1px solid ${border}`, background: c.tickerBg }}
+                    onMouseEnter={e => { e.currentTarget.style.background = rowHover }}
+                    onMouseLeave={e => { e.currentTarget.style.background = c.tickerBg }}
                   >
-                    <td style={{ padding: '10px 4px', fontWeight: '700', color: text, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: tickerBg, boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}>
-                      {row.ticker}
-                      {!row.hasOptions && (
-                        <span
-                          title="Stock only — no option activity in this period. Option columns are blank by fact, not for want of data."
-                          style={{
-                            marginLeft: 5, fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
-                            padding: '1px 4px', borderRadius: 3, verticalAlign: 'middle',
-                            color: textMid, border: `1px solid ${border}`,
-                          }}
-                        >STK</span>
-                      )}
-                      <button
-                        className="ytd-hide"
-                        onClick={(e) => { e.stopPropagation(); hideTicker(row.ticker) }}
-                        title={`Hide ${row.ticker} from view`}
-                        style={{ position: 'absolute', top: '50%', right: '1px', transform: 'translateY(-50%)', width: '15px', height: '15px', padding: 0, lineHeight: '13px', textAlign: 'center', border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: '12px', fontWeight: 700, color: '#fff', background: '#ef4444' }}
-                      >×</button>
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortCalls, isDark), fontWeight: '600' }}>
-                      {fmt(row.realizedShortCalls)}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedLongCalls, isDark), fontWeight: '600' }}>
-                      {fmt(row.realizedLongCalls)}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedShortPuts, isDark), fontWeight: '600' }}>
-                      {fmt(row.realizedShortPuts)}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.realizedLongPuts, isDark), fontWeight: '600' }}>
-                      {fmt(row.realizedLongPuts)}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.totalRealized, isDark), fontWeight: '700', fontSize: '14px' }}>
-                      {fmt(row.totalRealized)}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '600', color: estTax > 0 ? '#ef4444' : estTax < 0 ? '#22c55e' : textMid }}
-                        title={`(${fmt(row.totalRealized)} options + ${fmt(row.stockRealizedPnL || 0)} stock realized) × ${taxRate}% = ${fmt(estTax)}${estTax < 0 ? ' (tax benefit from losses)' : ''}`}>
-                      {fmt(estTax)}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(row.openPremium, isDark), fontWeight: '500' }}>
-                      <span title="Net premium received from currently-open positions (all time)">{fmt(row.openPremium)}</span>
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.openUnrealizedPnL, isDark) }}
-                        title={row.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available'}>
-                      {row.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(row.openUnrealizedPnL)}` : '—'}
-                    </td>
-                    {/* Theta projection — Open P&L rolled forward with the stock held flat */}
-                    {(() => {
-                      const proj = row.openProjected?.[projectMonths]
-                      if (!proj) {
-                        return <td style={{ padding: '10px 12px', textAlign: 'right', color: isDark ? '#475569' : '#cbd5e1' }}>—</td>
-                      }
-                      const gain = proj.pnl - (row.openUnrealizedPnL || 0)
-                      const allExpired = proj.totalLegs > 0 && proj.expiredLegs === proj.totalLegs
-                      return (
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(proj.pnl, isDark) }}
-                            title={`In ${projectMonths} month${projectMonths > 1 ? 's' : ''} with ${row.ticker} unchanged: ${fmt(proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay from today).`
-                              + (proj.expiredLegs > 0
-                                ? ` ${proj.expiredLegs} of ${proj.totalLegs} contract${proj.totalLegs > 1 ? 's' : ''} expire${proj.expiredLegs === 1 ? 's' : ''} by then and settle at intrinsic.`
-                                : '')}>
-                          {fmt(proj.pnl)}
-                          <div style={{ fontSize: '10px', fontWeight: 500, color: isDark ? '#64748b' : '#94a3b8' }}>
-                            {gain >= 0 ? '+' : ''}{fmt(gain)}
-                            {proj.expiredLegs > 0 && (
-                              <span title={allExpired ? 'All contracts expired by then' : 'Some contracts expired by then'}>
-                                {' '}{allExpired ? '✓' : `✓${proj.expiredLegs}`}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      )
-                    })()}
-                    {/* Stock columns + Net */}
-                    {(() => {
-                      const sh = asOf ? null : stockHoldings[row.ticker]
-                      const fb = asOf ? null : pnlLookup[row.ticker]
-                      const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
-                      const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
-                      const hasManualCost = !!costOverrides[row.ticker]
-                      const avgCost = costOverrides[row.ticker] || computedCost
-                      // Effective cost per share after options income: avg cost reduced by
-                      // the REALIZED Options Total (booked premium) spread across the shares.
-                      // Deliberately excludes unrealized open-option P&L so the number is a
-                      // stable cost basis that doesn't jitter with option marks.
-                      const effectiveCost = (pos > 0 && avgCost > 0)
-                        ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
-                        : null
-                      const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (!asOf && livePrices[row.ticker] > 0 ? livePrices[row.ticker] : null) ?? (row.stockCurrentPrice > 0 ? row.stockCurrentPrice : null)
-                      const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
-                        ? Math.round(pos * (price - avgCost) * 100) / 100
-                        : 0
-                      const stockRealized = row.stockRealizedPnL || 0
-                      const hasStock = (pos > 0 && avgCost > 0 && price > 0) || row.stockRealizedPnL != null
-                      const stockPnl = hasStock ? Math.round((stockUnrealized + stockRealized) * 100) / 100 : null
-                      const net = Math.round(((row.totalRealized || 0) + (stockPnl || 0)) * 100) / 100
-                      const netPlusOpen = Math.round((net + (row.openUnrealizedPnL || 0)) * 100) / 100
-                      // Total return: combined options + stock result as a % of the capital
-                      // invested in the shares (cost basis = shares × avg cost).
-                      const costBasis = (pos > 0 && avgCost > 0) ? pos * avgCost : null
-                      const returnPct = (costBasis && costBasis > 0) ? Math.round((netPlusOpen / costBasis) * 1000) / 10 : null
-                      // Out-performance vs holding the shares: how much better/worse the
-                      // options+stock result is than stock-only, as a % of the stock result's size.
-                      // +% = options added value; −% = options detracted. Always intuitive across signs.
-                      const vsStockPct = (stockPnl != null && stockPnl !== 0) ? Math.round(((netPlusOpen - stockPnl) / Math.abs(stockPnl)) * 1000) / 10 : null
-                      const optionsHelped = stockPnl != null && netPlusOpen >= stockPnl
-                      const isCostEditing = editingCost === row.ticker
-                      return (<>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', color: textMid, borderLeft: `1px solid ${border}` }}>
-                          {pos != null && pos > 0 ? pos.toLocaleString() : '—'}
-                        </td>
-                        <td style={{ padding: '6px 8px', textAlign: 'right' }}>
-                          {isCostEditing ? (
-                            <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end', alignItems: 'center' }}>
-                              <input
-                                type="number" step="0.01" value={costDraft}
-                                onChange={e => setCostDraft(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') saveCostOverride(row.ticker, costDraft); if (e.key === 'Escape') setEditingCost(null) }}
-                                autoFocus
-                                style={{ width: '72px', padding: '2px 5px', borderRadius: '4px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '12px', textAlign: 'right' }}
-                              />
-                              <button onClick={() => saveCostOverride(row.ticker, costDraft)} style={{ padding: '2px 6px', borderRadius: '4px', border: 'none', background: '#22c55e', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✓</button>
-                              <button onClick={() => setEditingCost(null)} style={{ padding: '2px 6px', borderRadius: '4px', border: 'none', background: '#94a3b8', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✗</button>
-                              {hasManualCost && <button onClick={() => clearCostOverride(row.ticker)} style={{ padding: '2px 6px', borderRadius: '4px', border: 'none', background: '#ef4444', color: 'white', fontSize: '11px', cursor: 'pointer' }}>Reset</button>}
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => { setEditingCost(row.ticker); setCostDraft(avgCost?.toFixed(2) || '') }}
-                              style={{ background: 'transparent', border: `1px solid ${hasManualCost ? '#f59e0b' : 'transparent'}`,
-                                padding: '2px 6px', borderRadius: '4px', cursor: 'pointer',
-                                color: hasManualCost ? '#f59e0b' : textMid, fontSize: '12px', fontWeight: hasManualCost ? '600' : '400' }}
-                              title={hasManualCost ? `Manual override: $${avgCost} (click to edit, Reset to clear)` : `Computed: $${avgCost?.toFixed(2) || '—'} (click to override)`}
-                            >
-                              {avgCost ? fmt(avgCost) : '—'}{hasManualCost ? ' ✎' : ''}
-                            </button>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '600',
-                            color: effectiveCost == null ? textMid : effectiveCost < avgCost ? '#22c55e' : effectiveCost > avgCost ? '#ef4444' : text }}
-                            title={effectiveCost != null
-                              ? `Avg cost ${fmt(avgCost)} − realized options ${fmt(row.totalRealized)} ÷ ${pos?.toLocaleString()} sh (${fmt((row.totalRealized || 0) / pos)}/sh) = ${fmt(effectiveCost)}`
-                              : 'Needs shares held + an avg cost'}>
-                          {effectiveCost != null ? fmt(effectiveCost) : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', color: text }}>
-                          {price ? fmt(price) : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(stockPnl, isDark) }}
-                            title={`Realized (buy/sell): ${fmt(stockRealized)}  ·  Unrealized (open shares): ${fmt(stockUnrealized)}`}>
-                          {stockPnl != null ? fmt(stockPnl) : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(net, isDark), borderLeft: `2px solid ${border}` }}
-                            title="Options Total (realized) + Stock P&L">
-                          {fmt(net)}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '14px', color: pnlColor(netPlusOpen, isDark), borderLeft: `1px solid ${border}` }}
-                            title={`Net (${fmt(net)}) + Open P&L (${row.openUnrealizedPnL != null ? fmt(row.openUnrealizedPnL) : '—'})`}>
-                          {fmt(netPlusOpen)}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: returnPct == null ? textMid : pnlColor(returnPct, isDark), borderLeft: `1px solid ${border}` }}
-                            title={returnPct == null ? 'No open shares to compute a return on' : `Total return on the ${fmt(costBasis)} cost basis (${pos?.toLocaleString()} sh × ${fmt(avgCost)}): Net+Open ${fmt(netPlusOpen)}`}>
-                          {returnPct != null ? `${returnPct >= 0 ? '+' : ''}${returnPct.toFixed(1)}%` : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.dayPnl, isDark), borderLeft: `1px solid ${border}` }}
-                            title={row.dayPnl != null
-                              ? `Today's move (since yesterday's close): stock ${row.dayStockPnl != null ? fmt(row.dayStockPnl) : '—'}${row.dayStockChangePct != null ? ` (${row.dayStockChangePct >= 0 ? '+' : ''}${row.dayStockChangePct}%)` : ''} + options ${row.dayOptionPnl != null ? fmt(row.dayOptionPnl) : '—'}`
-                              : 'No prior-day close available yet'}>
-                          {row.dayPnl != null ? `${row.dayPnl >= 0 ? '+' : ''}${fmt(row.dayPnl)}` : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: vsStockPct == null ? textMid : pnlColor(optionsHelped ? 1 : -1, isDark), borderLeft: `1px solid ${border}` }}
-                            title={vsStockPct == null ? 'No stock P&L to compare against' : `Options+stock did ${vsStockPct >= 0 ? 'better' : 'worse'} than holding the shares by ${fmt(Math.round((netPlusOpen - stockPnl) * 100) / 100)} (${vsStockPct >= 0 ? '+' : ''}${vsStockPct.toFixed(1)}% of the $${Math.abs(Math.round(stockPnl))} stock move). Net+Open ${fmt(netPlusOpen)} vs Stock ${fmt(stockPnl)}.`}>
-                          {vsStockPct != null ? `${vsStockPct >= 0 ? '+' : ''}${vsStockPct.toFixed(1)}%` : '—'}
-                        </td>
-                      </>)
-                    })()}
-                    <td style={{ padding: '10px 12px', textAlign: 'center', borderLeft: `1px solid ${border}` }}>
-                      {isEditing ? (
-                        <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                          <input
-                            type="date"
-                            value={editDraft}
-                            onChange={e => setEditDraft(e.target.value)}
-                            autoFocus
-                            style={{ padding: '3px 6px', borderRadius: '4px', border: `1px solid ${border}`, background: surface, color: text, fontSize: '12px', width: '120px' }}
-                          />
-                          <button onClick={() => saveSymbolDate(row.ticker, editDraft)} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#22c55e', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✓</button>
-                          <button onClick={() => { setEditingSymbol(null) }} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#94a3b8', color: 'white', fontSize: '11px', cursor: 'pointer' }}>✗</button>
-                          {hasOverride && <button onClick={() => { clearSymbolDate(row.ticker); setEditingSymbol(null) }} style={{ padding: '3px 8px', borderRadius: '4px', border: 'none', background: '#ef4444', color: 'white', fontSize: '11px', cursor: 'pointer' }}>Reset</button>}
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => { setEditingSymbol(row.ticker); setEditDraft(effectiveDate) }}
-                          style={{
-                            padding: '3px 10px', borderRadius: '4px', border: `1px solid ${hasOverride ? '#3b82f6' : border}`,
-                            background: hasOverride ? (isDark ? '#1e3a5f' : '#eff6ff') : 'transparent',
-                            color: hasOverride ? '#3b82f6' : textMid, fontSize: '12px', cursor: 'pointer',
-                            fontWeight: hasOverride ? '600' : '400'
-                          }}
-                          title={hasOverride ? `Custom: ${effectiveDate} (click to change)` : `Using global: ${effectiveDate} (click to override)`}
-                        >
-                          {fmtDate(effectiveDate)}{hasOverride ? ' ✎' : ''}
-                        </button>
-                      )}
-                    </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pnlColor(row.weeklyChangePct, isDark), borderLeft: `1px solid ${border}` }}
-                        title={row.weeklyChange != null ? `${row.weeklyChange >= 0 ? '+' : ''}$${row.weeklyChange.toFixed(2)} over ~1 week` : ''}>
-                      {row.weeklyChangePct != null ? `${row.weeklyChangePct >= 0 ? '+' : ''}${row.weeklyChangePct.toFixed(2)}%` : '—'}
-                    </td>
+                    {orderedColumns.map(col => col.pinned ? (
+                      <td key={col.key} style={{
+                        padding: '10px 4px', fontWeight: 700, color: text, letterSpacing: '0.03em',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        position: 'sticky', left: 0, zIndex: 1, background: c.tickerBg,
+                        boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
+                      }}>
+                        {row.ticker}
+                        {!row.hasOptions && (
+                          <span title="Stock only — no option activity in this period."
+                            style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                              padding: '1px 4px', borderRadius: 3, verticalAlign: 'middle',
+                              color: textMid, border: `1px solid ${border}` }}>STK</span>
+                        )}
+                        <button className="ytd-hide" onClick={e => { e.stopPropagation(); hideTicker(row.ticker) }}
+                          title={`Hide ${row.ticker} from view`}
+                          style={{ position: 'absolute', top: '50%', right: 1, transform: 'translateY(-50%)',
+                            width: 15, height: 15, padding: 0, lineHeight: '13px', textAlign: 'center',
+                            border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 12,
+                            fontWeight: 700, color: '#fff', background: '#ef4444' }}>{'×'}</button>
+                      </td>
+                    ) : (
+                      <td key={col.key} style={{ padding: '10px 12px', textAlign: col.align || 'right', ...cellBorder(col) }}>
+                        {col.cell ? col.cell(row, c) : null}
+                      </td>
+                    ))}
                   </tr>
                 )
               })}
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${border}`, background: headerBg }}>
-                <td style={{ padding: '10px 4px', fontWeight: '700', color: text, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, background: isDark ? '#151929' : '#f8fafc', boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}
-                    title={`Total (${rows.length})`}>
-                  Σ {rows.length}
-                </td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortCalls)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongCalls, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongCalls)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedShortPuts, isDark), fontWeight: '700' }}>{fmt(totals.realizedShortPuts)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.realizedLongPuts, isDark), fontWeight: '700' }}>{fmt(totals.realizedLongPuts)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.totalRealized, isDark), fontWeight: '700', fontSize: '15px' }}>{fmt(totals.totalRealized)}</td>
-                {(() => {
-                  const footTax = Math.round(totals.taxableRealized * taxRate) / 100
-                  return (
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '15px', color: footTax > 0 ? '#ef4444' : footTax < 0 ? '#22c55e' : textMid }}
-                        title={`Estimated tax on all realized gains this year at ${taxRate}%`}>
-                      {fmt(footTax)}
-                    </td>
-                  )
-                })()}
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openPremium, isDark), fontWeight: '700' }}>{fmt(totals.openPremium)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.openUnrealizedPnL)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.openProjectedPnL, isDark), fontWeight: '700' }}
-                    title={`Total Open P&L in ${projectMonths} month${projectMonths > 1 ? 's' : ''} with every stock unchanged. Tickers with no projection available fall back to their current Open P&L.`}>
-                  {fmt(totals.openProjectedPnL)}
-                  <div style={{ fontSize: '10px', fontWeight: 500, color: isDark ? '#64748b' : '#94a3b8' }}>
-                    {totals.openProjectedPnL - totals.openUnrealizedPnL >= 0 ? '+' : ''}
-                    {fmt(totals.openProjectedPnL - totals.openUnrealizedPnL)}
-                  </div>
-                </td>
-                <td colSpan={4} style={{ padding: '10px 12px', borderLeft: `1px solid ${border}` }} />
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.stockUnrealizedPnL, isDark), fontWeight: '700' }}>{fmt(totals.stockUnrealizedPnL)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `2px solid ${border}` }}>{fmt(totals.net)}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.net + totals.openUnrealizedPnL, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{fmt(totals.net + totals.openUnrealizedPnL)}</td>
-                {(() => {
-                  const npo = totals.net + totals.openUnrealizedPnL
-                  const ret = totals.costBasis > 0 ? Math.round((npo / totals.costBasis) * 1000) / 10 : null
-                  return (
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', fontSize: '15px', color: ret == null ? textMid : pnlColor(ret, isDark), borderLeft: `1px solid ${border}` }}
-                        title={ret == null ? '' : `Total return: Net+Open ${fmt(npo)} ÷ ${fmt(totals.costBasis)} cost basis`}>
-                      {ret != null ? `${ret >= 0 ? '+' : ''}${ret.toFixed(1)}%` : '—'}
-                    </td>
-                  )
-                })()}
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: pnlColor(totals.dayPnl, isDark), fontWeight: '700', fontSize: '15px', borderLeft: `1px solid ${border}` }}>{totals.dayPnl != null ? `${totals.dayPnl >= 0 ? '+' : ''}${fmt(totals.dayPnl)}` : '—'}</td>
-                {(() => {
-                  const npo = totals.net + totals.openUnrealizedPnL
-                  const sp = totals.stockUnrealizedPnL
-                  const pct = (sp !== 0) ? Math.round(((npo - sp) / Math.abs(sp)) * 1000) / 10 : null
-                  return (
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '700', color: pct == null ? textMid : pnlColor(npo >= sp ? 1 : -1, isDark), borderLeft: `1px solid ${border}` }}
-                        title={pct == null ? '' : `Options contributed ${fmt(Math.round((npo - sp) * 100) / 100)} vs holding stock alone`}>
-                      {pct != null ? `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%` : '—'}
-                    </td>
-                  )
-                })()}
-                <td style={{ borderLeft: `1px solid ${border}` }} />
-                <td style={{ borderLeft: `1px solid ${border}` }} />
+                {orderedColumns.map(col => col.pinned ? (
+                  <td key={col.key} style={{
+                    padding: '10px 4px', fontWeight: 700, color: text, fontSize: 11,
+                    textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
+                    position: 'sticky', left: 0, zIndex: 1,
+                    background: isDark ? '#151929' : '#f8fafc',
+                    boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
+                  }}>
+                    Total ({sorted.length})
+                  </td>
+                ) : (
+                  <td key={col.key} style={{ padding: '10px 12px', textAlign: col.align || 'right', ...cellBorder(col) }}>
+                    {col.foot ? col.foot(totals) : null}
+                  </td>
+                ))}
               </tr>
             </tfoot>
+
           </table>
         </div>
       )}
