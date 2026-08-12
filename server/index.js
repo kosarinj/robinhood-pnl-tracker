@@ -2656,7 +2656,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockPosition: sp?.position ?? null,
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
-          stockUnrealizedPnL: sp && cp ? r2(sp.position * (cp - sp.avgCost)) : null,
+          // Manual avg-cost overrides are honoured here. They were applied only
+          // in the Positions panel's own render, so every other consumer — the
+          // charts especially — silently used the computed cost instead.
+          stockUnrealizedPnL: sp && cp
+            ? r2(sp.position * (cp - (stockCostOverrides[e.ticker] || sp.avgCost)))
+            : null,
+          stockCostUsed: sp ? (stockCostOverrides[e.ticker] || sp.avgCost) : null,
+          stockCostIsOverride: !!stockCostOverrides[e.ticker],
           // Movement over the selected period on the shares currently held —
           // shares x (price now - price at period start). Null when there's no
           // historical price, so callers can tell "no data" from "no move".
