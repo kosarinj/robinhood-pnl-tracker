@@ -57,8 +57,10 @@ export default function ExtendedHoursPanel({ broker = 'all' }) {
   }, [broker])
 
   const positions = data?.positions || []
+  // Sum the actual position P&L, not per-contract marks — a 5-contract short
+  // and a 1-contract long are not the same size.
   const totalChange = useMemo(
-    () => positions.reduce((s, p) => s + (p.changePerContract || 0), 0),
+    () => positions.reduce((s, p) => s + (p.positionPnl ?? p.changePerContract ?? 0), 0),
     [positions]
   )
 
@@ -147,7 +149,7 @@ export default function ExtendedHoursPanel({ broker = 'all' }) {
               <th style={th}>Move</th>
               <th style={th}>Close mark</th>
               <th style={th}>Est. mark</th>
-              <th style={th}>Est. change</th>
+              <th style={th}>Est. P&amp;L</th>
             </tr>
           </thead>
           <tbody>
@@ -156,6 +158,11 @@ export default function ExtendedHoursPanel({ broker = 'all' }) {
                 <td style={{ ...td, textAlign: 'left' }}>
                   <div style={{ fontWeight: 600 }}>{p.symbol}</div>
                   <div style={{ fontSize: '11px', color: textMid, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {p.isShort != null && (
+                      <span style={{ fontWeight: 700, color: p.isShort ? amber : textMid }}>
+                        {p.isShort ? 'SHORT' : 'LONG'}
+                      </span>
+                    )}
                     <span>IV {(p.sigma * 100).toFixed(1)}%</span>
                     {p.earningsTonight && <span style={{ color: red, fontWeight: 700 }}>earnings tonight</span>}
                     {p.staleIv && <span style={{ color: amber }}>IV from {p.ivDate}</span>}
@@ -172,10 +179,10 @@ export default function ExtendedHoursPanel({ broker = 'all' }) {
                 </td>
                 <td style={{ ...td, color: textMid }}>{fmt(p.closeMark)}</td>
                 <td style={{ ...td, fontWeight: 600 }}>{fmt(p.estMark)}</td>
-                <td style={{ ...td, fontWeight: 700, color: pnlColor(p.changePerContract) }}>
-                  {signed(p.changePerContract)}
+                <td style={{ ...td, fontWeight: 700, color: pnlColor(p.positionPnl ?? p.changePerContract) }}>
+                  {signed(p.positionPnl ?? p.changePerContract)}
                   <div style={{ fontSize: '11px', color: textMid, fontWeight: 400 }}>
-                    {signed(p.changePerShare)}/sh
+                    {p.contracts > 1 ? `${p.contracts} × ` : ''}{signed(p.changePerContract)}/contract
                   </div>
                 </td>
               </tr>
@@ -186,8 +193,9 @@ export default function ExtendedHoursPanel({ broker = 'all' }) {
 
       <div style={{ fontSize: '11px', color: textMid, marginTop: '12px', lineHeight: 1.5 }}>
         Black-Scholes repriced on the extended-hours underlying, holding each contract's
-        closing implied volatility constant. Sign convention is the contract's value —
-        for a short position your P&amp;L is the opposite.
+        closing implied volatility constant. Figures are <strong>your</strong> P&amp;L for the whole
+        position: a short call gains when the mark falls, so the sign is flipped against the
+        contract's own move.
         {anyEarnings && (
           <div style={{ color: red, marginTop: '4px' }}>
             Earnings tonight on one or more names: implied vol collapses after the print,

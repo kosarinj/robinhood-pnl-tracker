@@ -129,17 +129,34 @@ try {
     assert.ok(p.estMark < p.underlyingNow, `${p.estMark} exceeds underlying`)
   })
 
-  test('change is consistent with close mark and estimate', () => {
-    assert.ok(Math.abs((p.closeMark + p.changePerShare) - p.estMark) < 0.02,
-      `${p.closeMark} + ${p.changePerShare} != ${p.estMark}`)
+  test('the contract mark change reconciles with the estimate', () => {
+    // contractMarkChange is the CONTRACT's move; changePerShare is the holder's
+    // P&L and is negated for a short. Only the former ties back to the marks.
+    assert.ok(Math.abs((p.closeMark + p.contractMarkChange) - p.estMark) < 0.02,
+      `${p.closeMark} + ${p.contractMarkChange} != ${p.estMark}`)
     assert.ok(Math.abs(p.changePerContract - p.changePerShare * 100) < 1)
   })
 
-  test('estimate moves the same direction as the underlying', () => {
+  test('a short call loses when its mark rises', () => {
+    // The reported bug: a covered call read as a gain when the contract got
+    // more expensive, which is exactly backwards for the seller.
+    assert.equal(p.isShort, true, 'fixture should be a short call')
+    assert.ok(Math.abs(p.changePerShare + p.contractMarkChange) < 0.001,
+      `holder P&L ${p.changePerShare} should be the negation of ${p.contractMarkChange}`)
+  })
+
+  test('position P&L scales by contract count', () => {
+    assert.equal(typeof p.contracts, 'number')
+    assert.ok(Math.abs(p.positionPnl - p.changePerContract * p.contracts) < 1,
+      `${p.positionPnl} != ${p.changePerContract} x ${p.contracts}`)
+  })
+
+  test('a short position moves opposite the underlying', () => {
     if (Math.abs(p.underlyingMovePct) < 0.01) return   // flat — nothing to assert
-    const sameSign = (p.underlyingMovePct > 0) === (p.changePerShare > 0)
-    assert.ok(sameSign || Math.abs(p.changePerShare) < 0.01,
-      `underlying ${p.underlyingMovePct}% but option ${p.changePerShare}`)
+    // Short CALL: stock up, seller loses.
+    const opposite = (p.underlyingMovePct > 0) === (p.changePerShare < 0)
+    assert.ok(opposite || Math.abs(p.changePerShare) < 0.01,
+      `underlying ${p.underlyingMovePct}% but short-call P&L ${p.changePerShare}`)
   })
 
   test('carries the reliability flags the UI renders', () => {

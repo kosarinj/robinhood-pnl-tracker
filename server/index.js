@@ -2859,11 +2859,18 @@ app.get('/api/extended-hours', requireAuth, async (req, res) => {
     }
 
     // Only price contracts that are still open and unexpired.
-    const openSymbols = new Set(
-      databaseService.getOpenOptionPositions(userId, brokerFilter)
-        .filter(p => (p.net_short > 0 || p.net_long > 0))
-        .map(p => p.symbol)
-    )
+    // Direction and size matter, not just which contracts are open. A short
+    // call's P&L is the OPPOSITE of the contract's value change — the mark going
+    // up costs the seller money — so reporting the contract delta made every
+    // covered call read backwards.
+    const openBySymbol = new Map()
+    databaseService.getOpenOptionPositions(userId, brokerFilter)
+      .filter(p => (p.net_short > 0 || p.net_long > 0))
+      .forEach(p => openBySymbol.set(p.symbol, {
+        isShort: p.net_short > 0,
+        contracts: p.net_short > 0 ? p.net_short : p.net_long,
+      }))
+    const openSymbols = new Set(openBySymbol.keys())
     const live = ivMarks.filter(m => openSymbols.has(m.symbol) && m.expiry > today)
     if (!live.length) {
       return res.json({ success: true, session: 'unknown', positions: [], note: 'No open unexpired option positions.' })
@@ -2897,7 +2904,11 @@ app.get('/api/extended-hours', requireAuth, async (req, res) => {
         K: m.strike, T0, T1, sigma: m.sigma, r: RISK_FREE_RATE,
       })
       if (estMark == null) continue
-      const delta = estMark - m.close_mark
+      const contractDelta = estMark - m.close_mark
+      const pos = openBySymbol.get(m.symbol) || { isShort: false, contracts: 1 }
+      // +1 long, -1 short: what the holder actually makes or loses.
+      const sign = pos.isShort ? -1 : 1
+      const delta = contractDelta * sign
       const underlyingMove = e.price - m.underlying_close
       const movePct = m.underlying_close > 0 ? (underlyingMove / m.underlying_close) * 100 : 0
 
@@ -2909,8 +2920,14 @@ app.get('/api/extended-hours', requireAuth, async (req, res) => {
         expiry: m.expiry,
         closeMark: round2(m.close_mark),
         estMark: round2(estMark),
+        isShort: pos.isShort,
+        contracts: pos.contracts,
+        // P&L from the holder's side, and for the whole position — not the
+        // contract's value change, and not per single contract.
         changePerShare: round2(delta),
         changePerContract: round2(delta * 100),
+        positionPnl: round2(delta * 100 * pos.contracts),
+        contractMarkChange: round2(contractDelta),
         underlyingClose: round2(m.underlying_close),
         underlyingNow: round2(e.price),
         underlyingMovePct: Math.round(movePct * 100) / 100,
