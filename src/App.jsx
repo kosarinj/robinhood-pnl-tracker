@@ -13,6 +13,7 @@ import ExtendedHoursPanel from './components/ExtendedHoursPanel'
 import BrokerTabs from './components/BrokerTabs'
 import DashboardCharts from './components/DashboardCharts'
 import EarningsPanel from './components/EarningsPanel'
+import FibRsiScreener from './components/FibRsiScreener'
 import UploadButton from './components/UploadButton'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
@@ -2577,6 +2578,7 @@ function AuthenticatedApp({ user }) {
       )}
 
       {/* Research tab */}
+      {activeMainTab === 'research' && <FibRsiScreener />}
       {activeMainTab === 'research' && <VolScanner />}
       {activeMainTab === 'research' && <PreMoveVolumePanel />}
       {activeMainTab === 'research' && <ScreenerPanel />}

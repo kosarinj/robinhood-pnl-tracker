@@ -2759,6 +2759,101 @@ app.get('/api/vol-scan', requireAuth, async (req, res) => {
 })
 
 // GET /api/brokers — which brokers this user has data for, for the tab bar.
+// ─── Fibonacci + RSI screener ────────────────────────────────────────────────
+// Two confirmations of the same idea, which is why they're screened together:
+// RSI says momentum is stretched, the retracement says price has actually
+// reached a level people watch. Either alone fires constantly; both at once is
+// rarer and means more.
+//
+// Retracement is measured from the swing high of the lookback:
+//     pct = (high - price) / (high - low)
+// 0% = at the highs, 100% = at the lows. The classic levels are 23.6, 38.2,
+// 50, 61.8 and 78.6.
+const FIB_LEVELS = [0, 23.6, 38.2, 50, 61.8, 78.6, 100]
+
+const nearestFibLevel = (pct) =>
+  FIB_LEVELS.reduce((best, l) => (Math.abs(l - pct) < Math.abs(best - pct) ? l : best), FIB_LEVELS[0])
+
+function screenFibRsi(closes, opts) {
+  const { rsiOversold, rsiOverbought, deepRetrace, shallowRetrace, nearLevel } = opts
+  if (!Array.isArray(closes) || closes.length < 30) return null
+
+  const price = closes[closes.length - 1]
+  const high = Math.max(...closes)
+  const low = Math.min(...closes)
+  if (!(price > 0) || !(high > low)) return null
+
+  const rsi = calculateRSI(closes, 14)
+  if (rsi == null) return null
+
+  const retracePct = Math.round(((high - price) / (high - low)) * 1000) / 10
+  const level = nearestFibLevel(retracePct)
+  const atLevel = Math.abs(retracePct - level) <= nearLevel
+
+  // Oversold: deep into the range AND momentum washed out.
+  // Overbought: up near the highs AND momentum stretched.
+  let signal = null
+  if (retracePct >= deepRetrace && rsi <= rsiOversold) signal = 'oversold'
+  else if (retracePct <= shallowRetrace && rsi >= rsiOverbought) signal = 'overbought'
+  if (!signal) return null
+
+  return {
+    price: Math.round(price * 100) / 100,
+    high: Math.round(high * 100) / 100,
+    low: Math.round(low * 100) / 100,
+    rsi: Math.round(rsi * 10) / 10,
+    retracePct,
+    fibLevel: level,
+    atLevel,
+    signal,
+  }
+}
+
+app.get('/api/screener/fib-rsi', requireAuth, async (req, res) => {
+  const n = (v, d) => { const x = parseFloat(v); return Number.isFinite(x) ? x : d }
+  const opts = {
+    rsiOversold: n(req.query.rsiOversold, 35),
+    rsiOverbought: n(req.query.rsiOverbought, 65),
+    deepRetrace: n(req.query.deepRetrace, 61.8),
+    shallowRetrace: n(req.query.shallowRetrace, 23.6),
+    nearLevel: n(req.query.nearLevel, 4),
+  }
+  const range = ['3mo', '6mo', '1y'].includes(req.query.range) ? req.query.range : '6mo'
+
+  try {
+    // Holdings first — a signal on something you own matters more than one on a
+    // name you don't. Then the rest of the universe.
+    const held = Object.keys(databaseService.getStockPositionsWithCost(req.user.userId))
+    const universe = [...new Set([...held, ...SP500])].filter(t => /^[A-Z.]{1,6}$/.test(t))
+
+    const hits = []
+    const CONC = 6
+    for (let i = 0; i < universe.length; i += CONC) {
+      const batch = universe.slice(i, i + CONC)
+      await Promise.all(batch.map(async ticker => {
+        try {
+          const hist = await priceService.fetchHistoricalPrices(ticker, range, '1d')
+          const closes = (hist || []).map(b => b.close).filter(c => c > 0)
+          const r = screenFibRsi(closes, opts)
+          if (r) hits.push({ ticker, held: held.includes(ticker), ...r })
+        } catch { /* one name failing shouldn't stop the scan */ }
+      }))
+      if (i + CONC < universe.length) await new Promise(r => setTimeout(r, 250))
+    }
+
+    // Strongest first: how far past the RSI threshold, then how close to a level.
+    hits.sort((a, b) => {
+      if (a.held !== b.held) return a.held ? -1 : 1
+      const strength = (h) => h.signal === 'oversold' ? (opts.rsiOversold - h.rsi) : (h.rsi - opts.rsiOverbought)
+      return strength(b) - strength(a)
+    })
+
+    res.json({ success: true, scanned: universe.length, range, opts, hits })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ─── Stock splits ────────────────────────────────────────────────────────────
 // Detected from Yahoo rather than entered by hand. The chart endpoint reports
 // them via events=split and, unlike quoteSummary, still works without a crumb.
