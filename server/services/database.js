@@ -2508,7 +2508,27 @@ export class DatabaseService {
   }
 
   // ── Stock splits ────────────────────────────────────────────────────────
-  getSplits(symbols = null) {
+  /**
+   * Split adjustment is off unless SPLIT_ADJUSTMENT=on.
+   *
+   * The adjustment multiplies share counts, so when it is wrong it is wrong
+   * everywhere at once and quietly — a position shrinks, and a position that
+   * shrinks to nothing takes its unrealized P&L with it and comes back as a
+   * realized gain. That is a bad failure mode to leave switched on while
+   * reported share counts are still unexplained.
+   *
+   * Off reads exactly as the app did before the feature landed: every factor
+   * is 1. The table and the refresh keep working, so nothing is lost and
+   * flipping this back on needs no code change.
+   */
+  splitAdjustmentEnabled() {
+    return String(process.env.SPLIT_ADJUSTMENT || 'off').toLowerCase() === 'on'
+  }
+
+  // What the table actually holds, whatever the switch says. Inspection and
+  // reconciliation need the real rows — hiding them from the diagnostic
+  // endpoint would be the opposite of helpful.
+  getSplitsRaw(symbols = null) {
     try {
       const rows = symbols?.length
         ? db.prepare(`SELECT symbol, split_date, ratio FROM stock_splits WHERE symbol IN (${symbols.map(() => '?').join(',')})`).all(...symbols)
@@ -2525,6 +2545,13 @@ export class DatabaseService {
       console.error('Error getting splits:', e)
       return {}
     }
+  }
+
+  // What the P&L math is allowed to apply. Empty while the switch is off, so
+  // every factor comes out 1.
+  getSplits(symbols = null) {
+    if (!this.splitAdjustmentEnabled()) return {}
+    return this.getSplitsRaw(symbols)
   }
 
   saveSplit(symbol, splitDate, ratio, source = 'yahoo') {

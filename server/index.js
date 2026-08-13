@@ -2864,7 +2864,7 @@ app.post('/api/splits/refresh', requireAuth, async (req, res) => {
     // position lists drop a symbol whose share count isn't above zero, so a bad
     // ratio that shrank a position to nothing would take that symbol out of the
     // sweep and strand the very row that caused it.
-    const stored = Object.keys(databaseService.getSplits())
+    const stored = Object.keys(databaseService.getSplitsRaw())
     const symbols = stored
       .concat(Object.keys(databaseService.getStockPositionsWithCost(userId)))
       .concat(Object.keys(databaseService.getAllPositions?.(userId) || {}))
@@ -2918,7 +2918,14 @@ app.post('/api/splits/refresh', requireAuth, async (req, res) => {
 
 app.get('/api/splits', requireAuth, (req, res) => {
   try {
-    res.json({ success: true, splits: databaseService.getSplits() })
+    // Reports the stored rows and whether they are actually being applied —
+    // "the table has a row" and "that row is moving your share count" are
+    // different questions, and confusing them wastes a debugging session.
+    res.json({
+      success: true,
+      applied: databaseService.splitAdjustmentEnabled(),
+      splits: databaseService.getSplitsRaw(),
+    })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }

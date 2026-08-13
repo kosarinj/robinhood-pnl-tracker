@@ -15,6 +15,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const TMP_DB = join(__dirname, `test_splits_${process.pid}.db`)
 process.env.DATABASE_PATH = TMP_DB
 process.env.NODE_ENV = 'test'
+// Adjustment ships off; these tests are about what it does when it's on.
+process.env.SPLIT_ADJUSTMENT = 'on'
 
 let passed = 0
 const test = (name, fn) => {
@@ -180,6 +182,28 @@ try {
     const fixed = databaseService.getStockPositionsWithCost(userId).PLTR
     assert.equal(fixed.position, 300)
     assert.ok(Math.abs(fixed.avgCost - 20) < 0.01, `avg cost ${fixed.avgCost}`)
+  })
+
+  console.log('\nThe switch')
+
+  test('off means no adjustment, and the rows are still there to inspect', () => {
+    // The safe default. Share counts must read exactly as they did before the
+    // feature existed, while the table stays visible for diagnosis.
+    databaseService.saveSplit('SWCH', '2026-01-01', 4, 'yahoo')
+    buy('SWCH', '2025-01-01', 25, 400)
+
+    process.env.SPLIT_ADJUSTMENT = 'on'
+    assert.equal(databaseService.getStockPositionsWithCost(userId).SWCH.position, 100,
+      'on: 25 pre-split shares read as 100')
+
+    process.env.SPLIT_ADJUSTMENT = 'off'
+    assert.equal(databaseService.splitAdjustmentEnabled(), false)
+    assert.deepEqual(databaseService.getSplits(['SWCH']), {}, 'off: nothing to apply')
+    assert.equal(databaseService.getSplitsRaw(['SWCH']).SWCH.length, 1, 'off: row still inspectable')
+    assert.equal(databaseService.getStockPositionsWithCost(userId).SWCH.position, 25,
+      'off: the unadjusted share count')
+
+    process.env.SPLIT_ADJUSTMENT = 'on'
   })
 
   console.log(`\n${passed} passed\n`)
