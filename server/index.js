@@ -2860,7 +2860,13 @@ app.get('/api/screener/fib-rsi', requireAuth, async (req, res) => {
 app.post('/api/splits/refresh', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
-    const symbols = Object.keys(databaseService.getStockPositionsWithCost(userId))
+    // Anything already carrying a split goes first and is always checked. Both
+    // position lists drop a symbol whose share count isn't above zero, so a bad
+    // ratio that shrank a position to nothing would take that symbol out of the
+    // sweep and strand the very row that caused it.
+    const stored = Object.keys(databaseService.getSplits())
+    const symbols = stored
+      .concat(Object.keys(databaseService.getStockPositionsWithCost(userId)))
       .concat(Object.keys(databaseService.getAllPositions?.(userId) || {}))
     const unique = [...new Set(symbols)].filter(t => /^[A-Z.]{1,6}$/.test(t)).slice(0, 40)
 
