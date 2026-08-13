@@ -693,7 +693,26 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // than disappearing because they weren't in the stored list.
   const orderedKeys = (() => {
     const saved = (columnOrder || []).filter(k => MOVABLE_KEYS.includes(k))
-    return [...saved, ...MOVABLE_KEYS.filter(k => !saved.includes(k))]
+    const missing = MOVABLE_KEYS.filter(k => !saved.includes(k))
+    const out = [...saved, ...missing]
+
+    // The what-if columns are only meaningful next to Net + Open P&L — they are
+    // the same figure under a different price. Appended to a saved order they
+    // land off the right edge of a table this wide, which reads as the control
+    // doing nothing at all. So they're pulled back next to their reference
+    // column every time rather than left wherever the append put them.
+    // Only for columns the saved order has never seen. Once dragged somewhere
+    // deliberately they're in `saved`, and that choice wins.
+    const SCENARIO_KEYS = ['scenarioNet', 'scenarioDelta']
+    const fresh = SCENARIO_KEYS.filter(k => missing.includes(k))
+    if (fresh.length) {
+      const rest = out.filter(k => !fresh.includes(k))
+      const anchor = rest.indexOf('netPlusOpen')
+      const at = anchor >= 0 ? anchor + 1 : rest.length
+      rest.splice(at, 0, ...fresh)
+      return rest
+    }
+    return out
   })()
   const orderedColumns = [ALL_COLUMNS[0], ...orderedKeys.map(k => ALL_COLUMNS.find(c => c.key === k)).filter(Boolean)]
 
