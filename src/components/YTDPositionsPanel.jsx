@@ -55,6 +55,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)
+  // What-if: shock every underlying by this percentage, right now. 0 = off.
+  // The mirror of the projection — that moves time and holds price, this moves
+  // price and holds time.
+  const [scenarioMove, setScenarioMove] = useState(0)
+  const SCENARIO_CHOICES = [-30, -20, -15, -10, -5, -2.5, 2.5, 5, 10, 15, 20, 30]
   // Which rows to show: everything, only names with option activity, or only
   // stocks held without options. Remembered between visits.
   const [rowView, setRowView] = useState(() => localStorage.getItem(LS_ROWVIEW_KEY) || 'all')
@@ -356,7 +361,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       ? Math.round(pos * (price - avgCost) * 100) / 100
       : 0
     const stockPnL = stockUnrealized + (r.stockRealizedPnL || 0)
+    // Portfolio-wide what-if: every underlying shocked by the same percentage
+    // at once. Realized stays put; only the open side moves.
+    const scPrice = (scenarioMove !== 0 && price > 0) ? price * (1 + scenarioMove / 100) : null
+    const scStockPnL = scPrice
+      ? ((pos > 0 && avgCost > 0) ? Math.round(pos * (scPrice - avgCost) * 100) / 100 : 0) + (r.stockRealizedPnL || 0)
+      : stockPnL
+    const scOpen = scenarioMove !== 0
+      ? (r.openScenario?.[scenarioMove] ?? r.openUnrealizedPnL ?? 0)
+      : (r.openUnrealizedPnL || 0)
     return {
+      scenarioStockPnL: acc.scenarioStockPnL + scStockPnL,
+      scenarioOpen: acc.scenarioOpen + scOpen,
+      scenarioNetPlusOpen: acc.scenarioNetPlusOpen + (r.totalRealized || 0) + scStockPnL + scOpen,
       realizedShortCalls: acc.realizedShortCalls + (r.realizedShortCalls || 0),
       realizedLongCalls: acc.realizedLongCalls + (r.realizedLongCalls || 0),
       realizedShortPuts: acc.realizedShortPuts + (r.realizedShortPuts || 0),
@@ -371,7 +388,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayPnl: acc.dayPnl + (r.dayPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -417,7 +434,35 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const returnPct = (costBasis && costBasis > 0) ? Math.round((netPlusOpen / costBasis) * 1000) / 10 : null
     const vsStockPct = (stockPnl != null && stockPnl !== 0) ? Math.round(((netPlusOpen - stockPnl) / Math.abs(stockPnl)) * 1000) / 10 : null
     const taxableRealized = (row.totalRealized || 0) + (row.stockRealizedPnL || 0)
+
+    // ── What-if ──
+    // Shares reprice linearly, so the stock side is shifted here rather than
+    // fetched. Options come from the server, which repriced each contract with
+    // Black–Scholes at the shocked underlying. Realized P&L is untouched: it's
+    // already banked and a price move can't reach it.
+    let sc = null
+    if (scenarioMove !== 0) {
+      const scPrice = price > 0 ? price * (1 + scenarioMove / 100) : null
+      const scStockUnrealized = (pos > 0 && avgCost > 0 && scPrice > 0)
+        ? Math.round(pos * (scPrice - avgCost) * 100) / 100
+        : 0
+      const scStockPnl = hasStock ? Math.round((scStockUnrealized + stockRealized) * 100) / 100 : null
+      // Falls back to today's open P&L when a ticker has no repriced option —
+      // no contracts, or no vol could be backed out of its mark.
+      const scOpen = row.openScenario?.[scenarioMove] ?? row.openUnrealizedPnL ?? 0
+      const scNetPlusOpen = Math.round((((row.totalRealized || 0) + (scStockPnl || 0)) + scOpen) * 100) / 100
+      sc = {
+        price: scPrice,
+        stockPnl: scStockPnl,
+        open: scOpen,
+        hasOptionModel: row.openScenario?.[scenarioMove] != null,
+        netPlusOpen: scNetPlusOpen,
+        delta: Math.round((scNetPlusOpen - netPlusOpen) * 100) / 100,
+      }
+    }
+
     return {
+      sc,
       i, pos, hasManualCost, avgCost, effectiveCost, price,
       stockUnrealized, stockRealized, stockPnl, net, netPlusOpen, costBasis,
       returnPct, vsStockPct, optionsHelped: stockPnl != null && netPlusOpen >= stockPnl,
@@ -557,6 +602,34 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       cell: (r, c) => <span title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`}
         style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.netPlusOpen, isDark) }}>{fmt(c.netPlusOpen)}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.net + t.openUnrealizedPnL, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net + t.openUnrealizedPnL)}</span> },
+
+    // What-if columns. Present only while a move is selected, so the table is
+    // unchanged when it's off.
+    ...(scenarioMove === 0 ? [] : [
+      { key: 'scenarioNet', label: `Net+Open @ ${scenarioMove > 0 ? '+' : ''}${scenarioMove}%`, borderLeft: '2px',
+        title: `Net + Open P&L if this stock moved ${scenarioMove > 0 ? '+' : ''}${scenarioMove}% right now. Shares reprice directly; open options are repriced with Black–Scholes at the new underlying, holding time and implied vol fixed. Realized P&L is already banked and doesn't move.`,
+        cell: (r, c) => c.sc == null ? <span style={{ color: textMid }}>—</span> : (
+          <span title={`Stock ${c.sc.stockPnl != null ? fmt(c.sc.stockPnl) : '—'} + options ${fmt(c.sc.open)}` +
+              (c.sc.hasOptionModel ? '' : ' (options not repriced — no vol from its mark; today\'s value carried over)')}
+            style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.sc.netPlusOpen, isDark) }}>
+            {fmt(c.sc.netPlusOpen)}
+            {!c.sc.hasOptionModel && r.openUnrealizedPnL != null && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
+          </span>
+        ),
+        foot: (t) => <span style={{ color: pnlColor(t.scenarioNetPlusOpen, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.scenarioNetPlusOpen)}</span> },
+
+      { key: 'scenarioDelta', label: 'Δ vs now', borderLeft: '1px',
+        title: 'Change from where the position stands today. This is the part the move is responsible for.',
+        cell: (r, c) => c.sc == null ? <span style={{ color: textMid }}>—</span> : (
+          <span style={{ fontWeight: 700, color: pnlColor(c.sc.delta, isDark) }}>
+            {c.sc.delta >= 0 ? '+' : ''}{fmt(c.sc.delta)}
+          </span>
+        ),
+        foot: (t) => {
+          const d = Math.round((t.scenarioNetPlusOpen - (t.net + t.openUnrealizedPnL)) * 100) / 100
+          return <span style={{ color: pnlColor(d, isDark), fontWeight: 700, fontSize: 15 }}>{d >= 0 ? '+' : ''}{fmt(d)}</span>
+        } },
+    ]),
 
     { key: 'returnPct', label: 'Return %', borderLeft: '1px',
       title: 'Total return = (Net + Open P&L) ÷ cost basis of the shares.',
@@ -713,6 +786,37 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               )}
             </button>
           ))}
+        </div>
+
+        {/* What if every stock moved x% right now. The mirror of the theta
+            column: that holds price and moves time, this holds time and moves
+            price. Off by default so the table looks the same until asked. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 12, color: textMid, fontWeight: 600 }}
+            title="Move every underlying by the same percentage and reprice. Shares reprice directly; open options are repriced with Black–Scholes at the new stock price, holding time to expiry and implied vol fixed. Realized P&L doesn't move — it's already banked.">
+            What if
+          </span>
+          <select
+            value={scenarioMove}
+            onChange={e => setScenarioMove(parseFloat(e.target.value))}
+            style={{
+              padding: '5px 8px', fontSize: 12, fontWeight: 600, cursor: 'pointer', borderRadius: 6,
+              border: `1px solid ${scenarioMove !== 0 ? '#667eea' : border}`,
+              background: scenarioMove !== 0 ? '#667eea' : 'transparent',
+              color: scenarioMove !== 0 ? '#fff' : textMid,
+            }}
+          >
+            <option value={0}>off</option>
+            {SCENARIO_CHOICES.map(m => (
+              <option key={m} value={m}>{m > 0 ? '+' : ''}{m}%</option>
+            ))}
+          </select>
+          {scenarioMove !== 0 && (
+            <span style={{ fontSize: 11, color: '#f59e0b' }}
+              title="Implied vol is held where it is today (sticky strike). A real selloff usually lifts vol, which makes short options cost more to close than this shows — so the downside here is the optimistic end.">
+              vol fixed ⓘ
+            </span>
+          )}
         </div>
         {columnOrder.length > 0 && (
           <button

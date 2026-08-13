@@ -2316,6 +2316,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const PROJECT_MONTHS = [1, 2, 3]
     const openProjectedByTicker = { 1: {}, 2: {}, 3: {} }
     const openProjectedLegs = { 1: {}, 2: {}, 3: {} }   // { ticker: {expired, total} }
+
+    // What-if: every underlying shocked by a percentage, right now. The theta
+    // projection next door moves time with the underlying held still; this is
+    // the same repricing with the axes swapped — the underlying moves and time
+    // stands still, so what comes back is the move's effect alone.
+    //
+    // Vol is held at whatever is backed out of the current mark (sticky strike).
+    // Real markets reprice vol on a large move — a selloff especially — so the
+    // downside here is the optimistic end of the range, not a forecast.
+    const SCENARIO_MOVES = [-30, -20, -15, -10, -5, -2.5, 2.5, 5, 10, 15, 20, 30]
+    const openScenarioByTicker = {}          // { move: { ticker: pnl } }
+    SCENARIO_MOVES.forEach(m => { openScenarioByTicker[m] = {} })
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!asOf) {
       const shortEntries = databaseService.getShortCallEntries(userId, brokerFilter)
@@ -2462,6 +2474,22 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
                 legs.total += 1
                 if (expired) legs.expired += 1
                 openProjectedLegs[months][ticker] = legs
+              }
+
+              // ── Price shock ──
+              // Same vol, same expiry, underlying moved. Time is held still so
+              // this isolates the move; decay is what the projection beside it
+              // is for. At 0% it reproduces today's Open P&L exactly, which is
+              // what makes the two continuous with each other.
+              for (const move of SCENARIO_MOVES) {
+                const S1 = S * (1 + move / 100)
+                const shocked = repriceFromClose({
+                  type: parsed.type, closeMark: currentOptionPrice,
+                  S0: S, S1, K: parsed.strike, T0, T1: T0, sigma, r: RISK_FREE_RATE,
+                })
+                if (shocked == null) continue
+                openScenarioByTicker[move][ticker] =
+                  (openScenarioByTicker[move][ticker] || 0) + (premiumPerShare - shocked) * shares
               }
             }
           }
@@ -2645,6 +2673,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           openUnrealizedPnL: openUnrealizedByTicker[e.ticker] != null ? r2(openUnrealizedByTicker[e.ticker]) : null,
           // Open P&L projected forward on theta alone (underlying held flat).
           // { "1": {pnl, expiredLegs, totalLegs}, "2": …, "3": … }
+          // Open option P&L if this underlying moved x% right now, keyed by
+          // percent. The stock side isn't here on purpose: shares reprice
+          // linearly, so the caller can shift them itself without a round trip.
+          openScenario: SCENARIO_MOVES.reduce((acc, m) => {
+            const v = openScenarioByTicker[m][e.ticker]
+            if (v != null) acc[m] = r2(v)
+            return acc
+          }, {}),
           openProjected: PROJECT_MONTHS.reduce((acc, m) => {
             const v = openProjectedByTicker[m][e.ticker]
             if (v != null) {
