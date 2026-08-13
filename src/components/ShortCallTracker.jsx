@@ -147,7 +147,22 @@ export default function ShortCallTracker({ broker = 'all' }) {
           title="View option vs stock price chart"
           style={{ padding: '9px 8px', fontWeight: '700', color: '#3b82f6', cursor: 'pointer', position: 'sticky', left: 0, zIndex: 1, width: '60px', minWidth: '60px', maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: rowBg, boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}` }}
         >{entry.ticker} 📈</td>
-        <td style={{ padding: '9px 10px', textAlign: 'right', color: text }}>${entry.strike}</td>
+        <td style={{ padding: '9px 10px', textAlign: 'right', color: text }}>
+          ${entry.strike}
+          {entry.spread && (
+            <div style={{ fontSize: '10px', color: textMid, fontWeight: 500, whiteSpace: 'nowrap' }}
+              title={`Long $${entry.spread.strike} call × ${entry.spread.contracts} caps this short.` +
+                (entry.spread.sameExpiry ? '' : ` NOTE: it expires ${entry.spread.expiry}, not with the short leg.`) +
+                (entry.spread.fullyCovered ? '' : ' Only part of the short position is covered — the rest is uncapped.') +
+                ` Width $${entry.spread.width}, cost ${fmt(entry.spread.longCost)}.`}>
+              <span style={{ color: '#3b82f6', fontWeight: 700 }}>
+                {entry.spread.fullyCovered ? 'SPREAD' : 'PARTIAL'}
+              </span>
+              {' '}▲${entry.spread.strike}
+              {!entry.spread.sameExpiry && <span style={{ color: '#f59e0b' }}> ⚠</span>}
+            </div>
+          )}
+        </td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: textMid }}>{fmtDate(entry.expiry)}</td>
         <td style={{ padding: '9px 10px', textAlign: 'center' }}>
           <span style={{ padding: '2px 7px', borderRadius: '10px', fontSize: '11px', fontWeight: '700', background: dteBadgeColor + '22', color: dteBadgeColor }}>
@@ -197,14 +212,32 @@ export default function ShortCallTracker({ broker = 'all' }) {
           {entry.thetaGain != null ? (entry.thetaGain >= 0 ? '+' : '') + fmt(entry.thetaGain) : '—'}
         </td>
         {(() => {
-          const netDollars = (entry.stockMove != null && entry.thetaGain != null)
-            ? (entry.stockMove + entry.thetaGain) * 100 * (entry.contracts || 1)
-            : null
+          // A spread is not a covered call. The covered-call figure adds the
+          // stock's move because it assumes 100 shares sit behind the short
+          // call — with a long call there instead, that term is meaningless and
+          // the long leg's own gain is missing. So a spread reports both legs
+          // and nothing else, which is also why it reads as a smaller loss on a
+          // rally: the long leg is gaining while the short one loses.
+          const sp = entry.spread
+          const isSpread = !!sp && sp.netPnl != null
+          const netDollars = isSpread
+            ? sp.netPnl
+            : (entry.stockMove != null && entry.thetaGain != null)
+              ? (entry.stockMove + entry.thetaGain) * 100 * (entry.contracts || 1)
+              : null
+          const title = isSpread
+            ? `Spread P&L, both legs: short $${entry.strike} ${(sp.shortPnl >= 0 ? '+' : '') + fmt(sp.shortPnl)} ` +
+              `+ long $${sp.strike} ${(sp.longPnl >= 0 ? '+' : '') + fmt(sp.longPnl)} = ${(sp.netPnl >= 0 ? '+' : '') + fmt(sp.netPnl)}. ` +
+              `Net credit ${fmt(sp.netCredit)}` +
+              (sp.maxLoss != null ? ` · max profit ${fmt(sp.maxProfit)} / max loss ${fmt(sp.maxLoss)}` : '') +
+              `. Excludes stock movement — there are no shares behind this one.`
+            : `(Stock Δ + Call Gain) × 100 × ${entry.contracts || 1} contract(s) — total dollar performance of the covered call position`
           return (
             <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', borderLeft: `1px solid ${border}`,
               color: netDollars != null ? pnlColor(netDollars, isDark) : (isDark ? '#94a3b8' : '#64748b') }}
-              title={`(Stock Δ + Call Gain) × 100 × ${entry.contracts || 1} contract(s) — total dollar performance of the covered call position`}>
+              title={title}>
               {netDollars != null ? (netDollars >= 0 ? '+' : '') + fmt(netDollars) : '—'}
+              {isSpread && <div style={{ fontSize: '10px', color: textMid, fontWeight: 400 }}>both legs</div>}
             </td>
           )
         })()}

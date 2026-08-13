@@ -3213,20 +3213,47 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
     const openEntryCount = {}
     entries.forEach(e => { if (openShortSymbols.has(e.symbol)) openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
 
+    // ── Covering long calls ──────────────────────────────────────────────
+    // short_call_entries only ever holds STO calls, so the long leg of a
+    // vertical was never a candidate here — it wasn't filtered out, it was
+    // never looked for. Built before the price fetch because the long leg needs
+    // a mark of its own: without one the P&L is the short leg alone, which
+    // overstates the loss on a rally by exactly what the long leg gained.
+    const availableLongs = openPositions
+      .filter(p => p.net_long > 0)
+      .map(p => {
+        const parsed = parseOptionDescription(p.symbol)
+        if (!parsed || parsed.type !== 'call') return null
+        return {
+          symbol: p.symbol,
+          ticker: parsed.ticker,
+          strike: parsed.strike,
+          expiry: `${parsed.year}-${parsed.month}-${parsed.day}`,
+          remaining: p.net_long,
+          costPerContract: p.bto_contracts > 0 ? Math.abs(p.total_paid) / p.bto_contracts : 0,
+        }
+      })
+      .filter(Boolean)
+
     // Fetch current option prices via Polygon for open positions
     const polygonKey = process.env.POLYGON_API_KEY || ''
     const optionPrices = {} // fresh marks (live quote / today's trade)
     const optionClose = {}  // stale fallback marks (daily close / old trade)
     const polygonStockPrices = {}
     if (polygonKey) {
-      for (const entry of entries) {
-        if (!openShortSymbols.has(entry.symbol)) continue
-        const polygonTicker = toPolygonTicker(entry.symbol)
-        const parsed = parseOptionDescription(entry.symbol)
+      // Long legs are priced alongside the shorts. Same marks, same fallbacks —
+      // a spread's P&L is only right if both sides are marked the same way.
+      const toPrice = [
+        ...entries.filter(e => openShortSymbols.has(e.symbol)).map(e => e.symbol),
+        ...availableLongs.map(l => l.symbol),
+      ]
+      for (const symbol of [...new Set(toPrice)]) {
+        const polygonTicker = toPolygonTicker(symbol)
+        const parsed = parseOptionDescription(symbol)
         if (!polygonTicker || !parsed) continue
         // Real (delayed) bid/ask mid from the quotes endpoint — the actual market mark.
         const qMid = await fetchOptionQuoteMid(polygonTicker, polygonKey)
-        if (qMid > 0) optionPrices[entry.symbol] = qMid
+        if (qMid > 0) optionPrices[symbol] = qMid
         try {
           const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polygonTicker}`
           const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 5000 })
@@ -3234,10 +3261,10 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
           if (snap) {
             if (!(qMid > 0)) {
               const fresh = freshOptionMark(snap)   // snapshot last_quote (usually null on delayed)
-              if (fresh > 0) optionPrices[entry.symbol] = fresh
+              if (fresh > 0) optionPrices[symbol] = fresh
             }
             const stale = staleOptionMark(snap)   // daily close / old trade (fallback)
-            if (stale > 0) optionClose[entry.symbol] = stale
+            if (stale > 0) optionClose[symbol] = stale
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
           }
@@ -3260,6 +3287,36 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
         // Last resort: in-memory cache
         const cached = priceService.getCurrentPrices()
         missingTickers.forEach(t => { if (cached[t] > 0) polygonStockPrices[t] = cached[t] })
+      }
+    }
+
+    // A long call covers a short one when it's the same underlying, struck
+    // higher, and expires no earlier. Nearest strike wins, and contracts are
+    // consumed so one long can't be claimed by two shorts.
+    const findCover = (entry, shortContracts) => {
+      const parsed = parseOptionDescription(entry.symbol)
+      if (!parsed) return null
+      const candidates = availableLongs
+        .filter(l => l.remaining > 0 && l.ticker === entry.ticker &&
+                     l.strike > parsed.strike && l.expiry >= entry.expiry)
+        .sort((a, b) => (a.strike - b.strike) || a.expiry.localeCompare(b.expiry))
+      const cover = candidates[0]
+      if (!cover) return null
+
+      const covered = Math.min(cover.remaining, shortContracts)
+      cover.remaining -= covered
+      const width = Math.round((cover.strike - parsed.strike) * 100) / 100
+      const longCost = cover.costPerContract * covered
+      return {
+        symbol: cover.symbol,
+        strike: cover.strike,
+        expiry: cover.expiry,
+        contracts: covered,
+        sameExpiry: cover.expiry === entry.expiry,
+        width,
+        longCost: Math.round(longCost * 100) / 100,
+        // Fully covered only when every short contract has a long behind it.
+        fullyCovered: covered >= shortContracts,
       }
     }
 
@@ -3289,8 +3346,54 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       const shares = effContracts * 100
       const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
       const callGainPerShare = (currentOptionPrice != null) ? (premiumPerShare - currentOptionPrice) : null
+
+      // Only an open short can still be covered by anything.
+      const cover = isOpen ? findCover(entry, effContracts) : null
+      let spread = null
+      if (cover) {
+        const premiumTotal = premiumPerShare * shares
+        const netCredit = Math.round((premiumTotal - cover.longCost) * 100) / 100
+        // A call credit spread's worst case is the strike width, less what was
+        // taken in. Only meaningful when every short contract is covered — a
+        // partly covered position still has an uncapped tail.
+        const maxLoss = cover.fullyCovered
+          ? Math.round((cover.width * 100 * cover.contracts - netCredit) * 100) / 100
+          : null
+
+        // The long leg's own P&L. Priced from the same marks as the short leg,
+        // so the two are comparable; null when it has no mark at all, because
+        // showing a spread P&L that silently omits one side is worse than
+        // showing nothing.
+        const longMark = optionPrices[cover.symbol] ?? optionClose[cover.symbol] ?? null
+        const longPnl = longMark != null
+          ? Math.round((longMark * 100 - cover.costPerContract) * cover.contracts * 100) / 100
+          : null
+        const shortPnl = callGainPerShare != null
+          ? Math.round(callGainPerShare * shares * 100) / 100
+          : null
+        // What the position is actually worth. The short leg alone overstates a
+        // rally: the long leg is gaining exactly while the short one loses.
+        const netPnl = (longPnl != null && shortPnl != null)
+          ? Math.round((shortPnl + longPnl) * 100) / 100
+          : null
+
+        spread = {
+          ...cover,
+          netCredit,
+          maxLoss,
+          maxProfit: netCredit,
+          longMark,
+          longMarkSource: optionPrices[cover.symbol] != null ? 'quote'
+            : optionClose[cover.symbol] != null ? 'close' : null,
+          longPnl,
+          shortPnl,
+          netPnl,
+        }
+      }
+
       return {
         ...entry,
+        spread,
         contracts: effContracts,
         premium: Math.round(premiumPerShare * 100) / 100,
         premiumTotal: Math.round(premiumPerShare * shares * 100) / 100,
