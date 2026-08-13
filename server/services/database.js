@@ -371,6 +371,23 @@ try {
   console.error('stock_splits migration error:', e.message)
 }
 
+// Migration: repair Buy to Cover rows imported as sales.
+//
+// BC closes a short by buying shares back, but the importer's buy test looked
+// for "BUY", BTO or BTC, so every cover was stored as another sale and a short
+// that was opened and closed subtracted its size twice. Re-importing cannot fix
+// these: the dedup key includes trans_code, so the existing rows match the file
+// and are skipped rather than rewritten. They have to be corrected in place.
+try {
+  const fixed = db.prepare(
+    `UPDATE trades SET is_buy = 1
+     WHERE trans_code = 'BC' AND COALESCE(is_option,0) = 0 AND COALESCE(is_buy,0) = 0`
+  ).run()
+  if (fixed.changes > 0) console.log(`✅ Repaired ${fixed.changes} Buy-to-Cover row(s) stored as sales`)
+} catch (e) {
+  console.error('buy-to-cover migration error:', e.message)
+}
+
 // Migration: stock cost overrides — manual avg cost per symbol for YTD panel
 try {
   db.exec(`

@@ -51,7 +51,11 @@ export const parseTrades = (file) => {
             // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
             // OEXP = Option Expiration (expires worthless), OASGN = Assignment, OEXC = Exercise
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
-            const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
+            // BC (Buy to Cover) closes a short. Kept in step with the server
+            // parser — it spells none of the letters below, so it used to count
+            // as a sale and a covered short subtracted its size twice.
+            const isBuy = transCode.includes('BUY') ||
+              transCode === 'BTO' || transCode === 'BTC' || transCode === 'BC'
             const isExpiry = transCode === 'OEXP' || transCode === 'OASGN' || transCode === 'OEXC'
 
             // Parse date

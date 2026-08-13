@@ -51,7 +51,13 @@ export const parseTrades = (file) => {
             // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
             // OEXP = Option Expiration (expires worthless), OASGN = Assignment, OEXC = Exercise
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
-            const isBuy = transCode.includes('BUY') || transCode === 'BTO' || transCode === 'BTC'
+            // BC is Buy to Cover — closing a short. It buys shares back, but it
+            // spells none of the letters this used to look for, so it counted as
+            // another sale: a short opened and closed subtracted its size twice
+            // instead of netting to zero. RDDT went negative and vanished from
+            // the positions list; PLTR read 200 where 300 were held.
+            const isBuy = transCode.includes('BUY') ||
+              transCode === 'BTO' || transCode === 'BTC' || transCode === 'BC'
             const isExpiry = transCode === 'OEXP' || transCode === 'OASGN' || transCode === 'OEXC'
 
             // Parse date - use Process Date (when trade settled) instead of Activity Date
