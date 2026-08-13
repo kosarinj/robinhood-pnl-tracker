@@ -2865,6 +2865,7 @@ app.post('/api/splits/refresh', requireAuth, async (req, res) => {
     const unique = [...new Set(symbols)].filter(t => /^[A-Z.]{1,6}$/.test(t)).slice(0, 40)
 
     const found = []
+    let removed = 0
     for (const sym of unique) {
       try {
         const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}` +
@@ -2873,19 +2874,37 @@ app.post('/api/splits/refresh', requireAuth, async (req, res) => {
           timeout: 10000,
           headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' },
         })
-        const splits = resp.data?.chart?.result?.[0]?.events?.splits || {}
+        // A 200 that carries no result block is a bad answer, not an empty one.
+        // Treat it as a failure so reconciliation can't act on it.
+        const result = resp.data?.chart?.result?.[0]
+        if (!result) throw new Error('no chart result')
+
+        const splits = result.events?.splits || {}
+        const confirmed = []
         Object.values(splits).forEach(sp => {
           const ratio = (sp.numerator || 0) / (sp.denominator || 1)
           if (!(ratio > 0) || ratio === 1) return
+          // A real split is somewhere between a 1:20 reverse and a 100:1. A
+          // ratio outside that is a malformed feed row, and applying it would
+          // silently multiply or erase a position.
+          if (ratio < 0.05 || ratio > 100) {
+            console.warn(`Ignoring implausible ${sym} split ratio ${ratio}`)
+            return
+          }
           const date = new Date(sp.date * 1000).toISOString().slice(0, 10)
           databaseService.saveSplit(sym, date, ratio, 'yahoo')
+          confirmed.push(date)
           found.push({ symbol: sym, date, ratio })
         })
+        // Yahoo answered for this symbol, so its list is authoritative: anything
+        // stored that it no longer reports was wrong and has to go.
+        removed += databaseService.reconcileYahooSplits(sym, confirmed)
       } catch { /* one symbol failing shouldn't abort the sweep */ }
       await new Promise(r => setTimeout(r, 150))
     }
-    await logActivity(req, 'refresh_splits', `Found ${found.length} splits across ${unique.length} symbols`)
-    res.json({ success: true, checked: unique.length, found })
+    await logActivity(req, 'refresh_splits',
+      `Found ${found.length} splits across ${unique.length} symbols; removed ${removed} stale`)
+    res.json({ success: true, checked: unique.length, found, removed })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
@@ -2894,6 +2913,33 @@ app.post('/api/splits/refresh', requireAuth, async (req, res) => {
 app.get('/api/splits', requireAuth, (req, res) => {
   try {
     res.json({ success: true, splits: databaseService.getSplits() })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// Remove splits by hand. A wrong ratio distorts share count and cost basis for
+// every panel at once, so there has to be a way to undo one without waiting for
+// the next refresh to disagree with it.
+app.delete('/api/splits/:symbol', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.params.symbol || '').toUpperCase()
+    if (!/^[A-Z.]{1,6}$/.test(symbol)) {
+      return res.status(400).json({ success: false, error: 'Bad symbol' })
+    }
+    const deleted = databaseService.deleteSplitsForSymbol(symbol)
+    await logActivity(req, 'delete_splits', `Deleted ${deleted} split(s) for ${symbol}`)
+    res.json({ success: true, symbol, deleted })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.delete('/api/splits', requireAuth, async (req, res) => {
+  try {
+    const deleted = databaseService.deleteAllSplits()
+    await logActivity(req, 'delete_splits', `Cleared all ${deleted} split(s)`)
+    res.json({ success: true, deleted })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }

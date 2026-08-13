@@ -123,6 +123,65 @@ try {
     assert.equal(opt.splitAdjusted, undefined)
   })
 
+  console.log('\nStale split removal')
+
+  test('a split Yahoo no longer reports is removed', () => {
+    // The RDDT case. A spurious row was written once, and because nothing ever
+    // deleted from this table it kept rewriting the share count on every read.
+    databaseService.saveSplit('RDDT', '2026-08-12', 0.667, 'yahoo')
+    assert.ok(databaseService.getSplits(['RDDT']).RDDT?.length, 'precondition')
+
+    const removed = databaseService.reconcileYahooSplits('RDDT', [])
+    assert.equal(removed, 1)
+    assert.equal(databaseService.getSplits(['RDDT']).RDDT, undefined)
+  })
+
+  test('a still-confirmed split survives reconciliation', () => {
+    databaseService.saveSplit('AAPL', '2020-08-31', 4, 'yahoo')
+    const removed = databaseService.reconcileYahooSplits('AAPL', ['2020-08-31'])
+    assert.equal(removed, 0)
+    assert.equal(databaseService.getSplits(['AAPL']).AAPL.length, 1)
+  })
+
+  test('reconciliation drops only the rows no longer reported', () => {
+    databaseService.saveSplit('MULT', '2021-01-01', 2, 'yahoo')
+    databaseService.saveSplit('MULT', '2023-01-01', 3, 'yahoo')
+    const removed = databaseService.reconcileYahooSplits('MULT', ['2023-01-01'])
+    assert.equal(removed, 1)
+    const left = databaseService.getSplits(['MULT']).MULT
+    assert.equal(left.length, 1)
+    assert.equal(left[0].date, '2023-01-01')
+  })
+
+  test('hand-entered splits are not touched by a Yahoo refresh', () => {
+    // NFLX's row is source 'test'. Yahoo disagreeing must not erase a ratio
+    // someone entered deliberately.
+    const before = databaseService.getSplits(['NFLX']).NFLX.length
+    const removed = databaseService.reconcileYahooSplits('NFLX', [])
+    assert.equal(removed, 0)
+    assert.equal(databaseService.getSplits(['NFLX']).NFLX.length, before)
+  })
+
+  test('deleting a symbol clears it whatever the source', () => {
+    const deleted = databaseService.deleteSplitsForSymbol('NFLX')
+    assert.ok(deleted >= 1)
+    assert.equal(databaseService.getSplits(['NFLX']).NFLX, undefined)
+  })
+
+  test('share count returns to normal once a bad split is gone', () => {
+    // The user-visible symptom: 300 shares reading as 200.
+    buy('PLTR', '2025-03-03', 300, 20)
+    databaseService.saveSplit('PLTR', '2026-08-12', 0.667, 'yahoo')
+    const distorted = databaseService.getStockPositionsWithCost(userId).PLTR
+    assert.ok(Math.abs(distorted.position - 200.1) < 0.5,
+      `expected the bad ratio to shrink the position, got ${distorted.position}`)
+
+    databaseService.reconcileYahooSplits('PLTR', [])
+    const fixed = databaseService.getStockPositionsWithCost(userId).PLTR
+    assert.equal(fixed.position, 300)
+    assert.ok(Math.abs(fixed.avgCost - 20) < 0.01, `avg cost ${fixed.avgCost}`)
+  })
+
   console.log(`\n${passed} passed\n`)
 } catch (e) {
   console.error('\nTest harness error:', e)

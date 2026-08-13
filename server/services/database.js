@@ -2540,6 +2540,60 @@ export class DatabaseService {
   }
 
   /**
+   * Replace the Yahoo-sourced splits for one symbol with exactly what Yahoo
+   * currently reports, and return how many stale rows were dropped.
+   *
+   * Without this the table was append-only: a single bad or transient reading
+   * was written once and then applied to every share count forever, because
+   * nothing ever removed a row. Share counts are MULTIPLIED by the ratio, so a
+   * spurious split silently rewrites a position and its cost basis.
+   *
+   * Only ever called after a response that actually parsed — a failed fetch
+   * must not be read as "Yahoo says there are no splits" and wipe real ones.
+   * Hand-entered rows (source != 'yahoo') are left alone.
+   */
+  reconcileYahooSplits(symbol, confirmedDates) {
+    try {
+      const sym = String(symbol).toUpperCase()
+      const keep = confirmedDates || []
+      const stale = keep.length
+        ? db.prepare(
+            `DELETE FROM stock_splits
+             WHERE symbol = ? AND COALESCE(source,'yahoo') = 'yahoo'
+               AND split_date NOT IN (${keep.map(() => '?').join(',')})`
+          ).run(sym, ...keep)
+        : db.prepare(
+            `DELETE FROM stock_splits WHERE symbol = ? AND COALESCE(source,'yahoo') = 'yahoo'`
+          ).run(sym)
+      return stale.changes || 0
+    } catch (e) {
+      console.error('Error reconciling splits:', e)
+      return 0
+    }
+  }
+
+  // Drop every split for a symbol, whatever its source — the manual escape
+  // hatch when a bad ratio has already distorted a position.
+  deleteSplitsForSymbol(symbol) {
+    try {
+      return db.prepare('DELETE FROM stock_splits WHERE symbol = ?')
+        .run(String(symbol).toUpperCase()).changes || 0
+    } catch (e) {
+      console.error('Error deleting splits for symbol:', e)
+      return 0
+    }
+  }
+
+  deleteAllSplits() {
+    try {
+      return db.prepare('DELETE FROM stock_splits').run().changes || 0
+    } catch (e) {
+      console.error('Error deleting splits:', e)
+      return 0
+    }
+  }
+
+  /**
    * Cumulative factor for a trade dated `transDate`: the product of every split
    * that happened AFTER it. A pre-split share count is multiplied by this and a
    * pre-split per-share price divided by it.
