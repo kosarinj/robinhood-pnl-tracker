@@ -89,6 +89,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // Hidden tickers change the totals, so they must follow the user too.
   const [hiddenTickers, setHiddenTickers] = useState(() => getPref(hiddenKey(broker), loadHidden(broker)))
   const [showHiddenList, setShowHiddenList] = useState(false)
+  const [showColumnEditor, setShowColumnEditor] = useState(false)
   // Column order, per broker tab — the columns worth seeing differ between a
   // stocks-only account and one full of covered calls.
   // Column order follows the USER, not the device — reordering on a laptop is
@@ -143,6 +144,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     setHiddenTickers(getPref(hiddenKey(broker), loadHidden(broker)))
     setColumnOrder(getPref(colKey(broker), []))
     setShowHiddenList(false)
+    setShowColumnEditor(false)
   }, [broker])
 
   // The server's copy arrives after first paint; adopt it when it does so a
@@ -747,6 +749,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     saveColumnOrder(next)
   }
 
+  // Nudge one place at a time. Dragging a table header is unusable on a touch
+  // screen — the gesture is the page's scroll — so the same reordering is
+  // available as buttons. Order is shared between devices, so this and the
+  // desktop drag are two ways at one setting.
+  const nudgeColumn = (key, delta) => {
+    const i = orderedKeys.indexOf(key)
+    const j = i + delta
+    if (i < 0 || j < 0 || j >= orderedKeys.length) return
+    const next = [...orderedKeys]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    saveColumnOrder(next)
+  }
+
+  const resetColumnOrder = () => saveColumnOrder([])
+
   const cellBorder = (c) => c.borderLeft ? { borderLeft: `${c.borderLeft} solid ${border}` } : {}
 
   return (
@@ -918,8 +935,48 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             )}
           </div>
         )}
+        {/* Reorder columns without dragging. On a phone the drag gesture is the
+            page's own scroll, so header dragging can't work there. Order is
+            stored per user, so setting it here or by dragging on a laptop are
+            two routes to the same setting. */}
+        <div style={{ position: 'relative' }}>
+          <button onClick={() => setShowColumnEditor(v => !v)}
+            title="Reorder columns with buttons — works on touch, and the order follows your account to every device."
+            style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${showColumnEditor ? '#667eea' : border}`,
+              background: showColumnEditor ? '#667eea' : surface, color: showColumnEditor ? '#fff' : textMid,
+              fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            ⇅ Columns
+          </button>
+          {showColumnEditor && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 20, background: surface,
+              border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', minWidth: '250px',
+              maxHeight: '60vh', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <div style={{ fontSize: '10px', color: textMid, marginBottom: '6px', lineHeight: 1.4 }}>
+                Order for <strong style={{ color: text }}>{broker === 'all' ? 'All brokers' : broker}</strong>.
+                Saved to your account, so it carries to your other devices.
+              </div>
+              {orderedColumns.filter(c => !c.pinned).map((col, idx, arr) => (
+                <div key={col.key} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 0' }}>
+                  <span style={{ flex: 1, fontSize: '12px', color: text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {typeof col.label === 'string' ? col.label : col.key}
+                  </span>
+                  <button onClick={() => nudgeColumn(col.key, -1)} disabled={idx === 0} title="Move left"
+                    style={{ padding: '3px 8px', borderRadius: '4px', border: `1px solid ${border}`, background: isDark ? '#252d3d' : '#f1f5f9',
+                      color: idx === 0 ? textMid : text, fontSize: '12px', cursor: idx === 0 ? 'default' : 'pointer', opacity: idx === 0 ? 0.4 : 1 }}>↑</button>
+                  <button onClick={() => nudgeColumn(col.key, 1)} disabled={idx === arr.length - 1} title="Move right"
+                    style={{ padding: '3px 8px', borderRadius: '4px', border: `1px solid ${border}`, background: isDark ? '#252d3d' : '#f1f5f9',
+                      color: idx === arr.length - 1 ? textMid : text, fontSize: '12px', cursor: idx === arr.length - 1 ? 'default' : 'pointer', opacity: idx === arr.length - 1 ? 0.4 : 1 }}>↓</button>
+                </div>
+              ))}
+              <button onClick={resetColumnOrder}
+                style={{ width: '100%', marginTop: '6px', padding: '5px', borderRadius: '4px', border: 'none', background: '#94a3b8', color: 'white', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
+                Reset to default
+              </button>
+            </div>
+          )}
+        </div>
         <span style={{ fontSize: '12px', color: textMid }}>
-          Click a date cell to set a per-symbol start date · hover a row to hide it · drag a column header to reorder (both saved per broker)
+          Click a date cell to set a per-symbol start date · hover a row to hide it · reorder columns by dragging a header or with ⇅ Columns (saved to your account)
         </span>
         {stockDebug && (
           <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px',
