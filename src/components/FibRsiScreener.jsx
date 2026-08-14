@@ -40,10 +40,16 @@ export default function FibRsiScreener() {
     background: 'var(--surface)', border: '1px solid var(--border)',
     borderRadius: 10, padding: '16px', marginBottom: 20, color: 'var(--text)',
   }
+  // Was 10px uppercase in the muted secondary colour on no background, which is
+  // about as hard as small text gets: low contrast, and wide tracking on tiny
+  // capitals separates the letters faster than it helps. Matches the other
+  // panels now — full-strength text on the table-header fill, which every theme
+  // defines, so it stays readable in dark and light alike.
   const th = {
-    textAlign: 'right', padding: '7px 10px', fontSize: 10, fontWeight: 700,
-    color: 'var(--textSecondary)', textTransform: 'uppercase', letterSpacing: '0.09em',
-    borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+    textAlign: 'right', padding: '8px 10px', fontSize: 11, fontWeight: 700,
+    color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.05em',
+    background: 'var(--tableHeader)',
+    borderBottom: `2px solid var(--border)`, whiteSpace: 'nowrap',
   }
   const td = {
     textAlign: 'right', padding: '8px 10px', fontSize: 12.5,
