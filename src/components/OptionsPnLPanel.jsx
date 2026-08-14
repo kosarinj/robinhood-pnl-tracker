@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import { getPref, setPref, subscribePrefs } from '../services/prefs'
 import IntradayChart, { RSIBadge } from './IntradayChart'
 import PutStrikeCalculator from './PutStrikeCalculator'
 import AverageDownCalculator from './AverageDownCalculator'
@@ -144,19 +145,23 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
   const [scenarioMarks, setScenarioMarks] = useState({})
   // 0 = All. Defaults to the whole history rather than the last 10 weeks, and
   // remembers the choice.
-  const [cumulativeWeeks, setCumulativeWeeks] = useState(
-    () => { const v = localStorage.getItem('optionsPnl_cumulativeWeeks'); return v === null ? 0 : Number(v) }
-  )
+  // These three decide what Cumulative P&L reports, so they follow the USER.
+  // Held per device they made one account show three different totals across a
+  // laptop, a phone browser and the iOS app.
+  const [cumulativeWeeks, setCumulativeWeeks] = useState(() => Number(getPref('optionsPnl_cumulativeWeeks', 0)) || 0)
   const changeCumulativeWeeks = (v) => {
     setCumulativeWeeks(v)
-    localStorage.setItem('optionsPnl_cumulativeWeeks', String(v))
+    setPref('optionsPnl_cumulativeWeeks', v)
   }
-  const [shareOverrides, setShareOverrides] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('shareOverrides') || '{}') } catch { return {} }
-  })
-  const [priceOverrides, setPriceOverrides] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('priceOverrides') || '{}') } catch { return {} }
-  })
+  const [shareOverrides, setShareOverrides] = useState(() => getPref('shareOverrides', {}))
+  const [priceOverrides, setPriceOverrides] = useState(() => getPref('priceOverrides', {}))
+
+  // Adopt this user's saved values once they arrive from the server.
+  useEffect(() => subscribePrefs(() => {
+    setCumulativeWeeks(Number(getPref('optionsPnl_cumulativeWeeks', 0)) || 0)
+    setShareOverrides(getPref('shareOverrides', {}))
+    setPriceOverrides(getPref('priceOverrides', {}))
+  }), [])
   const [editingOverride, setEditingOverride] = useState(null)
   const [editDraft, setEditDraft] = useState({ shares: '', price: '' })
   const [dailySnapshot, setDailySnapshot] = useState(null)
@@ -177,18 +182,18 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
     if (!val || isNaN(Number(val))) delete updated[ticker]
     else updated[ticker] = Number(val)
     setShareOverrides(updated)
-    localStorage.setItem('shareOverrides', JSON.stringify(updated))
+    setPref('shareOverrides', updated)
   }
   const savePriceOverride = (ticker, val) => {
     const updated = { ...priceOverrides }
     if (!val || isNaN(Number(val))) delete updated[ticker]
     else updated[ticker] = Number(val)
     setPriceOverrides(updated)
-    localStorage.setItem('priceOverrides', JSON.stringify(updated))
+    setPref('priceOverrides', updated)
   }
   const clearOverrides = (ticker) => {
-    const sh = { ...shareOverrides }; delete sh[ticker]; setShareOverrides(sh); localStorage.setItem('shareOverrides', JSON.stringify(sh))
-    const pr = { ...priceOverrides }; delete pr[ticker]; setPriceOverrides(pr); localStorage.setItem('priceOverrides', JSON.stringify(pr))
+    const sh = { ...shareOverrides }; delete sh[ticker]; setShareOverrides(sh); setPref('shareOverrides', sh)
+    const pr = { ...priceOverrides }; delete pr[ticker]; setPriceOverrides(pr); setPref('priceOverrides', pr)
   }
 
   const surface = isDark ? '#1e2130' : '#ffffff'

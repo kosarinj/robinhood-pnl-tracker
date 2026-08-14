@@ -388,6 +388,28 @@ try {
   console.error('buy-to-cover migration error:', e.message)
 }
 
+// Migration: per-user view preferences.
+//
+// These lived in localStorage, which makes them per DEVICE. Several of them
+// change displayed P&L rather than just layout — how many weeks Cumulative P&L
+// sums, manual share and price overrides, which tickers are hidden — so the
+// same account reported different totals on a laptop, a phone browser and the
+// iOS app, each holding its own copy. Keyed by user so settings follow the
+// person; the value is opaque JSON so a new preference needs no migration.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id INTEGER NOT NULL,
+      pref_key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+      PRIMARY KEY (user_id, pref_key)
+    )
+  `)
+} catch (e) {
+  console.error('user_preferences migration error:', e.message)
+}
+
 // Migration: stock cost overrides — manual avg cost per symbol for YTD panel
 try {
   db.exec(`
@@ -2522,6 +2544,47 @@ export class DatabaseService {
   // Returns list of dates (desc) that have daily price snapshots for a given user
   getDailySnapshotDates(userId, limit = 30) {
     return db.prepare(`SELECT DISTINCT price_date FROM daily_price_snapshots WHERE user_id = ? ORDER BY price_date DESC LIMIT ?`).all(userId, limit).map(r => r.price_date)
+  }
+
+  // ── Per-user view preferences ───────────────────────────────────────────
+  getPreferences(userId) {
+    try {
+      const rows = db.prepare('SELECT pref_key, value FROM user_preferences WHERE user_id = ?').all(userId)
+      const out = {}
+      rows.forEach(r => {
+        // Stored as JSON. A malformed row shouldn't take the whole set down —
+        // one bad preference would otherwise blank every panel at once.
+        try { out[r.pref_key] = JSON.parse(r.value) } catch { /* skip */ }
+      })
+      return out
+    } catch (e) {
+      console.error('Error getting preferences:', e)
+      return {}
+    }
+  }
+
+  setPreference(userId, key, value) {
+    try {
+      db.prepare(`
+        INSERT INTO user_preferences (user_id, pref_key, value, updated_at)
+        VALUES (?, ?, ?, strftime('%s','now'))
+        ON CONFLICT(user_id, pref_key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).run(userId, String(key), JSON.stringify(value))
+      return true
+    } catch (e) {
+      console.error('Error saving preference:', e)
+      return false
+    }
+  }
+
+  deletePreference(userId, key) {
+    try {
+      return db.prepare('DELETE FROM user_preferences WHERE user_id = ? AND pref_key = ?')
+        .run(userId, String(key)).changes || 0
+    } catch (e) {
+      console.error('Error deleting preference:', e)
+      return 0
+    }
   }
 
   // ── Stock splits ────────────────────────────────────────────────────────

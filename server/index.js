@@ -2890,6 +2890,47 @@ app.get('/api/screener/fib-rsi', requireAuth, async (req, res) => {
   }
 })
 
+// ─── Per-user view preferences ───────────────────────────────────────────────
+// Settings that used to live in localStorage, which made them per device. The
+// ones that change displayed P&L — the Cumulative P&L window, manual share and
+// price overrides, hidden tickers — are why the same account read differently
+// on a laptop, a phone browser and the iOS app.
+app.get('/api/preferences', requireAuth, (req, res) => {
+  try {
+    res.json({ success: true, preferences: databaseService.getPreferences(req.user.userId) })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.put('/api/preferences/:key', requireAuth, (req, res) => {
+  try {
+    const key = String(req.params.key || '')
+    if (!key || key.length > 120) {
+      return res.status(400).json({ success: false, error: 'Bad preference key' })
+    }
+    if (!('value' in (req.body || {}))) {
+      return res.status(400).json({ success: false, error: 'Missing value' })
+    }
+    // Bounded so a runaway client can't fill the volume with one row.
+    if (JSON.stringify(req.body.value ?? null).length > 100000) {
+      return res.status(413).json({ success: false, error: 'Preference too large' })
+    }
+    const ok = databaseService.setPreference(req.user.userId, key, req.body.value)
+    res.json({ success: ok })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+app.delete('/api/preferences/:key', requireAuth, (req, res) => {
+  try {
+    res.json({ success: true, deleted: databaseService.deletePreference(req.user.userId, String(req.params.key || '')) })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ─── Stock splits ────────────────────────────────────────────────────────────
 // Detected from Yahoo rather than entered by hand. The chart endpoint reports
 // them via events=split and, unlike quoteSummary, still works without a crumb.

@@ -14,6 +14,7 @@ import BrokerTabs from './components/BrokerTabs'
 import DashboardCharts from './components/DashboardCharts'
 import EarningsPanel from './components/EarningsPanel'
 import FibRsiScreener from './components/FibRsiScreener'
+import { loadPrefs } from './services/prefs'
 import UploadButton from './components/UploadButton'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
@@ -249,6 +250,19 @@ function AuthenticatedApp({ user }) {
             // of the trade date, so without this a post-split holding reads with
             // a pre-split average — NFLX showed roughly -$11k on that alone.
             fetch('/api/splits/refresh', { method: 'POST', credentials: 'include' }).catch(() => {})
+            // Pull this user's view settings. Several of these decide what
+            // Cumulative P&L reports, and held per device they made the same
+            // account show different totals on a laptop, a phone browser and
+            // the iOS app. Keys the server hasn't seen are seeded from this
+            // device, so the first client to load after the upgrade sets the
+            // baseline.
+            loadPrefs([
+              'optionsPnl_cumulativeWeeks', 'shareOverrides', 'priceOverrides',
+              'ytdPanel_globalStart', 'ytdPanel_symbolDates',
+              ...['all', 'robinhood', 'webull', 'schwab'].flatMap(bk => [
+                `ytdPanel_columnOrder_${bk}`, `ytdPanel_hiddenTickers_${bk}`,
+              ]),
+            ]).catch(() => {})
             setDeposits(result.deposits || [])
             setTotalPrincipal(result.totalPrincipal || 0)
             setDividendsAndInterest(result.dividendsAndInterest || [])

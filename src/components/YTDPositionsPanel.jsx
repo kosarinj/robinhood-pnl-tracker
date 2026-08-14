@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import { getPref, setPref, subscribePrefs } from '../services/prefs'
 
 const DEFAULT_GLOBAL_START = '2026-03-15'
 const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
@@ -51,7 +52,9 @@ const pnlColor = (n, isDark) => {
 export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const { isDark } = useTheme()
 
-  const [globalStart, setGlobalStart] = useState(() => localStorage.getItem(LS_GLOBAL_KEY) || DEFAULT_GLOBAL_START)
+  // The period start decides which realized P&L is counted, so it follows the
+  // user as well — otherwise two devices report different totals.
+  const [globalStart, setGlobalStart] = useState(() => getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)
@@ -65,7 +68,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [rowView, setRowView] = useState(() => localStorage.getItem(LS_ROWVIEW_KEY) || 'all')
   const changeRowView = (v) => { setRowView(v); localStorage.setItem(LS_ROWVIEW_KEY, v) }
   const [symbolDates, setSymbolDates] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(LS_SYMBOL_KEY) || '{}') } catch { return {} }
+    return getPref(LS_SYMBOL_KEY, {})
   })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -83,16 +86,17 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [stockHoldings, setStockHoldings] = useState({})
   const [stockDebug, setStockDebug] = useState(null)
   const [search, setSearch] = useState('')
-  const [hiddenTickers, setHiddenTickers] = useState(() => loadHidden(broker))
+  // Hidden tickers change the totals, so they must follow the user too.
+  const [hiddenTickers, setHiddenTickers] = useState(() => getPref(hiddenKey(broker), loadHidden(broker)))
   const [showHiddenList, setShowHiddenList] = useState(false)
   // Column order, per broker tab — the columns worth seeing differ between a
   // stocks-only account and one full of covered calls.
-  const [columnOrder, setColumnOrder] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(colKey(broker)) || '[]') } catch { return [] }
-  })
+  // Column order follows the USER, not the device — reordering on a laptop is
+  // the whole point, because dragging headers on a phone barely works.
+  const [columnOrder, setColumnOrder] = useState(() => getPref(colKey(broker), []))
   const saveColumnOrder = (next) => {
     setColumnOrder(next)
-    localStorage.setItem(colKey(broker), JSON.stringify(next))
+    setPref(colKey(broker), next)
   }
   const [dragKey, setDragKey] = useState(null)
   const [dragOverKey, setDragOverKey] = useState(null)
@@ -136,10 +140,30 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     fetchStockHoldings()
     fetchCostOverrides()
     // Hidden tickers are per broker, so swap in this tab's list.
-    setHiddenTickers(loadHidden(broker))
-    try { setColumnOrder(JSON.parse(localStorage.getItem(colKey(broker)) || '[]')) } catch { setColumnOrder([]) }
+    setHiddenTickers(getPref(hiddenKey(broker), loadHidden(broker)))
+    setColumnOrder(getPref(colKey(broker), []))
     setShowHiddenList(false)
   }, [broker])
+
+  // The server's copy arrives after first paint; adopt it when it does so a
+  // layout set on another device shows up without a reload.
+  useEffect(() => subscribePrefs(() => {
+    setColumnOrder(getPref(colKey(broker), []))
+    setHiddenTickers(getPref(hiddenKey(broker), loadHidden(broker)))
+    // The period is part of what the numbers mean, so if this user's saved one
+    // differs from what this device opened with, adopt it and refetch. Guarded
+    // on a real change — an unconditional refetch here would fire on every
+    // preference load.
+    const savedStart = getPref(LS_GLOBAL_KEY, null)
+    const savedDates = getPref(LS_SYMBOL_KEY, null)
+    const startChanged = savedStart && savedStart !== globalStart
+    const datesChanged = savedDates && JSON.stringify(savedDates) !== JSON.stringify(symbolDates)
+    if (startChanged) setGlobalStart(savedStart)
+    if (datesChanged) setSymbolDates(savedDates)
+    if (startChanged || datesChanged) {
+      fetchData(startChanged ? savedStart : globalStart, datesChanged ? savedDates : symbolDates, true)
+    }
+  }), [broker, globalStart, symbolDates, fetchData])
 
   // Fetch stock holdings + cost overrides from server on mount.
   // Scoped to the broker tab so Shares / Avg Cost / Stock P&L match the
@@ -213,7 +237,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
 
   const applyGlobalStart = (date) => {
     setGlobalStart(date)
-    localStorage.setItem(LS_GLOBAL_KEY, date)
+    setPref(LS_GLOBAL_KEY, date)
     fetchData(date, symbolDates)
   }
 
@@ -225,7 +249,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       updated[ticker] = date
     }
     setSymbolDates(updated)
-    localStorage.setItem(LS_SYMBOL_KEY, JSON.stringify(updated))
+    setPref(LS_SYMBOL_KEY, updated)
     setEditingSymbol(null)
     fetchData(globalStart, updated)
   }
@@ -234,7 +258,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const updated = { ...symbolDates }
     delete updated[ticker]
     setSymbolDates(updated)
-    localStorage.setItem(LS_SYMBOL_KEY, JSON.stringify(updated))
+    setPref(LS_SYMBOL_KEY, updated)
     fetchData(globalStart, updated)
   }
 
@@ -288,19 +312,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const hideTicker = (t) => {
     const updated = [...new Set([...hiddenTickers, t])]
     setHiddenTickers(updated)
-    localStorage.setItem(hiddenKey(broker), JSON.stringify(updated))
+    setPref(hiddenKey(broker), updated)
   }
 
   const restoreTicker = (t) => {
     const updated = hiddenTickers.filter(x => x !== t)
     setHiddenTickers(updated)
-    localStorage.setItem(hiddenKey(broker), JSON.stringify(updated))
+    setPref(hiddenKey(broker), updated)
     if (updated.length === 0) setShowHiddenList(false)
   }
 
   const restoreAllTickers = () => {
     setHiddenTickers([])
-    localStorage.setItem(hiddenKey(broker), '[]')
+    setPref(hiddenKey(broker), [])
     setShowHiddenList(false)
   }
 
