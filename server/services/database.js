@@ -2193,7 +2193,14 @@ export class DatabaseService {
    * strand lots and overstate the position (PLTR read 351 against an actual
    * 300 that way).
    */
-  getStockPositionsWithCost(userId = 1, asOf = null, broker = null) {
+  /**
+   * @param method 'average' averages every buy ever made — the original
+   *   behaviour, kept because the Options YTD panel is read daily and calibrated
+   *   on it. 'fifo' prices the shares actually held, which is what a broker
+   *   reports. The two legitimately differ for anyone who trades in and out;
+   *   callers pick, and nothing changes basis without being asked.
+   */
+  getStockPositionsWithCost(userId = 1, asOf = null, broker = null, method = 'average') {
     try {
       // Individual rows, not aggregates: FIFO needs each buy's own price, and
       // the split factor depends on each row's date.
@@ -2216,10 +2223,12 @@ export class DatabaseService {
         const f = this.splitFactor(splits[r.symbol], r.trans_date)
         const qty = (r.qty || 0) * f
         if (!(qty > 0)) return
-        const a = acc[r.symbol] || (acc[r.symbol] = { position: 0, buys: [] })
+        const a = acc[r.symbol] || (acc[r.symbol] = { position: 0, buys: [], boughtQty: 0, boughtCost: 0 })
         if (r.is_buy === 1) {
           a.position += qty
           a.buys.push({ qty, perShare: (r.amt || 0) / qty })
+          a.boughtQty += qty
+          a.boughtCost += (r.amt || 0)     // cash paid is unchanged by a split
         } else {
           a.position -= qty
         }
@@ -2229,21 +2238,25 @@ export class DatabaseService {
       Object.entries(acc).forEach(([symbol, a]) => {
         const position = Math.round(a.position * 1e6) / 1e6
         if (!(position > 0)) return
-        // Newest buys first, taking only as many shares as are still held.
-        let need = position, cost = 0
-        for (let i = a.buys.length - 1; i >= 0 && need > 1e-9; i--) {
-          const take = Math.min(a.buys[i].qty, need)
-          cost += take * a.buys[i].perShare
-          need -= take
+
+        let avgCost = 0
+        if (method === 'fifo') {
+          // Newest buys first, taking only as many shares as are still held.
+          let need = position, cost = 0
+          for (let i = a.buys.length - 1; i >= 0 && need > 1e-9; i--) {
+            const take = Math.min(a.buys[i].qty, need)
+            cost += take * a.buys[i].perShare
+            need -= take
+          }
+          // `need` left over means the open shares predate the imported history,
+          // so price what's known and let the rest fall back to that same average
+          // rather than reporting a basis of zero.
+          const covered = position - need
+          avgCost = covered > 1e-9 ? Math.round((cost / covered) * 100) / 100 : 0
+        } else {
+          avgCost = a.boughtQty > 0 ? Math.round((a.boughtCost / a.boughtQty) * 100) / 100 : 0
         }
-        // `need` left over means the open shares predate the imported history,
-        // so price what's known and let the rest fall back to that same average
-        // rather than reporting a basis of zero.
-        const covered = position - need
-        result[symbol] = {
-          position,
-          avgCost: covered > 1e-9 ? Math.round((cost / covered) * 100) / 100 : 0,
-        }
+        result[symbol] = { position, avgCost }
       })
       console.log(`getStockPositionsWithCost: ${Object.keys(result).length} stock positions for user ${userId}`)
       return result

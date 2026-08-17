@@ -48,7 +48,10 @@ try {
   const buy  = (sym, d, q, px) => ins.run({ sym, d, tc: 'Buy',  q, px, amt: -(q * px), isBuy: 1 })
   const sell = (sym, d, q, px) => ins.run({ sym, d, tc: 'Sell', q, px, amt: q * px, isBuy: 0 })
 
-  const pos = (sym) => databaseService.getStockPositionsWithCost(userId)[sym]
+  // 'fifo' is the corrected basis the Dashboard uses; 'average' is what the
+  // Options YTD panel deliberately stays on.
+  const pos = (sym) => databaseService.getStockPositionsWithCost(userId, null, null, 'fifo')[sym]
+  const posAvg = (sym) => databaseService.getStockPositionsWithCost(userId, null, null, 'average')[sym]
 
   console.log('\nCost basis of the shares held')
 
@@ -123,6 +126,24 @@ try {
     const p = pos('HHH')
     assert.equal(p.position, 11)
     assert.ok(Math.abs(p.avgCost - 120) < 0.01, `expected 120, got ${p.avgCost}`)
+  })
+
+  console.log('\nThe two bases coexist')
+
+  test('average still reports the old lifetime figure', () => {
+    // AAA: 40 @ $1,200 traded and closed, then 100 @ $75 and 2 @ $67.66.
+    // Lifetime average = 55,635.33 / 142 shares bought = $391.80. The shares
+    // actually held cost $74.86 — a fivefold difference on the same position.
+    const avg = posAvg('AAA'), fifo = pos('AAA')
+    assert.equal(avg.position, fifo.position, 'share count must agree either way')
+    assert.ok(Math.abs(avg.avgCost - 391.80) < 0.02, `expected 391.80, got ${avg.avgCost}`)
+    assert.ok(Math.abs(fifo.avgCost - 74.86) < 0.02, `expected 74.86, got ${fifo.avgCost}`)
+  })
+
+  test('buy-and-hold reads the same on both bases', () => {
+    // Nothing sold, so there is no difference to have — a guard that the split
+    // isn't inventing one where none exists.
+    assert.ok(Math.abs(posAvg('CCC').avgCost - pos('CCC').avgCost) < 0.01)
   })
 
   console.log(`\n${passed} passed\n`)

@@ -2238,6 +2238,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
 
 // GET /api/options-pnl/ytd — options P&L per underlying from a configurable start date
 app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
+  // basis=corrected -> FIFO cost basis, settlements booked into realized, long
+  // option legs counted in Open P&L. Default keeps every figure as it was.
+  const corrected = req.query.basis === 'corrected'
   try {
     const userId = req.user.userId
     const globalStart = req.query.startDate || '2000-01-01'
@@ -2282,6 +2285,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         stacks.long.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
       } else if (tc === 'STO') {
         stacks.short.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
+      } else if (['OEXP', 'OASGN', 'OEXC'].includes(tc) && !corrected) {
+        // Legacy: a settlement's symbol used to carry an "Option Expiration for"
+        // prefix, so it never matched the contract it closed and booked nothing.
+        // Skipped rather than matched, to keep realized exactly as it read.
+        return
       } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
         let closingShort, stack
         if (tc === 'BTC') { stack = stacks.short; closingShort = true }
@@ -2368,7 +2376,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // Every leg that needs a mark, long or short.
       const priceLegs = [
         ...openEntries.map(e => ({ symbol: e.symbol, ticker: e.ticker })),
-        ...openLongs.map(l => ({ symbol: l.symbol, ticker: l.ticker })),
+        // Only priced when they'll actually be used, so the legacy basis doesn't
+        // spend Polygon calls on marks it discards.
+        ...(corrected ? openLongs.map(l => ({ symbol: l.symbol, ticker: l.ticker })) : []),
       ].filter((v, i, a) => a.findIndex(x => x.symbol === v.symbol) === i)
 
       // Fetch current per-share option prices for the open short calls (same as tracker):
@@ -2557,7 +2567,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // are comparable. No model fallback here — modelOptionMark anchors to a
       // short call's sale premium and has nothing to say about a bought
       // contract, so a leg with no mark contributes nothing rather than a guess.
-      openLongs.forEach(leg => {
+      ;(corrected ? openLongs : []).forEach(leg => {
         const ticker = leg.ticker
         if (!ticker) return
         const shares = leg.contracts * 100
@@ -2694,7 +2704,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
     // Stock positions + prices — as of the chosen date, or live. Position/cost bounded
     // to trades on/before asOf; price is that day's historical close (else live).
-    const stockPositions = databaseService.getStockPositionsWithCost(userId, asOf, brokerFilter)
+    // 'corrected' opts into the accounting fixes; anything else keeps the
+    // original behaviour. The Options YTD panel is read daily and calibrated on
+    // the original figures, so it stays on them and the Dashboard asks for the
+    // corrected tally instead — the two legitimately differ.
+    const stockPositions = databaseService.getStockPositionsWithCost(
+      userId, asOf, brokerFilter, corrected ? 'fifo' : 'average')
     const stockCostOverrides = databaseService.getCostOverrides(userId, brokerFilter)
     const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides, asOf)
 
@@ -3940,7 +3955,8 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
     const userId = req.user.userId
     // getStockPositionsWithCost lives in database.js where db is in scope
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
-    const stockData = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
+    const stockData = databaseService.getStockPositionsWithCost(
+      userId, null, brokerFilter, req.query.basis === 'corrected' ? 'fifo' : 'average')
     const symbols = Object.keys(stockData)
     console.log(`/api/stock-positions-with-prices: getStockPositionsWithCost returned ${symbols.length} symbols: ${symbols.join(', ')}`)
 

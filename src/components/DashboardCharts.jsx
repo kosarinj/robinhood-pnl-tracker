@@ -37,6 +37,11 @@ export default function DashboardCharts({ broker = 'all' }) {
   useEffect(() => {
     const params = new URLSearchParams()
     if (broker && broker !== 'all') params.set('broker', broker)
+    // The Dashboard runs on the corrected tally: cost basis from the shares
+    // actually held, expiries booked into realized, long option legs counted.
+    // The Options YTD panel deliberately stays on the original figures, so the
+    // two disagree by design rather than by accident.
+    params.set('basis', 'corrected')
     const qs = params.toString()
     fetch(`/api/options-pnl/ytd${qs ? `?${qs}` : ''}`, { credentials: 'include' })
       .then(r => r.json())
