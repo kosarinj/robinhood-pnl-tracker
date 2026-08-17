@@ -2437,9 +2437,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + premiumPerShare * shares
         const usedQuote = optFresh[entry.symbol] != null
         let currentOptionPrice = optFresh[entry.symbol]
+        // Which basis this mark is on decides what it can legitimately be
+        // compared against. 'quote' and 'close' both come from the market;
+        // 'model' is a Black-Scholes estimate and is only comparable to another
+        // run of the same model.
+        let markBasis = usedQuote ? 'quote' : null
         if (currentOptionPrice == null) {
           const model = modelOptionMark(entry, parsed, stockByTicker[entry.ticker])
-          currentOptionPrice = model > 0 ? model : optClose[entry.symbol]
+          if (model > 0) { currentOptionPrice = model; markBasis = 'model' }
+          else { currentOptionPrice = optClose[entry.symbol]; markBasis = 'close' }
         }
         if (currentOptionPrice != null) {
           // Short call P&L = (premium collected − current cost to buy back) × shares.
@@ -2452,14 +2458,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           //   • modeled LEAP → same Black–Scholes model at yesterday's vs today's underlying
           const prevMkt = optPrevClose[entry.symbol]
           let dayOptPerShare = null
-          if (usedQuote && prevMkt > 0) {
+          if (markBasis !== 'model' && prevMkt > 0) {
+            // Market vs market: a live quote or today's close against yesterday's.
             dayOptPerShare = prevMkt - currentOptionPrice
           } else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) {
             const mNow = modelOptionMark(entry, parsed, stockByTicker[ticker])
             const mPrev = modelOptionMark(entry, parsed, openPrevUnderlying[ticker])
             if (mNow > 0 && mPrev > 0) dayOptPerShare = mPrev - mNow
           }
-          if (dayOptPerShare == null && prevMkt > 0) dayOptPerShare = prevMkt - currentOptionPrice // last resort
+          // Deliberately no last-resort fallback. Subtracting yesterday's MARKET
+          // close from a MODEL mark measures the gap between the model and the
+          // market, not a day's move: the model runs richer or cheaper than the
+          // print, so the difference persists whatever the stock did and shows up
+          // as a fixed daily figure that never reconciles. MRVL read -835 that
+          // way. Reporting nothing is honest; reporting that number is not.
           if (dayOptPerShare != null) {
             openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
           }
