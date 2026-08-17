@@ -2174,44 +2174,75 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * Open stock positions with the cost basis of the shares STILL HELD.
+   *
+   * This used to average every buy ever made, which is only right for someone
+   * who bought and held. Trading in and out wrecks it: NFLX was day-traded
+   * around $1,200 before its 10:1, closed out, then rebought at ~$75 — and the
+   * lifetime average reported $188.27 against a $76 price, a phantom -$11,460.
+   * RDDT read $198.55 where the shares held cost $155.69. Across ten positions
+   * the error came to about $27,000, and it was the whole reason stock P&L and
+   * every figure built on it looked wrong.
+   *
+   * Robinhood sells FIFO, so what remains is the most RECENT shares bought.
+   * Cost is taken by walking buys newest-first until the open position is
+   * covered. Deriving it that way rather than draining a lot queue forward
+   * matters because an export starts mid-history: earlier sells can exceed the
+   * buys on file, and a forward pass would either go negative or, if clamped,
+   * strand lots and overstate the position (PLTR read 351 against an actual
+   * 300 that way).
+   */
   getStockPositionsWithCost(userId = 1, asOf = null, broker = null) {
     try {
-      // Use COALESCE so NULL quantity/amount don't silently zero out rows.
-      // asOf (YYYY-MM-DD) bounds to trades on/before that date for a point-in-time view.
+      // Individual rows, not aggregates: FIFO needs each buy's own price, and
+      // the split factor depends on each row's date.
       const rows = db.prepare(`
-        SELECT
-          symbol,
-          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE -COALESCE(quantity,0) END) AS position,
-          SUM(CASE WHEN is_buy = 1 THEN ABS(COALESCE(amount,0)) ELSE 0 END) AS total_cost,
-          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought,
-          trans_date
+        SELECT symbol, trans_date, is_buy,
+               COALESCE(quantity,0) AS qty,
+               ABS(COALESCE(amount,0)) AS amt
         FROM trades
         WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
           ${asOf ? 'AND trans_date <= ?' : ''}
           ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
-        GROUP BY symbol, trans_date
+        ORDER BY trans_date ASC
       `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
 
-      // Split adjustment has to happen per trade date, so this groups by
-      // (symbol, date) and aggregates here rather than in SQL. A pre-split buy
-      // is recorded in pre-split terms: 1 NFLX share at $1,200 became 10 at
-      // $120 after the 10:1. Share counts scale; the dollar amount does not.
       const splits = this.getSplits([...new Set(rows.map(r => r.symbol))])
       const acc = {}
       rows.forEach(r => {
+        // A pre-split buy is recorded in pre-split terms: 1 NFLX share at
+        // $1,200 became 10 at $120. Share counts scale, the cash paid does not.
         const f = this.splitFactor(splits[r.symbol], r.trans_date)
-        const a = acc[r.symbol] || (acc[r.symbol] = { position: 0, total_cost: 0, total_bought: 0 })
-        a.position += (r.position || 0) * f
-        a.total_bought += (r.total_bought || 0) * f
-        a.total_cost += (r.total_cost || 0)      // cash paid is unchanged by a split
+        const qty = (r.qty || 0) * f
+        if (!(qty > 0)) return
+        const a = acc[r.symbol] || (acc[r.symbol] = { position: 0, buys: [] })
+        if (r.is_buy === 1) {
+          a.position += qty
+          a.buys.push({ qty, perShare: (r.amt || 0) / qty })
+        } else {
+          a.position -= qty
+        }
       })
 
       const result = {}
       Object.entries(acc).forEach(([symbol, a]) => {
-        if (!(a.position > 0)) return
+        const position = Math.round(a.position * 1e6) / 1e6
+        if (!(position > 0)) return
+        // Newest buys first, taking only as many shares as are still held.
+        let need = position, cost = 0
+        for (let i = a.buys.length - 1; i >= 0 && need > 1e-9; i--) {
+          const take = Math.min(a.buys[i].qty, need)
+          cost += take * a.buys[i].perShare
+          need -= take
+        }
+        // `need` left over means the open shares predate the imported history,
+        // so price what's known and let the rest fall back to that same average
+        // rather than reporting a basis of zero.
+        const covered = position - need
         result[symbol] = {
-          position: Math.round(a.position * 1e6) / 1e6,
-          avgCost: a.total_bought > 0 ? Math.round(a.total_cost / a.total_bought * 100) / 100 : 0
+          position,
+          avgCost: covered > 1e-9 ? Math.round((cost / covered) * 100) / 100 : 0,
         }
       })
       console.log(`getStockPositionsWithCost: ${Object.keys(result).length} stock positions for user ${userId}`)
