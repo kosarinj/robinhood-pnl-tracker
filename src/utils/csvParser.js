@@ -22,7 +22,13 @@ export const parseTrades = (file) => {
             // Activity Date, Process Date, Settle Date, Instrument, Description, Trans Code, Quantity, Price, Amount
 
             const instrument = row['Instrument'] || row['Symbol'] || ''
-            const description = row['Description'] || ''
+            // Kept in step with the server parser: settlement rows carry an
+            // "Option Expiration for ..." prefix, which made them a different
+            // contract from the trade that opened them, so expiries never closed
+            // anything and were never booked.
+            const description = (row['Description'] || '')
+              .replace(/^Option\s+(?:Expiration|Assignment|Exercise(?:\/Assignment)?)\s+for\s+/i, '')
+              .trim()
 
             // Determine if it's an option - check description for "Put" or "Call"
             const descLower = description.toLowerCase()

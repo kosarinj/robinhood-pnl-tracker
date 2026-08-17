@@ -22,7 +22,18 @@ export const parseTrades = (file) => {
             // Activity Date, Process Date, Settle Date, Instrument, Description, Trans Code, Quantity, Price, Amount
 
             const instrument = row['Instrument'] || row['Symbol'] || ''
-            const description = row['Description'] || ''
+            const rawDescription = row['Description'] || ''
+            // Settlement rows are written as "Option Expiration for MRVL 8/7/2026
+            // Put $148.00". An option's identity here IS its description, so that
+            // prefix made the settlement a different contract from the trade that
+            // opened it: nothing ever matched, every expired option stayed open
+            // for good, and the expiry — a loss on a bought contract, the whole
+            // premium on a sold one — was never booked. parseOptionDescription
+            // returns null on the prefixed form, so it couldn't even name the
+            // underlying and fell back to the first word, "OPTION".
+            const description = rawDescription
+              .replace(/^Option\s+(?:Expiration|Assignment|Exercise(?:\/Assignment)?)\s+for\s+/i, '')
+              .trim()
 
             // Determine if it's an option - check description for "Put" or "Call"
             const descLower = description.toLowerCase()

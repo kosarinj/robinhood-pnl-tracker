@@ -91,4 +91,65 @@ await test('option codes are untouched by the BC change', async () => {
   assert.ok(btc.isOption && sto.isOption, 'both should parse as options')
 })
 
+console.log('\nOption settlement rows')
+
+const OPENING = 'MRVL 8/7/2026 Put $148.00'
+const EXPIRY_DESC = `Option Expiration for ${OPENING}`
+
+await test('an expiry resolves to the same symbol as the trade that opened it', async () => {
+  // The bug: an option's identity here IS its description, so the prefix made
+  // the settlement a different contract. Nothing matched, so every expired
+  // option stayed open for good and the expiry was never booked.
+  const { trades } = await parseTrades(csv(
+    `"8/5/2026","8/5/2026","8/5/2026","MRVL","${OPENING}","BTO","1","$2.00","($200.00)"`,
+    `"8/7/2026","8/7/2026","8/7/2026","MRVL","${EXPIRY_DESC}","OEXP","1S","",""`
+  ))
+  assert.equal(trades.length, 2, 'the expiry must survive the price filter')
+  assert.equal(trades[0].symbol, trades[1].symbol, 'both rows must name one contract')
+  assert.equal(trades[1].symbol, OPENING)
+})
+
+await test('the expiry is flagged as one, and "1S" reads as one contract', async () => {
+  const { trades } = await parseTrades(csv(
+    `"8/7/2026","8/7/2026","8/7/2026","MRVL","${EXPIRY_DESC}","OEXP","1S","",""`
+  ))
+  const t = trades[0]
+  assert.equal(t.isExpiry, true)
+  assert.equal(t.contracts, 1, 'the S suffix must not break the contract count')
+  assert.equal(t.isOption, true)
+})
+
+await test('a multi-contract expiry keeps its size', async () => {
+  const { trades } = await parseTrades(csv(
+    `"8/7/2026","8/7/2026","8/7/2026","PLTR","Option Expiration for PLTR 8/7/2026 Put $108.00","OEXP","3S","",""`
+  ))
+  assert.equal(trades[0].contracts, 3)
+})
+
+await test('the underlying is recoverable, not the literal word "Option"', async () => {
+  // Unstripped, symbol.split(' ')[0] gave "OPTION", which passes a ticker
+  // sanity check, so 414 expiries were filed under a phantom ticker.
+  const { trades } = await parseTrades(csv(
+    `"8/7/2026","8/7/2026","8/7/2026","MRVL","${EXPIRY_DESC}","OEXP","1S","",""`
+  ))
+  assert.notEqual(trades[0].symbol.split(' ')[0].toUpperCase(), 'OPTION')
+  assert.equal(trades[0].symbol.split(' ')[0].toUpperCase(), 'MRVL')
+})
+
+await test('assignment and exercise prefixes are stripped too', async () => {
+  for (const verb of ['Assignment', 'Exercise', 'Exercise/Assignment']) {
+    const { trades } = await parseTrades(csv(
+      `"8/7/2026","8/7/2026","8/7/2026","MRVL","Option ${verb} for ${OPENING}","OASGN","1","",""`
+    ))
+    assert.equal(trades[0].symbol, OPENING, `"${verb}" was not stripped`)
+  }
+})
+
+await test('an ordinary option description is left alone', async () => {
+  const { trades } = await parseTrades(csv(
+    `"8/5/2026","8/5/2026","8/5/2026","MRVL","${OPENING}","BTO","1","$2.00","($200.00)"`
+  ))
+  assert.equal(trades[0].symbol, OPENING)
+})
+
 console.log(`\n${passed} passed\n`)

@@ -388,6 +388,37 @@ try {
   console.error('buy-to-cover migration error:', e.message)
 }
 
+// Migration: strip the settlement prefix from option symbols.
+//
+// Robinhood writes an expiry as "Option Expiration for MRVL 8/7/2026 Put $148.00".
+// An option's identity in this table IS its description, so that prefix made the
+// settlement a different contract from the trade that opened it. Nothing matched:
+// every expired option stayed open for good, and the expiry was never booked —
+// a loss on a bought contract, the whole premium kept on a sold one. Reimporting
+// cannot fix these, because the dedup key includes the symbol, so the stored rows
+// have to be rewritten in place.
+try {
+  const prefixes = [
+    'Option Expiration for ',
+    'Option Assignment for ',
+    'Option Exercise for ',
+    'Option Exercise/Assignment for ',
+  ]
+  let total = 0
+  for (const p of prefixes) {
+    const r = db.prepare(
+      `UPDATE trades
+          SET symbol = TRIM(SUBSTR(symbol, ?)),
+              description = TRIM(SUBSTR(COALESCE(description, symbol), ?))
+        WHERE COALESCE(is_option,0) = 1 AND symbol LIKE ?`
+    ).run(p.length + 1, p.length + 1, `${p}%`)
+    total += r.changes || 0
+  }
+  if (total > 0) console.log(`✅ Normalized ${total} option settlement symbol(s)`)
+} catch (e) {
+  console.error('option settlement symbol migration error:', e.message)
+}
+
 // Migration: per-user view preferences.
 //
 // These lived in localStorage, which makes them per DEVICE. Several of them
@@ -2088,8 +2119,12 @@ export class DatabaseService {
         symbol,
         SUM(CASE WHEN trans_code = 'BTO' THEN COALESCE(contracts, 1) ELSE 0 END) as bto_contracts,
         SUM(CASE WHEN trans_code = 'STO' THEN COALESCE(contracts, 1) ELSE 0 END) as sto_contracts,
-        SUM(CASE WHEN trans_code IN ('STC', 'OEXP', 'OASGN', 'OEXC') THEN COALESCE(contracts, 1) ELSE 0 END) as ltc_contracts,
+        SUM(CASE WHEN trans_code = 'STC' THEN COALESCE(contracts, 1) ELSE 0 END) as stc_contracts,
         SUM(CASE WHEN trans_code = 'BTC' THEN COALESCE(contracts, 1) ELSE 0 END) as btc_contracts,
+        -- Settlements are kept apart from STC because they can close EITHER side.
+        -- Counting them as long closes only, as before, left an expired short
+        -- open for good.
+        SUM(CASE WHEN trans_code IN ('OEXP', 'OASGN', 'OEXC') THEN COALESCE(contracts, 1) ELSE 0 END) as settled_contracts,
         SUM(CASE WHEN trans_code = 'BTO' THEN amount ELSE 0 END) as total_paid,
         SUM(CASE WHEN trans_code = 'STO' THEN amount ELSE 0 END) as total_received,
         MAX(trans_date) as last_trade_date
@@ -2100,16 +2135,29 @@ export class DatabaseService {
     `).all(...[userId, ...(broker ? [broker] : [])])
 
     return rows
-      .map(r => ({
-        symbol: r.symbol,
-        net_long: (r.bto_contracts || 0) - (r.ltc_contracts || 0),
-        net_short: (r.sto_contracts || 0) - (r.btc_contracts || 0),
-        bto_contracts: r.bto_contracts || 0,
-        sto_contracts: r.sto_contracts || 0,
-        total_paid: r.total_paid || 0,
-        total_received: r.total_received || 0,
-        last_trade_date: r.last_trade_date
-      }))
+      .map(r => {
+        // A settlement closes whichever side is actually open. The quantity's
+        // "1S" suffix looks like it marks a short, but 405 of 413 sit on
+        // contracts opened with BTO, so it can't be trusted for direction —
+        // matching the contract and closing the open side is what holds.
+        // Longs first, since an expiring long is the common case, then any
+        // remainder against the short side.
+        const longOpen = (r.bto_contracts || 0) - (r.stc_contracts || 0)
+        const shortOpen = (r.sto_contracts || 0) - (r.btc_contracts || 0)
+        const settled = r.settled_contracts || 0
+        const settleLong = Math.min(settled, Math.max(0, longOpen))
+        const settleShort = Math.min(settled - settleLong, Math.max(0, shortOpen))
+        return {
+          symbol: r.symbol,
+          net_long: longOpen - settleLong,
+          net_short: shortOpen - settleShort,
+          bto_contracts: r.bto_contracts || 0,
+          sto_contracts: r.sto_contracts || 0,
+          total_paid: r.total_paid || 0,
+          total_received: r.total_received || 0,
+          last_trade_date: r.last_trade_date,
+        }
+      })
       .filter(r => r.net_long > 0 || r.net_short > 0)
   }
 
