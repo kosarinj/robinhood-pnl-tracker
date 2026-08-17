@@ -2340,11 +2340,39 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       const openEntryCount = {}
       openEntries.forEach(e => { openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
 
+      // Open LONG legs. Everything below used to run off short_call_entries only,
+      // so a bought contract contributed nothing to Open P&L, Day P&L, the theta
+      // projection or the what-if. On a vertical that shows the short leg's loss
+      // on a rally with no offsetting gain from the long leg, and no shares to
+      // add a positive either — the day reads far worse than the position did,
+      // which is indistinguishable from a sign error.
+      const openLongs = openPositions
+        .filter(p => p.net_long > 0)
+        .map(p => {
+          const parsed = parseOptionDescription(p.symbol)
+          if (!parsed) return null
+          return {
+            symbol: p.symbol,
+            ticker: parsed.ticker,
+            parsed,
+            contracts: p.net_long,
+            // Per SHARE, to match how the short side carries premium.
+            costPerShare: p.bto_contracts > 0 ? Math.abs(p.total_paid) / p.bto_contracts / 100 : 0,
+          }
+        })
+        .filter(Boolean)
+
+      // Every leg that needs a mark, long or short.
+      const priceLegs = [
+        ...openEntries.map(e => ({ symbol: e.symbol, ticker: e.ticker })),
+        ...openLongs.map(l => ({ symbol: l.symbol, ticker: l.ticker })),
+      ].filter((v, i, a) => a.findIndex(x => x.symbol === v.symbol) === i)
+
       // Fetch current per-share option prices for the open short calls (same as tracker):
       // real quote mid → Black–Scholes model mark → stale daily close.
       const optFresh = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
-      if (polygonKey && openEntries.length > 0) {
-        await Promise.all(openEntries.map(async entry => {
+      if (polygonKey && priceLegs.length > 0) {
+        await Promise.all(priceLegs.map(async entry => {
           const polyTicker = toPolygonTicker(entry.symbol)
           const parsed = parseOptionDescription(entry.symbol)
           if (!polyTicker || !parsed) return
@@ -2370,7 +2398,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         }))
         // Resolve any missing underlying stock prices (Yahoo fallback), like the tracker,
         // so the Black–Scholes model has an underlying and doesn't fall to the stale close.
-        const openTickers = [...new Set(openEntries.map(e => e.ticker).filter(Boolean))]
+        const openTickers = [...new Set(priceLegs.map(e => e.ticker).filter(Boolean))]
         const missing = openTickers.filter(t => !(stockByTicker[t] > 0))
         if (missing.length > 0) {
           try {
@@ -2386,7 +2414,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // wrong way on a big stock day.
       const openPrevUnderlying = {}
       {
-        const openTickers = [...new Set(openEntries.map(e => e.ticker).filter(Boolean))]
+        const openTickers = [...new Set(priceLegs.map(e => e.ticker).filter(Boolean))]
         if (openTickers.length > 0) {
           try {
             const dc = await priceService.fetchDailyChange(openTickers)
@@ -2493,6 +2521,72 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
               }
             }
           }
+        }
+      })
+
+      // ── Long legs ──
+      // Same four figures as the shorts above, with the sign the other way up: a
+      // long gains when its mark RISES, so P&L is mark − cost rather than
+      // premium − mark. Marked from the same quotes so the two sides of a spread
+      // are comparable. No model fallback here — modelOptionMark anchors to a
+      // short call's sale premium and has nothing to say about a bought
+      // contract, so a leg with no mark contributes nothing rather than a guess.
+      openLongs.forEach(leg => {
+        const ticker = leg.ticker
+        if (!ticker) return
+        const shares = leg.contracts * 100
+        const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        if (!(nowMark > 0)) return
+
+        openUnrealizedByTicker[ticker] =
+          (openUnrealizedByTicker[ticker] || 0) + (nowMark - leg.costPerShare) * shares
+
+        // Today's move. Long: dearer is better, so now − prev.
+        const prevMark = optPrevClose[leg.symbol]
+        if (prevMark > 0) {
+          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + (nowMark - prevMark) * shares
+        }
+
+        const S = stockByTicker[ticker]
+        if (!(S > 0)) return
+        const expiry = `${leg.parsed.year}-${leg.parsed.month}-${leg.parsed.day}`
+        const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
+        const T0 = yrs(new Date(expiry).getTime() - Date.now())
+        if (!(T0 > 0)) return
+        let sigma = impliedVol(nowMark, S, leg.parsed.strike, T0, RISK_FREE_RATE, leg.parsed.type)
+        if (!(sigma > 0)) sigma = 0.001
+
+        for (const months of PROJECT_MONTHS) {
+          const T1 = T0 - months / 12
+          let projMark, expired = false
+          if (T1 <= 0) {
+            expired = true
+            projMark = leg.parsed.type === 'put'
+              ? Math.max(0, leg.parsed.strike - S)
+              : Math.max(0, S - leg.parsed.strike)
+          } else {
+            projMark = repriceFromClose({
+              type: leg.parsed.type, closeMark: nowMark,
+              S0: S, S1: S, K: leg.parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
+            })
+          }
+          if (projMark == null) continue
+          openProjectedByTicker[months][ticker] =
+            (openProjectedByTicker[months][ticker] || 0) + (projMark - leg.costPerShare) * shares
+          const legs = openProjectedLegs[months][ticker] || { expired: 0, total: 0 }
+          legs.total += 1
+          if (expired) legs.expired += 1
+          openProjectedLegs[months][ticker] = legs
+        }
+
+        for (const move of SCENARIO_MOVES) {
+          const shocked = repriceFromClose({
+            type: leg.parsed.type, closeMark: nowMark,
+            S0: S, S1: S * (1 + move / 100), K: leg.parsed.strike, T0, T1: T0, sigma, r: RISK_FREE_RATE,
+          })
+          if (shocked == null) continue
+          openScenarioByTicker[move][ticker] =
+            (openScenarioByTicker[move][ticker] || 0) + (shocked - leg.costPerShare) * shares
         }
       })
     } else {

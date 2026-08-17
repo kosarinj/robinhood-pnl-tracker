@@ -88,4 +88,55 @@ test('a deep ITM call with no vol information still reprices sanely', () => {
   assert.ok(up > deepMark, `deep ITM call should gain with the stock: ${up}`)
 })
 
+console.log('\nLong legs offset short ones')
+
+// A vertical: short the 105, long the 110, both three months out.
+const SHORT_K = 105, LONG_K = 110
+const shortMark = 3.0, longMark = 1.6
+const shortSigma = impliedVol(shortMark, S, SHORT_K, T, RISK_FREE_RATE, 'call')
+const longSigma = impliedVol(longMark, S, LONG_K, T, RISK_FREE_RATE, 'call')
+const longCostPerShare = 1.4      // paid 1.40/share, now marked 1.60
+
+const legAt = (movePct) => {
+  const S1 = S * (1 + movePct / 100)
+  const sm = repriceFromClose({ type: 'call', closeMark: shortMark, S0: S, S1, K: SHORT_K, T0: T, T1: T, sigma: shortSigma, r: RISK_FREE_RATE })
+  const lm = repriceFromClose({ type: 'call', closeMark: longMark, S0: S, S1, K: LONG_K, T0: T, T1: T, sigma: longSigma, r: RISK_FREE_RATE })
+  return {
+    short: (PREMIUM - sm) * SHARES,              // premium kept − cost to buy back
+    long: (lm - longCostPerShare) * SHARES,      // mark − what was paid
+  }
+}
+
+test('a long call gains as the stock rises, opposite the short', () => {
+  const up = legAt(10)
+  assert.ok(up.long > 0, `long leg should gain on a rally: ${up.long}`)
+  assert.ok(up.short < 0, `short leg should lose on a rally: ${up.short}`)
+})
+
+test('on a rally the pair loses strictly less than the short leg alone', () => {
+  // The bug: only short legs were counted, so a rally showed the full short-leg
+  // loss with nothing offsetting it. That read far worse than the position did.
+  for (const move of [5, 10, 15, 20, 30]) {
+    const { short, long } = legAt(move)
+    assert.ok(short + long > short,
+      `at +${move}% the pair (${(short + long).toFixed(2)}) should beat short-only (${short.toFixed(2)})`)
+    assert.ok(long > 0, `at +${move}% the long leg should be positive, got ${long.toFixed(2)}`)
+  }
+})
+
+test('a long leg reduces the gain on a selloff rather than adding to it', () => {
+  // Symmetry check: the offset cuts both ways, so it isn't a free improvement.
+  const { short, long } = legAt(-10)
+  assert.ok(short > 0, 'short leg gains on a selloff')
+  assert.ok(long < 0, 'long leg loses on a selloff')
+  assert.ok(short + long < short, 'the pair must gain less than the short leg alone')
+})
+
+test('a 0% shock leaves each leg at its current value', () => {
+  // Keeps the what-if column continuous with Open P&L now that longs are in it.
+  const { short, long } = legAt(0)
+  assert.ok(Math.abs(short - (PREMIUM - shortMark) * SHARES) < 1e-6, `short ${short}`)
+  assert.ok(Math.abs(long - (longMark - longCostPerShare) * SHARES) < 1e-6, `long ${long}`)
+})
+
 console.log(`\n${passed} passed\n`)
