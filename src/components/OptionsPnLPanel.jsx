@@ -457,10 +457,19 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
     const histSlice = slice.filter(w => w.weekStart !== curWk)
 
     // Historical contribution — identical to bottom Total Net's histContrib
-    let histOpts = 0, histStk = 0, histOth = 0
+    //
+    // byUnderlying is CASH FLOW, not P&L: a contract with no closing trade is
+    // counted at its opening credit or debit with no mark against it, so an open
+    // short reads as its full premium and a bought option as a total loss. The
+    // endpoint also returns realizedByUnderlying, which is LIFO-matched realized
+    // P&L per closing trade — the same basis the YTD panel's Options Total uses.
+    // The headline is built from that; the cash-flow figure is kept and shown
+    // underneath, so if the two disagree it's visible rather than buried.
+    let histOpts = 0, histStk = 0, histOth = 0, histOptsFlow = 0
     histSlice.forEach(w => {
-      Object.entries(w.byUnderlying || {}).forEach(([ticker, optPnl]) => {
-        histOpts += optPnl
+      Object.entries(w.byUnderlying || {}).forEach(([ticker, flow]) => {
+        histOpts += w.realizedByUnderlying?.[ticker] ?? 0
+        histOptsFlow += flow
         histStk += w.stockDelta?.[ticker] ?? 0
       })
       histOth += Object.values(w.otherStockDelta || {}).reduce((s, v) => s + v, 0)
@@ -482,10 +491,12 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
     })
 
     const optionsVal = Math.round((optionsWeekPnL + histOpts) * 100) / 100
+    const optionsFlowVal = Math.round((optionsWeekPnL + histOptsFlow) * 100) / 100
     const stockVal = Math.round((totalStockPnL + histStk + overrideAdj) * 100) / 100
     const otherVal = Math.round((otherStockPnL + histOth) * 100) / 100
     return {
       options: optionsVal,
+      optionsCashFlow: optionsFlowVal,
       stock: stockVal,
       other: otherVal,
       net: Math.round((optionsVal + stockVal + otherVal) * 100) / 100,
@@ -671,16 +682,27 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
           {[
-            ['Options', cumulativeTotals.options],
-            ['Stock', cumulativeTotals.stock],
-            ['Other Stocks', cumulativeTotals.other],
-            ['Net Total', cumulativeTotals.net],
-          ].map(([label, val]) => (
-            <div key={label} style={{ padding: '10px 14px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${border}` }}>
+            ['Options', cumulativeTotals.options,
+              'Realized option P&L (LIFO-matched per closing trade) for past weeks, plus this week realized + unrealized. Same basis as Options Total in the positions table, so the two agree.'],
+            ['Stock', cumulativeTotals.stock, null],
+            ['Other Stocks', cumulativeTotals.other, null],
+            ['Net Total', cumulativeTotals.net, 'Options + Stock + Other Stocks.'],
+          ].map(([label, val, tip]) => (
+            <div key={label} title={tip || undefined} style={{ padding: '10px 14px', borderRadius: '8px', background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${border}` }}>
               <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', color: textMid, marginBottom: '4px' }}>{label}</div>
               <div style={{ fontSize: '1.4rem', fontWeight: '800', color: loading ? textMid : val >= 0 ? green : red, lineHeight: 1 }}>
                 {loading ? '…' : (val >= 0 ? '+' : '') + fmt(val)}
               </div>
+              {/* Cash flow used to BE this number. Kept in view because the two
+                  parting company means a closing trade went unmatched, and that
+                  is worth seeing rather than silently absorbing. */}
+              {label === 'Options' && !loading && cumulativeTotals.optionsCashFlow != null
+                && Math.abs(cumulativeTotals.optionsCashFlow - val) >= 1 && (
+                <div style={{ fontSize: '10px', color: textMid, marginTop: '4px', lineHeight: 1.3 }}
+                  title="Net cash in and out of option trades over the same weeks. Counts an open contract at its opening credit or debit with no mark, so it reads high on sold premium and low on bought options.">
+                  cash flow {(cumulativeTotals.optionsCashFlow >= 0 ? '+' : '') + fmt(cumulativeTotals.optionsCashFlow)}
+                </div>
+              )}
             </div>
           ))}
         </div>

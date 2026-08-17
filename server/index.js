@@ -2311,6 +2311,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const openPremiumByTicker = {}
     const openUnrealizedByTicker = {}
     const openDailyByTicker = {}   // option side of today's mark-to-market move (EOD close → now)
+    // Which basis each ticker's day move came from, so a figure that disagrees
+    // with a broker can be explained instead of guessed at.
+    const dayBasisByTicker = {}    // ticker -> { market: n, model: n }
     // Theta projection: what Open P&L becomes in 1/2/3 months if the underlying
     // doesn't move. Keyed [months][ticker].
     const PROJECT_MONTHS = [1, 2, 3]
@@ -2457,10 +2460,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           //   • live quote  → yesterday's market close vs today's quote
           //   • modeled LEAP → same Black–Scholes model at yesterday's vs today's underlying
           const prevMkt = optPrevClose[entry.symbol]
+          // Today's market print, independent of what the LEVEL was marked at.
+          // The model wins for the level because an illiquid contract's stale
+          // close freezes, but the day's MOVE is a different question: when the
+          // market printed at both ends, that difference is the actual move and
+          // beats any model of it. Black-Scholes deltas on a modelled contract
+          // overstate how much a short call lost on a rally, which is what put
+          // the day at -485 against a broker's +900.
+          const todayMkt = optFresh[entry.symbol] ?? optClose[entry.symbol] ?? null
           let dayOptPerShare = null
-          if (markBasis !== 'model' && prevMkt > 0) {
-            // Market vs market: a live quote or today's close against yesterday's.
-            dayOptPerShare = prevMkt - currentOptionPrice
+          if (todayMkt > 0 && prevMkt > 0) {
+            // Market at both ends: a live quote or today's print against
+            // yesterday's close.
+            dayOptPerShare = prevMkt - todayMkt
           } else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) {
             const mNow = modelOptionMark(entry, parsed, stockByTicker[ticker])
             const mPrev = modelOptionMark(entry, parsed, openPrevUnderlying[ticker])
@@ -2474,6 +2486,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // way. Reporting nothing is honest; reporting that number is not.
           if (dayOptPerShare != null) {
             openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
+            const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
+            if (todayMkt > 0 && prevMkt > 0) bs.market += 1; else bs.model += 1
           }
 
           // ── Theta projection ──
@@ -2557,6 +2571,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const prevMark = optPrevClose[leg.symbol]
         if (prevMark > 0) {
           openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + (nowMark - prevMark) * shares
+          const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
+          bs.market += 1   // longs have no model fallback, so this is always a print
         }
 
         const S = stockByTicker[ticker]
@@ -2819,6 +2835,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           dayPnl,
           dayStockPnl,
           dayOptionPnl,
+          // 'market' when every option leg's day move came from real prints at
+          // both ends, 'model' when none did, 'mixed' in between. A model-derived
+          // day move is an estimate of the move, not the move — worth being able
+          // to see when a figure disagrees with the broker.
+          dayOptionBasis: (() => {
+            const bs = dayBasisByTicker[e.ticker]
+            if (!bs) return null
+            if (bs.model === 0) return 'market'
+            if (bs.market === 0) return 'model'
+            return 'mixed'
+          })(),
           dayStockChangePct: dc ? dc.pct : null
         }
       })

@@ -671,9 +671,16 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
 
     { key: 'dayPnl', label: 'Day P&L', sort: 'dayPnl', borderLeft: '1px',
       title: 'Today’s mark-to-market move: shares × stock move since yesterday’s close, plus open options.',
-      cell: (r) => <span title={r.dayPnl != null ? `Stock ${r.dayStockPnl != null ? fmt(r.dayStockPnl) : '—'} + options ${r.dayOptionPnl != null ? fmt(r.dayOptionPnl) : '—'}` : 'No prior-day close available yet'}
+      cell: (r) => <span title={r.dayPnl != null
+          ? `Stock ${r.dayStockPnl != null ? fmt(r.dayStockPnl) : '—'} + options ${r.dayOptionPnl != null ? fmt(r.dayOptionPnl) : '—'}` +
+            (r.dayOptionBasis === 'market' ? ' · option move from real prints at both ends'
+             : r.dayOptionBasis === 'model' ? ' · option move MODELLED (no market print both ends) — an estimate of the move, not the move'
+             : r.dayOptionBasis === 'mixed' ? ' · some legs modelled, some from real prints'
+             : '')
+          : 'No prior-day close available yet'}
         style={{ fontWeight: 700, color: pnlColor(r.dayPnl, isDark) }}>
-        {r.dayPnl != null ? `${r.dayPnl >= 0 ? '+' : ''}${fmt(r.dayPnl)}` : '—'}</span>,
+        {r.dayPnl != null ? `${r.dayPnl >= 0 ? '+' : ''}${fmt(r.dayPnl)}` : '—'}
+        {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.dayPnl, isDark), fontWeight: 700, fontSize: 15 }}>{t.dayPnl != null ? `${t.dayPnl >= 0 ? '+' : ''}${fmt(t.dayPnl)}` : '—'}</span> },
 
     { key: 'vsStockPct', label: 'vs Stock %', borderLeft: '1px',
