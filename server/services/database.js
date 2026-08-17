@@ -2637,20 +2637,21 @@ export class DatabaseService {
 
   // ── Stock splits ────────────────────────────────────────────────────────
   /**
-   * Split adjustment is off unless SPLIT_ADJUSTMENT=on.
+   * Split adjustment is ON unless SPLIT_ADJUSTMENT=off.
    *
-   * The adjustment multiplies share counts, so when it is wrong it is wrong
-   * everywhere at once and quietly — a position shrinks, and a position that
-   * shrinks to nothing takes its unrealized P&L with it and comes back as a
-   * realized gain. That is a bad failure mode to leave switched on while
-   * reported share counts are still unexplained.
+   * It was switched off while wrong RDDT and PLTR share counts were being
+   * chased. Splits turned out to be innocent — the cause was Buy-to-Cover rows
+   * imported as sales — and leaving it off cost real accuracy: NFLX split 10:1
+   * on 2025-11-17, so pre-split buys sat at a ~$188 average against a ~$76
+   * price and reported roughly -$11,400 that was never lost.
    *
-   * Off reads exactly as the app did before the feature landed: every factor
-   * is 1. The table and the refresh keep working, so nothing is lost and
-   * flipping this back on needs no code change.
+   * Back on by default, now that a stored reading is reconciled against Yahoo
+   * on every refresh, an implausible ratio is refused, and a bad row can be
+   * deleted outright. SPLIT_ADJUSTMENT=off still disables it, which reads
+   * exactly as the app did before the feature landed: every factor is 1.
    */
   splitAdjustmentEnabled() {
-    return String(process.env.SPLIT_ADJUSTMENT || 'off').toLowerCase() === 'on'
+    return String(process.env.SPLIT_ADJUSTMENT || 'on').toLowerCase() !== 'off'
   }
 
   // What the table actually holds, whatever the switch says. Inspection and
