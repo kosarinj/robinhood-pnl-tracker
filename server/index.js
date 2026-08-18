@@ -2479,34 +2479,44 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           //   • live quote  → yesterday's market close vs today's quote
           //   • modeled LEAP → same Black–Scholes model at yesterday's vs today's underlying
           const prevMkt = optPrevClose[entry.symbol]
-          // Today's market print, independent of what the LEVEL was marked at.
-          // The model wins for the level because an illiquid contract's stale
-          // close freezes, but the day's MOVE is a different question: when the
-          // market printed at both ends, that difference is the actual move and
-          // beats any model of it. Black-Scholes deltas on a modelled contract
-          // overstate how much a short call lost on a rally, which is what put
-          // the day at -485 against a broker's +900.
-          const todayMkt = optFresh[entry.symbol] ?? optClose[entry.symbol] ?? null
+          // Order matters, and both extremes have burned us. A LIVE quote at
+          // both ends is the actual move and beats any model of it — modelled
+          // deltas overstated a short call's loss on a rally and put the day at
+          // -485 against a broker's +900. But a STALE daily close is not
+          // today's market data, and treating it as if it were invents moves on
+          // contracts that barely trade. So: live quote, then the model, then
+          // two daily prints.
           let dayOptPerShare = null
-          if (todayMkt > 0 && prevMkt > 0) {
-            // Market at both ends: a live quote or today's print against
-            // yesterday's close.
-            dayOptPerShare = prevMkt - todayMkt
+          if (optFresh[entry.symbol] > 0 && prevMkt > 0) {
+            // A LIVE quote against yesterday's close. Both market, both current.
+            dayOptPerShare = prevMkt - optFresh[entry.symbol]
           } else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) {
             const mNow = modelOptionMark(entry, parsed, stockByTicker[ticker])
             const mPrev = modelOptionMark(entry, parsed, openPrevUnderlying[ticker])
             if (mNow > 0 && mPrev > 0) dayOptPerShare = mPrev - mNow
           }
-          // Deliberately no last-resort fallback. Subtracting yesterday's MARKET
-          // close from a MODEL mark measures the gap between the model and the
-          // market, not a day's move: the model runs richer or cheaper than the
-          // print, so the difference persists whatever the stock did and shows up
-          // as a fixed daily figure that never reconciles. MRVL read -835 that
-          // way. Reporting nothing is honest; reporting that number is not.
+          // Last resort: two daily prints. Deliberately BELOW the model, because
+          // on a contract that barely trades neither print is necessarily from
+          // the session it claims — a 2028 LEAP can carry a close from days ago
+          // against a previous_close from days before that, and differencing
+          // them invents a move that never happened. A short TQQQ $110 call read
+          // roughly +$643 that way on a day worth about +$150, which flipped the
+          // whole row positive while the stock was down 5%. The model tracks the
+          // underlying and is the better answer for exactly these contracts.
+          if (dayOptPerShare == null && optClose[entry.symbol] > 0 && prevMkt > 0
+              && markBasis !== 'model') {
+            dayOptPerShare = prevMkt - optClose[entry.symbol]
+          }
+          // Still nothing means no comparable pair at all. Subtracting a market
+          // close from a MODEL mark measures the gap between model and market,
+          // not a day's move — it persists whatever the stock did and never
+          // reconciles. MRVL read -835 that way. Reporting nothing is honest.
           if (dayOptPerShare != null) {
             openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
             const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
-            if (todayMkt > 0 && prevMkt > 0) bs.market += 1; else bs.model += 1
+            if (optFresh[entry.symbol] > 0 && prevMkt > 0) bs.market += 1
+            else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) bs.model += 1
+            else bs.market += 1     // two daily prints
           }
 
           // ── Theta projection ──
