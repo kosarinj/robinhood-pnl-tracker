@@ -504,6 +504,50 @@ export class PriceService {
       }
       if (i + batchSize < symbols.length) await new Promise(r => setTimeout(r, 400))
     }
+
+    // Fall back to the v8 chart endpoint for anything spark didn't answer for.
+    //
+    // spark is on the v7 family, which Yahoo has been progressively closing —
+    // v7/finance/quote already 401s, which is what broke Current Stock in the
+    // short-call tracker. When this returns nothing the caller has no daily
+    // price, and Day P&L was then published from the option side alone, which
+    // inverts the sign on a down day. v8/chart is what the rest of the app
+    // relies on; it answers per symbol, so it costs a call each but only for
+    // the ones actually missing.
+    const missing = symbols.filter(s => !result[s])
+    for (const symbol of missing) {
+      try {
+        const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`
+        const resp = await axios.get(url, { timeout: 12000, headers })
+        const r0 = resp.data?.chart?.result?.[0]
+        const meta = r0?.meta || {}
+        const ts = r0?.timestamp || []
+        const closes = r0?.indicators?.quote?.[0]?.close || []
+        const bars = ts.map((t, i) => ({ t, c: closes[i] })).filter(b => b.c > 0)
+        if (bars.length < 2) continue
+        const today = new Date().toISOString().slice(0, 10)
+        const current = meta.regularMarketPrice > 0 ? meta.regularMarketPrice : bars[bars.length - 1].c
+        const lastDate = new Date(bars[bars.length - 1].t * 1000).toISOString().slice(0, 10)
+        // Same rule as above: if today's forming bar is present, yesterday's
+        // close is the one before it.
+        const prevClose = lastDate === today ? bars[bars.length - 2].c : bars[bars.length - 1].c
+        if (current > 0 && prevClose > 0) {
+          result[symbol] = {
+            current,
+            prevClose,
+            change: Math.round((current - prevClose) * 100) / 100,
+            pct: Math.round(((current - prevClose) / prevClose) * 10000) / 100,
+          }
+        }
+      } catch (err) {
+        console.warn(`Daily change fallback failed for ${symbol}:`, err.response?.status || err.message)
+      }
+    }
+    if (missing.length) {
+      const stillMissing = symbols.filter(s => !result[s])
+      console.log(`Daily change: spark missed ${missing.length}, chart recovered ${missing.length - stillMissing.length}` +
+        (stillMissing.length ? `, still missing ${stillMissing.join(',')}` : ''))
+    }
     return result
   }
 

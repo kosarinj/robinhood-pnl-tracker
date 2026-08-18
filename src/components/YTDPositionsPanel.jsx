@@ -677,9 +677,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
              : r.dayOptionBasis === 'model' ? ' · option move MODELLED (no market print both ends) — an estimate of the move, not the move'
              : r.dayOptionBasis === 'mixed' ? ' · some legs modelled, some from real prints'
              : '')
-          : 'No prior-day close available yet'}
+          : r.dayIncomplete
+            ? 'No daily stock price for this name, so the day can\'t be reported. Showing the option side alone would flip the sign on a down day — the shares fall while short options gain.'
+            : 'No prior-day close available yet'}
         style={{ fontWeight: 700, color: pnlColor(r.dayPnl, isDark) }}>
         {r.dayPnl != null ? `${r.dayPnl >= 0 ? '+' : ''}${fmt(r.dayPnl)}` : '—'}
+        {r.dayIncomplete && <span style={{ fontSize: 10, color: '#f59e0b' }}> no px</span>}
         {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.dayPnl, isDark), fontWeight: 700, fontSize: 15 }}>{t.dayPnl != null ? `${t.dayPnl >= 0 ? '+' : ''}${fmt(t.dayPnl)}` : '—'}</span> },
 

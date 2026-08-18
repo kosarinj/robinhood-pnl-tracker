@@ -2821,8 +2821,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const dayStockPnl = (sp && sp.position > 0 && dc && dc.prevClose > 0)
           ? r2(sp.position * (dc.current - dc.prevClose)) : null
         const dayOptionPnl = openDailyByTicker[e.ticker] != null ? r2(openDailyByTicker[e.ticker]) : null
-        const dayPnl = (dayStockPnl != null || dayOptionPnl != null)
-          ? r2((dayStockPnl || 0) + (dayOptionPnl || 0)) : null
+        // A day is only reportable when every side of the position is in it.
+        // Shares held but no daily price left dayStockPnl null, and this then
+        // published the OPTION side alone as though it were the whole day. On a
+        // down day that inverts the answer — the stock falls while short options
+        // gain — so the column read positive against a broker's -2,200. A
+        // missing half is not a small error in a total, it is a different
+        // number. Report nothing and say why instead.
+        const missingStockDay = !!(sp && sp.position > 0) && dayStockPnl == null
+        const dayPnl = missingStockDay ? null
+          : (dayStockPnl != null || dayOptionPnl != null)
+            ? r2((dayStockPnl || 0) + (dayOptionPnl || 0)) : null
         // Only surface realized stock P&L for CLOSED positions (no open shares) — e.g. JPM.
         // Open positions keep showing just their unrealized (open-share) gain, as before, so
         // active names aren't inflated by all-time realized gains.
@@ -2882,6 +2891,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           dayPnl,
           dayStockPnl,
           dayOptionPnl,
+          // True when shares are held but no daily price arrived, so the day
+          // can't be reported. Surfaced rather than hidden: the failure mode it
+          // replaces was silent and inverted the sign.
+          dayIncomplete: missingStockDay,
           // 'market' when every option leg's day move came from real prints at
           // both ends, 'model' when none did, 'mixed' in between. A model-derived
           // day move is an estimate of the move, not the move — worth being able
