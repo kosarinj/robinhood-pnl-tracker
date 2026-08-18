@@ -152,8 +152,14 @@ try {
   })
 
   test('a short position moves opposite the underlying', () => {
-    if (Math.abs(p.underlyingMovePct) < 0.01) return   // flat — nothing to assert
-    // Short CALL: stock up, seller loses.
+    // Only holds once the move is big enough to outweigh decay. The reprice
+    // advances TIME as well as price — T1 runs from now to expiry, T0 from the
+    // calibration close — so over a small move theta dominates: the contract
+    // gets cheaper and the seller GAINS even as the stock ticks up. That is
+    // correct, and asserting a strict sign here failed on a real 0.13% day at
+    // +$0.03. The genuine invariant, that a short call loses when its own mark
+    // rises, is asserted separately above and doesn't depend on the underlying.
+    if (Math.abs(p.underlyingMovePct) < 0.5) return
     const opposite = (p.underlyingMovePct > 0) === (p.changePerShare < 0)
     assert.ok(opposite || Math.abs(p.changePerShare) < 0.01,
       `underlying ${p.underlyingMovePct}% but short-call P&L ${p.changePerShare}`)

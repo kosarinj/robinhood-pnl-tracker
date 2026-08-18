@@ -2385,9 +2385,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // Every leg that needs a mark, long or short.
       const priceLegs = [
         ...openEntries.map(e => ({ symbol: e.symbol, ticker: e.ticker })),
-        // Only priced when they'll actually be used, so the legacy basis doesn't
-        // spend Polygon calls on marks it discards.
-        ...(corrected ? openLongs.map(l => ({ symbol: l.symbol, ticker: l.ticker })) : []),
+        // Priced on both bases: the legacy basis still needs these for the day
+        // move, even though it leaves them out of the cumulative figures.
+        ...openLongs.map(l => ({ symbol: l.symbol, ticker: l.ticker })),
       ].filter((v, i, a) => a.findIndex(x => x.symbol === v.symbol) === i)
 
       // Fetch current per-share option prices for the open short calls (same as tracker):
@@ -2576,15 +2576,21 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // are comparable. No model fallback here — modelOptionMark anchors to a
       // short call's sale premium and has nothing to say about a bought
       // contract, so a leg with no mark contributes nothing rather than a guess.
-      ;(corrected ? openLongs : []).forEach(leg => {
+      // Long legs always contribute TODAY'S MOVE, on both bases.
+      //
+      // Gating these behind the corrected basis was wrong for Day P&L. Open P&L
+      // and Net + Open are cumulative figures that were calibrated on short legs
+      // alone, so those stay as they were — but a DAY figure built from short
+      // calls only isn't a different convention, it's a partial one. This
+      // account holds far more bought contracts than sold (2,110 BTO against
+      // 348 STO), so leaving them out left the day dominated by a minority of
+      // the book and reading backwards against the broker on any real move.
+      openLongs.forEach(leg => {
         const ticker = leg.ticker
         if (!ticker) return
         const shares = leg.contracts * 100
         const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
         if (!(nowMark > 0)) return
-
-        openUnrealizedByTicker[ticker] =
-          (openUnrealizedByTicker[ticker] || 0) + (nowMark - leg.costPerShare) * shares
 
         // Today's move. Long: dearer is better, so now − prev.
         const prevMark = optPrevClose[leg.symbol]
@@ -2593,6 +2599,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
           bs.market += 1   // longs have no model fallback, so this is always a print
         }
+
+        // Everything below is cumulative, so it stays on the corrected basis
+        // only and Options YTD's Open P&L is untouched.
+        if (!corrected) return
+
+        openUnrealizedByTicker[ticker] =
+          (openUnrealizedByTicker[ticker] || 0) + (nowMark - leg.costPerShare) * shares
 
         const S = stockByTicker[ticker]
         if (!(S > 0)) return
