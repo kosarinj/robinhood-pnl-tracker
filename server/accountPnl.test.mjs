@@ -86,6 +86,53 @@ try {
     assert.deepEqual(databaseService.getCashFlows(1), a)
   })
 
+  console.log('\nShare transfers')
+
+  test('a journal is recorded, not dropped', () => {
+    const n = databaseService.saveShareTransfers(1, [
+      { broker: 'schwab', symbol: 'aapl', date: '2026-03-01', quantity: 100, direction: 'in', description: 'Journaled Shares' },
+    ])
+    assert.equal(n, 1)
+    assert.equal(databaseService.getShareTransfers(1, 'schwab').length, 1)
+  })
+
+  test('the symbol is normalised', () => {
+    assert.equal(databaseService.getShareTransfers(1, 'schwab')[0].symbol, 'AAPL')
+  })
+
+  test('re-importing the same export does not stack duplicates', () => {
+    // A second upload replays every journal row; without the UNIQUE they would
+    // accumulate and the correction would grow each time.
+    databaseService.saveShareTransfers(1, [
+      { broker: 'schwab', symbol: 'AAPL', date: '2026-03-01', quantity: 100, direction: 'in', description: 'Journaled Shares' },
+    ])
+    assert.equal(databaseService.getShareTransfers(1, 'schwab').length, 1)
+  })
+
+  test('the broker tab scopes transfers', () => {
+    databaseService.saveShareTransfers(1, [
+      { broker: 'webull', symbol: 'AAPL', date: '2026-03-01', quantity: 100, direction: 'out' },
+    ])
+    assert.equal(databaseService.getShareTransfers(1, 'webull').length, 1)
+    assert.equal(databaseService.getShareTransfers(1, 'schwab').length, 1)
+    assert.equal(databaseService.getShareTransfers(1).length, 2)
+  })
+
+  test('in and out of the same shares cancel across brokers', () => {
+    // Nothing left the account, so the correction must net to zero once both
+    // sides are in view — otherwise the All tab would inherit the distortion.
+    const all = databaseService.getShareTransfers(1)
+    const net = all.reduce((s, t) => s + (t.direction === 'out' ? 1 : -1) * t.quantity, 0)
+    assert.equal(net, 0)
+  })
+
+  test('a transfer with no quantity is ignored', () => {
+    const n = databaseService.saveShareTransfers(1, [
+      { broker: 'schwab', symbol: 'MSFT', date: '2026-03-02', quantity: 0, direction: 'in' },
+    ])
+    assert.equal(n, 0)
+  })
+
   console.log(`\n${passed} passed\n`)
 } catch (e) {
   console.error('\nTest harness error:', e)

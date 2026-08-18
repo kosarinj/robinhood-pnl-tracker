@@ -500,6 +500,9 @@ io.on('connection', (socket) => {
       // Parse trades, dividends/interest, and deposits
       let trades, dividendsAndInterest, deposits = [], totalPrincipal = 0
       let importWarnings = []
+      // Share journals: moved, not traded. Parsed all along and then dropped,
+      // which left per-broker P&L half-counted at both ends.
+      let shareTransfers = []
       if (broker === 'webull') {
         // Webull's orders export carries no cash movements, so there are no
         // deposits or dividends to pull out of it.
@@ -520,6 +523,7 @@ io.on('connection', (socket) => {
         dividendsAndInterest = parsed.dividendsAndInterest
         deposits = parsed.deposits
         totalPrincipal = parsed.totalPrincipal
+        shareTransfers = parsed.transfers || []
         importWarnings = parsed.warnings
         if (importWarnings.length) console.log(`Schwab parser warnings: ${importWarnings.join(' | ')}`)
         if (!trades.length && !dividendsAndInterest.length) {
@@ -531,6 +535,7 @@ io.on('connection', (socket) => {
         ;({ deposits, totalPrincipal } = await parseDeposits(csvContent))
       }
       trades.forEach(t => { t.broker = broker })
+      shareTransfers.forEach(t => { t.broker = broker })
 
       // Get unique stock symbols
       const allSymbols = [...new Set(trades.map(t => t.symbol))]
@@ -584,6 +589,10 @@ io.on('connection', (socket) => {
       // Save trades and deposits to database immediately (don't wait for prices)
       try {
         databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal, user.userId, broker)
+        if (shareTransfers.length) {
+          const n = databaseService.saveShareTransfers(user.userId, shareTransfers)
+          console.log(`↔ recorded ${n} share transfer(s) for ${broker}`)
+        }
         console.log(`💾 Saved ${trades.length} trades and ${deposits.length} deposits to database for ${asofDate} (user: ${user.userId})`)
       } catch (error) {
         console.error('Error saving trades:', error)
@@ -3072,16 +3081,45 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
       else unpriced.push(s)
     })
 
+    // Shares that arrived or left without being bought or sold. Valued at
+    // today's price, which is not what they were worth when they moved — but it
+    // is the size of the hole they leave in a single broker's figures, which is
+    // the question being asked. Signed so that adding it closes that hole: an
+    // outbound transfer credits the broker that no longer holds the shares, an
+    // inbound one debits the broker that never paid for them.
+    const transfers = databaseService.getShareTransfers(userId, brokerFilter)
+    const transferSymbols = [...new Set(transfers.map(t => t.symbol))]
+    let transferPrices = prices
+    const needed = transferSymbols.filter(s => !(transferPrices[s] > 0))
+    if (needed.length > 0) {
+      try {
+        const more = await priceService.fetchPrices(needed)
+        transferPrices = { ...transferPrices, ...more }
+      } catch (e) { /* leave unpriced */ }
+    }
+    let transferValue = 0
+    const transferDetail = {}
+    transfers.forEach(t => {
+      const px = transferPrices[t.symbol]
+      if (!(px > 0)) return
+      const signed = (t.direction === 'out' ? 1 : -1) * t.quantity * px
+      transferValue += signed
+      transferDetail[t.symbol] = round2((transferDetail[t.symbol] || 0) + signed)
+    })
+
     res.json({
       success: true,
       stockCashFlow: round2(stockCash),
       stockMarketValue: round2(stockMarketValue),
       stockTotal: round2(stockCash + stockMarketValue),
       optionCashFlow: round2(optionCash),
+      transferValue: round2(transferValue),
+      transferCount: transfers.length,
+      transferDetail,
       // Add the signed market value of open contracts to this for the account
       // total: long positions are worth what they'd sell for, short ones cost
       // that much to buy back.
-      subtotalExcludingOpenOptions: round2(stockCash + stockMarketValue + optionCash),
+      subtotalExcludingOpenOptions: round2(stockCash + stockMarketValue + optionCash + transferValue),
       positionCount: symbols.length,
       unpricedSymbols: unpriced,
     })

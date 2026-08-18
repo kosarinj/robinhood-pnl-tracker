@@ -419,6 +419,32 @@ try {
   console.error('option settlement symbol migration error:', e.message)
 }
 
+// Migration: share transfers between brokers.
+//
+// Shares moved by journal, not bought or sold. The Schwab parser has always
+// separated these out, and server/index.js then dropped them on the floor —
+// which leaves per-broker P&L half-counted in both directions. The broker that
+// sent them shows the purchase with no shares and no sale to offset it; the one
+// that received them shows shares that cost nothing. Neither is wrong about its
+// own cash, and neither can be right on its own.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS share_transfers (
+      user_id INTEGER NOT NULL,
+      broker TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      transfer_date TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      direction TEXT NOT NULL,          -- 'in' | 'out'
+      description TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      UNIQUE(user_id, broker, symbol, transfer_date, quantity, direction)
+    )
+  `)
+} catch (e) {
+  console.error('share_transfers migration error:', e.message)
+}
+
 // Migration: per-user view preferences.
 //
 // These lived in localStorage, which makes them per DEVICE. Several of them
@@ -2674,6 +2700,46 @@ export class DatabaseService {
     } catch (e) {
       console.error('Error getting cash flows:', e)
       return { stockCash: 0, optionCash: 0 }
+    }
+  }
+
+  // ── Share transfers ─────────────────────────────────────────────────────
+  // UNIQUE on the whole row, so re-importing the same export doesn't stack up
+  // duplicate journals the way a second upload otherwise would.
+  saveShareTransfers(userId, transfers = []) {
+    if (!transfers.length) return 0
+    const stmt = db.prepare(`
+      INSERT OR IGNORE INTO share_transfers
+        (user_id, broker, symbol, transfer_date, quantity, direction, description)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    let n = 0
+    const run = db.transaction(list => {
+      list.forEach(t => {
+        if (!t?.symbol || !(t.quantity > 0)) return
+        const r = stmt.run(
+          userId, t.broker || 'robinhood', String(t.symbol).toUpperCase(),
+          t.date, t.quantity, t.direction === 'out' ? 'out' : 'in', t.description || null
+        )
+        n += r.changes || 0
+      })
+    })
+    try { run(transfers) } catch (e) { console.error('Error saving share transfers:', e) }
+    return n
+  }
+
+  getShareTransfers(userId = 1, broker = null) {
+    try {
+      return db.prepare(`
+        SELECT broker, symbol, transfer_date, quantity, direction, description
+        FROM share_transfers
+        WHERE user_id = ?
+          ${broker ? 'AND broker = ?' : ''}
+        ORDER BY transfer_date ASC
+      `).all(...[userId, ...(broker ? [broker] : [])])
+    } catch (e) {
+      console.error('Error getting share transfers:', e)
+      return []
     }
   }
 

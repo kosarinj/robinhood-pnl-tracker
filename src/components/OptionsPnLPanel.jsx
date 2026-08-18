@@ -726,6 +726,15 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
               {row('Stock — cash in/out', account.stockCashFlow, 'Every stock sale minus every stock purchase.')}
               {row('Stock — held at market', account.stockMarketValue, `Market value of ${account.positionCount} position(s) held right now.`)}
               {row('Options — cash in/out', account.optionCashFlow, 'Premium received minus premium paid, across every option trade.')}
+              {account.transferCount > 0 && row(
+                `Transfers — shares moved (${account.transferCount})`,
+                account.transferValue,
+                'Shares that arrived or left without being bought or sold, at today\'s price. ' +
+                'A broker that sent shares away shows their purchase with nothing to offset it; ' +
+                'one that received them holds shares it never paid for. This closes that gap. ' +
+                'It nets to zero across all brokers, because nothing actually left the account: ' +
+                Object.entries(account.transferDetail || {}).map(([s, v]) => `${s} ${v >= 0 ? '+' : ''}${fmt(v)}`).join(', ')
+              )}
               {row('Options — open at market', openOptionValue, 'What the open contracts are worth now: long positions positive, short positions negative because they cost that much to close.')}
               <div style={{ fontSize: 10, color: textMid, marginTop: 6, lineHeight: 1.4 }}>
                 Cash flow plus market value — no cost-basis method involved, so this moves only when money moves or a price does.
