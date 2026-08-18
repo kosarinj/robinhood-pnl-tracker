@@ -3038,6 +3038,59 @@ app.get('/api/screener/fib-rsi', requireAuth, async (req, res) => {
   }
 })
 
+// ─── Account P&L ─────────────────────────────────────────────────────────────
+// What the account has actually made: cash in and out, plus what the open
+// positions are worth right now.
+//
+// Deliberately not built from realized + unrealized. Those two split the same
+// total differently depending on how cost basis is figured, which is what made
+// every other figure here arguable. This one can't be: it moves only when money
+// moves or a price does, so it should track the broker.
+//
+// The option side of the market value comes from the caller, which already
+// holds the priced open positions — pricing them twice would double the Polygon
+// calls for the same answer.
+app.get('/api/account-pnl', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const round2 = n => Math.round(n * 100) / 100
+    const { stockCash, optionCash } = databaseService.getCashFlows(userId, brokerFilter)
+
+    // Only the share counts matter here, so the cost-basis method is irrelevant.
+    const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
+    const symbols = Object.keys(positions)
+    let prices = {}
+    if (symbols.length > 0) {
+      try { prices = await priceService.fetchPrices(symbols) } catch (e) { prices = {} }
+    }
+    let stockMarketValue = 0
+    const unpriced = []
+    symbols.forEach(s => {
+      const p = prices[s]
+      if (p > 0) stockMarketValue += positions[s].position * p
+      else unpriced.push(s)
+    })
+
+    res.json({
+      success: true,
+      stockCashFlow: round2(stockCash),
+      stockMarketValue: round2(stockMarketValue),
+      stockTotal: round2(stockCash + stockMarketValue),
+      optionCashFlow: round2(optionCash),
+      // Add the signed market value of open contracts to this for the account
+      // total: long positions are worth what they'd sell for, short ones cost
+      // that much to buy back.
+      subtotalExcludingOpenOptions: round2(stockCash + stockMarketValue + optionCash),
+      positionCount: symbols.length,
+      unpricedSymbols: unpriced,
+    })
+  } catch (e) {
+    console.error('Error in /api/account-pnl:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ─── Per-user view preferences ───────────────────────────────────────────────
 // Settings that used to live in localStorage, which made them per device. The
 // ones that change displayed P&L — the Cumulative P&L window, manual share and

@@ -2638,6 +2638,45 @@ export class DatabaseService {
     return db.prepare(`SELECT DISTINCT price_date FROM daily_price_snapshots WHERE user_id = ? ORDER BY price_date DESC LIMIT ?`).all(userId, limit).map(r => r.price_date)
   }
 
+  /**
+   * Net cash in and out, split between stock and options.
+   *
+   * The building block for account P&L, which is simply cash flow plus what the
+   * open positions are worth right now. That identity is why this exists:
+   * realized + unrealized = proceeds + market value - total cost whichever way
+   * cost basis is figured, so a total built this way cannot be thrown off by
+   * FIFO versus average. It only ever moves when money moves or a price does.
+   *
+   * Amounts are stored absolute, so direction comes from the trans code. An
+   * expiry carries no cash at all and contributes nothing here — what it did to
+   * the position shows up in the market value instead.
+   */
+  getCashFlows(userId = 1, broker = null) {
+    try {
+      const r = db.prepare(`
+        SELECT
+          SUM(CASE WHEN COALESCE(is_option,0) = 0
+                   THEN (CASE WHEN is_buy = 1 THEN -ABS(COALESCE(amount,0)) ELSE ABS(COALESCE(amount,0)) END)
+                   ELSE 0 END) AS stock_cash,
+          SUM(CASE WHEN COALESCE(is_option,0) = 1
+                   THEN (CASE WHEN UPPER(COALESCE(trans_code,'')) IN ('BTO','BTC') THEN -ABS(COALESCE(amount,0))
+                              WHEN UPPER(COALESCE(trans_code,'')) IN ('STO','STC') THEN  ABS(COALESCE(amount,0))
+                              ELSE 0 END)
+                   ELSE 0 END) AS option_cash
+        FROM trades
+        WHERE user_id = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+      `).get(...[userId, ...(broker ? [broker] : [])])
+      return {
+        stockCash: r?.stock_cash || 0,
+        optionCash: r?.option_cash || 0,
+      }
+    } catch (e) {
+      console.error('Error getting cash flows:', e)
+      return { stockCash: 0, optionCash: 0 }
+    }
+  }
+
   // ── Per-user view preferences ───────────────────────────────────────────
   getPreferences(userId) {
     try {

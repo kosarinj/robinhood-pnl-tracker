@@ -153,6 +153,17 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
     setCumulativeWeeks(v)
     setPref('optionsPnl_cumulativeWeeks', v)
   }
+  // Account P&L: cash in and out, plus what's held at market. Independent of
+  // cost-basis method, so it can't drift the way the other figures do.
+  const [account, setAccount] = useState(null)
+  useEffect(() => {
+    const q = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+    fetch(`/api/account-pnl${q}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setAccount(d?.success ? d : null))
+      .catch(() => setAccount(null))
+  }, [broker])
+
   const [shareOverrides, setShareOverrides] = useState(() => getPref('shareOverrides', {}))
   const [priceOverrides, setPriceOverrides] = useState(() => getPref('priceOverrides', {}))
 
@@ -680,6 +691,51 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
             ))}
           </div>
         </div>
+        {/* Account P&L — cash in and out, plus everything held at market. The
+            tiles below answer "what did the period do"; this answers "where does
+            the account stand", which is the question a broker answers. It is
+            built without any cost-basis method at all, so FIFO versus average
+            cannot move it. */}
+        {account && (() => {
+          // Long contracts are worth what they'd sell for; short ones cost that
+          // much to buy back. currentValue is unsigned, so direction is applied
+          // here. Only positions with a real mark count — a contract we couldn't
+          // price is reported rather than silently valued at zero.
+          const priced = openPositions.filter(p => p.markSource && p.currentValue != null)
+          const unpriced = openPositions.length - priced.length
+          const openOptionValue = priced.reduce(
+            (s, p) => s + (p.isLong ? p.currentValue : -p.currentValue), 0)
+          const total = account.subtotalExcludingOpenOptions + openOptionValue
+          const row = (label, val, tip) => (
+            <div title={tip} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12, padding: '2px 0' }}>
+              <span style={{ color: textMid }}>{label}</span>
+              <span style={{ fontWeight: 600, color: val >= 0 ? green : red }}>{(val >= 0 ? '+' : '') + fmt(val)}</span>
+            </div>
+          )
+          return (
+            <div style={{ marginBottom: 12, padding: '12px 14px', borderRadius: 8, border: `1px solid ${border}`,
+              background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: textMid }}>
+                  Account P&L
+                </span>
+                <span style={{ fontSize: '1.6rem', fontWeight: 800, lineHeight: 1, color: total >= 0 ? green : red }}>
+                  {(total >= 0 ? '+' : '') + fmt(total)}
+                </span>
+              </div>
+              {row('Stock — cash in/out', account.stockCashFlow, 'Every stock sale minus every stock purchase.')}
+              {row('Stock — held at market', account.stockMarketValue, `Market value of ${account.positionCount} position(s) held right now.`)}
+              {row('Options — cash in/out', account.optionCashFlow, 'Premium received minus premium paid, across every option trade.')}
+              {row('Options — open at market', openOptionValue, 'What the open contracts are worth now: long positions positive, short positions negative because they cost that much to close.')}
+              <div style={{ fontSize: 10, color: textMid, marginTop: 6, lineHeight: 1.4 }}>
+                Cash flow plus market value — no cost-basis method involved, so this moves only when money moves or a price does.
+                {unpriced > 0 && <span style={{ color: '#f59e0b' }}> {unpriced} open contract(s) had no mark and are excluded.</span>}
+                {account.unpricedSymbols?.length > 0 && <span style={{ color: '#f59e0b' }}> No price for {account.unpricedSymbols.join(', ')}.</span>}
+              </div>
+            </div>
+          )
+        })()}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px' }}>
           {[
             ['Options', cumulativeTotals.options,
