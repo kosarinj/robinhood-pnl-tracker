@@ -3125,6 +3125,84 @@ app.get('/api/screener/fib-rsi', requireAuth, async (req, res) => {
   }
 })
 
+// ─── Day P&L inputs ──────────────────────────────────────────────────────────
+// Read-only dump of everything the day calculation consumes, so a wrong figure
+// can be reconstructed by hand instead of guessed at. Deliberately raw: the
+// three marks per contract, the two prices per stock, and nothing derived.
+app.get('/api/debug-day-inputs', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+
+    const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
+    const open = databaseService.getOpenOptionPositions(userId, brokerFilter)
+    const today = new Date().toISOString().slice(0, 10)
+    const active = open.filter(p => {
+      const parsed = parseOptionDescription(p.symbol)
+      if (!parsed) return false
+      return `${parsed.year}-${parsed.month}-${parsed.day}` >= today
+    })
+
+    const tickers = [...new Set([
+      ...Object.keys(positions),
+      ...active.map(p => parseOptionDescription(p.symbol)?.ticker).filter(Boolean),
+    ])]
+    let daily = {}
+    try { daily = await priceService.fetchDailyChange(tickers) } catch (e) { /* report as missing */ }
+
+    const stocks = Object.entries(positions).map(([ticker, p]) => {
+      const d = daily[ticker]
+      return {
+        ticker, shares: p.position,
+        prevClose: d?.prevClose ?? null,
+        current: d?.current ?? null,
+        pct: d?.pct ?? null,
+        dayStockPnl: d?.prevClose > 0 ? Math.round(p.position * (d.current - d.prevClose) * 100) / 100 : null,
+        priceMissing: !d,
+      }
+    }).sort((a, b) => (a.ticker > b.ticker ? 1 : -1))
+
+    // The three marks each leg is judged on, straight from Polygon.
+    const legs = []
+    for (const p of active.slice(0, 60)) {
+      const parsed = parseOptionDescription(p.symbol)
+      const polyTicker = toPolygonTicker(p.symbol)
+      const row = {
+        symbol: p.symbol, ticker: parsed?.ticker || null,
+        side: p.net_short > 0 ? 'SHORT' : 'LONG',
+        contracts: p.net_short > 0 ? p.net_short : p.net_long,
+        quoteMid: null, dayClose: null, prevClose: null,
+      }
+      if (polygonKey && polyTicker && parsed) {
+        try {
+          row.quoteMid = (await fetchOptionQuoteMid(polyTicker, polygonKey)) || null
+          const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
+          const snap = (await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })).data?.results
+          if (snap) {
+            row.dayClose = staleOptionMark(snap) || null
+            row.prevClose = snap.day?.previous_close || null
+            row.underlyingNow = snap.underlying_asset?.price || null
+          }
+        } catch (e) { row.error = e.message }
+      }
+      legs.push(row)
+    }
+
+    const stockDayTotal = stocks.reduce((s, r) => s + (r.dayStockPnl || 0), 0)
+    res.json({
+      success: true, broker: brokerFilter || 'all',
+      polygonEnabled: !!polygonKey,
+      stockDayTotal: Math.round(stockDayTotal * 100) / 100,
+      stocksMissingPrice: stocks.filter(s => s.priceMissing).map(s => s.ticker),
+      stocks, legs,
+      note: 'quoteMid = live mid; dayClose = today\'s print; prevClose = yesterday\'s. A leg with only dayClose/prevClose and no quoteMid is the case that used to invent moves.',
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ─── Account P&L ─────────────────────────────────────────────────────────────
 // What the account has actually made: cash in and out, plus what the open
 // positions are worth right now.
