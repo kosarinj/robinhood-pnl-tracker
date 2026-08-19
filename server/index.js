@@ -2331,6 +2331,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // Which basis each ticker's day move came from, so a figure that disagrees
     // with a broker can be explained instead of guessed at.
     const dayBasisByTicker = {}    // ticker -> { market: n, model: n }
+    // Tickers with a leg whose day move can't be established. A day is only
+    // reportable when every part of the position is in it — a partial one is a
+    // different number, and on a down day an opposite-signed one.
+    const dayGapTickers = new Set()
     // Theta projection: what Open P&L becomes in 1/2/3 months if the underlying
     // doesn't move. Keyed [months][ticker].
     const PROJECT_MONTHS = [1, 2, 3]
@@ -2511,6 +2515,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // close from a MODEL mark measures the gap between model and market,
           // not a day's move — it persists whatever the stock did and never
           // reconciles. MRVL read -835 that way. Reporting nothing is honest.
+          if (dayOptPerShare == null) dayGapTickers.add(ticker)
           if (dayOptPerShare != null) {
             openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
             const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
@@ -2600,14 +2605,56 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         if (!ticker) return
         const shares = leg.contracts * 100
         const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
-        if (!(nowMark > 0)) return
+        if (!(nowMark > 0)) { dayGapTickers.add(ticker); return }
 
-        // Today's move. Long: dearer is better, so now − prev.
+        const S = stockByTicker[ticker]
+        const expiry = `${leg.parsed.year}-${leg.parsed.month}-${leg.parsed.day}`
+        const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
+        const T0 = yrs(new Date(expiry).getTime() - Date.now())
+        let sigma = null
+        if (S > 0 && T0 > 0) {
+          sigma = impliedVol(nowMark, S, leg.parsed.strike, T0, RISK_FREE_RATE, leg.parsed.type)
+          if (!(sigma > 0)) sigma = 0.001
+        }
+
+        // Today's move, same order of preference as the short legs. Long:
+        // dearer is better, so now − prev.
+        //
+        // This used to difference two daily prints with no model fallback,
+        // which is the bug fixed for short legs and left here. On a contract
+        // that barely trades neither print is necessarily from the session it
+        // claims, so the difference is a move that never happened — and with
+        // far more bought contracts than sold, those phantom moves dominated
+        // the day and held its sign against the broker.
         const prevMark = optPrevClose[leg.symbol]
-        if (prevMark > 0) {
-          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + (nowMark - prevMark) * shares
+        let dayLongPerShare = null
+        let basis = null
+        if (optFresh[leg.symbol] > 0 && prevMark > 0) {
+          dayLongPerShare = optFresh[leg.symbol] - prevMark
+          basis = 'market'
+        } else if (sigma != null && openPrevUnderlying[ticker] > 0) {
+          // Same contract, same vol, yesterday's underlying — the move the
+          // stock actually made, rather than the gap between two stale prints.
+          const mPrev = repriceFromClose({
+            type: leg.parsed.type, closeMark: nowMark,
+            S0: S, S1: openPrevUnderlying[ticker], K: leg.parsed.strike,
+            T0, T1: T0, sigma, r: RISK_FREE_RATE,
+          })
+          if (mPrev > 0) { dayLongPerShare = nowMark - mPrev; basis = 'model' }
+        }
+        if (dayLongPerShare == null && prevMark > 0 && optClose[leg.symbol] > 0
+            && optFresh[leg.symbol] > 0) {
+          dayLongPerShare = optClose[leg.symbol] - prevMark
+          basis = 'market'
+        }
+
+        if (dayLongPerShare != null) {
+          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayLongPerShare * shares
           const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
-          bs.market += 1   // longs have no model fallback, so this is always a print
+          bs[basis] += 1
+        } else {
+          // A leg we can't move honestly makes the whole ticker's day partial.
+          dayGapTickers.add(ticker)
         }
 
         // Everything below is cumulative, so it stays on the corrected basis
@@ -2617,14 +2664,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         openUnrealizedByTicker[ticker] =
           (openUnrealizedByTicker[ticker] || 0) + (nowMark - leg.costPerShare) * shares
 
-        const S = stockByTicker[ticker]
-        if (!(S > 0)) return
-        const expiry = `${leg.parsed.year}-${leg.parsed.month}-${leg.parsed.day}`
-        const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
-        const T0 = yrs(new Date(expiry).getTime() - Date.now())
-        if (!(T0 > 0)) return
-        let sigma = impliedVol(nowMark, S, leg.parsed.strike, T0, RISK_FREE_RATE, leg.parsed.type)
-        if (!(sigma > 0)) sigma = 0.001
+        // S, T0 and sigma are already established above for the day move.
+        if (!(S > 0) || !(T0 > 0) || sigma == null) return
 
         for (const months of PROJECT_MONTHS) {
           const T1 = T0 - months / 12
@@ -2828,7 +2869,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // gain — so the column read positive against a broker's -2,200. A
         // missing half is not a small error in a total, it is a different
         // number. Report nothing and say why instead.
-        const missingStockDay = !!(sp && sp.position > 0) && dayStockPnl == null
+        const missingStockDay = (!!(sp && sp.position > 0) && dayStockPnl == null)
+          || dayGapTickers.has(e.ticker)
         const dayPnl = missingStockDay ? null
           : (dayStockPnl != null || dayOptionPnl != null)
             ? r2((dayStockPnl || 0) + (dayOptionPnl || 0)) : null
