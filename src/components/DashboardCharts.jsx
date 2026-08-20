@@ -37,11 +37,10 @@ export default function DashboardCharts({ broker = 'all' }) {
   useEffect(() => {
     const params = new URLSearchParams()
     if (broker && broker !== 'all') params.set('broker', broker)
-    // The Dashboard runs on the corrected tally: cost basis from the shares
-    // actually held, expiries booked into realized, long option legs counted.
-    // The Options YTD panel deliberately stays on the original figures, so the
-    // two disagree by design rather than by accident.
-    params.set('basis', 'corrected')
+    // Same basis as the Options YTD panel deliberately. These charts sit beside
+    // that panel and get read against it, so a silent difference in cost basis
+    // reads as one of them being broken. Account P&L above is where the
+    // broker-comparable figure lives, and it needs no basis at all.
     const qs = params.toString()
     fetch(`/api/options-pnl/ytd${qs ? `?${qs}` : ''}`, { credentials: 'include' })
       .then(r => r.json())
@@ -82,11 +81,19 @@ export default function DashboardCharts({ broker = 'all' }) {
     const mapped = open.map(r => {
       const stock = Number(r.stockUnrealizedPnL) || 0
       const options = Number(r.openUnrealizedPnL) || 0
+      // Net + Open, matching the Options YTD panel's column of that name:
+      // realized options + realized stock + unrealized stock + open options.
+      // The bar used to carry unrealized only, so it disagreed with the panel
+      // by exactly the realized part — a real difference in what was being
+      // measured, on top of the basis difference, and nothing said so.
+      const realizedOptions = Number(r.totalRealized) || 0
+      const realizedStock = Number(r.stockRealizedPnL) || 0
       return {
         ticker: r.ticker,
         stock: Math.round(stock * 100) / 100,
         options: Math.round(options * 100) / 100,
-        net: Math.round((stock + options) * 100) / 100,
+        realized: Math.round((realizedOptions + realizedStock) * 100) / 100,
+        net: Math.round((realizedOptions + realizedStock + stock + options) * 100) / 100,
         shares: Number(r.stockPosition) || 0,
         costUsed: r.stockCostUsed ?? null,
         overrideUsed: !!r.stockCostIsOverride,
@@ -139,7 +146,7 @@ export default function DashboardCharts({ broker = 'all' }) {
       {/* ── Net by position ── one series, so no legend; sign carried by the label ── */}
       <div className="floating-panel" style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
-          <h3 style={title}>Open P&amp;L by position</h3>
+          <h3 style={title}>Net + Open P&amp;L by position</h3>
           <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
                          color: totals.net >= 0 ? tokens.chartPositive : tokens.chartNegative }}>
             {moneySigned(totals.net)}
@@ -147,7 +154,7 @@ export default function DashboardCharts({ broker = 'all' }) {
         </div>
         <div style={{ ...sub, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span>
-            Unrealized stock + open options
+            Realized + unrealized stock + open options — the Options YTD panel's Net + Open
             {closedCount > 0 && ` · ${closedCount} closed hidden`}
           </span>
 
@@ -164,8 +171,8 @@ export default function DashboardCharts({ broker = 'all' }) {
             <Tooltip contentStyle={tip} cursor={{ fill: tokens.surfaceHover }}
                      labelStyle={{ color: 'var(--textSecondary)', fontSize: 11 }}
                      formatter={(v, _n, p) => [
-                       `${moneySigned(v)}  (stock ${moneySigned(p?.payload?.stock)}, open options ${moneySigned(p?.payload?.options)})`,
-                       'Open P&L',
+                       `${moneySigned(v)}  (realized ${moneySigned(p?.payload?.realized)}, unrealized stock ${moneySigned(p?.payload?.stock)}, open options ${moneySigned(p?.payload?.options)})`,
+                       'Net + Open P&L',
                      ]} />
             <Bar dataKey="net" radius={[0, 4, 4, 0]} barSize={14} isAnimationActive={false}
                  label={{ position: 'right', formatter: moneySigned,
