@@ -412,9 +412,13 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
       net: acc.net + (r.totalRealized || 0) + stockPnL,
       dayPnl: acc.dayPnl + (r.dayPnl || 0),
+      // Summed independently of dayPnl, which is withheld entirely when a leg
+      // can't be priced. A half that IS known still belongs in its own total.
+      dayStockPnl: acc.dayStockPnl + (r.dayStockPnl || 0),
+      dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -686,6 +690,35 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.dayPnl, isDark), fontWeight: 700, fontSize: 15 }}>{t.dayPnl != null ? `${t.dayPnl >= 0 ? '+' : ''}${fmt(t.dayPnl)}` : '—'}</span> },
 
+    // The two halves of the day, side by side with the combined figure.
+    //
+    // Each is shown on its own even when the OTHER one is missing, which is
+    // safe here in a way it wasn't for the total: a labelled column that reads
+    // "—" is visibly absent, whereas a total silently built from one half looks
+    // like a whole number and inverts the sign on a down day. That's the trap
+    // the combined column now refuses; these two are what it refuses to guess.
+    { key: 'dayStockPnl', label: 'Day Stock', sort: 'dayStockPnl', borderLeft: '1px',
+      title: 'Today’s stock move only: shares × (price now − yesterday’s close). Blank when no daily price arrived for this name.',
+      cell: (r, c) => <span style={{ fontWeight: 600, color: pnlColor(r.dayStockPnl, isDark) }}>
+        {r.dayStockPnl != null ? `${r.dayStockPnl >= 0 ? '+' : ''}${fmt(r.dayStockPnl)}` : '—'}
+        {r.dayStockPnl == null && c.pos > 0 && <span style={{ fontSize: 10, color: '#f59e0b' }} title="Shares held but no daily price for this name."> no px</span>}
+      </span>,
+      foot: (t) => <span style={{ color: pnlColor(t.dayStockPnl, isDark), fontWeight: 700 }}>
+        {t.dayStockPnl >= 0 ? '+' : ''}{fmt(t.dayStockPnl)}</span> },
+
+    { key: 'dayOptionPnl', label: 'Day Options', sort: 'dayOptionPnl', borderLeft: '1px',
+      title: 'Today’s move on open option legs only, from your side of each trade — a short gains when its mark falls, a long when it rises. Blank when no leg could be priced at both ends.',
+      cell: (r) => <span
+        title={r.dayOptionBasis === 'market' ? 'From real prints at both ends'
+             : r.dayOptionBasis === 'model' ? 'MODELLED — repriced at yesterday’s underlying, an estimate of the move rather than the move'
+             : r.dayOptionBasis === 'mixed' ? 'Some legs modelled, some from real prints' : ''}
+        style={{ fontWeight: 600, color: pnlColor(r.dayOptionPnl, isDark) }}>
+        {r.dayOptionPnl != null ? `${r.dayOptionPnl >= 0 ? '+' : ''}${fmt(r.dayOptionPnl)}` : '—'}
+        {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
+      </span>,
+      foot: (t) => <span style={{ color: pnlColor(t.dayOptionPnl, isDark), fontWeight: 700 }}>
+        {t.dayOptionPnl >= 0 ? '+' : ''}{fmt(t.dayOptionPnl)}</span> },
+
     { key: 'vsStockPct', label: 'vs Stock %', borderLeft: '1px',
       title: 'How much better (or worse) options+stock did than just holding the shares, as a % of the stock result.',
       cell: (r, c) => <span title={c.vsStockPct == null ? 'No stock P&L to compare against' : `Net+Open ${fmt(c.netPlusOpen)} vs Stock ${fmt(c.stockPnl)}`}
@@ -739,16 +772,24 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     // column every time rather than left wherever the append put them.
     // Only for columns the saved order has never seen. Once dragged somewhere
     // deliberately they're in `saved`, and that choice wins.
-    const SCENARIO_KEYS = ['scenarioNet', 'scenarioDelta']
-    const fresh = SCENARIO_KEYS.filter(k => missing.includes(k))
-    if (fresh.length) {
-      const rest = out.filter(k => !fresh.includes(k))
-      const anchor = rest.indexOf('netPlusOpen')
+    // Each group of added columns is only meaningful beside its reference
+    // column; appended to a saved order they land off the right edge of a table
+    // this wide and read as though nothing happened.
+    const NEIGHBOURS = [
+      { keys: ['scenarioNet', 'scenarioDelta'], anchor: 'netPlusOpen' },
+      { keys: ['dayStockPnl', 'dayOptionPnl'], anchor: 'dayPnl' },
+    ]
+    let ordered = out
+    for (const { keys, anchor: anchorKey } of NEIGHBOURS) {
+      const fresh = keys.filter(k => missing.includes(k))
+      if (!fresh.length) continue
+      const rest = ordered.filter(k => !fresh.includes(k))
+      const anchor = rest.indexOf(anchorKey)
       const at = anchor >= 0 ? anchor + 1 : rest.length
       rest.splice(at, 0, ...fresh)
-      return rest
+      ordered = rest
     }
-    return out
+    return ordered
   })()
   const orderedColumns = [ALL_COLUMNS[0], ...orderedKeys.map(k => ALL_COLUMNS.find(c => c.key === k)).filter(Boolean)]
 
