@@ -3285,6 +3285,36 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/price-history-pnl/:ticker?price=153.45
+ *
+ * Previous visits to roughly this price, and what the position was worth each
+ * time. Reads stored snapshots rather than recomputing: those recorded the
+ * option marks as they actually were, and there's no way to recover a past
+ * option price after the fact.
+ */
+app.get('/api/price-history-pnl/:ticker', requireAuth, (req, res) => {
+  try {
+    const ticker = String(req.params.ticker || '').toUpperCase()
+    const price = Number(req.query.price)
+    if (!(price > 0)) return res.status(400).json({ success: false, error: 'price is required' })
+    const band = Number(req.query.band) > 0 ? Number(req.query.band) : 2
+
+    let visits = databaseService.getPnlAtSimilarPrice(req.user.userId, ticker, price, { bandPct: band })
+    // Widen once before giving up. A 2% band on a thinly-snapshotted name often
+    // finds nothing, and "no history" reads as broken when 5% would have found
+    // three visits — the response says which band actually answered.
+    let usedBand = band
+    if (visits.length === 0) {
+      visits = databaseService.getPnlAtSimilarPrice(req.user.userId, ticker, price, { bandPct: 5 })
+      usedBand = 5
+    }
+    res.json({ success: true, ticker, price, band: usedBand, visits })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ─── Per-user view preferences ───────────────────────────────────────────────
 // Settings that used to live in localStorage, which made them per device. The
 // ones that change displayed P&L — the Cumulative P&L window, manual share and

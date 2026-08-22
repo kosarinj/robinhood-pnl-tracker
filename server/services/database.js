@@ -2743,6 +2743,68 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * Previous times this stock sat near a given price, and what the position was
+   * worth then.
+   *
+   * Answers "the stock is back at 153 — am I doing better or worse than last
+   * time it was here?", which for a covered-call book is really asking whether
+   * the options overlay is earning its keep. Price alone can't say: the shares
+   * are worth the same, so any difference is premium collected and decay.
+   *
+   * Matched on a percentage band rather than an absolute one, so it behaves the
+   * same on a $9 stock and a $900 one. Only the closest visit per day is kept —
+   * several snapshots from one day are the same visit, and would otherwise fill
+   * the list with a single afternoon.
+   */
+  getPnlAtSimilarPrice(userId, symbol, targetPrice, { bandPct = 2, limit = 4, excludeDays = 5 } = {}) {
+    try {
+      const price = Number(targetPrice)
+      if (!(price > 0)) return []
+      const low = price * (1 - bandPct / 100)
+      const high = price * (1 + bandPct / 100)
+
+      const rows = db.prepare(`
+        SELECT asof_date, current_price, position, realized_pnl, unrealized_pnl,
+               options_pnl, total_pnl
+        FROM pnl_snapshots
+        WHERE user_id = ? AND symbol = ?
+          AND current_price BETWEEN ? AND ?
+          -- Recent days are the visit being asked about, not a previous one.
+          AND asof_date <= date('now', ?)
+        ORDER BY asof_date DESC
+      `).all(userId, String(symbol).toUpperCase(), low, high, `-${excludeDays} days`)
+
+      // One entry per day, the closest to the target price.
+      const byDay = new Map()
+      for (const r of rows) {
+        const day = String(r.asof_date).slice(0, 10)
+        const prev = byDay.get(day)
+        if (!prev || Math.abs(r.current_price - price) < Math.abs(prev.current_price - price)) {
+          byDay.set(day, r)
+        }
+      }
+
+      return [...byDay.values()]
+        .sort((a, b) => String(b.asof_date).localeCompare(String(a.asof_date)))
+        .slice(0, limit)
+        .map(r => ({
+          date: String(r.asof_date).slice(0, 10),
+          price: round2(r.current_price),
+          position: r.position,
+          realized: round2(r.realized_pnl),
+          unrealized: round2(r.unrealized_pnl),
+          options: round2(r.options_pnl),
+          // The same combination the panel's Net + Open shows, from the parts
+          // stored at the time.
+          netPlusOpen: round2((r.realized_pnl || 0) + (r.unrealized_pnl || 0) + (r.options_pnl || 0)),
+        }))
+    } catch (e) {
+      console.error('Error getting P&L at similar price:', e)
+      return []
+    }
+  }
+
   // ── Per-user view preferences ───────────────────────────────────────────
   getPreferences(userId) {
     try {
@@ -2943,4 +3005,11 @@ export const databaseService = new DatabaseService()
 // Export the database connection for use by other services (like auth)
 export function getDatabase() {
   return db
+}
+
+// Shared rounding for the snapshot comparisons above. Null stays null — a
+// missing figure and a zero mean different things on a P&L line.
+function round2(n) {
+  if (n == null) return null
+  return Math.round(Number(n) * 100) / 100
 }

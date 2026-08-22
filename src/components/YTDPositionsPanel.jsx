@@ -90,6 +90,24 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [hiddenTickers, setHiddenTickers] = useState(() => getPref(hiddenKey(broker), loadHidden(broker)))
   const [showHiddenList, setShowHiddenList] = useState(false)
   const [showColumnEditor, setShowColumnEditor] = useState(false)
+  // "Last time RDDT was at 153, where was I?" — for a covered-call book the
+  // shares are worth the same at the same price, so any difference is premium
+  // and decay, which is the overlay earning its keep or not.
+  const [histFor, setHistFor] = useState(null)
+  const [hist, setHist] = useState({ loading: false, visits: [], band: null, error: null })
+
+  const togglePriceHistory = (ticker, price) => {
+    if (histFor === ticker) { setHistFor(null); return }
+    if (!(price > 0)) return
+    setHistFor(ticker)
+    setHist({ loading: true, visits: [], band: null, error: null })
+    fetch(`/api/price-history-pnl/${encodeURIComponent(ticker)}?price=${price}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setHist(d?.success
+        ? { loading: false, visits: d.visits || [], band: d.band, error: null }
+        : { loading: false, visits: [], band: null, error: d?.error || 'Could not load' }))
+      .catch(() => setHist({ loading: false, visits: [], band: null, error: 'Could not load' }))
+  }
   // Column order, per broker tab — the columns worth seeing differ between a
   // stocks-only account and one full of covered calls.
   // Column order follows the USER, not the device — reordering on a laptop is
@@ -628,9 +646,26 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       cell: (r, c) => <span style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.net, isDark) }}>{fmt(c.net)}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.net, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net)}</span> },
 
-    { key: 'netPlusOpen', label: 'Net + Open P&L', borderLeft: '1px', title: 'Net + Open P&L — marks open short options to market on top of Net.',
-      cell: (r, c) => <span title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`}
-        style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.netPlusOpen, isDark) }}>{fmt(c.netPlusOpen)}</span>,
+    { key: 'netPlusOpen', label: 'Net + Open P&L', borderLeft: '1px', title: 'Net + Open P&L — marks open short options to market on top of Net. Click a value to see previous times this stock was at the same price.',
+      cell: (r, c) => (
+        <span style={{ position: 'relative', display: 'inline-block' }}>
+          <span
+            onClick={() => togglePriceHistory(r.ticker, c.price)}
+            title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`
+              + (c.price > 0 ? ' · click for previous visits to this price' : '')}
+            style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.netPlusOpen, isDark),
+                     cursor: c.price > 0 ? 'pointer' : 'default',
+                     borderBottom: c.price > 0 ? `1px dotted ${border}` : 'none' }}>
+            {fmt(c.netPlusOpen)}
+          </span>
+          {histFor === r.ticker && (
+            <PriceHistoryPopover
+              state={hist} ticker={r.ticker} nowPrice={c.price} nowValue={c.netPlusOpen}
+              onClose={() => setHistFor(null)} isDark={isDark} fmt={fmt} pnlColor={pnlColor}
+            />
+          )}
+        </span>
+      ),
       foot: (t) => <span style={{ color: pnlColor(t.net + t.openUnrealizedPnL, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net + t.openUnrealizedPnL)}</span> },
 
     // What-if columns. Present only while a move is selected, so the table is
@@ -1168,6 +1203,77 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             </tfoot>
 
           </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Previous visits to roughly the current price.
+ *
+ * Each row is compared against today, because the useful number isn't what the
+ * position was worth then — it's whether it's worth more now at the same stock
+ * price. That difference is the premium collected and decayed since, with the
+ * share move held constant by construction.
+ */
+function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDark, fmt, pnlColor }) {
+  const surface = isDark ? '#1e2130' : '#ffffff'
+  const border = isDark ? '#2a3142' : '#e2e8f0'
+  const text = isDark ? '#e2e8f0' : '#1e293b'
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+
+  return (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 50,
+        background: surface, border: `1px solid ${border}`, borderRadius: 8,
+        padding: '10px 12px', minWidth: 290, textAlign: 'left',
+        boxShadow: '0 6px 20px rgba(0,0,0,0.18)', fontWeight: 400,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: text }}>
+          {ticker} near {fmt(nowPrice)}
+        </span>
+        <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: textMid, cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
+      </div>
+
+      {state.loading && <div style={{ fontSize: 12, color: textMid }}>Looking…</div>}
+      {state.error && <div style={{ fontSize: 12, color: '#ef4444' }}>{state.error}</div>}
+
+      {!state.loading && !state.error && state.visits.length === 0 && (
+        <div style={{ fontSize: 12, color: textMid, lineHeight: 1.5 }}>
+          No earlier snapshot with this stock near {fmt(nowPrice)}. Snapshots are written
+          when a CSV is uploaded, so history only goes as deep as those uploads.
+        </div>
+      )}
+
+      {state.visits.map(v => {
+        const delta = nowValue != null ? nowValue - v.netPlusOpen : null
+        return (
+          <div key={v.date} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0', fontSize: 12.5, borderTop: `1px solid ${border}` }}>
+            <span style={{ color: textMid, whiteSpace: 'nowrap' }}>
+              {v.date} · {fmt(v.price)}
+            </span>
+            <span style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap' }}>
+              <span style={{ color: pnlColor(v.netPlusOpen, isDark), fontWeight: 600 }}>{fmt(v.netPlusOpen)}</span>
+              {delta != null && (
+                <span style={{ color: pnlColor(delta, isDark), fontWeight: 700 }}>
+                  {delta >= 0 ? '+' : ''}{fmt(delta)}
+                </span>
+              )}
+            </span>
+          </div>
+        )
+      })}
+
+      {state.visits.length > 0 && (
+        <div style={{ fontSize: 10.5, color: textMid, marginTop: 6, lineHeight: 1.45, borderTop: `1px solid ${border}`, paddingTop: 6 }}>
+          Right-hand figure is today versus then, at about the same stock price — so it's
+          the options and any trades since, not the share move.
+          {state.band > 2 && ` Widened to ±${state.band}% to find these.`}
         </div>
       )}
     </div>
