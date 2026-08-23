@@ -96,42 +96,71 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [histFor, setHistFor] = useState(null)
   const [hist, setHist] = useState({ loading: false, visits: [], band: null, error: null })
 
-  const togglePriceHistory = (ticker, price) => {
+  /**
+   * Previous visits to this price, priced by the SAME as-of view.
+   *
+   * The dates come from a lightweight lookup, but each figure is then fetched
+   * from /api/options-pnl/ytd?asOf=<date> — the exact endpoint behind the as-of
+   * screen, which has been checked against reality. Computing it separately is
+   * what kept producing numbers that disagreed with it: first from stale
+   * snapshots, then from a recomputation on a different basis. Reusing it means
+   * a row here and the same date in as-of cannot differ.
+   *
+   * It also means Net + Open rather than Net, because that view estimates the
+   * open option leg with Black-Scholes at the underlying's close on the day —
+   * marked as an estimate there, and no less of one here.
+   */
+  const togglePriceHistory = async (ticker, price) => {
     if (histFor === ticker) { setHistFor(null); return }
     if (!(price > 0)) return
     setHistFor(ticker)
     setHist({ loading: true, visits: [], band: null, error: null })
-    // Pass the window and broker the panel is showing, so the figures line up
-    // with the Net column they're being compared against.
-    const q = new URLSearchParams({ price: String(price) })
-    const effStart = symbolDates[ticker] || globalStart
-    if (effStart) q.set('startDate', effStart)
-    if (broker && broker !== 'all') q.set('broker', broker)
-    fetch(`/api/price-history-pnl/${encodeURIComponent(ticker)}?${q}`, { credentials: 'include' })
-      .then(r => r.json())
-      .then(d => setHist(d?.success
-        ? { loading: false, visits: d.visits || [], band: d.band, error: null }
-        : { loading: false, visits: [], band: null, error: d?.error || 'Could not load' }))
-      .catch(() => setHist({ loading: false, visits: [], band: null, error: 'Could not load' }))
-  }
-  // Column order, per broker tab — the columns worth seeing differ between a
-  // stocks-only account and one full of covered calls.
-  // Column order follows the USER, not the device — reordering on a laptop is
-  // the whole point, because dragging headers on a phone barely works.
-  const [columnOrder, setColumnOrder] = useState(() => getPref(colKey(broker), []))
-  const saveColumnOrder = (next) => {
-    setColumnOrder(next)
-    setPref(colKey(broker), next)
-  }
-  const [dragKey, setDragKey] = useState(null)
-  const [dragOverKey, setDragOverKey] = useState(null)
 
-  const [lastUpdated, setLastUpdated] = useState(null)
-  // Ordinary tax rate reused from the Tax Center's saved plan (options + short-term
-  // gains are taxed at this rate). Defaults to 24% if the Tax tab hasn't been set.
-  const [taxRate] = useState(() => {
-    try { const p = JSON.parse(localStorage.getItem('taxCenter_plan') || '{}'); return parseFloat(p.ordinaryRate) || 24 } catch { return 24 }
-  })
+    const effStart = symbolDates[ticker] || globalStart
+    const brokerQ = broker && broker !== 'all' ? `&broker=${encodeURIComponent(broker)}` : ''
+
+    try {
+      const datesRes = await fetch(
+        `/api/price-history-pnl/${encodeURIComponent(ticker)}?price=${price}&startDate=${effStart}${brokerQ}`,
+        { credentials: 'include' })
+      const datesData = await datesRes.json()
+      if (!datesData?.success) throw new Error(datesData?.error || 'Could not load')
+      const dates = datesData.visits || []
+      if (dates.length === 0) {
+        setHist({ loading: false, visits: [], band: datesData.band, error: null })
+        return
+      }
+
+      // In parallel — each is a full as-of computation, and four in sequence is
+      // a noticeable wait on a popover.
+      const priced = await Promise.all(dates.map(async d => {
+        try {
+          const p = new URLSearchParams({ startDate: effStart, asOf: d.date })
+          if (broker && broker !== 'all') p.set('broker', broker)
+          const res = await fetch(`/api/options-pnl/ytd?${p}`, { credentials: 'include' })
+          const data = await res.json()
+          const row = (data?.byUnderlying || []).find(x => x.ticker === ticker)
+          if (!row) return { ...d, netPlusOpen: null }
+          // Assembled exactly as the panel's own column is.
+          const stockPnl = (row.stockUnrealizedPnL || 0) + (row.stockRealizedPnL || 0)
+          const net = (row.totalRealized || 0) + stockPnl
+          return {
+            ...d,
+            netPlusOpen: Math.round((net + (row.openUnrealizedPnL || 0)) * 100) / 100,
+            net: Math.round(net * 100) / 100,
+            openPnl: row.openUnrealizedPnL ?? null,
+            shares: row.stockPosition ?? null,
+          }
+        } catch {
+          return { ...d, netPlusOpen: null }
+        }
+      }))
+
+      setHist({ loading: false, visits: priced, band: datesData.band, error: null })
+    } catch (e) {
+      setHist({ loading: false, visits: [], band: null, error: e.message || 'Could not load' })
+    }
+  }
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates, quiet = false) => {
     if (!quiet) setLoading(true)
@@ -671,7 +700,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           </span>
           {histFor === r.ticker && (
             <PriceHistoryPopover
-              state={hist} ticker={r.ticker} nowPrice={c.price} nowValue={c.net}
+              state={hist} ticker={r.ticker} nowPrice={c.price} nowValue={c.netPlusOpen}
               onClose={() => setHistFor(null)} isDark={isDark} fmt={fmt} pnlColor={pnlColor}
             />
           )}
@@ -1250,7 +1279,7 @@ function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDar
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: text }}>
-          {ticker} near {fmt(nowPrice)} · Net
+          {ticker} near {fmt(nowPrice)} · Net + Open
         </span>
         <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: textMid, cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
       </div>
@@ -1266,14 +1295,20 @@ function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDar
       )}
 
       {state.visits.map(v => {
-        const delta = nowValue != null ? nowValue - v.net : null
+        const delta = (nowValue != null && v.netPlusOpen != null) ? nowValue - v.netPlusOpen : null
         return (
           <div key={v.date} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0', fontSize: 12.5, borderTop: `1px solid ${border}` }}>
-            <span style={{ color: textMid, whiteSpace: 'nowrap' }}>
+            <span style={{ color: textMid, whiteSpace: 'nowrap' }}
+              title={v.netPlusOpen != null
+                ? `Net ${fmt(v.net)} + open options ${v.openPnl != null ? fmt(v.openPnl) : '—'}`
+                  + (v.shares != null ? ` · ${v.shares} shares` : '')
+                : 'No as-of figure for this date'}>
               {v.date} · {fmt(v.price)}
             </span>
-            <span style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap' }}>
-              <span style={{ color: pnlColor(v.net, isDark), fontWeight: 600 }}>{fmt(v.net)}</span>
+            <span style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap', alignItems: 'baseline' }}>
+              <span style={{ color: pnlColor(v.netPlusOpen, isDark), fontWeight: 600 }}>
+                {v.netPlusOpen != null ? fmt(v.netPlusOpen) : '—'}
+              </span>
               {delta != null && (
                 <span style={{ color: pnlColor(delta, isDark), fontWeight: 700 }}>
                   {delta >= 0 ? '+' : ''}{fmt(delta)}
@@ -1286,9 +1321,9 @@ function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDar
 
       {state.visits.length > 0 && (
         <div style={{ fontSize: 10.5, color: textMid, marginTop: 6, lineHeight: 1.45, borderTop: `1px solid ${border}`, paddingTop: 6 }}>
-          Compared against <strong>Net</strong> today, not Net + Open — open option value can't
-          be recovered for a past date, so it's left out of both sides rather than estimated
-          into one. Recomputed from your trades, not from what was recorded at the time.
+          Each figure comes from the same <strong>as-of</strong> view you can open for that
+          date, so the two always agree. Its open-option leg is a Black-Scholes estimate at
+          that day's underlying — there are no historical option quotes to price it exactly.
           {state.band > 2 && ` Widened to ±${state.band}% to find these.`}
         </div>
       )}
