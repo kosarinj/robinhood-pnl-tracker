@@ -110,6 +110,23 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
    * open option leg with Black-Scholes at the underlying's close on the day —
    * marked as an estimate there, and no less of one here.
    */
+  // Column order follows the USER, not the device — reordering on a laptop is
+  // the whole point, because dragging headers on a phone barely works.
+  const [columnOrder, setColumnOrder] = useState(() => getPref(colKey(broker), []))
+  const saveColumnOrder = (next) => {
+    setColumnOrder(next)
+    setPref(colKey(broker), next)
+  }
+  const [dragKey, setDragKey] = useState(null)
+  const [dragOverKey, setDragOverKey] = useState(null)
+
+  const [lastUpdated, setLastUpdated] = useState(null)
+  // Ordinary tax rate reused from the Tax Center's saved plan (options + short-term
+  // gains are taxed at this rate). Defaults to 24% if the Tax tab hasn't been set.
+  const [taxRate] = useState(() => {
+    try { const p = JSON.parse(localStorage.getItem('taxCenter_plan') || '{}'); return parseFloat(p.ordinaryRate) || 24 } catch { return 24 }
+  })
+
   const togglePriceHistory = async (ticker, price) => {
     if (histFor === ticker) { setHistFor(null); return }
     if (!(price > 0)) return
