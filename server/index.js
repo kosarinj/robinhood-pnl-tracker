@@ -2089,9 +2089,6 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
     const today = new Date().toISOString().slice(0, 10)
     const polygonKey = process.env.POLYGON_API_KEY || ''
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
-    // Same window the panel is showing, or the two are answering different
-    // questions — its Options Total counts only closes since this date.
-    const fromDate = req.query.startDate || null
     const openOpts = databaseService.getOpenOptionPositions(req.user.userId, brokerFilter)
 
     // Filter out positions where option has already expired
@@ -3311,6 +3308,9 @@ app.get('/api/price-history-pnl/:ticker', requireAuth, async (req, res) => {
     const price = Number(req.query.price)
     if (!(price > 0)) return res.status(400).json({ success: false, error: 'price is required' })
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    // Same window the panel is showing, or the two answer different questions —
+    // its Options Total counts only closes since this date.
+    const fromDate = req.query.startDate || null
 
     let band = Number(req.query.band) > 0 ? Number(req.query.band) : 2
     let dates = databaseService.getPriceVisits(req.user.userId, ticker, price, { bandPct: band })
