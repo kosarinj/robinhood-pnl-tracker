@@ -2089,6 +2089,9 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
     const today = new Date().toISOString().slice(0, 10)
     const polygonKey = process.env.POLYGON_API_KEY || ''
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    // Same window the panel is showing, or the two are answering different
+    // questions — its Options Total counts only closes since this date.
+    const fromDate = req.query.startDate || null
     const openOpts = databaseService.getOpenOptionPositions(req.user.userId, brokerFilter)
 
     // Filter out positions where option has already expired
@@ -3320,26 +3323,34 @@ app.get('/api/price-history-pnl/:ticker', requireAuth, async (req, res) => {
 
     const visits = dates.map(d => {
       const stock = databaseService.getStockStateAsOf(req.user.userId, ticker, d.date, brokerFilter)
-      const optionsRealized = databaseService.getOptionRealizedAsOf(req.user.userId, ticker, d.date, brokerFilter)
+      const optionsRealized = databaseService.getOptionRealizedAsOf(
+        req.user.userId, ticker, d.date, brokerFilter, fromDate)
       const stockUnrealized = (stock.position > 0 && stock.avgCost > 0)
         ? Math.round(stock.position * (d.price - stock.avgCost) * 100) / 100
         : 0
+      // The panel reports realized stock P&L only once a position is CLOSED —
+      // an open one shows just its unrealized gain, so that active names aren't
+      // inflated by years of booked profit. Matched here, or the comparison
+      // carries a figure the column it sits next to never showed.
+      const isOpen = stock.position > 0
+      const stockRealized = isOpen ? 0 : stock.realized
       return {
         date: d.date,
         price: d.price,
         position: stock.position,
         avgCost: stock.avgCost,
         stockUnrealized,
-        stockRealized: stock.realized,
+        stockRealized,
         optionsRealized,
-        net: Math.round((stockUnrealized + stock.realized + optionsRealized) * 100) / 100,
+        net: Math.round((stockUnrealized + stockRealized + optionsRealized) * 100) / 100,
       }
     })
 
     res.json({
       success: true, ticker, price, band, visits,
       basis: 'net',
-      note: 'Realized options + realized stock + unrealized stock. Open option value is excluded — past option marks are not recoverable.',
+      fromDate,
+      note: 'Same basis as the Net column: options realized in the selected period, plus stock. Open option value is excluded — past option marks are not recoverable.',
     })
   } catch (e) {
     console.error('price-history-pnl error:', e.message)

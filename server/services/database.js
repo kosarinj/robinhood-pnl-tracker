@@ -2858,10 +2858,19 @@ export class DatabaseService {
    * modelling one would turn a measurement into a guess. The caller says so
    * rather than folding an estimate into the total.
    */
-  getOptionRealizedAsOf(userId, ticker, asOfDate, broker = null) {
+  getOptionRealizedAsOf(userId, ticker, asOfDate, broker = null, fromDate = null) {
     try {
+      // Bounded BELOW as well as above. The panel's Options Total only counts
+      // closes inside the selected period, so summing all-time here made the
+      // comparison read far too high — every option ever closed, against a
+      // column showing only this period's.
+      //
+      // Lots still OPEN at fromDate are built from trades before it, so the
+      // stack is filled from the whole history and only CLOSES inside the
+      // window are counted. Starting the stack at fromDate would leave closes
+      // with nothing to match against and silently drop them.
       const rows = db.prepare(`
-        SELECT symbol, trans_code, COALESCE(contracts,1) AS contracts, ABS(COALESCE(amount,0)) AS amt
+        SELECT symbol, trans_date, trans_code, COALESCE(contracts,1) AS contracts, ABS(COALESCE(amount,0)) AS amt
         FROM trades
         WHERE is_option = 1 AND user_id = ? AND trans_date <= ?
           ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
@@ -2894,7 +2903,10 @@ export class DatabaseService {
             const take = Math.min(lot.left, remaining)
             const openVal = lot.ppc * take
             const closeVal = ppc * take
-            realized += closingShort ? (openVal - closeVal) : (closeVal - openVal)
+            const pnl = closingShort ? (openVal - closeVal) : (closeVal - openVal)
+            // Only closes inside the window count toward the figure, though the
+            // lots themselves are tracked across the whole history.
+            if (!fromDate || String(r.trans_date) >= fromDate) realized += pnl
             lot.left -= take; remaining -= take
             if (lot.left <= 0) stack.pop()
           }

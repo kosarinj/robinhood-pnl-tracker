@@ -101,7 +101,13 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     if (!(price > 0)) return
     setHistFor(ticker)
     setHist({ loading: true, visits: [], band: null, error: null })
-    fetch(`/api/price-history-pnl/${encodeURIComponent(ticker)}?price=${price}`, { credentials: 'include' })
+    // Pass the window and broker the panel is showing, so the figures line up
+    // with the Net column they're being compared against.
+    const q = new URLSearchParams({ price: String(price) })
+    const effStart = symbolDates[ticker] || globalStart
+    if (effStart) q.set('startDate', effStart)
+    if (broker && broker !== 'all') q.set('broker', broker)
+    fetch(`/api/price-history-pnl/${encodeURIComponent(ticker)}?${q}`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => setHist(d?.success
         ? { loading: false, visits: d.visits || [], band: d.band, error: null }
