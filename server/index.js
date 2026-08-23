@@ -3288,29 +3288,61 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
 /**
  * GET /api/price-history-pnl/:ticker?price=153.45
  *
- * Previous visits to roughly this price, and what the position was worth each
- * time. Reads stored snapshots rather than recomputing: those recorded the
- * option marks as they actually were, and there's no way to recover a past
- * option price after the fact.
+ * Previous visits to roughly this price, with the position recomputed from the
+ * trades as it stood on each of those days.
+ *
+ * The stored snapshots supply only the DATE and the PRICE. Their P&L columns
+ * were written by the calculator of the day — Buy-to-Cover as a sale, expiries
+ * never booked, cost averaged over every buy ever made — so reading them back
+ * compares today's corrected figure against yesterday's broken one. That put
+ * MRVL at +$6,400 on a day it was nothing of the sort.
+ *
+ * Open option value is deliberately absent. A past option mark cannot be
+ * recovered, and modelling one would turn a measurement into a guess, so the
+ * figure is Net: realized options + realized stock + unrealized stock. The
+ * response labels it so the UI can say what's in it.
  */
-app.get('/api/price-history-pnl/:ticker', requireAuth, (req, res) => {
+app.get('/api/price-history-pnl/:ticker', requireAuth, async (req, res) => {
   try {
     const ticker = String(req.params.ticker || '').toUpperCase()
     const price = Number(req.query.price)
     if (!(price > 0)) return res.status(400).json({ success: false, error: 'price is required' })
-    const band = Number(req.query.band) > 0 ? Number(req.query.band) : 2
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
 
-    let visits = databaseService.getPnlAtSimilarPrice(req.user.userId, ticker, price, { bandPct: band })
-    // Widen once before giving up. A 2% band on a thinly-snapshotted name often
-    // finds nothing, and "no history" reads as broken when 5% would have found
-    // three visits — the response says which band actually answered.
-    let usedBand = band
-    if (visits.length === 0) {
-      visits = databaseService.getPnlAtSimilarPrice(req.user.userId, ticker, price, { bandPct: 5 })
-      usedBand = 5
+    let band = Number(req.query.band) > 0 ? Number(req.query.band) : 2
+    let dates = databaseService.getPriceVisits(req.user.userId, ticker, price, { bandPct: band })
+    // Widen once rather than reporting nothing — "no history" reads as broken
+    // when 5% would have found three visits. The response says which band answered.
+    if (dates.length === 0) {
+      band = 5
+      dates = databaseService.getPriceVisits(req.user.userId, ticker, price, { bandPct: band })
     }
-    res.json({ success: true, ticker, price, band: usedBand, visits })
+
+    const visits = dates.map(d => {
+      const stock = databaseService.getStockStateAsOf(req.user.userId, ticker, d.date, brokerFilter)
+      const optionsRealized = databaseService.getOptionRealizedAsOf(req.user.userId, ticker, d.date, brokerFilter)
+      const stockUnrealized = (stock.position > 0 && stock.avgCost > 0)
+        ? Math.round(stock.position * (d.price - stock.avgCost) * 100) / 100
+        : 0
+      return {
+        date: d.date,
+        price: d.price,
+        position: stock.position,
+        avgCost: stock.avgCost,
+        stockUnrealized,
+        stockRealized: stock.realized,
+        optionsRealized,
+        net: Math.round((stockUnrealized + stock.realized + optionsRealized) * 100) / 100,
+      }
+    })
+
+    res.json({
+      success: true, ticker, price, band, visits,
+      basis: 'net',
+      note: 'Realized options + realized stock + unrealized stock. Open option value is excluded — past option marks are not recoverable.',
+    })
   } catch (e) {
+    console.error('price-history-pnl error:', e.message)
     res.status(500).json({ success: false, error: e.message })
   }
 })

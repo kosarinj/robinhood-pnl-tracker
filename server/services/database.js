@@ -2744,20 +2744,19 @@ export class DatabaseService {
   }
 
   /**
-   * Previous times this stock sat near a given price, and what the position was
-   * worth then.
+   * Dates on which this stock closed near a given price, from the snapshots.
    *
-   * Answers "the stock is back at 153 — am I doing better or worse than last
-   * time it was here?", which for a covered-call book is really asking whether
-   * the options overlay is earning its keep. Price alone can't say: the shares
-   * are worth the same, so any difference is premium collected and decay.
+   * ONLY the price and the date are taken from the snapshot row. Its P&L
+   * columns are deliberately ignored: they were written by the calculator as it
+   * stood at the time, which counted Buy-to-Cover as a sale, never booked an
+   * expiry, and averaged cost over every buy ever made. Reading them back would
+   * be comparing today's corrected figure against yesterday's buggy one — MRVL
+   * came out at +$6,400 on a day that was nothing like it.
    *
-   * Matched on a percentage band rather than an absolute one, so it behaves the
-   * same on a $9 stock and a $900 one. Only the closest visit per day is kept —
-   * several snapshots from one day are the same visit, and would otherwise fill
-   * the list with a single afternoon.
+   * The caller recomputes the P&L for these dates from the trades, which is the
+   * only basis that agrees with what's on screen now.
    */
-  getPnlAtSimilarPrice(userId, symbol, targetPrice, { bandPct = 2, limit = 4, excludeDays = 5 } = {}) {
+  getPriceVisits(userId, symbol, targetPrice, { bandPct = 2, limit = 4, excludeDays = 5 } = {}) {
     try {
       const price = Number(targetPrice)
       if (!(price > 0)) return []
@@ -2765,17 +2764,16 @@ export class DatabaseService {
       const high = price * (1 + bandPct / 100)
 
       const rows = db.prepare(`
-        SELECT asof_date, current_price, position, realized_pnl, unrealized_pnl,
-               options_pnl, total_pnl
+        SELECT asof_date, current_price
         FROM pnl_snapshots
         WHERE user_id = ? AND symbol = ?
           AND current_price BETWEEN ? AND ?
-          -- Recent days are the visit being asked about, not a previous one.
           AND asof_date <= date('now', ?)
         ORDER BY asof_date DESC
       `).all(userId, String(symbol).toUpperCase(), low, high, `-${excludeDays} days`)
 
-      // One entry per day, the closest to the target price.
+      // One per day, closest to the target — several rows from one day are one
+      // visit, and would otherwise fill the list with a single afternoon.
       const byDay = new Map()
       for (const r of rows) {
         const day = String(r.asof_date).slice(0, 10)
@@ -2784,24 +2782,128 @@ export class DatabaseService {
           byDay.set(day, r)
         }
       }
-
       return [...byDay.values()]
         .sort((a, b) => String(b.asof_date).localeCompare(String(a.asof_date)))
         .slice(0, limit)
-        .map(r => ({
-          date: String(r.asof_date).slice(0, 10),
-          price: round2(r.current_price),
-          position: r.position,
-          realized: round2(r.realized_pnl),
-          unrealized: round2(r.unrealized_pnl),
-          options: round2(r.options_pnl),
-          // The same combination the panel's Net + Open shows, from the parts
-          // stored at the time.
-          netPlusOpen: round2((r.realized_pnl || 0) + (r.unrealized_pnl || 0) + (r.options_pnl || 0)),
-        }))
+        .map(r => ({ date: String(r.asof_date).slice(0, 10), price: round2(r.current_price) }))
     } catch (e) {
-      console.error('Error getting P&L at similar price:', e)
+      console.error('Error finding price visits:', e)
       return []
+    }
+  }
+
+  /**
+   * Stock position and realized stock P&L as of a date, from the trades.
+   *
+   * Same FIFO basis as the live figures, so a comparison across dates is
+   * measuring the position rather than a change of method.
+   */
+  getStockStateAsOf(userId, symbol, asOfDate, broker = null) {
+    try {
+      const rows = db.prepare(`
+        SELECT trans_date, is_buy, COALESCE(quantity,0) AS qty, ABS(COALESCE(amount,0)) AS amt
+        FROM trades
+        WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ? AND symbol = ?
+          AND trans_date <= ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC
+      `).all(...[userId, String(symbol).toUpperCase(), asOfDate, ...(broker ? [broker] : [])])
+
+      const splits = this.getSplits([String(symbol).toUpperCase()])
+      let position = 0, realized = 0
+      const buys = []
+      let soldQty = 0, soldProceeds = 0, boughtQty = 0, boughtCost = 0
+
+      for (const r of rows) {
+        const f = this.splitFactor(splits[String(symbol).toUpperCase()], r.trans_date)
+        const qty = (r.qty || 0) * f
+        if (!(qty > 0)) continue
+        if (r.is_buy === 1) {
+          position += qty
+          buys.push({ qty, perShare: (r.amt || 0) / qty })
+          boughtQty += qty; boughtCost += (r.amt || 0)
+        } else {
+          position -= qty
+          soldQty += qty; soldProceeds += (r.amt || 0)
+        }
+      }
+      if (soldQty > 0 && boughtQty > 0) {
+        realized = soldProceeds - (boughtCost / boughtQty) * soldQty
+      }
+
+      // Cost of the shares still held, newest first — the same rule the live
+      // panel uses.
+      let need = position, cost = 0
+      for (let i = buys.length - 1; i >= 0 && need > 1e-9; i--) {
+        const take = Math.min(buys[i].qty, need)
+        cost += take * buys[i].perShare
+        need -= take
+      }
+      const covered = position - need
+      return {
+        position: Math.round(position * 1e6) / 1e6,
+        avgCost: covered > 1e-9 ? round2(cost / covered) : 0,
+        realized: round2(realized),
+      }
+    } catch (e) {
+      console.error('Error getting stock state as of:', e)
+      return { position: 0, avgCost: 0, realized: 0 }
+    }
+  }
+
+  /**
+   * Realized OPTION P&L for one underlying up to a date, LIFO-matched.
+   *
+   * Open contracts are not valued: a past option mark can't be recovered, and
+   * modelling one would turn a measurement into a guess. The caller says so
+   * rather than folding an estimate into the total.
+   */
+  getOptionRealizedAsOf(userId, ticker, asOfDate, broker = null) {
+    try {
+      const rows = db.prepare(`
+        SELECT symbol, trans_code, COALESCE(contracts,1) AS contracts, ABS(COALESCE(amount,0)) AS amt
+        FROM trades
+        WHERE is_option = 1 AND user_id = ? AND trans_date <= ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC
+      `).all(...[userId, asOfDate, ...(broker ? [broker] : [])])
+
+      const want = String(ticker).toUpperCase()
+      const stacks = {}
+      let realized = 0
+
+      for (const r of rows) {
+        const sym = String(r.symbol || '')
+        // Cheap prefix match on the underlying, which is how these descriptions
+        // are shaped ("MRVL 8/15/2026 Call $90.00").
+        if (!sym.toUpperCase().startsWith(want + ' ')) continue
+        const tc = String(r.trans_code || '').toUpperCase()
+        const n = Math.abs(r.contracts || 1)
+        const ppc = n > 0 ? r.amt / n : r.amt
+        if (!stacks[sym]) stacks[sym] = { long: [], short: [] }
+        const st = stacks[sym]
+
+        if (tc === 'BTO') st.long.push({ ppc, left: n })
+        else if (tc === 'STO') st.short.push({ ppc, left: n })
+        else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+          const closingShort = tc === 'BTC'
+          const stack = closingShort ? st.short : st.long
+          let remaining = n
+          while (remaining > 0 && stack.length > 0) {
+            const lot = stack[stack.length - 1]
+            const take = Math.min(lot.left, remaining)
+            const openVal = lot.ppc * take
+            const closeVal = ppc * take
+            realized += closingShort ? (openVal - closeVal) : (closeVal - openVal)
+            lot.left -= take; remaining -= take
+            if (lot.left <= 0) stack.pop()
+          }
+        }
+      }
+      return round2(realized)
+    } catch (e) {
+      console.error('Error getting option realized as of:', e)
+      return 0
     }
   }
 

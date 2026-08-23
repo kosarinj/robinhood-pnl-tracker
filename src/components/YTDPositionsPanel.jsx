@@ -648,7 +648,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
 
     { key: 'netPlusOpen', label: 'Net + Open P&L', borderLeft: '1px', title: 'Net + Open P&L — marks open short options to market on top of Net. Click a value to see previous times this stock was at the same price.',
       cell: (r, c) => (
-        <span style={{ position: 'relative', display: 'inline-block' }}>
+        <span style={{
+          position: 'relative', display: 'inline-block',
+          // Lift the whole cell while its popover is open, otherwise later cells
+          // paint over it — they come after in document order.
+          zIndex: histFor === r.ticker ? 9998 : 'auto',
+        }}>
           <span
             onClick={() => togglePriceHistory(r.ticker, c.price)}
             title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`
@@ -660,7 +665,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           </span>
           {histFor === r.ticker && (
             <PriceHistoryPopover
-              state={hist} ticker={r.ticker} nowPrice={c.price} nowValue={c.netPlusOpen}
+              state={hist} ticker={r.ticker} nowPrice={c.price} nowValue={c.net}
               onClose={() => setHistFor(null)} isDark={isDark} fmt={fmt} pnlColor={pnlColor}
             />
           )}
@@ -1227,7 +1232,11 @@ function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDar
     <div
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 50,
+        // The sticky ticker column and the table header both create stacking
+        // contexts, so a modest z-index here loses to them. Fixed positioning
+        // would escape the table entirely but then wouldn't follow the row on
+        // scroll; a large z-index plus the raised cell below is enough.
+        position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 9999,
         background: surface, border: `1px solid ${border}`, borderRadius: 8,
         padding: '10px 12px', minWidth: 290, textAlign: 'left',
         boxShadow: '0 6px 20px rgba(0,0,0,0.18)', fontWeight: 400,
@@ -1235,7 +1244,7 @@ function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDar
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: text }}>
-          {ticker} near {fmt(nowPrice)}
+          {ticker} near {fmt(nowPrice)} · Net
         </span>
         <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: textMid, cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
       </div>
@@ -1251,14 +1260,14 @@ function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDar
       )}
 
       {state.visits.map(v => {
-        const delta = nowValue != null ? nowValue - v.netPlusOpen : null
+        const delta = nowValue != null ? nowValue - v.net : null
         return (
           <div key={v.date} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0', fontSize: 12.5, borderTop: `1px solid ${border}` }}>
             <span style={{ color: textMid, whiteSpace: 'nowrap' }}>
               {v.date} · {fmt(v.price)}
             </span>
             <span style={{ display: 'flex', gap: 8, whiteSpace: 'nowrap' }}>
-              <span style={{ color: pnlColor(v.netPlusOpen, isDark), fontWeight: 600 }}>{fmt(v.netPlusOpen)}</span>
+              <span style={{ color: pnlColor(v.net, isDark), fontWeight: 600 }}>{fmt(v.net)}</span>
               {delta != null && (
                 <span style={{ color: pnlColor(delta, isDark), fontWeight: 700 }}>
                   {delta >= 0 ? '+' : ''}{fmt(delta)}
@@ -1271,8 +1280,9 @@ function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDar
 
       {state.visits.length > 0 && (
         <div style={{ fontSize: 10.5, color: textMid, marginTop: 6, lineHeight: 1.45, borderTop: `1px solid ${border}`, paddingTop: 6 }}>
-          Right-hand figure is today versus then, at about the same stock price — so it's
-          the options and any trades since, not the share move.
+          Compared against <strong>Net</strong> today, not Net + Open — open option value can't
+          be recovered for a past date, so it's left out of both sides rather than estimated
+          into one. Recomputed from your trades, not from what was recorded at the time.
           {state.band > 2 && ` Widened to ±${state.band}% to find these.`}
         </div>
       )}
