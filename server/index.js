@@ -4541,6 +4541,15 @@ app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
         const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
         const snap = resp.data?.results
         if (!snap) { row.error = 'no results'; row.rawStatus = resp.data?.status || null; out.push(row); continue }
+        // The /v3/quotes call the Close Now column depends on. Reported raw so a
+        // blank column can be attributed: no entitlement, no quote for this
+        // contract, or a quote with only one side.
+        const q = await fetchOptionQuote(polygonTicker, polygonKey)
+        row.quote = { bid: q.bid, ask: q.ask, mid: q.mid }
+        row.quoteUsable = q.bid > 0 && q.ask > 0
+        row.spread = (q.bid > 0 && q.ask > 0) ? Math.round((q.ask - q.bid) * 100) / 100 : null
+        row.markIsToday = marketMarkIsToday(snap)
+
         const lt = snap.last_trade || {}
         const rawTs = lt.sip_timestamp ?? lt.t ?? 0
         const ltMs = rawTs ? (rawTs > 1e15 ? rawTs / 1e6 : rawTs) : 0
