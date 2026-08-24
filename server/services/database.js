@@ -2732,11 +2732,23 @@ export class DatabaseService {
         GROUP BY code
       `).all(...[userId, ...(broker ? [broker] : [])])
 
+      // Whether ANY cash activity exists for this user, which separates "no
+      // margin was ever charged" from "nothing has been imported yet". Those
+      // look identical as zeros and need opposite responses.
+      let hasData = false
+      try {
+        const any = db.prepare(
+          `SELECT 1 FROM cash_activity WHERE user_id = ? ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''} LIMIT 1`
+        ).get(...[userId, ...(broker ? [broker] : [])])
+        hasData = !!any
+      } catch (e) { /* table may not exist yet on an old database */ }
+
       const by = Object.fromEntries(rows.map(r => [r.code, { n: r.n, total: Number(r.total) || 0 }]))
       const marginInterest = -(by.MINT?.total || 0)   // charged to you
       const subscription = -(by.GOLD?.total || 0)     // charged to you
       const interestEarned = by.INT?.total || 0       // paid to you
       return {
+        hasData,
         marginInterest: round2(marginInterest),
         marginInterestCount: by.MINT?.n || 0,
         subscription: round2(subscription),
@@ -2745,7 +2757,7 @@ export class DatabaseService {
       }
     } catch (e) {
       console.error('Error getting financing costs:', e)
-      return { marginInterest: 0, marginInterestCount: 0, subscription: 0, interestEarned: 0, net: 0 }
+      return { hasData: false, marginInterest: 0, marginInterestCount: 0, subscription: 0, interestEarned: 0, net: 0 }
     }
   }
 

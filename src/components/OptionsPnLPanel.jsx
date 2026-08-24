@@ -740,7 +740,17 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                   financing cost, not a trading result — but it's real money and a
                   leveraged book can look profitable while the borrowing behind it
                   eats the gain, so it shouldn't be invisible either. */}
-              {account.financing && (account.financing.marginInterest !== 0 || account.financing.subscription !== 0 || account.financing.interestEarned !== 0) && (
+              {/* Nothing imported yet reads exactly like nothing to report, so
+                  say which it is rather than rendering nothing at all. */}
+              {account.financing && !account.financing.hasData && (
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px dashed ${border}`,
+                              fontSize: 11.5, color: textMid, lineHeight: 1.5 }}>
+                  <strong style={{ color: '#f59e0b' }}>Margin interest not loaded.</strong> These rows were
+                  parsed but never stored until now — re-upload your CSV once and they'll appear here.
+                </div>
+              )}
+
+              {account.financing?.hasData && (account.financing.marginInterest !== 0 || account.financing.subscription !== 0 || account.financing.interestEarned !== 0) && (
                 <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px dashed ${border}` }}>
                   <div style={{ fontSize: 10.5, color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
                     Not included above
