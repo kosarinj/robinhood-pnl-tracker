@@ -2677,6 +2677,49 @@ export class DatabaseService {
    * expiry carries no cash at all and contributes nothing here — what it did to
    * the position shows up in the market value instead.
    */
+  /**
+   * Money the broker charged or paid that isn't a trade.
+   *
+   * Margin interest is a real cost of running a leveraged book and it never
+   * appears in trade P&L, so a position can look profitable while the borrowing
+   * behind it quietly eats the gain. Reported separately rather than folded
+   * into a total: it's a financing cost, not a trading result, and mixing them
+   * makes both harder to read.
+   *
+   * Robinhood codes these MINT ("Aggregated Margin Rate"), GOLD (subscription)
+   * and INT (interest paid TO you). Amounts are stored absolute, so the sign
+   * comes from what the code means.
+   */
+  getFinancingCosts(userId = 1, broker = null) {
+    try {
+      const rows = db.prepare(`
+        SELECT UPPER(COALESCE(trans_code,'')) AS code,
+               COUNT(*) AS n,
+               SUM(ABS(COALESCE(amount,0))) AS total
+        FROM trades
+        WHERE user_id = ?
+          AND UPPER(COALESCE(trans_code,'')) IN ('MINT','GOLD','INT')
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        GROUP BY code
+      `).all(...[userId, ...(broker ? [broker] : [])])
+
+      const by = Object.fromEntries(rows.map(r => [r.code, { n: r.n, total: Number(r.total) || 0 }]))
+      const marginInterest = -(by.MINT?.total || 0)   // charged to you
+      const subscription = -(by.GOLD?.total || 0)     // charged to you
+      const interestEarned = by.INT?.total || 0       // paid to you
+      return {
+        marginInterest: round2(marginInterest),
+        marginInterestCount: by.MINT?.n || 0,
+        subscription: round2(subscription),
+        interestEarned: round2(interestEarned),
+        net: round2(marginInterest + subscription + interestEarned),
+      }
+    } catch (e) {
+      console.error('Error getting financing costs:', e)
+      return { marginInterest: 0, marginInterestCount: 0, subscription: 0, interestEarned: 0, net: 0 }
+    }
+  }
+
   getCashFlows(userId = 1, broker = null) {
     try {
       const r = db.prepare(`

@@ -736,6 +736,34 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                 Object.entries(account.transferDetail || {}).map(([s, v]) => `${s} ${v >= 0 ? '+' : ''}${fmt(v)}`).join(', ')
               )}
               {row('Options — open at market', openOptionValue, 'What the open contracts are worth now: long positions positive, short positions negative because they cost that much to close.')}
+              {/* Deliberately below the total and outside it. Margin interest is a
+                  financing cost, not a trading result — but it's real money and a
+                  leveraged book can look profitable while the borrowing behind it
+                  eats the gain, so it shouldn't be invisible either. */}
+              {account.financing && (account.financing.marginInterest !== 0 || account.financing.subscription !== 0 || account.financing.interestEarned !== 0) && (
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px dashed ${border}` }}>
+                  <div style={{ fontSize: 10.5, color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                    Not included above
+                  </div>
+                  {account.financing.marginInterest !== 0 && row(
+                    `Margin interest${account.financing.marginInterestCount ? ` (${account.financing.marginInterestCount} charges)` : ''}`,
+                    account.financing.marginInterest,
+                    'What borrowing has cost. Never appears in trade P&L, so a position can look profitable while the interest behind it eats the gain.'
+                  )}
+                  {account.financing.subscription !== 0 && row(
+                    'Gold subscription', account.financing.subscription, 'Robinhood Gold fees.')}
+                  {account.financing.interestEarned !== 0 && row(
+                    'Interest earned', account.financing.interestEarned, 'Interest paid to you on idle cash.')}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12,
+                                paddingTop: 4, marginTop: 2, borderTop: `1px solid ${border}` }}>
+                    <span style={{ color: textMid, fontWeight: 600 }}>Net financing</span>
+                    <span style={{ fontWeight: 700, color: account.financing.net >= 0 ? green : red }}>
+                      {(account.financing.net >= 0 ? '+' : '') + fmt(account.financing.net)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div style={{ fontSize: 10, color: textMid, marginTop: 6, lineHeight: 1.4 }}>
                 Cash flow plus market value — no cost-basis method involved, so this moves only when money moves or a price does.
                 {unpriced > 0 && <span style={{ color: '#f59e0b' }}> {unpriced} open contract(s) had no mark and are excluded.</span>}

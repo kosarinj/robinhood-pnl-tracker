@@ -3495,6 +3495,9 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
     const round2 = n => Math.round(n * 100) / 100
     const { stockCash, optionCash } = databaseService.getCashFlows(userId, brokerFilter)
+    // Reported but NOT added to any total — a financing cost isn't a trading
+    // result, and folding it in would make both harder to read.
+    const financing = databaseService.getFinancingCosts(userId, brokerFilter)
 
     // Only the share counts matter here, so the cost-basis method is irrelevant.
     const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
@@ -3543,6 +3546,7 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
       stockMarketValue: round2(stockMarketValue),
       stockTotal: round2(stockCash + stockMarketValue),
       optionCashFlow: round2(optionCash),
+      financing,
       transferValue: round2(transferValue),
       transferCount: transfers.length,
       transferDetail,
