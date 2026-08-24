@@ -3318,6 +3318,86 @@ app.get('/api/debug-day-inputs', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/debug-open-breakdown?ticker=MRVL
+ *
+ * Every OPEN contract for one underlying, with the mark it got, where that mark
+ * came from, and what it contributes to Open P&L. Answers "why is this number
+ * what it is" by showing the parts rather than the total.
+ */
+app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!ticker) return res.status(400).json({ error: 'ticker is required' })
+
+    const open = databaseService.getOpenOptionPositions(userId)
+    const entries = databaseService.getShortCallEntries(userId)
+    const today = todayStrLocal()
+
+    const shortOpen = new Set(open.filter(p => p.net_short > 0).map(p => p.symbol))
+    const mine = entries.filter(e => (e.ticker || '').toUpperCase() === ticker && shortOpen.has(e.symbol))
+
+    const rows = []
+    let total = 0
+    for (const e of mine) {
+      const parsed = parseOptionDescription(e.symbol)
+      const expiry = parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : null
+      const row = { symbol: e.symbol, expiry, contracts: e.contracts || 1, premiumTotal: e.premium }
+      if (expiry && expiry < today) { row.skipped = 'expired'; rows.push(row); continue }
+
+      const polyTicker = toPolygonTicker(e.symbol)
+      let mark = null, basis = null, volume = null
+      if (polygonKey && polyTicker && parsed) {
+        const q = await fetchOptionQuote(polyTicker, polygonKey)
+        if (q.mid > 0) { mark = q.mid; basis = 'quote' }
+        try {
+          const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
+          const snap = (await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })).data?.results
+          if (snap) {
+            volume = snap.day?.volume ?? null
+            row.dayClose = snap.day?.close ?? null
+            row.prevClose = snap.day?.previous_close ?? null
+            row.markIsToday = marketMarkIsToday(snap)
+            if (mark == null && row.markIsToday && snap.day?.close > 0) {
+              mark = snap.day.close; basis = 'today'
+            }
+            if (mark == null) {
+              const m = modelOptionMark(e, parsed, snap.underlying_asset?.price)
+              if (m > 0) { mark = m; basis = 'model' }
+              else if (snap.day?.close > 0) { mark = snap.day.close; basis = 'staleClose' }
+            }
+          }
+        } catch (err) { row.snapshotError = err.message }
+      }
+
+      const contracts = e.contracts || 1
+      const premiumPerShare = contracts > 0 ? e.premium / (contracts * 100) : 0
+      row.volume = volume
+      row.mark = mark != null ? Math.round(mark * 100) / 100 : null
+      row.basis = basis
+      row.premiumPerShare = Math.round(premiumPerShare * 100) / 100
+      row.openPnl = mark != null
+        ? Math.round((premiumPerShare - mark) * 100 * contracts * 100) / 100
+        : null
+      if (row.openPnl != null) total += row.openPnl
+      rows.push(row)
+    }
+
+    rows.sort((a, b) => (a.openPnl ?? 0) - (b.openPnl ?? 0))
+    res.json({
+      ticker,
+      openContracts: rows.filter(r => !r.skipped).length,
+      totalOpenPnl: Math.round(total * 100) / 100,
+      byBasis: rows.reduce((acc, r) => { if (r.basis) acc[r.basis] = (acc[r.basis] || 0) + 1; return acc }, {}),
+      rows,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Account P&L ─────────────────────────────────────────────────────────────
 // What the account has actually made: cash in and out, plus what the open
 // positions are worth right now.
