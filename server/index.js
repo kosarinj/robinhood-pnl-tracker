@@ -61,6 +61,28 @@ function staleOptionMark(snap) {
   if (!snap) return 0
   return (snap.day?.close || 0) || (snap.last_trade?.price || 0)
 }
+
+/**
+ * Did this contract actually print TODAY?
+ *
+ * A close from today is a real market price and beats any model of it. A close
+ * from three weeks ago is a frozen number that says nothing about now, and the
+ * model — which at least tracks the underlying — is better. Both arrive in the
+ * same `day.close` field, so without a timestamp they were treated alike and a
+ * contract that had traded this morning still got modelled.
+ *
+ * Polygon timestamps are nanoseconds since epoch.
+ */
+function marketMarkIsToday(snap) {
+  if (!snap) return false
+  const ns = snap.last_trade?.sip_timestamp || snap.last_trade?.participant_timestamp
+    || snap.day?.last_updated || 0
+  if (!ns) return false
+  const ms = Number(ns) / 1e6
+  if (!Number.isFinite(ms) || ms <= 0) return false
+  const d = new Date(ms)
+  return d.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+}
 // Real bid/ask midpoint from Polygon's dedicated quotes endpoint. On the Options
 // Starter (delayed) plan the snapshot's last_quote is null, but /v3/quotes still
 // serves the (15-min delayed) NBBO — this is the actual market mid. Returns 0 if
@@ -2335,6 +2357,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // reportable when every part of the position is in it — a partial one is a
     // different number, and on a down day an opposite-signed one.
     const dayGapTickers = new Set()
+    // ticker -> 'market' | 'model' | 'mixed', from how each leg's mark was got.
+    const openBasisByTicker = {}
     // Theta projection: what Open P&L becomes in 1/2/3 months if the underlying
     // doesn't move. Keyed [months][ticker].
     const PROJECT_MONTHS = [1, 2, 3]
@@ -2396,7 +2420,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
       // Fetch current per-share option prices for the open short calls (same as tracker):
       // real quote mid → Black–Scholes model mark → stale daily close.
-      const optFresh = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
+      // optToday: a real trade or close printed TODAY. It sits between a live
+      // quote and the model, because it's a measurement rather than an estimate
+      // — the model should only win when the market hasn't spoken recently.
+      const optFresh = {}, optToday = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
       if (polygonKey && priceLegs.length > 0) {
         await Promise.all(priceLegs.map(async entry => {
           const polyTicker = toPolygonTicker(entry.symbol)
@@ -2414,7 +2441,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
                 if (fresh > 0) optFresh[entry.symbol] = fresh
               }
               const stale = staleOptionMark(snap)
-              if (stale > 0) optClose[entry.symbol] = stale
+              if (stale > 0) {
+                optClose[entry.symbol] = stale
+                // A print from TODAY is real market data and outranks the model;
+                // only an old one is a fallback.
+                if (marketMarkIsToday(snap)) optToday[entry.symbol] = stale
+              }
               // Option's prior-day EOD close (for today's mark-to-market move) — same snapshot, no extra call.
               if (snap.day?.previous_close > 0) optPrevClose[entry.symbol] = snap.day.previous_close
               const u = snap.underlying_asset?.price
@@ -2461,6 +2493,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
         const parsed = parseOptionDescription(entry.symbol)
         openPremiumByTicker[ticker] = (openPremiumByTicker[ticker] || 0) + premiumPerShare * shares
+        // Priority: live quote -> a print from TODAY -> model -> stale close.
+        //
+        // The middle step is new. A contract that traded today has a real market
+        // price sitting in the same field as one that last traded weeks ago, and
+        // both were being passed over for the model. That's right for the frozen
+        // one and wrong for the fresh one — and the model can drift a long way,
+        // because its vol is backed out of the ORIGINAL sale. MRVL was sold near
+        // $150 and now trades near $236, so a vol anchored to that sale is
+        // describing a different world. That's where -3,200 against a broker's
+        // -2,000 comes from.
         const usedQuote = optFresh[entry.symbol] != null
         let currentOptionPrice = optFresh[entry.symbol]
         // Which basis this mark is on decides what it can legitimately be
@@ -2468,12 +2510,21 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // 'model' is a Black-Scholes estimate and is only comparable to another
         // run of the same model.
         let markBasis = usedQuote ? 'quote' : null
+        if (currentOptionPrice == null && optToday[entry.symbol] > 0) {
+          currentOptionPrice = optToday[entry.symbol]
+          markBasis = 'today'
+        }
         if (currentOptionPrice == null) {
           const model = modelOptionMark(entry, parsed, stockByTicker[entry.ticker])
           if (model > 0) { currentOptionPrice = model; markBasis = 'model' }
           else { currentOptionPrice = optClose[entry.symbol]; markBasis = 'close' }
         }
         if (currentOptionPrice != null) {
+          const isMarket = markBasis === 'quote' || markBasis === 'today'
+          const prevBasis = openBasisByTicker[ticker]
+          const thisBasis = isMarket ? 'market' : 'model'
+          openBasisByTicker[ticker] = !prevBasis ? thisBasis
+            : prevBasis === thisBasis ? thisBasis : 'mixed'
           // Short call P&L = (premium collected − current cost to buy back) × shares.
           openUnrealizedByTicker[ticker] =
             (openUnrealizedByTicker[ticker] || 0) + (premiumPerShare - currentOptionPrice) * shares
@@ -2491,9 +2542,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // contracts that barely trade. So: live quote, then the model, then
           // two daily prints.
           let dayOptPerShare = null
-          if (optFresh[entry.symbol] > 0 && prevMkt > 0) {
+          if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) {
             // A LIVE quote against yesterday's close. Both market, both current.
-            dayOptPerShare = prevMkt - optFresh[entry.symbol]
+            dayOptPerShare = prevMkt - (optFresh[entry.symbol] || optToday[entry.symbol])
           } else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) {
             const mNow = modelOptionMark(entry, parsed, stockByTicker[ticker])
             const mPrev = modelOptionMark(entry, parsed, openPrevUnderlying[ticker])
@@ -2519,7 +2570,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           if (dayOptPerShare != null) {
             openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
             const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
-            if (optFresh[entry.symbol] > 0 && prevMkt > 0) bs.market += 1
+            if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) bs.market += 1
             else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) bs.model += 1
             else bs.market += 1     // two daily prints
           }
@@ -2941,6 +2992,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // both ends, 'model' when none did, 'mixed' in between. A model-derived
           // day move is an estimate of the move, not the move — worth being able
           // to see when a figure disagrees with the broker.
+          // Which basis today's OPEN P&L rests on for this ticker: a real market
+          // mark, or a model estimate. Reported so an estimate reads as one
+          // rather than as a measurement.
+          openMarkBasis: openBasisByTicker[e.ticker] || null,
           dayOptionBasis: (() => {
             const bs = dayBasisByTicker[e.ticker]
             if (!bs) return null

@@ -629,9 +629,15 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
 
     { key: 'openUnrealizedPnL', label: 'Open P&L', sort: 'openUnrealizedPnL',
       title: 'Unrealized P&L on open short options: premium collected minus current cost to buy them back',
-      cell: (r) => <span title={r.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available'}
+      cell: (r) => <span title={
+          (r.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available')
+          + (r.openMarkBasis === 'model' ? ' · MODELLED — no market price for these contracts, so this is a Black-Scholes estimate and can differ from your broker'
+             : r.openMarkBasis === 'mixed' ? ' · some legs modelled, some from real market prices'
+             : r.openMarkBasis === 'market' ? ' · from real market prices' : '')}
         style={{ fontWeight: 700, color: pnlColor(r.openUnrealizedPnL, isDark) }}>
-        {r.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(r.openUnrealizedPnL)}` : '—'}</span>,
+        {r.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(r.openUnrealizedPnL)}` : '—'}
+        {r.openMarkBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~est</span>}
+        {r.openMarkBasis === 'mixed' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.openUnrealizedPnL, isDark), fontWeight: 700 }}>{fmt(t.openUnrealizedPnL)}</span> },
 
     { key: 'theta', label: 'Theta',
