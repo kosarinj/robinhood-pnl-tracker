@@ -2401,7 +2401,21 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       const netShortBySymbol = {}
       openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
       const openShortSymbols = new Set(openPositions.filter(p => p.net_short > 0).map(p => p.symbol))
-      const openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
+      // Open AND not yet expired. An expired contract can't be marked to market
+      // — Polygon answers "Options contract not found" — so pricing it is a
+      // guaranteed-failed request on every page load. MRVL alone was making a
+      // dozen of them.
+      //
+      // getOpenOptionPositions already nets settlements out, so anything still
+      // listed as open past its expiry is a contract whose settlement never
+      // arrived in the CSV rather than a live position. Either way there's
+      // nothing to price.
+      const notExpired = (sym) => {
+        const p = parseOptionDescription(sym)
+        if (!p) return true                     // unparseable: leave it alone
+        return `${p.year}-${p.month}-${p.day}` >= todayStrLocal()
+      }
+      const openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol) && notExpired(e.symbol))
       // Only rescale to net_short when a symbol has a single open entry (avoids double-count).
       const openEntryCount = {}
       openEntries.forEach(e => { openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
@@ -2433,7 +2447,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         ...openEntries.map(e => ({ symbol: e.symbol, ticker: e.ticker })),
         // Priced on both bases: the legacy basis still needs these for the day
         // move, even though it leaves them out of the cumulative figures.
-        ...openLongs.map(l => ({ symbol: l.symbol, ticker: l.ticker })),
+        ...openLongs.filter(l => notExpired(l.symbol)).map(l => ({ symbol: l.symbol, ticker: l.ticker })),
       ].filter((v, i, a) => a.findIndex(x => x.symbol === v.symbol) === i)
 
       // Fetch current per-share option prices for the open short calls (same as tracker):
@@ -3489,6 +3503,14 @@ app.get('/api/price-history-pnl/:ticker', requireAuth, async (req, res) => {
     res.status(500).json({ success: false, error: e.message })
   }
 })
+
+// Today as YYYY-MM-DD in LOCAL time. Not toISOString, which is UTC and gives
+// yesterday's date for most of the evening in US timezones — that would treat a
+// contract expiring today as already expired and stop pricing it a day early.
+function todayStrLocal() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 // Whole days between two YYYY-MM-DD dates. Built from the strings rather than
 // Date arithmetic so it can't drift with a timezone.
