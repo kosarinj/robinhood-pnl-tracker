@@ -3312,14 +3312,45 @@ app.get('/api/price-history-pnl/:ticker', requireAuth, async (req, res) => {
     // its Options Total counts only closes since this date.
     const fromDate = req.query.startDate || null
 
+    // Dates come from the stock's own price history, NOT from stored snapshots.
+    //
+    // Snapshots only exist on days a CSV was uploaded, so "no earlier snapshot
+    // near $89" was really "you didn't upload on one of those days" — while
+    // CRCL had in fact traded there on eleven sessions. Reading it as "the
+    // stock was never here" is the natural interpretation and the wrong one.
     let band = Number(req.query.band) > 0 ? Number(req.query.band) : 2
-    let dates = databaseService.getPriceVisits(req.user.userId, ticker, price, { bandPct: band })
-    // Widen once rather than reporting nothing — "no history" reads as broken
-    // when 5% would have found three visits. The response says which band answered.
-    if (dates.length === 0) {
-      band = 5
-      dates = databaseService.getPriceVisits(req.user.userId, ticker, price, { bandPct: band })
+    let history = []
+    try {
+      history = await priceService.fetchHistoricalPrices(ticker, '2y', '1d')
+    } catch (e) {
+      return res.json({ success: true, ticker, price, band, visits: [], reason: `No price history: ${e.message}` })
     }
+
+    const todayStr = new Date().toISOString().slice(0, 10)
+    const findNear = (pct) => {
+      const hits = history
+        .map(h => ({ date: String(h.date).slice(0, 10), close: h.close }))
+        .filter(h => h.close > 0 && Math.abs(h.close - price) / price <= pct / 100)
+        // Recent days are the visit being asked about, not a previous one.
+        // today MINUS the date, so a past session is a positive number of days
+        // ago. The other way round every date is negative and nothing survives.
+        .filter(h => daysBetween(todayStr, h.date) >= 5)
+        .sort((a, b) => b.date.localeCompare(a.date))
+
+      // Consecutive sessions at the same level are ONE visit — Dec 9, 10 and 11
+      // is a week at that price, not three separate occasions, and listing them
+      // separately would fill the popover with a single fortnight.
+      const visits = []
+      for (const h of hits) {
+        if (visits.length >= 4) break
+        if (visits.some(v => Math.abs(daysBetween(h.date, v.date)) < 10)) continue
+        visits.push({ date: h.date, price: Math.round(h.close * 100) / 100 })
+      }
+      return visits
+    }
+
+    let dates = findNear(band)
+    if (dates.length === 0) { band = 5; dates = findNear(band) }
 
     const visits = dates.map(d => {
       const stock = databaseService.getStockStateAsOf(req.user.userId, ticker, d.date, brokerFilter)
@@ -3348,7 +3379,7 @@ app.get('/api/price-history-pnl/:ticker', requireAuth, async (req, res) => {
 
     res.json({
       success: true, ticker, price, band, visits,
-      basis: 'net',
+      basis: 'netPlusOpen',
       fromDate,
       note: 'Same basis as the Net column: options realized in the selected period, plus stock. Open option value is excluded — past option marks are not recoverable.',
     })
@@ -3357,6 +3388,14 @@ app.get('/api/price-history-pnl/:ticker', requireAuth, async (req, res) => {
     res.status(500).json({ success: false, error: e.message })
   }
 })
+
+// Whole days between two YYYY-MM-DD dates. Built from the strings rather than
+// Date arithmetic so it can't drift with a timezone.
+function daysBetween(a, b) {
+  const ms = Date.UTC(...a.split('-').map((v, i) => i === 1 ? Number(v) - 1 : Number(v)))
+           - Date.UTC(...b.split('-').map((v, i) => i === 1 ? Number(v) - 1 : Number(v)))
+  return Math.round(ms / 86400000)
+}
 
 // ─── Per-user view preferences ───────────────────────────────────────────────
 // Settings that used to live in localStorage, which made them per device. The

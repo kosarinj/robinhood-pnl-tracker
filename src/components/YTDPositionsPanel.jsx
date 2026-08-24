@@ -1346,8 +1346,8 @@ function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClos
 
       {!state.loading && !state.error && state.visits.length === 0 && (
         <div style={{ fontSize: 12, color: textMid, lineHeight: 1.5 }}>
-          No earlier snapshot with this stock near {fmt(nowPrice)}. Snapshots are written
-          when a CSV is uploaded, so history only goes as deep as those uploads.
+          {ticker} hasn't traded near {fmt(nowPrice)} in the last two years, other than
+          the past few days.
         </div>
       )}
 
