@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useTheme } from '../contexts/ThemeContext'
 import { getPref, setPref, subscribePrefs } from '../services/prefs'
 
@@ -127,9 +128,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     try { const p = JSON.parse(localStorage.getItem('taxCenter_plan') || '{}'); return parseFloat(p.ordinaryRate) || 24 } catch { return 24 }
   })
 
-  const togglePriceHistory = async (ticker, price) => {
-    if (histFor === ticker) { setHistFor(null); return }
+  // Where to draw the popover, in viewport coordinates. Needed because it's
+  // portalled out of the table and so has no positioned ancestor to sit under.
+  const [histAnchor, setHistAnchor] = useState(null)
+  const [histNow, setHistNow] = useState({ price: 0, value: null })
+
+  const togglePriceHistory = async (ticker, price, el, nowValue) => {
+    if (histFor === ticker) { setHistFor(null); setHistAnchor(null); return }
     if (!(price > 0)) return
+    if (el) {
+      const box = el.getBoundingClientRect()
+      setHistAnchor({ top: box.bottom, right: window.innerWidth - box.right })
+    }
+    // Carried alongside, because the popover no longer lives inside the row and
+    // can't read its values.
+    setHistNow({ price, value: nowValue })
     setHistFor(ticker)
     setHist({ loading: true, visits: [], band: null, error: null })
 
@@ -699,28 +712,20 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       foot: (t) => <span style={{ color: pnlColor(t.net, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net)}</span> },
 
     { key: 'netPlusOpen', label: 'Net + Open P&L', borderLeft: '1px', title: 'Net + Open P&L — marks open short options to market on top of Net. Click a value to see previous times this stock was at the same price.',
+      // The popover is NOT rendered here — it goes through a portal to
+      // document.body, below. The sticky ticker column is position:sticky with
+      // a z-index, which makes it its own stacking context, and nothing painted
+      // inside the table can be layered above it however high its z-index. The
+      // only reliable fix is to leave the table.
       cell: (r, c) => (
-        <span style={{
-          position: 'relative', display: 'inline-block',
-          // Lift the whole cell while its popover is open, otherwise later cells
-          // paint over it — they come after in document order.
-          zIndex: histFor === r.ticker ? 9998 : 'auto',
-        }}>
-          <span
-            onClick={() => togglePriceHistory(r.ticker, c.price)}
-            title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`
-              + (c.price > 0 ? ' · click for previous visits to this price' : '')}
-            style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.netPlusOpen, isDark),
-                     cursor: c.price > 0 ? 'pointer' : 'default',
-                     borderBottom: c.price > 0 ? `1px dotted ${border}` : 'none' }}>
-            {fmt(c.netPlusOpen)}
-          </span>
-          {histFor === r.ticker && (
-            <PriceHistoryPopover
-              state={hist} ticker={r.ticker} nowPrice={c.price} nowValue={c.netPlusOpen}
-              onClose={() => setHistFor(null)} isDark={isDark} fmt={fmt} pnlColor={pnlColor}
-            />
-          )}
+        <span
+          onClick={e => togglePriceHistory(r.ticker, c.price, e.currentTarget, c.netPlusOpen)}
+          title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`
+            + (c.price > 0 ? ' · click for previous visits to this price' : '')}
+          style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.netPlusOpen, isDark),
+                   cursor: c.price > 0 ? 'pointer' : 'default',
+                   borderBottom: c.price > 0 ? `1px dotted ${border}` : 'none' }}>
+          {fmt(c.netPlusOpen)}
         </span>
       ),
       foot: (t) => <span style={{ color: pnlColor(t.net + t.openUnrealizedPnL, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net + t.openUnrealizedPnL)}</span> },
@@ -1262,6 +1267,23 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           </table>
         </div>
       )}
+
+      {/* Portalled to document.body so it can't be trapped under the sticky
+          ticker column's stacking context. Positioned from the clicked cell's
+          rect in viewport coordinates, which is why it's fixed rather than
+          absolute. */}
+      {histFor && histAnchor && createPortal(
+        <PriceHistoryPopover
+          state={hist}
+          ticker={histFor}
+          anchor={histAnchor}
+          nowPrice={histNow.price}
+          nowValue={histNow.value}
+          onClose={() => { setHistFor(null); setHistAnchor(null) }}
+          isDark={isDark} fmt={fmt} pnlColor={pnlColor}
+        />,
+        document.body
+      )}
     </div>
   )
 }
@@ -1274,21 +1296,39 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
  * price. That difference is the premium collected and decayed since, with the
  * share move held constant by construction.
  */
-function PriceHistoryPopover({ state, ticker, nowPrice, nowValue, onClose, isDark, fmt, pnlColor }) {
+function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClose, isDark, fmt, pnlColor }) {
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2a3142' : '#e2e8f0'
   const text = isDark ? '#e2e8f0' : '#1e293b'
   const textMid = isDark ? '#94a3b8' : '#64748b'
 
+  // A fixed popover doesn't move with the row it belongs to, so on scroll it
+  // would sit over an unrelated one. Closing is honest; tracking the row would
+  // be nicer but needs the anchor recomputed every frame.
+  useEffect(() => {
+    const close = () => onClose()
+    const onKey = (ev) => { if (ev.key === 'Escape') onClose() }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
   return (
     <div
       onClick={e => e.stopPropagation()}
       style={{
-        // The sticky ticker column and the table header both create stacking
-        // contexts, so a modest z-index here loses to them. Fixed positioning
-        // would escape the table entirely but then wouldn't follow the row on
-        // scroll; a large z-index plus the raised cell below is enough.
-        position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 9999,
+        // Fixed, in viewport coordinates, because this is portalled to body and
+        // has no positioned ancestor. Clamped so a row near the right edge or
+        // the bottom of the window doesn't push it off screen.
+        position: 'fixed',
+        top: Math.min(anchor.top + 6, window.innerHeight - 240),
+        right: Math.max(8, anchor.right),
+        zIndex: 9999,
         background: surface, border: `1px solid ${border}`, borderRadius: 8,
         padding: '10px 12px', minWidth: 290, textAlign: 'left',
         boxShadow: '0 6px 20px rgba(0,0,0,0.18)', fontWeight: 400,
