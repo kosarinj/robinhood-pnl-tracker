@@ -73,6 +73,22 @@ function staleOptionMark(snap) {
  *
  * Polygon timestamps are nanoseconds since epoch.
  */
+/**
+ * The date of the snapshot's daily bar, or null.
+ *
+ * A stale close is only interpretable if you know WHEN it was — the same $76.25
+ * means different things four days and four months ago.
+ */
+function marketMarkDate(snap) {
+  const ns = snap?.day?.last_updated || snap?.last_trade?.sip_timestamp
+    || snap?.last_trade?.participant_timestamp || 0
+  if (!ns) return null
+  const ms = Number(ns) / 1e6
+  if (!Number.isFinite(ms) || ms <= 0) return null
+  const d = new Date(ms)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
 function marketMarkIsToday(snap) {
   if (!snap) return false
   const ns = snap.last_trade?.sip_timestamp || snap.last_trade?.participant_timestamp
@@ -2458,6 +2474,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       const optFresh = {}, optToday = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
       // Raw bid/ask per contract, for the realistic cost of getting out.
       const optQuote = {}
+      // When each stale close was printed, so it can be aged forward.
+      const optCloseDate = {}
       if (polygonKey && priceLegs.length > 0) {
         await Promise.all(priceLegs.map(async entry => {
           const polyTicker = toPolygonTicker(entry.symbol)
@@ -2479,6 +2497,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
               const stale = staleOptionMark(snap)
               if (stale > 0) {
                 optClose[entry.symbol] = stale
+                const md = marketMarkDate(snap)
+                if (md) optCloseDate[entry.symbol] = md
                 // A print from TODAY is real market data and outranks the model;
                 // only an old one is a fallback.
                 if (marketMarkIsToday(snap)) optToday[entry.symbol] = stale
@@ -2517,6 +2537,25 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         }
       }
 
+      // Underlying prices on each stale close's date, fetched up front because
+      // the loop below is synchronous. One lookup per distinct (ticker, date)
+      // rather than per contract — several strikes usually share a close date.
+      const undThenByKey = {}
+      {
+        const needed = [...new Set(
+          openEntries
+            .filter(e => optClose[e.symbol] > 0 && optCloseDate[e.symbol] && e.ticker)
+            .map(e => `${e.ticker}|${optCloseDate[e.symbol]}`)
+        )]
+        await Promise.all(needed.map(async key => {
+          const [tk, dt] = key.split('|')
+          try {
+            const px = await priceService.getPriceForDate(tk, dt)
+            if (px > 0) undThenByKey[key] = px
+          } catch (e) { /* leave missing; the model still covers it */ }
+        }))
+      }
+
       openEntries.forEach(entry => {
         const ticker = entry.ticker
         if (!ticker) return
@@ -2550,6 +2589,44 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           currentOptionPrice = optToday[entry.symbol]
           markBasis = 'today'
         }
+        // A stale close AGED FORWARD for what the underlying has done since.
+        //
+        // This is the case that produced -3,363 against a broker's -2,000. The
+        // MRVL 2028 $380 last printed at $76.25 with a volume of ONE, four days
+        // ago — and MRVL has fallen 8.65% since. Using that print unchanged
+        // marks the position at a price the stock no longer supports.
+        //
+        // Ageing it is strictly better than either alternative: it starts from
+        // a real trade in THIS contract rather than a months-old sale like the
+        // model does, and unlike the raw close it accounts for the move since.
+        // Same repricing the extended-hours view already uses.
+        if (currentOptionPrice == null) {
+          const closeMark = optClose[entry.symbol]
+          const closeDate = optCloseDate[entry.symbol]
+          const undNow = stockByTicker[entry.ticker]
+          if (closeMark > 0 && closeDate && undNow > 0) {
+            try {
+              const undThen = undThenByKey[`${entry.ticker}|${closeDate}`] || 0
+              if (undThen > 0 && Math.abs(undNow - undThen) / undThen > 0.001) {
+                const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
+                const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+                const T0 = yrs(new Date(expiry).getTime() - new Date(closeDate).getTime())
+                const T1 = yrs(new Date(expiry).getTime() - Date.now())
+                if (T0 > 0 && T1 > 0) {
+                  const sigma = impliedVol(closeMark, undThen, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
+                  if (sigma > 0) {
+                    const aged = repriceFromClose({
+                      type: parsed.type, closeMark, S0: undThen, S1: undNow,
+                      K: parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
+                    })
+                    if (aged > 0) { currentOptionPrice = aged; markBasis = 'agedClose' }
+                  }
+                }
+              }
+            } catch (e) { /* fall through to the model */ }
+          }
+        }
+
         if (currentOptionPrice == null) {
           const model = modelOptionMark(entry, parsed, stockByTicker[entry.ticker])
           if (model > 0) { currentOptionPrice = model; markBasis = 'model' }
@@ -2567,6 +2644,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             }
           }
 
+          // Aged and modelled marks are both estimates. Grouping the aged one
+          // with the market would hide that it's been adjusted.
           const isMarket = markBasis === 'quote' || markBasis === 'today'
           const prevBasis = openBasisByTicker[ticker]
           const thisBasis = isMarket ? 'market' : 'model'
