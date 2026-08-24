@@ -497,11 +497,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayPnl: acc.dayPnl + (r.dayPnl || 0),
       // Summed independently of dayPnl, which is withheld entirely when a leg
       // can't be priced. A half that IS known still belongs in its own total.
+      openExitPnL: acc.openExitPnL + (r.openExitPnL || 0),
       dayStockPnl: acc.dayStockPnl + (r.dayStockPnl || 0),
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -793,6 +794,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.dayPnl, isDark), fontWeight: 700, fontSize: 15 }}>{t.dayPnl != null ? `${t.dayPnl >= 0 ? '+' : ''}${fmt(t.dayPnl)}` : '—'}</span> },
 
+    { key: 'openExitPnL', label: 'Close Now', sort: 'openExitPnL', borderLeft: '1px',
+      title: 'What the open options would really settle at if closed right now: shorts bought back at the ASK, longs sold at the BID. Always worse than Open P&L, which uses the mid — the mid is a valuation convention, not a price anyone fills at. Blank when there is no two-sided quote.',
+      cell: (r) => r.openExitPnL == null
+        ? <span style={{ color: textMid }} title="No live bid/ask for these contracts">—</span>
+        : (
+          <span title={r.exitSpreadCost != null
+              ? `${fmt(r.exitSpreadCost)} worse than the mid-based Open P&L — that gap is the spread you cross to get out.`
+              : ''}
+            style={{ fontWeight: 600, color: pnlColor(r.openExitPnL, isDark) }}>
+            {fmt(r.openExitPnL)}
+          </span>
+        ),
+      foot: (t) => <span style={{ color: pnlColor(t.openExitPnL, isDark), fontWeight: 700 }}>
+        {t.openExitPnL !== 0 ? fmt(t.openExitPnL) : '—'}</span> },
+
     // The two halves of the day, side by side with the combined figure.
     //
     // Each is shown on its own even when the OTHER one is missing, which is
@@ -881,6 +897,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const NEIGHBOURS = [
       { keys: ['scenarioNet', 'scenarioDelta'], anchor: 'netPlusOpen' },
       { keys: ['dayStockPnl', 'dayOptionPnl'], anchor: 'dayPnl' },
+      { keys: ['openExitPnL'], anchor: 'openUnrealizedPnL' },
     ]
     let ordered = out
     for (const { keys, anchor: anchorKey } of NEIGHBOURS) {

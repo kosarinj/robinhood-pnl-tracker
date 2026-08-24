@@ -88,15 +88,28 @@ function marketMarkIsToday(snap) {
 // serves the (15-min delayed) NBBO — this is the actual market mid. Returns 0 if
 // unavailable (no quote, or key not entitled → caller falls back to the model).
 async function fetchOptionQuoteMid(polygonTicker, polygonKey) {
+  const q = await fetchOptionQuote(polygonTicker, polygonKey)
+  return q.mid
+}
+
+/**
+ * Both sides of the quote, not just the middle.
+ *
+ * The mid is the convention for valuing a position, but it isn't a price anyone
+ * will trade at: closing a SHORT means paying the ask, closing a LONG means
+ * taking the bid. On a wide spread those differ from the mid by real money, so
+ * the exit column needs the sides kept rather than averaged away.
+ */
+async function fetchOptionQuote(polygonTicker, polygonKey) {
   try {
     const url = `https://api.polygon.io/v3/quotes/${polygonTicker}`
     const resp = await axios.get(url, { params: { apiKey: polygonKey, limit: 1, order: 'desc', sort: 'timestamp' }, timeout: 6000 })
     const q = resp.data?.results?.[0]
-    if (!q) return 0
+    if (!q) return { mid: 0, bid: 0, ask: 0 }
     const bid = q.bid_price || 0, ask = q.ask_price || 0
-    if (bid > 0 && ask > 0) return (bid + ask) / 2
-    return bid || ask || 0
-  } catch { return 0 }
+    const mid = (bid > 0 && ask > 0) ? (bid + ask) / 2 : (bid || ask || 0)
+    return { mid, bid, ask }
+  } catch { return { mid: 0, bid: 0, ask: 0 } }
 }
 
 // ── Black–Scholes marking (math lives in utils/blackScholes.js) ──
@@ -2359,6 +2372,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const dayGapTickers = new Set()
     // ticker -> 'market' | 'model' | 'mixed', from how each leg's mark was got.
     const openBasisByTicker = {}
+    // What it would really cost to get out: shorts bought back at the ASK,
+    // longs sold at the BID. Always worse than the mid-based figure, which is
+    // the point — the mid is a valuation convention, not a fill.
+    const openExitByTicker = {}
+    const exitSpreadByTicker = {}   // total mid-vs-exit gap, so the cost is visible
     // Theta projection: what Open P&L becomes in 1/2/3 months if the underlying
     // doesn't move. Keyed [months][ticker].
     const PROJECT_MONTHS = [1, 2, 3]
@@ -2424,13 +2442,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // quote and the model, because it's a measurement rather than an estimate
       // — the model should only win when the market hasn't spoken recently.
       const optFresh = {}, optToday = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
+      // Raw bid/ask per contract, for the realistic cost of getting out.
+      const optQuote = {}
       if (polygonKey && priceLegs.length > 0) {
         await Promise.all(priceLegs.map(async entry => {
           const polyTicker = toPolygonTicker(entry.symbol)
           const parsed = parseOptionDescription(entry.symbol)
           if (!polyTicker || !parsed) return
-          const qMid = await fetchOptionQuoteMid(polyTicker, polygonKey)
+          const quote = await fetchOptionQuote(polyTicker, polygonKey)
+          const qMid = quote.mid
           if (qMid > 0) optFresh[entry.symbol] = qMid
+          if (quote.bid > 0 || quote.ask > 0) optQuote[entry.symbol] = quote
           try {
             const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
             const resp = await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })
@@ -2520,6 +2542,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           else { currentOptionPrice = optClose[entry.symbol]; markBasis = 'close' }
         }
         if (currentOptionPrice != null) {
+          // Short: buying it back costs the ask. Without a two-sided quote there
+          // is nothing honest to say, so it contributes nothing rather than
+          // silently reusing the mid and pretending it's an exit price.
+          const q = optQuote[entry.symbol]
+          if (q?.ask > 0) {
+            openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (premiumPerShare - q.ask) * shares
+            if (q.mid > 0) {
+              exitSpreadByTicker[ticker] = (exitSpreadByTicker[ticker] || 0) + (q.ask - q.mid) * shares
+            }
+          }
+
           const isMarket = markBasis === 'quote' || markBasis === 'today'
           const prevBasis = openBasisByTicker[ticker]
           const thisBasis = isMarket ? 'market' : 'model'
@@ -2706,6 +2739,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         } else {
           // A leg we can't move honestly makes the whole ticker's day partial.
           dayGapTickers.add(ticker)
+        }
+
+        // Long: selling it takes the bid.
+        const lq = optQuote[leg.symbol]
+        if (lq?.bid > 0) {
+          openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (lq.bid - leg.costPerShare) * shares
+          if (lq.mid > 0) {
+            exitSpreadByTicker[ticker] = (exitSpreadByTicker[ticker] || 0) + (lq.mid - lq.bid) * shares
+          }
         }
 
         // Everything below is cumulative, so it stays on the corrected basis
@@ -2996,6 +3038,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // mark, or a model estimate. Reported so an estimate reads as one
           // rather than as a measurement.
           openMarkBasis: openBasisByTicker[e.ticker] || null,
+          // Null when no two-sided quote was available for any leg — an absent
+          // figure is honest, a mid dressed up as an exit price is not.
+          openExitPnL: openExitByTicker[e.ticker] != null ? r2(openExitByTicker[e.ticker]) : null,
+          exitSpreadCost: exitSpreadByTicker[e.ticker] != null ? r2(exitSpreadByTicker[e.ticker]) : null,
           dayOptionBasis: (() => {
             const bs = dayBasisByTicker[e.ticker]
             if (!bs) return null
