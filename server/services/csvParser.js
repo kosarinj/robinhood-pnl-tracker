@@ -98,7 +98,10 @@ export const parseTrades = (file) => {
             .filter(t => {
               const tc = t.transCode
               // Exclude dividends and interest from trades
-              if (tc === 'CDIV' || tc === 'MDIV' || tc === 'INT' || tc === 'MINT') {
+              // Cash activity, not trades: dividends, interest, margin (MINT =
+              // "Aggregated Margin Rate") and the Gold subscription. They carry
+              // no shares, so they'd break position maths if left in.
+              if (['CDIV', 'MDIV', 'INT', 'MINT', 'GOLD'].includes(tc)) {
                 return false
               }
               // Include expiry/assignment/exercise even when price = 0 (they close option positions)
@@ -111,7 +114,7 @@ export const parseTrades = (file) => {
           const dividendsAndInterest = results.data
             .map((row, index) => {
               const transCode = (row['Trans Code'] || '').toUpperCase()
-              if (!['CDIV', 'MDIV', 'INT', 'MINT'].includes(transCode)) {
+              if (!['CDIV', 'MDIV', 'INT', 'MINT', 'GOLD'].includes(transCode)) {
                 return null
               }
 
@@ -128,6 +131,9 @@ export const parseTrades = (file) => {
                 transCode,
                 isDividend: transCode === 'CDIV' || transCode === 'MDIV',
                 isInterest: transCode === 'INT' || transCode === 'MINT',
+                // Charged to you rather than paid to you — the sign can't come
+                // from the amount, which is stored absolute.
+                isCharge: transCode === 'MINT' || transCode === 'GOLD',
                 description: row['Description'] || ''
               }
             })

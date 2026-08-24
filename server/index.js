@@ -640,6 +640,12 @@ io.on('connection', (socket) => {
       // Save trades and deposits to database immediately (don't wait for prices)
       try {
         databaseService.saveTrades(trades, asofDate, deposits, totalPrincipal, user.userId, broker)
+        // Dividends, interest, margin and fees. Parsed on every upload and then
+        // discarded until now, which is why margin interest had nowhere to show.
+        if (dividendsAndInterest?.length) {
+          const n = databaseService.saveCashActivity(user.userId, dividendsAndInterest, broker)
+          console.log(`💵 Saved ${n} new cash activity row(s) for ${broker}`)
+        }
         if (shareTransfers.length) {
           const n = databaseService.saveShareTransfers(user.userId, shareTransfers)
           console.log(`↔ recorded ${n} share transfer(s) for ${broker}`)

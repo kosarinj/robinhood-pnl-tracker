@@ -352,6 +352,35 @@ try {
   console.error('option_iv_marks migration error:', e.message)
 }
 
+// Migration: broker cash activity — dividends, interest, margin, fees.
+//
+// These were parsed on upload and then dropped: they lived in the socket
+// session and there was a "TODO: Load from database" where the reload should
+// have been. So margin interest — a real, recurring cost of a leveraged book —
+// existed nowhere the app could see it.
+//
+// Kept out of `trades` deliberately. They aren't trades, and putting them there
+// would put them into position and P&L maths that has no idea what to do with
+// a financing charge.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cash_activity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      trans_date TEXT NOT NULL,
+      trans_code TEXT NOT NULL,
+      symbol TEXT,
+      amount REAL NOT NULL,
+      description TEXT,
+      broker TEXT DEFAULT 'robinhood',
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      UNIQUE(user_id, broker, trans_date, trans_code, amount, description)
+    )
+  `)
+} catch (e) {
+  console.error('cash_activity migration error:', e.message)
+}
+
 // Migration: stock splits. A split is a market fact, not per-user, so there's no
 // user_id. Trades BEFORE split_date are recorded in pre-split terms: the share
 // count needs multiplying and the per-share price dividing. The dollar amount is
@@ -2696,7 +2725,7 @@ export class DatabaseService {
         SELECT UPPER(COALESCE(trans_code,'')) AS code,
                COUNT(*) AS n,
                SUM(ABS(COALESCE(amount,0))) AS total
-        FROM trades
+        FROM cash_activity
         WHERE user_id = ?
           AND UPPER(COALESCE(trans_code,'')) IN ('MINT','GOLD','INT')
           ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
@@ -2718,6 +2747,37 @@ export class DatabaseService {
       console.error('Error getting financing costs:', e)
       return { marginInterest: 0, marginInterestCount: 0, subscription: 0, interestEarned: 0, net: 0 }
     }
+  }
+
+  /**
+   * Persist dividends, interest, margin and fees from an upload.
+   *
+   * UNIQUE on the whole row so re-uploading an overlapping export doesn't
+   * double-count a charge — these have no order id to dedupe on, and the same
+   * margin charge appearing twice would quietly double the reported cost.
+   */
+  saveCashActivity(userId, rows = [], broker = 'robinhood') {
+    if (!rows.length) return 0
+    const stmt = db.prepare(`
+      INSERT OR IGNORE INTO cash_activity
+        (user_id, trans_date, trans_code, symbol, amount, description, broker)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    let n = 0
+    const run = db.transaction(list => {
+      list.forEach(r => {
+        const code = String(r.transCode || '').toUpperCase()
+        if (!code) return
+        const date = r.date instanceof Date
+          ? r.date.toISOString().slice(0, 10)
+          : String(r.date || r.transDate || '').slice(0, 10)
+        if (!date) return
+        n += stmt.run(userId, date, code, r.symbol || null,
+          Math.abs(Number(r.amount) || 0), r.description || null, broker).changes || 0
+      })
+    })
+    try { run(rows) } catch (e) { console.error('Error saving cash activity:', e) }
+    return n
   }
 
   getCashFlows(userId = 1, broker = null) {
