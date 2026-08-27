@@ -131,6 +131,26 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // Where to draw the popover, in viewport coordinates. Needed because it's
   // portalled out of the table and so has no positioned ancestor to sit under.
   const [histAnchor, setHistAnchor] = useState(null)
+  // Per-ticker drill-down: the individual contracts behind a row, with the mark
+  // each one got and where that mark came from.
+  const [openRow, setOpenRow] = useState(null)
+  const [rowDetail, setRowDetail] = useState({ loading: false, data: null, error: null })
+
+  const toggleRowDetail = async (ticker) => {
+    if (openRow === ticker) { setOpenRow(null); return }
+    setOpenRow(ticker)
+    setRowDetail({ loading: true, data: null, error: null })
+    try {
+      const q = broker && broker !== 'all' ? `&broker=${encodeURIComponent(broker)}` : ''
+      const r = await fetch(`/api/debug-open-breakdown?ticker=${encodeURIComponent(ticker)}${q}`, { credentials: 'include' })
+      const d = await r.json()
+      setRowDetail(d?.error
+        ? { loading: false, data: null, error: d.error }
+        : { loading: false, data: d, error: null })
+    } catch (e) {
+      setRowDetail({ loading: false, data: null, error: 'Could not load' })
+    }
+  }
   const [histNow, setHistNow] = useState({ price: 0, value: null })
 
   const togglePriceHistory = async (ticker, price, el, nowValue) => {
@@ -1231,8 +1251,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               {sorted.map((row, i) => {
                 const c = rowCtx(row, i)
                 return (
+                  <React.Fragment key={row.ticker}>
                   <tr
-                    key={row.ticker}
                     style={{ borderBottom: `1px solid ${border}`, background: c.tickerBg }}
                     onMouseEnter={e => { e.currentTarget.style.background = rowHover }}
                     onMouseLeave={e => { e.currentTarget.style.background = c.tickerBg }}
@@ -1244,6 +1264,16 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                         position: 'sticky', left: 0, zIndex: 1, background: c.tickerBg,
                         boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
                       }}>
+                        {row.hasOptions && (
+                          <button onClick={e => { e.stopPropagation(); toggleRowDetail(row.ticker) }}
+                            title={`Show the individual option contracts behind ${row.ticker}`}
+                            style={{ marginRight: 4, padding: '0 4px', fontSize: 11, lineHeight: 1.3,
+                              border: `1px solid ${border}`, borderRadius: 3, cursor: 'pointer',
+                              background: openRow === row.ticker ? '#3b82f6' : 'transparent',
+                              color: openRow === row.ticker ? '#fff' : textMid }}>
+                            {openRow === row.ticker ? '−' : '+'}
+                          </button>
+                        )}
                         {row.ticker}
                         {!row.hasOptions && (
                           <span title="Stock only — no option activity in this period."
@@ -1264,6 +1294,17 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                       </td>
                     ))}
                   </tr>
+
+                  {openRow === row.ticker && (
+                    <tr style={{ background: isDark ? '#141a2b' : '#f7f9fc' }}>
+                      <td colSpan={orderedColumns.length} style={{ padding: '10px 16px', borderBottom: `1px solid ${border}` }}>
+                        {rowDetail.loading && <span style={{ fontSize: 12, color: textMid }}>Pricing contracts…</span>}
+                        {rowDetail.error && <span style={{ fontSize: 12, color: '#ef4444' }}>{rowDetail.error}</span>}
+                        {rowDetail.data && <OpenContractsDetail d={rowDetail.data} isDark={isDark} fmt={fmt} pnlColor={pnlColor} />}
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 )
               })}
             </tbody>
@@ -1407,6 +1448,75 @@ function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClos
           {state.band > 2 && ` Widened to ±${state.band}% to find these.`}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * The individual option contracts behind one ticker's row.
+ *
+ * Shows where each mark came from, because that's the difference between a
+ * measured number and an estimated one — and on a thinly traded contract it's
+ * the difference between agreeing with the broker and not.
+ */
+function OpenContractsDetail({ d, isDark, fmt, pnlColor }) {
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+  const text = isDark ? '#e2e8f0' : '#1e293b'
+  const border = isDark ? '#2a3142' : '#e2e8f0'
+
+  const live = (d.rows || []).filter(r => !r.skipped)
+  if (live.length === 0) {
+    return <span style={{ fontSize: 12, color: textMid }}>No open option contracts for {d.ticker}.</span>
+  }
+
+  const label = {
+    quote: ['market', '#22c55e'],
+    today: ['traded today', '#22c55e'],
+    agedClose: ['aged', '#f59e0b'],
+    model: ['modelled', '#f59e0b'],
+    staleClose: ['stale print', '#ef4444'],
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+        {d.ticker} — {live.length} open contract{live.length === 1 ? '' : 's'}
+      </div>
+      <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+        <tbody>
+          {live.map((r, i) => {
+            const [txt, colour] = label[r.basis] || ['—', textMid]
+            return (
+              <tr key={i}>
+                <td style={{ padding: '3px 14px 3px 0', color: text, whiteSpace: 'nowrap' }}>{r.symbol}</td>
+                <td style={{ padding: '3px 14px 3px 0', fontWeight: 600, whiteSpace: 'nowrap',
+                             color: r.side === 'long' ? '#22c55e' : '#f59e0b' }}>
+                  {r.side === 'long' ? 'LONG' : 'SHORT'} {r.contracts}
+                </td>
+                <td style={{ padding: '3px 14px 3px 0', color: textMid, whiteSpace: 'nowrap' }}>
+                  mark {r.mark != null ? fmt(r.mark) : '—'}
+                </td>
+                <td style={{ padding: '3px 14px 3px 0', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 10.5, color: colour }}>{txt}</span>
+                  {r.volume != null && (
+                    <span style={{ fontSize: 10.5, color: textMid }}> · vol {r.volume}</span>
+                  )}
+                </td>
+                <td style={{ padding: '3px 0', fontWeight: 700, whiteSpace: 'nowrap',
+                             color: pnlColor(r.openPnl, isDark) }}>
+                  {r.openPnl != null ? fmt(r.openPnl) : '—'}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 11, color: textMid, marginTop: 8, lineHeight: 1.5 }}>
+        Total {fmt(d.totalOpenPnl)}.
+        {' '}A <strong>stale print</strong> is the last trade in a contract that hasn't traded
+        recently — on a thin contract that can sit a long way from where it would trade now,
+        which is the usual reason a figure disagrees with your broker.
+      </div>
     </div>
   )
 }

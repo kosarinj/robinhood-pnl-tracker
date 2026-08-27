@@ -3424,6 +3424,13 @@ app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
     const shortOpen = new Set(open.filter(p => p.net_short > 0).map(p => p.symbol))
     const mine = entries.filter(e => (e.ticker || '').toUpperCase() === ticker && shortOpen.has(e.symbol))
 
+    // Long legs too. Built from open positions rather than short_call_entries,
+    // which only ever holds sold calls — a spread would otherwise show one side.
+    const longs = open.filter(p => p.net_long > 0).map(p => {
+      const parsed = parseOptionDescription(p.symbol)
+      return parsed && parsed.ticker.toUpperCase() === ticker ? { p, parsed } : null
+    }).filter(Boolean)
+
     const rows = []
     let total = 0
     for (const e of mine) {
@@ -3470,6 +3477,45 @@ app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
       rows.push(row)
     }
 
+    for (const { p, parsed } of longs) {
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      const row = {
+        symbol: p.symbol, expiry, side: 'long', contracts: p.net_long,
+        costTotal: Math.abs(p.total_paid),
+      }
+      if (expiry < today) { row.skipped = 'expired'; rows.push(row); continue }
+      const polyTicker = toPolygonTicker(p.symbol)
+      let mark = null, basis = null
+      if (polygonKey && polyTicker) {
+        const q = await fetchOptionQuote(polyTicker, polygonKey)
+        if (q.mid > 0) { mark = q.mid; basis = 'quote' }
+        try {
+          const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
+          const snap = (await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })).data?.results
+          if (snap) {
+            row.volume = snap.day?.volume ?? null
+            row.dayClose = snap.day?.close ?? null
+            row.markIsToday = marketMarkIsToday(snap)
+            if (mark == null && snap.day?.close > 0) {
+              mark = snap.day.close
+              basis = row.markIsToday ? 'today' : 'staleClose'
+            }
+          }
+        } catch (err) { row.snapshotError = err.message }
+      }
+      const costPerShare = p.bto_contracts > 0 ? Math.abs(p.total_paid) / p.bto_contracts / 100 : 0
+      row.mark = mark != null ? Math.round(mark * 100) / 100 : null
+      row.basis = basis
+      row.costPerShare = Math.round(costPerShare * 100) / 100
+      // Long: gains when the mark rises, the opposite of a short.
+      row.openPnl = mark != null
+        ? Math.round((mark - costPerShare) * 100 * p.net_long * 100) / 100
+        : null
+      if (row.openPnl != null) total += row.openPnl
+      rows.push(row)
+    }
+
+    rows.forEach(r => { if (!r.side) r.side = 'short' })
     rows.sort((a, b) => (a.openPnl ?? 0) - (b.openPnl ?? 0))
     res.json({
       ticker,
