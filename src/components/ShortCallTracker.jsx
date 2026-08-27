@@ -35,6 +35,11 @@ export default function ShortCallTracker({ broker = 'all' }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [editingId, setEditingId] = useState(null)
+  // Drill-down into the individual sales behind a row. short_call_entries
+  // collapses same-day fills, so the trades are the only place the separate
+  // sales survive.
+  const [expandedId, setExpandedId] = useState(null)
+  const [fills, setFills] = useState({ loading: false, data: null, error: null })
   const [editClose, setEditClose] = useState('')
   const [rebuilding, setRebuilding] = useState(false)
   const [rebuildMsg, setRebuildMsg] = useState(null)
@@ -124,6 +129,21 @@ export default function ShortCallTracker({ broker = 'all' }) {
     background: headerBg, borderBottom: `2px solid ${border}`, whiteSpace: 'nowrap'
   }
 
+  const toggleFills = async (entry) => {
+    if (expandedId === entry.id) { setExpandedId(null); return }
+    setExpandedId(entry.id)
+    setFills({ loading: true, data: null, error: null })
+    try {
+      const r = await fetch(`/api/short-calls/${entry.id}/trades`, { credentials: 'include' })
+      const d = await r.json()
+      setFills(d?.success
+        ? { loading: false, data: d, error: null }
+        : { loading: false, data: null, error: d?.error || 'Could not load' })
+    } catch (e) {
+      setFills({ loading: false, data: null, error: 'Could not load' })
+    }
+  }
+
   const renderRow = (entry, i) => {
     const isEditing = editingId === entry.id
     const dteBadgeColor = entry.daysToExpiry > 21 ? '#22c55e' : entry.daysToExpiry > 7 ? '#f59e0b' : entry.daysToExpiry >= 0 ? '#ef4444' : '#94a3b8'
@@ -141,7 +161,8 @@ export default function ShortCallTracker({ broker = 'all' }) {
     const accent = profitable ? '#22c55e' : losing ? '#ef4444' : null
 
     return (
-      <tr key={entry.id} style={{ borderBottom: `1px solid ${border}`, background: rowBg, boxShadow: accent ? `inset 3px 0 0 ${accent}` : undefined }}>
+      <React.Fragment key={entry.id}>
+      <tr style={{ borderBottom: `1px solid ${border}`, background: rowBg, boxShadow: accent ? `inset 3px 0 0 ${accent}` : undefined }}>
         <td
           onClick={() => setChartEntry(entry)}
           title="View option vs stock price chart"
@@ -169,7 +190,22 @@ export default function ShortCallTracker({ broker = 'all' }) {
             {entry.isExpired ? 'Exp' : `${entry.daysToExpiry}d`}
           </span>
         </td>
-        <td style={{ padding: '9px 10px', textAlign: 'center', color: textMid }}>{entry.contracts}</td>
+        <td style={{ padding: '9px 10px', textAlign: 'center', color: textMid }}>
+          {entry.contracts}
+          {/* Only worth offering where there can be something to see. One
+              contract is one fill, so an expander there would always disappoint. */}
+          {(entry.contracts || 1) > 1 && (
+            <button
+              onClick={() => toggleFills(entry)}
+              title="Show the individual sales behind this position"
+              style={{ marginLeft: 5, padding: '0 5px', fontSize: 12, lineHeight: 1.3,
+                       border: `1px solid ${border}`, borderRadius: 4, cursor: 'pointer',
+                       background: expandedId === entry.id ? '#3b82f6' : 'transparent',
+                       color: expandedId === entry.id ? '#fff' : textMid }}>
+              {expandedId === entry.id ? '−' : '+'}
+            </button>
+          )}
+        </td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: '#22c55e', fontWeight: '600' }}>{fmt(entry.premium)}</td>
         <td style={{ padding: '9px 10px', textAlign: 'right' }}>
           {isEditing ? (
@@ -251,6 +287,62 @@ export default function ShortCallTracker({ broker = 'all' }) {
           </span>
         </td>
       </tr>
+
+      {expandedId === entry.id && (
+        <tr style={{ background: isDark ? '#141a2b' : '#f7f9fc' }}>
+          <td colSpan={13} style={{ padding: '10px 16px', borderBottom: `1px solid ${border}` }}>
+            {fills.loading && <span style={{ fontSize: 12, color: textMid }}>Loading fills…</span>}
+            {fills.error && <span style={{ fontSize: 12, color: '#ef4444' }}>{fills.error}</span>}
+            {fills.data && (
+              <div>
+                <div style={{ fontSize: 11, color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                  Individual trades in {fills.data.symbol}
+                </div>
+                <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+                  <tbody>
+                    {fills.data.fills.map((f, k) => (
+                      <tr key={k}>
+                        <td style={{ padding: '3px 14px 3px 0', color: textMid }}>{fmtDate(f.date)}</td>
+                        <td style={{ padding: '3px 14px 3px 0', fontWeight: 600,
+                                     color: f.opening ? '#22c55e' : '#f59e0b' }}>
+                          {f.opening ? 'Sold' : f.transCode === 'OEXP' ? 'Expired' : 'Closed'}
+                        </td>
+                        <td style={{ padding: '3px 14px 3px 0', color: text }}>
+                          {f.contracts} contract{f.contracts === 1 ? '' : 's'}
+                        </td>
+                        <td style={{ padding: '3px 14px 3px 0', color: text }}>
+                          {fmt(f.perShare)}/sh
+                        </td>
+                        <td style={{ padding: '3px 0', color: textMid }}>
+                          {fmt(f.totalAmount)} total
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div style={{ fontSize: 11.5, color: textMid, marginTop: 8, lineHeight: 1.5 }}>
+                  {fills.data.summary.sales} sale{fills.data.summary.sales === 1 ? '' : 's'} ·{' '}
+                  {fills.data.summary.soldContracts} contracts ·{' '}
+                  average {fmt(fills.data.summary.avgPerShare)}/sh
+                  {/* The row is built from short_call_entries, which collapses
+                      same-day fills. Where that disagrees with the trades, say
+                      so — the trades are the record. */}
+                  {fills.data.summary.storedContracts != null
+                    && fills.data.summary.storedContracts !== fills.data.summary.soldContracts && (
+                    <div style={{ color: '#f59e0b', marginTop: 4 }}>
+                      The row shows {fills.data.summary.storedContracts} contract(s) but the trades total{' '}
+                      {fills.data.summary.soldContracts} — same-day sales get collapsed into one entry,
+                      so the trades above are the accurate record.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+      </React.Fragment>
     )
   }
 

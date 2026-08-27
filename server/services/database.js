@@ -2498,6 +2498,22 @@ export class DatabaseService {
     }
   }
 
+  /** Every trade in one option contract, oldest first. */
+  getTradesForOptionSymbol(userId, symbol, broker = null) {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, contracts, amount, price
+        FROM trades
+        WHERE user_id = ? AND is_option = 1 AND symbol = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC, id ASC
+      `).all(...[userId, symbol, ...(broker ? [broker] : [])])
+    } catch (e) {
+      console.error('Error getting trades for option symbol:', e)
+      return []
+    }
+  }
+
   updateShortCallUnderlyingClose(id, underlyingClose) {
     try {
       return db.prepare(`UPDATE short_call_entries SET underlying_close = ? WHERE id = ?`).run(underlyingClose, id)

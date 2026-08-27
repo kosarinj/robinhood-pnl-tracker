@@ -4292,6 +4292,72 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/short-calls/:id/trades — the individual sales behind one row.
+ *
+ * short_call_entries is keyed (user, symbol, sale_date) and the upsert
+ * OVERWRITES premium and contracts, so two sales of the same contract on the
+ * same day collapse into one row with only the later one's numbers. The tracker
+ * papers over the count by rescaling to net_short, but the individual fills —
+ * different times, different prices — exist nowhere in that table.
+ *
+ * The trades themselves are the real record, so this reads from there. Closing
+ * trades are included too: a position built over several sales is usually
+ * unwound the same way, and seeing only one side of that is misleading.
+ */
+app.get('/api/short-calls/:id/trades', requireAuth, (req, res) => {
+  try {
+    const userId = req.user.userId
+    const id = parseInt(req.params.id)
+    const entry = databaseService.getShortCallEntries(userId).find(e => e.id === id)
+    if (!entry) return res.status(404).json({ success: false, error: 'Entry not found' })
+
+    const rows = databaseService.getTradesForOptionSymbol(userId, entry.symbol, entry.broker || null)
+    const fills = rows.map(t => {
+      const contracts = Math.abs(t.contracts || 1)
+      const amount = Math.abs(t.amount || 0)
+      const code = String(t.trans_code || '').toUpperCase()
+      const opening = code === 'STO'
+      return {
+        date: String(t.trans_date).slice(0, 10),
+        transCode: code,
+        opening,
+        contracts,
+        // Per contract and per share, because the tracker shows per share and
+        // a broker statement shows per contract.
+        totalAmount: Math.round(amount * 100) / 100,
+        perContract: Math.round((amount / contracts) * 100) / 100,
+        perShare: Math.round((amount / contracts / 100) * 100) / 100,
+      }
+    })
+
+    const sold = fills.filter(f => f.opening)
+    const closed = fills.filter(f => !f.opening)
+    const soldContracts = sold.reduce((n, f) => n + f.contracts, 0)
+    const soldTotal = sold.reduce((n, f) => n + f.totalAmount, 0)
+
+    res.json({
+      success: true,
+      symbol: entry.symbol,
+      fills,
+      summary: {
+        sales: sold.length,
+        soldContracts,
+        soldTotal: Math.round(soldTotal * 100) / 100,
+        avgPerShare: soldContracts > 0
+          ? Math.round((soldTotal / soldContracts / 100) * 100) / 100 : null,
+        closes: closed.length,
+        // The row's stored figures, so a disagreement with the trades is
+        // visible rather than something to be discovered later.
+        storedContracts: entry.contracts,
+        storedPremium: entry.premium,
+      },
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // PUT /api/short-calls/:id/underlying-close — manually set underlying close for a short call entry
 app.put('/api/short-calls/:id/underlying-close', requireAuth, (req, res) => {
   try {
