@@ -4135,6 +4135,41 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
     const openEntryCount = {}
     entries.forEach(e => { if (openShortSymbols.has(e.symbol)) openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
 
+    // ── Which ENTRIES are still open ─────────────────────────────────────
+    //
+    // Open-ness was decided per SYMBOL: if a contract had any short position
+    // left, every entry for it showed as open. Buy one back and re-sell it and
+    // you get a third entry — a new sale date — while the net is still two, so
+    // the tracker listed three open calls for a two-call position. That's the
+    // HOOD case: bought a call back, sold shares, then reversed both.
+    //
+    // net_short is now allocated across a symbol's entries, NEWEST SALE FIRST.
+    // Newest-first because a re-sold contract is the position actually held
+    // now; the older entry it replaced is the one that was closed. Entries past
+    // the allocation are marked closed.
+    const openContractsByEntry = {}
+    {
+      const bySymbol = {}
+      entries.forEach(e => {
+        if (!openShortSymbols.has(e.symbol)) return
+        ;(bySymbol[e.symbol] = bySymbol[e.symbol] || []).push(e)
+      })
+      Object.entries(bySymbol).forEach(([sym, list]) => {
+        let remaining = netShortBySymbol[sym] || 0
+        list
+          .slice()
+          .sort((a, b) => String(b.sale_date || '').localeCompare(String(a.sale_date || '')) || (b.id - a.id))
+          .forEach(e => {
+            const want = Math.abs(e.contracts || 1)
+            // A partly-covered entry keeps the part that's still open rather
+            // than being dropped entirely — half a position is still a position.
+            const take = Math.max(0, Math.min(want, remaining))
+            openContractsByEntry[e.id] = take
+            remaining -= take
+          })
+      })
+    }
+
     // ── Covering long calls ──────────────────────────────────────────────
     // short_call_entries only ever holds STO calls, so the long leg of a
     // vertical was never a candidate here — it wasn't filtered out, it was
@@ -4254,7 +4289,10 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
         if (model > 0) { currentOptionPrice = model; priceSource = 'model' }
         else if (optionClose[entry.symbol] > 0) { currentOptionPrice = optionClose[entry.symbol]; priceSource = 'close' }
       }
-      const isOpen = openShortSymbols.has(entry.symbol)
+      // Open only if this ENTRY still holds contracts, not merely because the
+      // symbol does.
+      const entryOpenContracts = openContractsByEntry[entry.id]
+      const isOpen = entryOpenContracts != null ? entryOpenContracts > 0 : openShortSymbols.has(entry.symbol)
       const expiryMs = new Date(entry.expiry + 'T00:00:00Z').getTime()
       const todayMs = new Date(today + 'T00:00:00Z').getTime()
       const daysToExpiry = Math.round((expiryMs - todayMs) / (1000 * 60 * 60 * 24))
@@ -4264,7 +4302,12 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       // symbol, scale to the actual open contract count from trades (net_short).
       const entryContracts = entry.contracts || 1
       const netShort = netShortBySymbol[entry.symbol] || entryContracts
-      const effContracts = (isOpen && openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
+      // How many of this entry's contracts are actually still open. The
+      // allocation above knows, so prefer it; the old rescale only worked when
+      // a symbol had exactly one entry and guessed otherwise.
+      const effContracts = isOpen && entryOpenContracts > 0
+        ? entryOpenContracts
+        : (isOpen && openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
       const shares = effContracts * 100
       const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
       const callGainPerShare = (currentOptionPrice != null) ? (premiumPerShare - currentOptionPrice) : null
