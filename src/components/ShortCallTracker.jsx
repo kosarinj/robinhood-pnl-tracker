@@ -194,7 +194,10 @@ export default function ShortCallTracker({ broker = 'all' }) {
           {entry.contracts}
           {/* Only worth offering where there can be something to see. One
               contract is one fill, so an expander there would always disappoint. */}
-          {(entry.contracts || 1) > 1 && (
+          {/* Offered when there's more than one contract OR more than one sale —
+              a two-contract position bought in one fill has nothing to show,
+              while two separate sales of one contract each certainly does. */}
+          {((entry.contracts || 1) > 1 || (entry.saleCount || 1) > 1) && (
             <button
               onClick={() => toggleFills(entry)}
               title="Show the individual sales behind this position"
@@ -208,6 +211,12 @@ export default function ShortCallTracker({ broker = 'all' }) {
         </td>
         <td style={{ padding: '9px 10px', textAlign: 'right', color: '#22c55e', fontWeight: '600' }}>{fmt(entry.premium)}</td>
         <td style={{ padding: '9px 10px', textAlign: 'right' }}>
+          {(entry.saleCount || 1) > 1 && (
+            <div style={{ fontSize: 10, color: textMid, whiteSpace: 'nowrap' }}
+              title={`Sold across ${entry.saleCount} trades: ${(entry.saleDates || []).map(fmtDate).join(', ')}. The premium shown is the average weighted by contracts.`}>
+              {entry.saleCount} sales · avg
+            </div>
+          )}
           {isEditing ? (
             <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
               <input

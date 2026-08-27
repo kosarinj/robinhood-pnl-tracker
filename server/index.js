@@ -4374,7 +4374,54 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       }
     })
 
-    res.json({ success: true, entries: result, polygonEnabled: !!polygonKey })
+    // ── One row per CONTRACT ─────────────────────────────────────────────
+    //
+    // Rows were one per ENTRY, so selling the same contract on two dates listed
+    // it twice — but that's one position of two contracts, not two positions.
+    // Merged after pricing rather than before, so every per-entry mark and P&L
+    // is computed exactly as it was and only the presentation changes.
+    //
+    // Dollar figures add; per-share figures are weighted by contracts, because
+    // an average premium ignoring size would misreport a 1-and-5 split as if it
+    // were 3 and 3.
+    const merged = []
+    const bySym = new Map()
+    for (const r of result) {
+      // Only open rows merge. Closed ones are history and each closed on its own
+      // terms, so collapsing them would destroy the record.
+      const key = r.isOpen ? `${r.broker || 'robinhood'}::${r.symbol}` : `closed::${r.id}`
+      const prev = bySym.get(key)
+      if (!prev) {
+        bySym.set(key, { ...r, saleCount: 1, saleDates: [r.sale_date].filter(Boolean) })
+        merged.push(key)
+        continue
+      }
+      const a = prev.contracts || 0, b = r.contracts || 0
+      const tot = a + b
+      const wavg = (x, y) => (tot > 0 ? ((x || 0) * a + (y || 0) * b) / tot : (x ?? y))
+      prev.premium = round2(wavg(prev.premium, r.premium))
+      prev.underlying_close = (prev.underlying_close != null && r.underlying_close != null)
+        ? round2(wavg(prev.underlying_close, r.underlying_close))
+        : (prev.underlying_close ?? r.underlying_close)
+      prev.thetaGain = (prev.thetaGain != null && r.thetaGain != null)
+        ? round2(wavg(prev.thetaGain, r.thetaGain)) : (prev.thetaGain ?? r.thetaGain)
+      prev.stockMove = prev.stockMove ?? r.stockMove
+      prev.contracts = tot
+      prev.premiumTotal = round2((prev.premiumTotal || 0) + (r.premiumTotal || 0))
+      prev.callGainTotal = (prev.callGainTotal != null || r.callGainTotal != null)
+        ? round2((prev.callGainTotal || 0) + (r.callGainTotal || 0)) : null
+      prev.saleCount += 1
+      if (r.sale_date) prev.saleDates.push(r.sale_date)
+      // Keep the earliest sale as the row's date — it's when the position began.
+      if (r.sale_date && (!prev.sale_date || r.sale_date < prev.sale_date)) prev.sale_date = r.sale_date
+    }
+    const mergedRows = merged.map(k => {
+      const r = bySym.get(k)
+      r.saleDates = [...new Set(r.saleDates)].sort()
+      return r
+    })
+
+    res.json({ success: true, entries: mergedRows, polygonEnabled: !!polygonKey })
   } catch (e) {
     console.error('Error in /api/short-calls:', e.message)
     res.status(500).json({ success: false, error: e.message })
