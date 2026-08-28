@@ -57,6 +57,10 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
   }))
   const showCall = data?.optionModeled && series.some((p) => p.callPrice != null)
   const latestKept = [...series].reverse().find(p => p.kept != null)?.kept ?? 0
+  // Everything collected — the most this position can make, reached only if the
+  // call expires worthless.
+  const maxKept = Math.round(premiumPerShare * 100 * contracts * 100) / 100
+  const pctCollected = maxKept > 0 ? Math.round((latestKept / maxKept) * 100) : null
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null
@@ -120,10 +124,17 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
                   <span style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
                                  color: latestKept >= 0 ? GOOD : CRIT }}>
                     {latestKept >= 0 ? '+' : '−'}${Math.abs(Math.round(latestKept)).toLocaleString()}
+                    {pctCollected != null && (
+                      <span style={{ fontSize: 12, fontWeight: 600, color: textMid, marginLeft: 6 }}>
+                        {pctCollected}% of ${Math.round(maxKept).toLocaleString()}
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div style={{ fontSize: 11, color: textMid, marginBottom: 4 }}>
-                  What you'd keep buying it back at each day's estimated price. Decay pushes it up.
+                  What you'd keep buying it back at each day's estimated price. Decay pushes it up
+                  toward the ceiling; a rally pulls it down, and below zero it costs more to close
+                  than you sold it for.
                 </div>
                 <div style={{ width: '100%', height: '190px' }}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -133,8 +144,15 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
                       <YAxis tick={{ fontSize: 11, fill: textMid }} width={62}
                              tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`} domain={['auto', 'auto']} />
                       <Tooltip content={<KeptTooltip contracts={contracts} />} />
+                      {/* The ceiling: what's kept if it expires worthless. The
+                          line can only climb toward this, so the remaining gap
+                          IS the decay still to be collected — which is the
+                          thing worth judging by eye. */}
+                      <ReferenceLine y={maxKept} stroke={GOOD} strokeDasharray="6 4"
+                        label={{ value: `max $${Math.round(maxKept).toLocaleString()} — expires worthless`,
+                                 position: 'insideTopRight', fill: GOOD, fontSize: 10 }} />
                       <ReferenceLine y={0} stroke={textMid} strokeDasharray="4 3"
-                        label={{ value: 'break-even', position: 'insideTopLeft', fill: textMid, fontSize: 10 }} />
+                        label={{ value: 'break-even — worth what you sold it for', position: 'insideBottomLeft', fill: textMid, fontSize: 10 }} />
                       <Line type="monotone" dataKey="kept" name="Premium kept" stroke={GOOD}
                             strokeWidth={2} dot={false} isAnimationActive={false} />
                     </ComposedChart>
