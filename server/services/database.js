@@ -3322,6 +3322,29 @@ export class DatabaseService {
     `).run({ user_id: userId, ...m })
   }
 
+  /**
+   * The mark history of one contract, oldest first.
+   *
+   * option_iv_marks records a closing mark per contract per day, captured for
+   * the extended-hours estimate. It also happens to be a decay series: for a
+   * sold call, the mark falling IS the premium being earned, and that's the
+   * thing worth watching when a stock ranges.
+   */
+  getOptionMarkHistory(userId, symbol, days = 90) {
+    try {
+      return db.prepare(`
+        SELECT mark_date, close_mark, underlying_close, sigma
+        FROM option_iv_marks
+        WHERE user_id = ? AND symbol = ?
+          AND mark_date >= date('now', ?)
+        ORDER BY mark_date ASC
+      `).all(userId, symbol, `-${Math.max(1, days)} days`)
+    } catch (e) {
+      console.error('Error getting option mark history:', e)
+      return []
+    }
+  }
+
   // Most recent calibration at or before asOfDate, one row per symbol.
   getLatestOptionIvMarks(userId, asOfDate = null) {
     const cutoff = asOfDate || '9999-12-31'

@@ -3647,6 +3647,167 @@ app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/collars — the strategy view.
+ *
+ * Shares, the short call sold against them and the long put protecting them,
+ * per ticker, with where the stock sits between the two strikes. That band is
+ * the position: above the call is assignment and capped upside, below the put
+ * is protection actually paying out, between them is the intended state.
+ *
+ * Built because the panels list legs separately and never show the shape they
+ * form — a rolling collar is one position, not three unrelated rows.
+ */
+app.get('/api/collars', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const today = todayStrLocal()
+
+    const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter, 'moving')
+    const overrides = databaseService.getCostOverrides(userId, brokerFilter)
+    const open = databaseService.getOpenOptionPositions(userId, brokerFilter)
+
+    // Live, unexpired legs only — an expired contract protects nothing.
+    const legs = open.map(p => {
+      const parsed = parseOptionDescription(p.symbol)
+      if (!parsed) return null
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      if (expiry < today) return null
+      return { p, parsed, expiry }
+    }).filter(Boolean)
+
+    const tickers = [...new Set([
+      ...Object.keys(positions),
+      ...legs.map(l => l.parsed.ticker),
+    ])]
+    let prices = {}
+    if (tickers.length) {
+      try { prices = await priceService.fetchPrices(tickers) } catch (e) { prices = {} }
+    }
+
+    const dte = (e) => Math.round((new Date(e).getTime() - new Date(today).getTime()) / 86400000)
+
+    const rows = tickers.map(ticker => {
+      const sp = positions[ticker]
+      const price = prices[ticker] || 0
+      const mine = legs.filter(l => l.parsed.ticker === ticker)
+
+      // The nearest expiry on each side is the live one — with a rolling collar
+      // the far-dated legs are previous rolls still on the books.
+      const shortCalls = mine.filter(l => l.p.net_short > 0 && l.parsed.type === 'call')
+        .sort((a, b) => a.expiry.localeCompare(b.expiry))
+      const longPuts = mine.filter(l => l.p.net_long > 0 && l.parsed.type === 'put')
+        .sort((a, b) => a.expiry.localeCompare(b.expiry))
+
+      const call = shortCalls[0]
+      const put = longPuts[0]
+      const cost = overrides[ticker] ?? sp?.avgCost ?? null
+
+      return {
+        ticker,
+        shares: sp?.position ?? 0,
+        avgCost: cost,
+        price,
+        call: call ? {
+          strike: call.parsed.strike, expiry: call.expiry, dte: dte(call.expiry),
+          contracts: call.p.net_short,
+          itm: price > 0 && price > call.parsed.strike,
+        } : null,
+        put: put ? {
+          strike: put.parsed.strike, expiry: put.expiry, dte: dte(put.expiry),
+          contracts: put.p.net_long,
+          itm: price > 0 && price < put.parsed.strike,
+        } : null,
+        // Extra rolls still open beyond the nearest leg — worth surfacing, since
+        // a collar that has been rolled several times accumulates them.
+        extraCalls: Math.max(0, shortCalls.length - 1),
+        extraPuts: Math.max(0, longPuts.length - 1),
+        coveredShares: shortCalls.reduce((n, l) => n + l.p.net_short, 0) * 100,
+        protectedShares: longPuts.reduce((n, l) => n + l.p.net_long, 0) * 100,
+      }
+    })
+    // Complete collars first, then partial, then bare stock — the ones needing
+    // attention are the ones missing a leg.
+    .filter(r => r.shares > 0 || r.call || r.put)
+    .sort((a, b) => {
+      const score = (r) => (r.call ? 1 : 0) + (r.put ? 1 : 0)
+      return score(b) - score(a) || a.ticker.localeCompare(b.ticker)
+    })
+
+    res.json({ success: true, rows })
+  } catch (e) {
+    console.error('Collars error:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+/**
+ * GET /api/decay?ticker=PLTR — premium earned over time on open short calls.
+ *
+ * The mark of a sold call falling IS money earned: you keep the difference
+ * between what you sold it for and what it would now cost to buy back. When a
+ * stock ranges, that gap widens every day on its own. Nothing in the app showed
+ * it — the panels report a level, and this is the thing that has a shape.
+ *
+ * Series are per contract, in dollars kept, so they can be read against each
+ * other and summed.
+ */
+app.get('/api/decay', requireAuth, (req, res) => {
+  try {
+    const userId = req.user.userId
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    const days = Math.min(365, Math.max(7, Number(req.query.days) || 90))
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const today = todayStrLocal()
+
+    const open = databaseService.getOpenOptionPositions(userId, brokerFilter)
+    const entries = databaseService.getShortCallEntries(userId, brokerFilter)
+    const openShort = new Set(open.filter(p => p.net_short > 0).map(p => p.symbol))
+
+    const wanted = entries.filter(e => {
+      if (!openShort.has(e.symbol)) return false
+      if (ticker && String(e.ticker || '').toUpperCase() !== ticker) return false
+      const parsed = parseOptionDescription(e.symbol)
+      if (!parsed) return false
+      return `${parsed.year}-${parsed.month}-${parsed.day}` >= today
+    })
+
+    const series = wanted.map(e => {
+      const history = databaseService.getOptionMarkHistory(userId, e.symbol, days)
+      const contracts = Math.abs(e.contracts || 1)
+      const premiumPerShare = contracts > 0 ? e.premium / (contracts * 100) : 0
+      return {
+        symbol: e.symbol,
+        ticker: e.ticker,
+        contracts,
+        premiumPerShare: Math.round(premiumPerShare * 100) / 100,
+        // Dollars kept if bought back at that day's mark. Rises as the contract
+        // decays, which is the whole point of the picture.
+        points: history.map(h => ({
+          date: h.mark_date,
+          mark: Math.round(h.close_mark * 100) / 100,
+          underlying: h.underlying_close != null ? Math.round(h.underlying_close * 100) / 100 : null,
+          kept: Math.round((premiumPerShare - h.close_mark) * 100 * contracts * 100) / 100,
+        })),
+      }
+    }).filter(s => s.points.length > 0)
+
+    res.json({
+      success: true,
+      ticker: ticker || null,
+      days,
+      series,
+      // Said plainly, because an empty chart otherwise reads as "no decay".
+      note: series.length === 0
+        ? 'No mark history yet. Marks are captured once a day, so a few sessions are needed before there is a curve to see.'
+        : null,
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // ─── Account P&L ─────────────────────────────────────────────────────────────
 // What the account has actually made: cash in and out, plus what the open
 // positions are worth right now.

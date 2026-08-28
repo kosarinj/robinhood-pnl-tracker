@@ -38,9 +38,25 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
   const grid = isDark ? '#2d3748' : '#eef2f7'
   const STOCK = '#3b82f6'
   const CALL = '#f59e0b'
+  // Validated status steps. Paired with a label wherever they appear, so colour
+  // never carries the meaning on its own.
+  const GOOD = '#0ca30c'
+  const CRIT = '#d03b3b'
 
-  const series = data?.series || []
+  const rawSeries = data?.series || []
+  const contracts = Math.abs(entry?.contracts || 1)
+  const premiumPerShare = data?.premiumPerShare || 0
+  // Dollars kept if bought back at that day's estimated price — the figure the
+  // strategy turns on, and the one the old chart made you infer from the gap
+  // between two differently-scaled lines.
+  const series = rawSeries.map(p => ({
+    ...p,
+    kept: p.callPrice != null && premiumPerShare > 0
+      ? Math.round((premiumPerShare - p.callPrice) * 100 * contracts * 100) / 100
+      : null,
+  }))
   const showCall = data?.optionModeled && series.some((p) => p.callPrice != null)
+  const latestKept = [...series].reverse().find(p => p.kept != null)?.kept ?? 0
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload || !payload.length) return null
@@ -90,45 +106,57 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
 
         {!loading && !error && series.length > 0 && (
           <>
-            <div style={{ width: '100%', height: '420px', marginTop: '12px' }}>
+            {/* Premium kept — the headline, on its own scale.
+                This replaced a dual-axis chart that drew the stock and the call
+                price against two different y-scales. With two scales, where the
+                lines cross and how their slopes compare are artifacts of the
+                scaling rather than facts about the position, so the picture
+                couldn't be read literally. Two single-axis charts sharing an
+                x-axis say the same thing and can be. */}
+            {showCall && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 14 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: text }}>Premium kept</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+                                 color: latestKept >= 0 ? GOOD : CRIT }}>
+                    {latestKept >= 0 ? '+' : '−'}${Math.abs(Math.round(latestKept)).toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: textMid, marginBottom: 4 }}>
+                  What you'd keep buying it back at each day's estimated price. Decay pushes it up.
+                </div>
+                <div style={{ width: '100%', height: '190px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={series} margin={{ top: 6, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 11, fill: textMid }} minTickGap={28} />
+                      <YAxis tick={{ fontSize: 11, fill: textMid }} width={62}
+                             tickFormatter={(v) => `$${Math.round(v).toLocaleString()}`} domain={['auto', 'auto']} />
+                      <Tooltip content={<KeptTooltip contracts={contracts} />} />
+                      <ReferenceLine y={0} stroke={textMid} strokeDasharray="4 3"
+                        label={{ value: 'break-even', position: 'insideTopLeft', fill: textMid, fontSize: 10 }} />
+                      <Line type="monotone" dataKey="kept" name="Premium kept" stroke={GOOD}
+                            strokeWidth={2} dot={false} isAnimationActive={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
+
+            {/* Stock, on its own scale, sharing the x-axis above. */}
+            <div style={{ fontSize: 12, fontWeight: 700, color: text, marginTop: 16 }}>Stock price</div>
+            <div style={{ width: '100%', height: '190px' }}>
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={series} margin={{ top: 10, right: 16, left: 0, bottom: 4 }}>
-                  <CartesianGrid stroke={grid} strokeDasharray="3 3" />
+                <ComposedChart data={series} margin={{ top: 6, right: 16, left: 0, bottom: 4 }}>
+                  <CartesianGrid stroke={grid} strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 11, fill: textMid }} minTickGap={28} />
-                  <YAxis
-                    yAxisId="stock"
-                    tick={{ fontSize: 11, fill: STOCK }}
-                    tickFormatter={(v) => `$${v}`}
-                    domain={['auto', 'auto']}
-                    width={56}
-                  />
-                  {showCall && (
-                    <YAxis
-                      yAxisId="call"
-                      orientation="right"
-                      tick={{ fontSize: 11, fill: CALL }}
-                      tickFormatter={(v) => `$${v}`}
-                      domain={['auto', 'auto']}
-                      width={52}
-                    />
-                  )}
+                  <YAxis tick={{ fontSize: 11, fill: textMid }} tickFormatter={(v) => `$${v}`}
+                         domain={['auto', 'auto']} width={56} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Legend wrapperStyle={{ fontSize: '12px' }} />
-
-                  {/* Strike (on the stock axis) */}
-                  <ReferenceLine yAxisId="stock" y={data.strike} stroke={textMid} strokeDasharray="5 4"
+                  <ReferenceLine y={data.strike} stroke={textMid} strokeDasharray="5 4"
                     label={{ value: `strike $${data.strike}`, position: 'insideTopRight', fill: textMid, fontSize: 10 }} />
-
-                  {/* Premium you sold for (on the call axis) — call above it = losing */}
-                  {showCall && data.premiumPerShare > 0 && (
-                    <ReferenceLine yAxisId="call" y={data.premiumPerShare} stroke={CALL} strokeDasharray="5 4"
-                      label={{ value: `sold $${data.premiumPerShare}`, position: 'insideBottomRight', fill: CALL, fontSize: 10 }} />
-                  )}
-
-                  <Line yAxisId="stock" type="monotone" dataKey="stock" name="Stock price" stroke={STOCK} strokeWidth={2} dot={false} />
-                  {showCall && (
-                    <Line yAxisId="call" type="monotone" dataKey="callPrice" name="Call price (est)" stroke={CALL} strokeWidth={2} dot={false} strokeDasharray="4 2" />
-                  )}
+                  <Line type="monotone" dataKey="stock" name="Stock price" stroke={STOCK}
+                        strokeWidth={2} dot={false} isAnimationActive={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -143,6 +171,33 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
             </div>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Tooltip for the premium-kept line.
+ *
+ * Names the figure and its direction in words, so the reading doesn't depend on
+ * knowing that up is good — which is the opposite of the intuition for a price
+ * chart sitting directly beneath it.
+ */
+function KeptTooltip({ active, payload, label, contracts }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  if (p.kept == null) return null
+  return (
+    <div style={{
+      background: 'var(--surface, #fff)', border: '1px solid var(--border, #e2e8f0)',
+      borderRadius: 6, padding: '8px 10px', fontSize: 12, color: 'var(--text, #1e293b)',
+    }}>
+      <div style={{ color: 'var(--textSecondary, #64748b)', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontWeight: 700 }}>
+        {p.kept >= 0 ? 'Keeping ' : 'Down '}${Math.abs(Math.round(p.kept)).toLocaleString()}
+      </div>
+      <div style={{ color: 'var(--textSecondary, #64748b)', fontSize: 11, marginTop: 2 }}>
+        buy back at ${p.callPrice?.toFixed(2)}/sh × {contracts} contract{contracts === 1 ? '' : 's'}
       </div>
     </div>
   )
