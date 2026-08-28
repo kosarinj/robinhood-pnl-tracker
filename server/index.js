@@ -3596,9 +3596,21 @@ app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
         : null
     }
 
+    // A manual override REPLACES the computed cost wherever it's set, so none
+    // of the methods above would be in play for this ticker. Reported first
+    // because it silently outranks everything else.
+    const overrides = databaseService.getCostOverrides(userId, brokerFilter)
+    const override = overrides[ticker] ?? null
+    const pos = basis.moving?.position || 0
+
     res.json({
       ticker,
       price,
+      override,
+      overrideInUse: override != null,
+      overrideImplies: (override != null && price > 0 && pos > 0)
+        ? { avgCost: override, unrealized: Math.round(pos * (price - override) * 100) / 100 }
+        : null,
       basis,
       implied,
       trades: {
