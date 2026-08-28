@@ -2249,11 +2249,14 @@ export class DatabaseService {
    * 300 that way).
    */
   /**
-   * @param method 'average' averages every buy ever made — the original
-   *   behaviour, kept because the Options YTD panel is read daily and calibrated
-   *   on it. 'fifo' prices the shares actually held, which is what a broker
-   *   reports. The two legitimately differ for anyone who trades in and out;
-   *   callers pick, and nothing changes basis without being asked.
+   * @param method
+   *   'moving'  — moving average, what a broker shows: a sale removes shares at
+   *               the running average, so shares that are gone stop counting.
+   *   'fifo'    — the actual cost of the specific shares still held.
+   *   'average' — a lifetime average of every buy ever made. Kept only for
+   *               callers that were calibrated on it; it never forgets a closed
+   *               position, which is how PLTR read $160.32 against a broker's
+   *               $132.19.
    */
   getStockPositionsWithCost(userId = 1, asOf = null, broker = null, method = 'average') {
     try {
@@ -2278,7 +2281,10 @@ export class DatabaseService {
         const f = this.splitFactor(splits[r.symbol], r.trans_date)
         const qty = (r.qty || 0) * f
         if (!(qty > 0)) return
-        const a = acc[r.symbol] || (acc[r.symbol] = { position: 0, buys: [], boughtQty: 0, boughtCost: 0 })
+        const a = acc[r.symbol] || (acc[r.symbol] = { position: 0, buys: [], ordered: [], boughtQty: 0, boughtCost: 0 })
+        // Buys AND sells in order, which the moving average needs — it has to
+        // see each sale to know what to forget.
+        a.ordered.push({ isBuy: r.is_buy === 1, qty, amt: r.amt || 0 })
         if (r.is_buy === 1) {
           a.position += qty
           a.buys.push({ qty, perShare: (r.amt || 0) / qty })
@@ -2295,7 +2301,32 @@ export class DatabaseService {
         if (!(position > 0)) return
 
         let avgCost = 0
-        if (method === 'fifo') {
+        if (method === 'moving') {
+          // Moving average — what a broker shows as "average cost".
+          //
+          // A sale removes shares AT the running average, so it leaves the
+          // average untouched and the shares that are gone stop influencing it.
+          // The lifetime average this replaced never forgot anything: PLTR read
+          // $160.32 against a broker's $132.19, because buys from positions
+          // closed months ago were still weighing on shares held today.
+          //
+          // A sale bigger than the shares on file empties the position rather
+          // than going negative — an export starts mid-history, so those shares
+          // were bought before it and there is no cost to carry forward.
+          let sh = 0, cost = 0
+          for (const b of a.ordered) {
+            if (b.isBuy) { sh += b.qty; cost += b.amt }
+            else if (sh > 0) {
+              const take = Math.min(b.qty, sh)
+              cost -= (cost / sh) * take
+              sh -= take
+              if (sh <= 1e-9) { sh = 0; cost = 0 }
+            }
+          }
+          avgCost = sh > 1e-9 ? Math.round((cost / sh) * 100) / 100 : 0
+          // The share COUNT still comes from netting, which handles a mid-history
+          // export correctly; only the cost comes from this walk.
+        } else if (method === 'fifo') {
           // Newest buys first, taking only as many shares as are still held.
           let need = position, cost = 0
           for (let i = a.buys.length - 1; i >= 0 && need > 1e-9; i--) {
@@ -2495,6 +2526,22 @@ export class DatabaseService {
       `).run(userId, symbol, ticker, strike, expiry, contracts, premium, saleDate, underlyingClose ?? null, broker)
     } catch (e) {
       console.error('Error upserting short call entry:', e)
+    }
+  }
+
+  /** Every stock trade in one symbol, oldest first. */
+  getTradesForStockSymbol(userId, symbol, broker = null) {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, quantity, price, amount, is_buy
+        FROM trades
+        WHERE user_id = ? AND (is_option = 0 OR is_option IS NULL) AND symbol = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC, id ASC
+      `).all(...[userId, symbol, ...(broker ? [broker] : [])])
+    } catch (e) {
+      console.error('Error getting stock trades for symbol:', e)
+      return []
     }
   }
 

@@ -3130,6 +3130,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             : null,
           periodStartPrice: periodStartPrices[e.ticker] ?? null,
           stockRealizedPnL: (!isOpen && stockRealized[e.ticker] != null) ? r2(stockRealized[e.ticker]) : null,
+          // The same figure WITHOUT the closed-position gate, so a partial sale
+          // has somewhere to appear.
+          //
+          // stockRealizedPnL above is deliberately withheld while shares are
+          // still held, to stop an active name being inflated by years of booked
+          // gains — and that's still how Net is built. But it means selling part
+          // of a position moves money from unrealized into a figure nothing
+          // renders: PLTR's Net + Open fell about $3,850 on a sale that earned
+          // exactly that. Reported separately so it can be seen without changing
+          // what Net means.
+          stockRealizedAll: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null,
           dayPnl,
@@ -3535,6 +3546,75 @@ app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
       totalOpenPnl: Math.round(total * 100) / 100,
       byBasis: rows.reduce((acc, r) => { if (r.basis) acc[r.basis] = (acc[r.basis] || 0) + 1; return acc }, {}),
       rows,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
+ * GET /api/debug-stock-basis?ticker=PLTR
+ *
+ * One ticker's stock position with every cost-basis method side by side, and
+ * what each implies. Built because three separate explanations were offered for
+ * a figure without anyone being able to see the inputs — this shows them.
+ */
+app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    if (!ticker) return res.status(400).json({ error: 'ticker is required' })
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+
+    const methods = ['moving', 'fifo', 'average']
+    const basis = {}
+    for (const m of methods) {
+      const all = databaseService.getStockPositionsWithCost(userId, null, brokerFilter, m)
+      basis[m] = all[ticker] || null
+    }
+
+    let price = 0
+    try {
+      const px = await priceService.fetchPrices([ticker])
+      price = px[ticker] || 0
+    } catch (e) { /* leave 0 */ }
+
+    // Every stock trade, so the walk can be checked by hand.
+    const trades = databaseService.getTradesForStockSymbol(userId, ticker, brokerFilter)
+    const buys = trades.filter(t => t.is_buy === 1)
+    const sells = trades.filter(t => t.is_buy !== 1)
+
+    const implied = {}
+    for (const m of methods) {
+      const b = basis[m]
+      implied[m] = b && price > 0
+        ? {
+            position: b.position,
+            avgCost: b.avgCost,
+            unrealized: Math.round(b.position * (price - b.avgCost) * 100) / 100,
+          }
+        : null
+    }
+
+    res.json({
+      ticker,
+      price,
+      basis,
+      implied,
+      trades: {
+        count: trades.length,
+        buyCount: buys.length,
+        sellCount: sells.length,
+        totalBought: Math.round(buys.reduce((n, t) => n + (t.quantity || 0), 0) * 1e4) / 1e4,
+        totalSold: Math.round(sells.reduce((n, t) => n + (t.quantity || 0), 0) * 1e4) / 1e4,
+        lastFive: trades.slice(-5).map(t => ({
+          date: String(t.trans_date).slice(0, 10),
+          code: t.trans_code,
+          qty: t.quantity,
+          amount: t.amount,
+        })),
+      },
+      note: 'moving = broker-style average (sales remove shares at the running average). fifo = cost of the specific shares still held. average = lifetime average of every buy ever, including shares long since sold — what Options YTD currently uses.',
     })
   } catch (e) {
     res.status(500).json({ error: e.message })
