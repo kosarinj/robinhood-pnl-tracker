@@ -2849,15 +2849,23 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           }
         }
 
-        // Everything below is cumulative, so it stays on the corrected basis
-        // only and Options YTD's Open P&L is untouched.
-        if (!corrected) return
+        // Long legs count on BOTH bases now.
+        //
+        // They were gated to the corrected basis to protect figures calibrated
+        // on short legs alone. That made sense when the long leg was an
+        // occasional spread; it doesn't for a collar, where a bought put is
+        // half the position by design. Excluding it meant Open P&L showed the
+        // short call moving against a falling stock while the put that offsets
+        // it — the whole point of holding it — contributed nothing.
+        //
+        // The projection and what-if below stay corrected-only: those are
+        // forward-looking columns, not the position's current value.
 
         openUnrealizedByTicker[ticker] =
           (openUnrealizedByTicker[ticker] || 0) + (nowMark - leg.costPerShare) * shares
 
         // S, T0 and sigma are already established above for the day move.
-        if (!(S > 0) || !(T0 > 0) || sigma == null) return
+        if (!corrected || !(S > 0) || !(T0 > 0) || sigma == null) return
 
         for (const months of PROJECT_MONTHS) {
           const T1 = T0 - months / 12
