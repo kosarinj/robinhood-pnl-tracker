@@ -2976,7 +2976,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const stockPositions = databaseService.getStockPositionsWithCost(
       userId, asOf, brokerFilter, corrected ? 'fifo' : 'average')
     const stockCostOverrides = databaseService.getCostOverrides(userId, brokerFilter)
-    const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides, asOf)
+    // Scoped to the panel's period and broker, like realized OPTION P&L already
+    // is. The question this panel answers is "where am I since I started",
+    // not "what is my tax liability for the year" — an all-time figure answers
+    // the second and buries the first.
+    const stockRealized = databaseService.getStockRealizedPnL(
+      userId, stockCostOverrides, asOf, brokerFilter, globalStart)
 
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
@@ -3129,17 +3134,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             ? r2(sp.position * (cp - periodStartPrices[e.ticker]))
             : null,
           periodStartPrice: periodStartPrices[e.ticker] ?? null,
-          stockRealizedPnL: (!isOpen && stockRealized[e.ticker] != null) ? r2(stockRealized[e.ticker]) : null,
-          // The same figure WITHOUT the closed-position gate, so a partial sale
-          // has somewhere to appear.
+          // Shown whether or not shares are still held.
           //
-          // stockRealizedPnL above is deliberately withheld while shares are
-          // still held, to stop an active name being inflated by years of booked
-          // gains — and that's still how Net is built. But it means selling part
-          // of a position moves money from unrealized into a figure nothing
-          // renders: PLTR's Net + Open fell about $3,850 on a sale that earned
-          // exactly that. Reported separately so it can be seen without changing
-          // what Net means.
+          // It used to appear only once a position was fully closed, so selling
+          // part of a holding moved money out of view: PLTR read 8,000 and then
+          // 2,000 the moment 100 shares were sold, because the gain on them
+          // stopped being rendered anywhere. Now that the figure is scoped to
+          // the period and booked at the cost prevailing at each sale, there is
+          // nothing to protect against — it's this period's realized gain, not
+          // years of accumulated history.
+          stockRealizedPnL: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
+          // Kept as an alias so the Stock Realized column keeps working; it is
+          // now the same figure as stockRealizedPnL, which is no longer gated.
           stockRealizedAll: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null,
