@@ -811,6 +811,9 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         style={{ fontWeight: 700, color: pnlColor(r.dayPnl, isDark) }}>
         {r.dayPnl != null ? `${r.dayPnl >= 0 ? '+' : ''}${fmt(r.dayPnl)}` : '—'}
         {r.dayIncomplete && <span style={{ fontSize: 10, color: '#f59e0b' }}> no px</span>}
+        {/* Shown but not whole — the total is here, one leg just isn't in it. */}
+        {r.dayPartial && <span style={{ fontSize: 10, color: '#f59e0b' }}
+          title="At least one option leg had no usable move, so this total is incomplete."> partial</span>}
         {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.dayPnl, isDark), fontWeight: 700, fontSize: 15 }}>{t.dayPnl != null ? `${t.dayPnl >= 0 ? '+' : ''}${fmt(t.dayPnl)}` : '—'}</span> },
 

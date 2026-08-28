@@ -3061,8 +3061,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // gain — so the column read positive against a broker's -2,200. A
         // missing half is not a small error in a total, it is a different
         // number. Report nothing and say why instead.
-        const missingStockDay = (!!(sp && sp.position > 0) && dayStockPnl == null)
-          || dayGapTickers.has(e.ticker)
+        // Two different kinds of missing, and only one justifies withholding.
+        //
+        // No daily STOCK price while shares are held is the dangerous one: the
+        // total then reduces to the option side alone, which on a down day
+        // carries the opposite sign. That still reports nothing.
+        //
+        // An option leg that couldn't be priced is not the same thing. The
+        // total is a little incomplete, not inverted — and refusing it while
+        // showing both halves beside it was the worst of both: the parts were
+        // there and the sum wasn't.
+        const missingStockDay = !!(sp && sp.position > 0) && dayStockPnl == null
+        const partialLegs = dayGapTickers.has(e.ticker)
         const dayPnl = missingStockDay ? null
           : (dayStockPnl != null || dayOptionPnl != null)
             ? r2((dayStockPnl || 0) + (dayOptionPnl || 0)) : null
@@ -3129,6 +3139,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // can't be reported. Surfaced rather than hidden: the failure mode it
           // replaces was silent and inverted the sign.
           dayIncomplete: missingStockDay,
+          // Shown but not whole: at least one option leg had no usable move.
+          dayPartial: partialLegs && !missingStockDay,
           // 'market' when every option leg's day move came from real prints at
           // both ends, 'model' when none did, 'mixed' in between. A model-derived
           // day move is an estimate of the move, not the move — worth being able
