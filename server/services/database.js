@@ -2379,7 +2379,7 @@ export class DatabaseService {
    * shares sold inside the period were bought before it — but only sales within
    * the window are counted.
    */
-  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null) {
+  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
     try {
       const rows = db.prepare(`
         SELECT symbol, trans_date, is_buy,
@@ -2416,7 +2416,12 @@ export class DatabaseService {
           const avgThen = st.cost / st.shares
           const proceedsPerShare = (r.amt || 0) / qty
           const pnl = (proceedsPerShare - avgThen) * covered
-          if (!fromDate || String(r.trans_date) >= fromDate) {
+          // A per-symbol start wins over the global one. Rolling positions get
+          // reopened, and "where am I on THIS position" needs a date per name
+          // — a flat holding otherwise reports a year of old sales as though
+          // they were its current standing.
+          const start = fromDateBySymbol[r.symbol] || fromDate
+          if (!start || String(r.trans_date) >= start) {
             result[r.symbol] = (result[r.symbol] || 0) + pnl
           }
           st.cost -= avgThen * covered

@@ -2989,7 +2989,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // not "what is my tax liability for the year" — an all-time figure answers
     // the second and buries the first.
     const stockRealized = databaseService.getStockRealizedPnL(
-      userId, stockCostOverrides, asOf, brokerFilter, globalStart)
+      userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
 
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
@@ -3190,6 +3190,39 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       })
       .sort((a, b) => b.totalRealized - a.totalRealized)
 
+    // ?ticker=MRVL narrows the response to one name. Reusing this endpoint
+    // rather than a parallel debug route means the decomposition is the panel's
+    // own arithmetic by construction — a separate route could drift and then
+    // "agree" with a bug instead of exposing it.
+    if (req.query.ticker) {
+      const t = String(req.query.ticker).toUpperCase()
+      const row = result[t]
+      if (!row) return res.json({ success: true, ticker: t, found: false, globalStart })
+      const stockRealizedTerm = row.stockRealizedPnL || 0
+      const stockUnrealTerm = row.stockUnrealizedPnL || 0
+      const optionsRealized = row.totalRealized || 0
+      const openTerm = row.openUnrealizedPnL || 0
+      const net = optionsRealized + stockUnrealTerm + stockRealizedTerm
+      return res.json({
+        success: true, ticker: t, found: true,
+        window: { globalStart, effectiveStart: perSymbolDates[t] || globalStart, asOf },
+        terms: {
+          optionsRealized,
+          stockUnrealized: stockUnrealTerm,
+          stockRealized: stockRealizedTerm,
+          openOptions: openTerm,
+        },
+        net: Math.round(net * 100) / 100,
+        netPlusOpen: Math.round((net + openTerm) * 100) / 100,
+        breakdown: {
+          realizedShortCalls: row.realizedShortCalls,
+          realizedLongCalls: row.realizedLongCalls,
+          realizedShortPuts: row.realizedShortPuts,
+          realizedLongPuts: row.realizedLongPuts,
+        },
+        row,
+      })
+    }
     res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates, asOf })
   } catch (e) {
     console.error('Error in /api/options-pnl/ytd:', e.message)
