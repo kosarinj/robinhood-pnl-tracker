@@ -2386,7 +2386,8 @@ export class DatabaseService {
    * disagree — a separate query for the detail could reconcile to a different
    * number and turn a real discrepancy into an argument about which is right.
    */
-  _walkStockRealized(userId = 1, asOf = null, broker = null) {
+  _walkStockRealized(userId = 1, asOf = null, broker = null, opts = {}) {
+    const { overrides = {}, fromDate = null, fromDateBySymbol = {} } = opts
     const rows = db.prepare(`
       SELECT symbol, trans_date, is_buy,
              COALESCE(quantity,0) AS qty,
@@ -2406,7 +2407,24 @@ export class DatabaseService {
       const f = this.splitFactor(splits[r.symbol], r.trans_date)
       const qty = (r.qty || 0) * f
       if (!(qty > 0)) continue
-      const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0 })
+      const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0, rebased: false })
+
+      // Rebase to the manual cost at the period start.
+      //
+      // Without this, a row measures its two halves against different bases:
+      // unrealized against the override, realized against the lifetime average.
+      // For a name accumulated over a year and then overridden, sales book gains
+      // against shares bought long before the position being asked about — the
+      // "banked money" that shows up as profit the holder never made.
+      //
+      // Shares bought after the start come in at what was actually paid and
+      // blend in normally, so a position built up over the period stays honest.
+      const symStart = fromDateBySymbol[r.symbol] || fromDate
+      if (symStart && !st.rebased && String(r.trans_date) >= symStart) {
+        st.rebased = true
+        const ov = overrides[r.symbol]
+        if (ov > 0 && st.shares > 1e-9) st.cost = st.shares * ov
+      }
 
       if (r.is_buy === 1) {
         st.shares += qty
@@ -2435,12 +2453,12 @@ export class DatabaseService {
   }
 
   /** Sales of one symbol, each flagged with whether the period counts it. */
-  getStockRealizedDetail(userId = 1, symbol, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
+  getStockRealizedDetail(userId = 1, symbol, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}, overrides = {}) {
     try {
       const sym = String(symbol).toUpperCase()
       const start = fromDateBySymbol[sym] || fromDate
       const r2 = (n) => Math.round(n * 100) / 100
-      const sales = this._walkStockRealized(userId, asOf, broker)
+      const sales = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol })
         .filter(e => e.symbol === sym)
         .map(e => ({
           date: e.date, qty: r2(e.qty), covered: r2(e.covered),
@@ -2464,7 +2482,7 @@ export class DatabaseService {
   getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
     try {
       const result = {}
-      for (const e of this._walkStockRealized(userId, asOf, broker)) {
+      for (const e of this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol })) {
         // A per-symbol start wins over the global one. Rolling positions get
         // reopened, and "where am I on THIS position" needs a date per name
         // — a flat holding otherwise reports a year of old sales as though

@@ -2988,8 +2988,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // is. The question this panel answers is "where am I since I started",
     // not "what is my tax liability for the year" — an all-time figure answers
     // the second and buries the first.
+    // Rebasing realized P&L to the manual cost at the period start is OPT-IN
+    // (?rebase=1). It is arguably the more consistent treatment — unrealized
+    // already uses the override — but it moves every name that carries one, and
+    // some of those currently read correctly. Changing them to fix a different
+    // name would trade a known-good number for an unverified one.
+    const rebase = req.query.rebase === '1'
     const stockRealized = databaseService.getStockRealizedPnL(
-      userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
+      userId, rebase ? stockCostOverrides : {}, asOf, brokerFilter, globalStart, perSymbolDates)
 
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
@@ -3625,9 +3631,26 @@ app.get('/api/debug-realized', requireAuth, (req, res) => {
     const ticker = String(req.query.ticker || '').toUpperCase()
     if (!ticker) return res.status(400).json({ success: false, error: 'ticker is required' })
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
-    const detail = databaseService.getStockRealizedDetail(
-      userId, ticker, req.query.asOf || null, brokerFilter, req.query.startDate || null, {})
-    res.json({ success: true, ...detail })
+    const start = req.query.startDate || null
+    const overrides = databaseService.getCostOverrides(userId, brokerFilter)
+    // Both treatments side by side, so the choice is made by comparing numbers
+    // rather than by argument.
+    const asIs = databaseService.getStockRealizedDetail(
+      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, {})
+    const rebased = databaseService.getStockRealizedDetail(
+      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, overrides)
+    res.json({
+      success: true,
+      ticker, start,
+      override: overrides[ticker] ?? null,
+      current: { inPeriod: asIs.inPeriod, allTime: asIs.allTime },
+      ifRebasedToOverride: { inPeriod: rebased.inPeriod, allTime: rebased.allTime },
+      difference: Math.round(((rebased.inPeriod || 0) - (asIs.inPeriod || 0)) * 100) / 100,
+      countedSales: asIs.countedSales,
+      totalSales: asIs.totalSales,
+      sales: asIs.sales,
+      salesRebased: rebased.sales,
+    })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }
