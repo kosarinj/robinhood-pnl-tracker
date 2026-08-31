@@ -2379,57 +2379,101 @@ export class DatabaseService {
    * shares sold inside the period were bought before it — but only sales within
    * the window are counted.
    */
-  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
-    try {
-      const rows = db.prepare(`
-        SELECT symbol, trans_date, is_buy,
-               COALESCE(quantity,0) AS qty,
-               ABS(COALESCE(amount,0)) AS amt
-        FROM trades
-        WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
-          ${asOf ? 'AND trans_date <= ?' : ''}
-          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
-        ORDER BY trans_date ASC, id ASC
-      `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
+  /**
+   * Every realized sale, in order, with the average cost at the moment it sold.
+   *
+   * The total and the itemised view come from this one walk so they cannot
+   * disagree — a separate query for the detail could reconcile to a different
+   * number and turn a real discrepancy into an argument about which is right.
+   */
+  _walkStockRealized(userId = 1, asOf = null, broker = null) {
+    const rows = db.prepare(`
+      SELECT symbol, trans_date, is_buy,
+             COALESCE(quantity,0) AS qty,
+             ABS(COALESCE(amount,0)) AS amt
+      FROM trades
+      WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
+        ${asOf ? 'AND trans_date <= ?' : ''}
+        ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+      ORDER BY trans_date ASC, id ASC
+    `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
 
-      const splits = this.getSplits([...new Set(rows.map(r => r.symbol))])
-      const state = {}
-      const result = {}
+    const splits = this.getSplits([...new Set(rows.map(r => r.symbol))])
+    const state = {}
+    const events = []
 
-      for (const r of rows) {
-        const f = this.splitFactor(splits[r.symbol], r.trans_date)
-        const qty = (r.qty || 0) * f
-        if (!(qty > 0)) continue
-        const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0 })
+    for (const r of rows) {
+      const f = this.splitFactor(splits[r.symbol], r.trans_date)
+      const qty = (r.qty || 0) * f
+      if (!(qty > 0)) continue
+      const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0 })
 
-        if (r.is_buy === 1) {
-          st.shares += qty
-          st.cost += (r.amt || 0)          // cash paid is unchanged by a split
-          continue
-        }
-
-        // A sale bigger than the shares on hand means the rest were bought
-        // before this export begins. Their cost is unknowable, so only the
-        // covered part is booked — inventing a basis would manufacture profit.
-        const covered = Math.min(qty, st.shares)
-        if (covered > 1e-9) {
-          const avgThen = st.cost / st.shares
-          const proceedsPerShare = (r.amt || 0) / qty
-          const pnl = (proceedsPerShare - avgThen) * covered
-          // A per-symbol start wins over the global one. Rolling positions get
-          // reopened, and "where am I on THIS position" needs a date per name
-          // — a flat holding otherwise reports a year of old sales as though
-          // they were its current standing.
-          const start = fromDateBySymbol[r.symbol] || fromDate
-          if (!start || String(r.trans_date) >= start) {
-            result[r.symbol] = (result[r.symbol] || 0) + pnl
-          }
-          st.cost -= avgThen * covered
-          st.shares -= covered
-          if (st.shares <= 1e-9) { st.shares = 0; st.cost = 0 }
-        }
+      if (r.is_buy === 1) {
+        st.shares += qty
+        st.cost += (r.amt || 0)          // cash paid is unchanged by a split
+        continue
       }
 
+      // A sale bigger than the shares on hand means the rest were bought
+      // before this export begins. Their cost is unknowable, so only the
+      // covered part is booked — inventing a basis would manufacture profit.
+      const covered = Math.min(qty, st.shares)
+      if (covered > 1e-9) {
+        const avgThen = st.cost / st.shares
+        const proceedsPerShare = (r.amt || 0) / qty
+        const pnl = (proceedsPerShare - avgThen) * covered
+        events.push({
+          symbol: r.symbol, date: String(r.trans_date),
+          qty, covered, avgThen, proceedsPerShare, pnl,
+        })
+        st.cost -= avgThen * covered
+        st.shares -= covered
+        if (st.shares <= 1e-9) { st.shares = 0; st.cost = 0 }
+      }
+    }
+    return events
+  }
+
+  /** Sales of one symbol, each flagged with whether the period counts it. */
+  getStockRealizedDetail(userId = 1, symbol, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
+    try {
+      const sym = String(symbol).toUpperCase()
+      const start = fromDateBySymbol[sym] || fromDate
+      const r2 = (n) => Math.round(n * 100) / 100
+      const sales = this._walkStockRealized(userId, asOf, broker)
+        .filter(e => e.symbol === sym)
+        .map(e => ({
+          date: e.date, qty: r2(e.qty), covered: r2(e.covered),
+          avgCostThen: r2(e.avgThen), soldAt: r2(e.proceedsPerShare),
+          pnl: r2(e.pnl), counted: !start || e.date >= start,
+        }))
+      return {
+        symbol: sym, start,
+        allTime: r2(sales.reduce((a, e) => a + e.pnl, 0)),
+        inPeriod: r2(sales.filter(e => e.counted).reduce((a, e) => a + e.pnl, 0)),
+        countedSales: sales.filter(e => e.counted).length,
+        totalSales: sales.length,
+        sales,
+      }
+    } catch (e) {
+      console.error('Error getting realized detail:', e)
+      return { error: e.message }
+    }
+  }
+
+  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
+    try {
+      const result = {}
+      for (const e of this._walkStockRealized(userId, asOf, broker)) {
+        // A per-symbol start wins over the global one. Rolling positions get
+        // reopened, and "where am I on THIS position" needs a date per name
+        // — a flat holding otherwise reports a year of old sales as though
+        // they were its current standing.
+        const start = fromDateBySymbol[e.symbol] || fromDate
+        if (!start || e.date >= start) {
+          result[e.symbol] = (result[e.symbol] || 0) + e.pnl
+        }
+      }
       Object.keys(result).forEach(k => { result[k] = Math.round(result[k] * 100) / 100 })
       return result
     } catch (e) {
