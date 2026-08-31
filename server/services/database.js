@@ -2468,6 +2468,75 @@ export class DatabaseService {
   }
 
   /**
+   * Blended cost per share of what is still held, as { SYMBOL: avgCost }.
+   *
+   * A manual cost describes the position at the period start, not every share
+   * held since. Applying it flat prices shares bought later at a cost that
+   * predates them: HOOD repurchased 100 at $110.48 after selling 100, and those
+   * shares reported +$20 each against the $84.31 override when they were down
+   * $5.69 — a real -$569 lot showing as a +$2,048 gain.
+   *
+   * So the override sets the basis at the start and every later buy comes in at
+   * what was actually paid. Only names with an override are returned; without
+   * one the positions query already answers this and a second opinion would
+   * quietly move rows the user never touched.
+   */
+  getStockEffectiveCost(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
+    try {
+      const rows = db.prepare(`
+        SELECT symbol, trans_date, is_buy,
+               COALESCE(quantity,0) AS qty,
+               ABS(COALESCE(amount,0)) AS amt
+        FROM trades
+        WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
+          ${asOf ? 'AND trans_date <= ?' : ''}
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC, id ASC
+      `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
+
+      const splits = this.getSplits([...new Set(rows.map(r => r.symbol))])
+      const state = {}
+      for (const r of rows) {
+        const f = this.splitFactor(splits[r.symbol], r.trans_date)
+        const qty = (r.qty || 0) * f
+        if (!(qty > 0)) continue
+        const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0, rebased: false })
+
+        // At the first trade on or after the start, the holding is restated at
+        // the override. Buys after that blend in at their real cost.
+        const symStart = fromDateBySymbol[r.symbol] || fromDate
+        const ov = overrides[r.symbol]
+        if (symStart && !st.rebased && String(r.trans_date) >= symStart) {
+          st.rebased = true
+          if (ov > 0 && st.shares > 1e-9) st.cost = st.shares * ov
+        }
+
+        if (r.is_buy === 1) { st.shares += qty; st.cost += (r.amt || 0); continue }
+        const covered = Math.min(qty, st.shares)
+        if (covered > 1e-9) {
+          const avgThen = st.cost / st.shares
+          st.cost -= avgThen * covered
+          st.shares -= covered
+          if (st.shares <= 1e-9) { st.shares = 0; st.cost = 0 }
+        }
+      }
+
+      const result = {}
+      for (const [sym, st] of Object.entries(state)) {
+        if (!(overrides[sym] > 0)) continue
+        // Never rebased means every trade predates the window; the override then
+        // still describes the whole holding and there is nothing to blend.
+        if (!st.rebased) { result[sym] = Math.round(overrides[sym] * 10000) / 10000; continue }
+        if (st.shares > 1e-9) result[sym] = Math.round((st.cost / st.shares) * 10000) / 10000
+      }
+      return result
+    } catch (e) {
+      console.error('Error getting stock effective cost:', e)
+      return {}
+    }
+  }
+
+  /**
    * Manual avg-cost overrides as { SYMBOL: cost }.
    *
    * With a broker, returns that broker's overrides. Without one (the merged

@@ -2991,6 +2991,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const stockRealized = databaseService.getStockRealizedPnL(
       userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
 
+    // A manual cost sets the basis at the period start; shares bought after it
+    // come in at what was actually paid. Without this, HOOD's 100 repurchased at
+    // $110.48 were priced at the $84.31 override and showed +$2,048 when the lot
+    // was down $569. Only names with an override are affected.
+    const effectiveCost = databaseService.getStockEffectiveCost(
+      userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
+    const basisFor = (ticker, sp) =>
+      sp ? (effectiveCost[ticker] || stockCostOverrides[ticker] || sp.avgCost) : null
+
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
     // getStockPositionsWithCost already filters to HAVING position > 0, so this
@@ -3131,10 +3140,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // in the Positions panel's own render, so every other consumer — the
           // charts especially — silently used the computed cost instead.
           stockUnrealizedPnL: sp && cp
-            ? r2(sp.position * (cp - (stockCostOverrides[e.ticker] || sp.avgCost)))
+            ? r2(sp.position * (cp - basisFor(e.ticker, sp)))
             : null,
-          stockCostUsed: sp ? (stockCostOverrides[e.ticker] || sp.avgCost) : null,
+          stockCostUsed: basisFor(e.ticker, sp),
           stockCostIsOverride: !!stockCostOverrides[e.ticker],
+          // True when the override was blended with buys made after the period
+          // start rather than applied flat to every share.
+          stockCostIsBlended: !!effectiveCost[e.ticker]
+            && effectiveCost[e.ticker] !== stockCostOverrides[e.ticker],
           // Movement over the selected period on the shares currently held —
           // shares x (price now - price at period start). Null when there's no
           // historical price, so callers can tell "no data" from "no move".

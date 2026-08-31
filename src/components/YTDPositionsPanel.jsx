@@ -484,7 +484,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const fb = asOf ? null : pnlLookup[r.ticker]
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
-    const avgCost = costOverrides[r.ticker] || computedCost
+    // The server already blended the override with post-start buys and booked
+    // realized against the same basis; recomputing from the flat override here
+    // would put one row's two halves on different bases.
+    const avgCost = (r.stockCostUsed > 0 ? r.stockCostUsed : null) || costOverrides[r.ticker] || computedCost
     const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (!asOf && livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
     const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
@@ -512,7 +515,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
       openProjectedPnL: acc.openProjectedPnL + (r.openProjected?.[projectMonths]?.pnl ?? r.openUnrealizedPnL ?? 0),
+      // stockUnrealizedPnL carries realized too and feeds Net and the vs-Stock%
+      // footer; stockUnrealizedOnly is what the Stock P&L column foots to.
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
+      stockUnrealizedOnly: acc.stockUnrealizedOnly + stockUnrealized,
       net: acc.net + (r.totalRealized || 0) + stockPnL,
       dayPnl: acc.dayPnl + (r.dayPnl || 0),
       // Summed independently of dayPnl, which is withheld entirely when a leg
@@ -523,7 +529,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -554,7 +560,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
     const hasManualCost = !!costOverrides[row.ticker]
-    const avgCost = costOverrides[row.ticker] || computedCost
+    const avgCost = (row.stockCostUsed > 0 ? row.stockCostUsed : null) || costOverrides[row.ticker] || computedCost
     const effectiveCost = (pos > 0 && avgCost > 0)
       ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
       : null
@@ -730,19 +736,24 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     { key: 'stockPrice', label: 'Stock Price', title: 'Current stock price',
       cell: (r, c) => <span style={{ color: text }}>{c.price ? fmt(c.price) : '—'}</span> },
 
-    { key: 'stockPnL', label: 'Stock P&L', sort: 'stockPnL', title: 'Stock P&L = realized (buy/sell gains) + unrealized (open shares)',
-      cell: (r, c) => <span title={`Realized: ${fmt(c.stockRealized)} · Unrealized: ${fmt(c.stockUnrealized)}`}
-        style={{ fontWeight: 700, color: pnlColor(c.stockPnl, isDark) }}>{c.stockPnl != null ? fmt(c.stockPnl) : '—'}</span>,
-      foot: (t) => <span style={{ color: pnlColor(t.stockUnrealizedPnL, isDark), fontWeight: 700 }}>{fmt(t.stockUnrealizedPnL)}</span> },
+    // Unrealized only. Realized has its own column immediately to the right, so
+    // the table still sums to Net — just in three visible terms rather than two:
+    // Stock P&L + Stock Realized + Options Total. Folding realized in here read
+    // as double-counting on any name sold and bought back.
+    { key: 'stockPnL', label: 'Stock P&L', sort: 'stockUnrealizedPnL',
+      title: 'Unrealized P&L on shares still held. Gains already booked are in Stock Realized. Net = Stock P&L + Stock Realized + Options Total.',
+      cell: (r, c) => <span title={`Unrealized: ${fmt(c.stockUnrealized)} · Realized (next column): ${fmt(c.stockRealized)}`}
+        style={{ fontWeight: 700, color: pnlColor(c.stockUnrealized, isDark) }}>{c.stockPnl != null ? fmt(c.stockUnrealized) : '—'}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.stockUnrealizedOnly, isDark), fontWeight: 700 }}>{fmt(t.stockUnrealizedOnly)}</span> },
 
     { key: 'stockRealizedAll', label: 'Stock Realized', sort: 'stockRealizedAll', borderLeft: '1px',
-      title: 'Booked gains and losses from shares actually sold, whether or not the position is still open. NOT part of Net — Net excludes it while shares are held, so a partial sale would otherwise move money out of view entirely.',
+      title: 'Booked gains and losses from shares actually sold, whether or not the position is still open. Part of Net: Net = Stock P&L + Stock Realized + Options Total.',
       cell: (r) => r.stockRealizedAll == null || r.stockRealizedAll === 0
         ? <span style={{ color: textMid }}>—</span>
         : (
           <span title={r.stockPosition > 0
-              ? 'Already banked. Not in Net, because shares are still held.'
-              : 'Position fully closed — this is also in Net.'}
+              ? 'Already banked, and counted in Net.'
+              : 'Position fully closed — also counted in Net.'}
             style={{ fontWeight: 600, color: pnlColor(r.stockRealizedAll, isDark) }}>
             {fmt(r.stockRealizedAll)}
             {r.stockPosition > 0 && <span style={{ fontSize: 10, color: textMid }}> banked</span>}
@@ -751,7 +762,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       foot: (t) => <span style={{ color: pnlColor(t.stockRealizedAll, isDark), fontWeight: 700 }}>
         {fmt(t.stockRealizedAll)}</span> },
 
-    { key: 'net', label: 'Net', sort: 'net', borderLeft: '2px', title: 'Options Total (realized) + Stock P&L.',
+    { key: 'net', label: 'Net', sort: 'net', borderLeft: '2px', title: 'Stock P&L (unrealized) + Stock Realized + Options Total.',
       cell: (r, c) => <span style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.net, isDark) }}>{fmt(c.net)}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.net, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net)}</span> },
 
