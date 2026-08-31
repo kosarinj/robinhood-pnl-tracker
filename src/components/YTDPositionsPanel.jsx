@@ -505,7 +505,13 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const fb = asOf ? null : pnlLookup[r.ticker]
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
-    const avgCost = costOverrides[r.ticker] || computedCost
+    // Under "My cost" the server has already blended the override with buys made
+    // after the period start, and realized is booked against that same basis.
+    // Recomputing from the flat override here would put the two halves of one
+    // row on different bases — the exact split this toggle exists to close.
+    const avgCost = (rebase && r.stockCostUsed > 0)
+      ? r.stockCostUsed
+      : (costOverrides[r.ticker] || computedCost)
     const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (!asOf && livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
     const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
@@ -575,7 +581,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
     const hasManualCost = !!costOverrides[row.ticker]
-    const avgCost = costOverrides[row.ticker] || computedCost
+    // See the totals reduce: under "My cost" the server's basis already blends
+    // the override with post-start buys, and realized is booked against it. The
+    // flat override here would leave the row's two halves on different bases.
+    const avgCost = (rebase && row.stockCostUsed > 0)
+      ? row.stockCostUsed
+      : (costOverrides[row.ticker] || computedCost)
     const effectiveCost = (pos > 0 && avgCost > 0)
       ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
       : null
