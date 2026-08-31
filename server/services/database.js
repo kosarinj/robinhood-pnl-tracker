@@ -2415,7 +2415,15 @@ export class DatabaseService {
         if (covered > 1e-9) {
           const avgThen = st.cost / st.shares
           const proceedsPerShare = (r.amt || 0) / qty
-          const pnl = (proceedsPerShare - avgThen) * covered
+          // A manual cost is what the holder says the position cost, and the
+          // unrealized half is already measured against it. Booking realized
+          // against the computed average instead puts one row's two halves on
+          // different bases: NFLX sold near $81 read as a loss against a $94.55
+          // computed average while the $74.86 override called the same shares a
+          // gain. State keeps tracking real cash — only what is reported moves.
+          const ov = overrides[r.symbol]
+          const basis = ov > 0 ? ov : avgThen
+          const pnl = (proceedsPerShare - basis) * covered
           // A per-symbol start wins over the global one. Rolling positions get
           // reopened, and "where am I on THIS position" needs a date per name
           // — a flat holding otherwise reports a year of old sales as though
