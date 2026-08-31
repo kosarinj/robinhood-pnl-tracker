@@ -2984,39 +2984,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const stockPositions = databaseService.getStockPositionsWithCost(
       userId, asOf, brokerFilter, corrected ? 'fifo' : 'average')
     const stockCostOverrides = databaseService.getCostOverrides(userId, brokerFilter)
-    // Scoped to the panel's period and broker, like realized OPTION P&L already
-    // is. The question this panel answers is "where am I since I started",
-    // not "what is my tax liability for the year" — an all-time figure answers
-    // the second and buries the first.
-    // Rebasing realized P&L to the manual cost at the period start is OPT-IN
-    // (?rebase=1). It is arguably the more consistent treatment — unrealized
-    // already uses the override — but it moves every name that carries one, and
-    // some of those currently read correctly. Changing them to fix a different
-    // name would trade a known-good number for an unverified one.
-    const rebase = req.query.rebase === '1'
-    // netScope=position counts realized stock only on shares bought inside the
-    // window, newest lots consumed first. A trim of a long-held stack then
-    // belongs to the previous leg of the position rather than this one, while a
-    // sale following a recent purchase still counts in full. A plain on/off
-    // switch cannot do this: one name needs realized included and another needs
-    // it excluded, and both are right.
-    const scopeToNewLots = req.query.netScope === 'position'
-    const stockRealized = databaseService.getStockRealizedPnL(
-      userId, rebase ? stockCostOverrides : {}, asOf, brokerFilter, globalStart, perSymbolDates, scopeToNewLots)
-
-    // Under rebase the override is the cost of the position AT THE PERIOD
-    // START, so shares bought after it must come in at what was actually paid.
-    // Pricing the whole holding at the override books a gain on shares that
-    // never rose — HOOD's buy-back near $104 against an $84.31 override read
-    // ~$20/share of profit that was never made. Empty when rebase is off, so
-    // the flat-override behaviour below is untouched by default.
-    const effectiveCost = rebase
-      ? databaseService.getStockEffectiveCost(
-          userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
-      : {}
-    // Blended basis first, then the flat override, then the computed average.
-    const basisFor = (ticker, sp) =>
-      sp ? (effectiveCost[ticker] || stockCostOverrides[ticker] || sp.avgCost) : null
+    const stockRealized = databaseService.getStockRealizedPnL(userId, stockCostOverrides, asOf)
 
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
@@ -3048,20 +3016,6 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         } catch { /* no historical price — caller falls back */ }
       }))
     }
-
-    // Period move measured per share, not per position.
-    //
-    // shares x (price now - price at period start) pays every share the whole
-    // climb, including ones bought after it. HOOD held 104 shares from May 1 at
-    // $73.66 and bought 100 back near $104 in August; crediting all 204 with the
-    // full $31 move reported about $6,100 where roughly $3,000 of it happened
-    // before those shares were owned.
-    //
-    // Rebasing to the start price and blending later buys at what was actually
-    // paid is the same walk the cost basis uses, so a share is only ever paid
-    // for the part of the move it was present for.
-    const periodBasis = databaseService.getStockEffectiveCost(
-      userId, periodStartPrices, asOf, brokerFilter, globalStart, perSymbolDates)
 
     const stockPrices = {}
     if (allTickers.length > 0 && asOf) {
@@ -3172,32 +3126,28 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // in the Positions panel's own render, so every other consumer — the
           // charts especially — silently used the computed cost instead.
           stockUnrealizedPnL: sp && cp
-            ? r2(sp.position * (cp - basisFor(e.ticker, sp)))
+            ? r2(sp.position * (cp - (stockCostOverrides[e.ticker] || sp.avgCost)))
             : null,
-          stockCostUsed: basisFor(e.ticker, sp),
+          stockCostUsed: sp ? (stockCostOverrides[e.ticker] || sp.avgCost) : null,
           stockCostIsOverride: !!stockCostOverrides[e.ticker],
-          // True when the basis blends the override with later buys rather than
-          // applying it flat — so the UI can say which number it is showing.
-          stockCostIsBlended: !!effectiveCost[e.ticker],
           // Movement over the selected period on the shares currently held —
           // shares x (price now - price at period start). Null when there's no
           // historical price, so callers can tell "no data" from "no move".
           stockPeriodPnl: (sp && cp && periodStartPrices[e.ticker] > 0)
-            ? r2(sp.position * (cp - (periodBasis[e.ticker] || periodStartPrices[e.ticker])))
+            ? r2(sp.position * (cp - periodStartPrices[e.ticker]))
             : null,
           periodStartPrice: periodStartPrices[e.ticker] ?? null,
-          // Shown whether or not shares are still held.
+          stockRealizedPnL: (!isOpen && stockRealized[e.ticker] != null) ? r2(stockRealized[e.ticker]) : null,
+          // The same figure WITHOUT the closed-position gate, so a partial sale
+          // has somewhere to appear.
           //
-          // It used to appear only once a position was fully closed, so selling
-          // part of a holding moved money out of view: PLTR read 8,000 and then
-          // 2,000 the moment 100 shares were sold, because the gain on them
-          // stopped being rendered anywhere. Now that the figure is scoped to
-          // the period and booked at the cost prevailing at each sale, there is
-          // nothing to protect against — it's this period's realized gain, not
-          // years of accumulated history.
-          stockRealizedPnL: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
-          // Kept as an alias so the Stock Realized column keeps working; it is
-          // now the same figure as stockRealizedPnL, which is no longer gated.
+          // stockRealizedPnL above is deliberately withheld while shares are
+          // still held, to stop an active name being inflated by years of booked
+          // gains — and that's still how Net is built. But it means selling part
+          // of a position moves money from unrealized into a figure nothing
+          // renders: PLTR's Net + Open fell about $3,850 on a sale that earned
+          // exactly that. Reported separately so it can be seen without changing
+          // what Net means.
           stockRealizedAll: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null,
@@ -3234,45 +3184,6 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       })
       .sort((a, b) => b.totalRealized - a.totalRealized)
 
-    // ?ticker=MRVL narrows the response to one name. Reusing this endpoint
-    // rather than a parallel debug route means the decomposition is the panel's
-    // own arithmetic by construction — a separate route could drift and then
-    // "agree" with a bug instead of exposing it.
-    if (req.query.ticker) {
-      const t = String(req.query.ticker).toUpperCase()
-      // result is an ARRAY (Object.values above), not a map — look it up by field.
-      const row = result.find(r => String(r.ticker).toUpperCase() === t)
-      if (!row) {
-        return res.json({
-          success: true, ticker: t, found: false, globalStart,
-          available: result.map(r => r.ticker).sort(),
-        })
-      }
-      const stockRealizedTerm = row.stockRealizedPnL || 0
-      const stockUnrealTerm = row.stockUnrealizedPnL || 0
-      const optionsRealized = row.totalRealized || 0
-      const openTerm = row.openUnrealizedPnL || 0
-      const net = optionsRealized + stockUnrealTerm + stockRealizedTerm
-      return res.json({
-        success: true, ticker: t, found: true,
-        window: { globalStart, effectiveStart: perSymbolDates[t] || globalStart, asOf },
-        terms: {
-          optionsRealized,
-          stockUnrealized: stockUnrealTerm,
-          stockRealized: stockRealizedTerm,
-          openOptions: openTerm,
-        },
-        net: Math.round(net * 100) / 100,
-        netPlusOpen: Math.round((net + openTerm) * 100) / 100,
-        breakdown: {
-          realizedShortCalls: row.realizedShortCalls,
-          realizedLongCalls: row.realizedLongCalls,
-          realizedShortPuts: row.realizedShortPuts,
-          realizedLongPuts: row.realizedLongPuts,
-        },
-        row,
-      })
-    }
     res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates, asOf })
   } catch (e) {
     console.error('Error in /api/options-pnl/ytd:', e.message)
@@ -3656,47 +3567,6 @@ app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
  * what each implies. Built because three separate explanations were offered for
  * a figure without anyone being able to see the inputs — this shows them.
  */
-/**
- * GET /api/debug-realized?ticker=MRVL&startDate=2026-05-01
- *
- * Every share sale of one name with the average cost at the moment it sold, and
- * whether the period counts it. Answers "can this total come from these sales?"
- * — which reasoning from a five-row preview cannot.
- */
-app.get('/api/debug-realized', requireAuth, (req, res) => {
-  try {
-    // requireAuth attaches { userId, username, email } — .id is undefined, which
-    // fell through to the userId = 1 default and quietly reported another
-    // account's trades on any login that isn't user 1.
-    const userId = req.user.userId
-    const ticker = String(req.query.ticker || '').toUpperCase()
-    if (!ticker) return res.status(400).json({ success: false, error: 'ticker is required' })
-    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
-    const start = req.query.startDate || null
-    const overrides = databaseService.getCostOverrides(userId, brokerFilter)
-    // Both treatments side by side, so the choice is made by comparing numbers
-    // rather than by argument.
-    const asIs = databaseService.getStockRealizedDetail(
-      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, {}, false)
-    const scoped = databaseService.getStockRealizedDetail(
-      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, {}, true)
-    res.json({
-      success: true,
-      ticker, start,
-      override: overrides[ticker] ?? null,
-      sincePeriodStart: asIs.inPeriod,
-      currentPositionOnly: scoped.inPeriod,
-      difference: Math.round(((scoped.inPeriod || 0) - (asIs.inPeriod || 0)) * 100) / 100,
-      countedSales: asIs.countedSales,
-      totalSales: asIs.totalSales,
-      // Only the sales the period counts — the pre-period ones are noise here.
-      sales: scoped.sales.filter(x => x.counted),
-    })
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message })
-  }
-})
-
 app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId

@@ -28,8 +28,6 @@ const loadHidden = (broker) => {
   } catch { return [] }
 }
 const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
-const LS_NETSCOPE_KEY = 'ytdPanel_netScope'   // 'period' | 'position'
-const LS_REBASE_KEY = 'ytdPanel_rebase'       // measure against the manual cost
 // Cost overrides are cached per broker — one shared key was how the Robinhood
 // cost ended up showing on Webull rows.
 const costKey = (broker) => `ytdPanel_costOverrides_${broker || 'all'}`
@@ -58,16 +56,6 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // The period start decides which realized P&L is counted, so it follows the
   // user as well — otherwise two devices report different totals.
   const [globalStart, setGlobalStart] = useState(() => getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
-  // 'period'   — every share sale in the window counts (the default)
-  // 'position' — only shares bought inside the window, so trimming a long-held
-  //              stack doesn't book the previous leg's gain against this one
-  const [netScope, setNetScope] = useState(() => getPref(LS_NETSCOPE_KEY, 'period'))
-  // Off  — realized books against the lifetime average, unrealized prices the
-  //        whole holding at the manual cost (the long-standing behaviour).
-  // On   — the manual cost is the basis AT THE PERIOD START: realized measures
-  //        against it, and shares bought later blend in at what was paid, so a
-  //        buy-back stops reporting a gain it never made.
-  const [rebase, setRebase] = useState(() => getPref(LS_REBASE_KEY, false))
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)
@@ -231,8 +219,6 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       const gs = overrideGlobal ?? globalStart
       const sd = overrideSymbolDates ?? symbolDates
       const params = new URLSearchParams({ startDate: gs })
-      if (netScope === 'position') params.set('netScope', 'position')
-      if (rebase) params.set('rebase', '1')
       if (Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
       if (asOf) params.set('asOf', asOf)
       if (broker && broker !== 'all') params.set('broker', broker)
@@ -245,14 +231,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     } finally {
       if (!quiet) setLoading(false)
     }
-  }, [globalStart, symbolDates, asOf, broker, netScope, rebase])
-
-  // Refetch when the scope or basis changes; quiet so the table doesn't blank out.
-  const firstScope = useRef(true)
-  useEffect(() => {
-    if (firstScope.current) { firstScope.current = false; return }
-    fetchData(undefined, undefined, true)
-  }, [netScope, rebase])
+  }, [globalStart, symbolDates, asOf, broker])
 
   useEffect(() => { fetchData() }, [])
   // Refetch when the as-of date changes (or is cleared back to live)
@@ -505,13 +484,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const fb = asOf ? null : pnlLookup[r.ticker]
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (r.stockPosition > 0 ? r.stockPosition : null)
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (r.stockAvgCost > 0 ? r.stockAvgCost : null)
-    // Under "My cost" the server has already blended the override with buys made
-    // after the period start, and realized is booked against that same basis.
-    // Recomputing from the flat override here would put the two halves of one
-    // row on different bases — the exact split this toggle exists to close.
-    const avgCost = (rebase && r.stockCostUsed > 0)
-      ? r.stockCostUsed
-      : (costOverrides[r.ticker] || computedCost)
+    const avgCost = costOverrides[r.ticker] || computedCost
     const price = (sh?.currentPrice > 0 ? sh.currentPrice : null) ?? (!asOf && livePrices[r.ticker] > 0 ? livePrices[r.ticker] : null) ?? (r.stockCurrentPrice > 0 ? r.stockCurrentPrice : null)
     const stockUnrealized = (pos > 0 && avgCost > 0 && price > 0)
       ? Math.round(pos * (price - avgCost) * 100) / 100
@@ -539,11 +512,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
       openProjectedPnL: acc.openProjectedPnL + (r.openProjected?.[projectMonths]?.pnl ?? r.openUnrealizedPnL ?? 0),
-      // Two totals, deliberately: stockUnrealizedPnL carries realized too and
-      // feeds Net and the vs-Stock% footer, while stockUnrealizedOnly is what
-      // the Stock P&L column foots to.
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
-      stockUnrealizedOnly: acc.stockUnrealizedOnly + stockUnrealized,
       net: acc.net + (r.totalRealized || 0) + stockPnL,
       dayPnl: acc.dayPnl + (r.dayPnl || 0),
       // Summed independently of dayPnl, which is withheld entirely when a leg
@@ -554,7 +523,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -585,12 +554,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const pos = (sh?.position > 0 ? sh.position : null) ?? (fb?.position > 0 ? fb.position : null) ?? (row.stockPosition > 0 ? row.stockPosition : null)
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
     const hasManualCost = !!costOverrides[row.ticker]
-    // See the totals reduce: under "My cost" the server's basis already blends
-    // the override with post-start buys, and realized is booked against it. The
-    // flat override here would leave the row's two halves on different bases.
-    const avgCost = (rebase && row.stockCostUsed > 0)
-      ? row.stockCostUsed
-      : (costOverrides[row.ticker] || computedCost)
+    const avgCost = costOverrides[row.ticker] || computedCost
     const effectiveCost = (pos > 0 && avgCost > 0)
       ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
       : null
@@ -766,15 +730,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     { key: 'stockPrice', label: 'Stock Price', title: 'Current stock price',
       cell: (r, c) => <span style={{ color: text }}>{c.price ? fmt(c.price) : '—'}</span> },
 
-    // Unrealized only. Gains already taken have their own column, and counting
-    // them here showed the same money twice: shares sold and bought back booked
-    // the gain as realized, then the repurchased shares carried it again.
-    // Net still includes stock realized — see the totals reduce.
-    { key: 'stockPnL', label: 'Stock P&L', sort: 'stockUnrealizedPnL',
-      title: 'Unrealized P&L on shares currently held. Gains already booked are in Stock Realized; Net counts both.',
-      cell: (r, c) => <span title={`Unrealized: ${fmt(c.stockUnrealized)} · Realized (not in this column): ${fmt(c.stockRealized)}`}
-        style={{ fontWeight: 700, color: pnlColor(c.stockUnrealized, isDark) }}>{c.stockPnl != null ? fmt(c.stockUnrealized) : '—'}</span>,
-      foot: (t) => <span style={{ color: pnlColor(t.stockUnrealizedOnly, isDark), fontWeight: 700 }}>{fmt(t.stockUnrealizedOnly)}</span> },
+    { key: 'stockPnL', label: 'Stock P&L', sort: 'stockPnL', title: 'Stock P&L = realized (buy/sell gains) + unrealized (open shares)',
+      cell: (r, c) => <span title={`Realized: ${fmt(c.stockRealized)} · Unrealized: ${fmt(c.stockUnrealized)}`}
+        style={{ fontWeight: 700, color: pnlColor(c.stockPnl, isDark) }}>{c.stockPnl != null ? fmt(c.stockPnl) : '—'}</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.stockUnrealizedPnL, isDark), fontWeight: 700 }}>{fmt(t.stockUnrealizedPnL)}</span> },
 
     { key: 'stockRealizedAll', label: 'Stock Realized', sort: 'stockRealizedAll', borderLeft: '1px',
       title: 'Booked gains and losses from shares actually sold, whether or not the position is still open. NOT part of Net — Net excludes it while shares are held, so a partial sale would otherwise move money out of view entirely.',
@@ -1097,73 +1056,6 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               {key === 'stock' && stockOnlyCount > 0 && (
                 <span style={{ marginLeft: 5, opacity: 0.75, fontWeight: 500, fontSize: 11 }}>{stockOnlyCount}</span>
               )}
-            </button>
-          ))}
-        </div>
-
-        {/* Which share sales count toward Net.
-
-            "Since start" books every sale in the window. That is right for a
-            name sold once recently, and wrong for one that was trimmed out of a
-            long-held stack — the trim's gain belongs to the previous leg of the
-            position, not the one being measured. "This position" counts only
-            shares bought inside the window, newest lots first, which separates
-            the two without needing a start date per name. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <span style={{ fontSize: 12, color: textMid, fontWeight: 600, marginRight: 4 }}>
-            Realized:
-          </span>
-          {[
-            ['period', 'Since start', 'Every share sale in the period counts toward Net'],
-            ['position', 'This position', 'Only shares bought inside the period count — trimming a long-held stack does not book the previous position’s gain here'],
-          ].map(([key, label, tip]) => (
-            <button
-              key={key}
-              onClick={() => { setNetScope(key); setPref(LS_NETSCOPE_KEY, key) }}
-              title={tip}
-              style={{
-                padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                borderRadius: 6,
-                border: `1px solid ${netScope === key ? '#667eea' : border}`,
-                background: netScope === key ? '#667eea' : 'transparent',
-                color: netScope === key ? '#fff' : textMid,
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* What the manual cost means.
-
-            Off, it prices every share held at the override and books realized
-            against the lifetime average — two different bases in one row.
-            On, the override is the cost AT THE PERIOD START: realized measures
-            against it, and shares bought later blend in at what was actually
-            paid, so a sell-and-buy-back stops showing a gain on the shares that
-            came back. Opt-in, because it moves figures that were calibrated on
-            the old treatment. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <span style={{ fontSize: 12, color: textMid, fontWeight: 600, marginRight: 4 }}>
-            Cost basis:
-          </span>
-          {[
-            [false, 'Lifetime avg', 'Realized books against the lifetime average cost; a manual cost prices the whole holding'],
-            [true, 'My cost', 'The manual cost is the basis at the period start — shares bought after it come in at what you actually paid'],
-          ].map(([key, label, tip]) => (
-            <button
-              key={String(key)}
-              onClick={() => { setRebase(key); setPref(LS_REBASE_KEY, key) }}
-              title={tip}
-              style={{
-                padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                borderRadius: 6,
-                border: `1px solid ${rebase === key ? '#667eea' : border}`,
-                background: rebase === key ? '#667eea' : 'transparent',
-                color: rebase === key ? '#fff' : textMid,
-              }}
-            >
-              {label}
             </button>
           ))}
         </div>

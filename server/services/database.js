@@ -2358,198 +2358,31 @@ export class DatabaseService {
   // For a fully-closed position this equals sells − buys, matching the Dashboard's realized P&L.
   // `overrides` is an optional { SYMBOL: avgCost } map; when present for a symbol, the
   // manual cost basis is used instead of the computed average cost.
-  /**
-   * Realized stock P&L, booked against the cost prevailing at each sale.
-   *
-   * The previous version computed `proceeds − avgCost × totalSold` using ONE
-   * cost for every sale ever made. With a manual override that meant applying
-   * today's basis to sales from a year ago, across 2,327 PLTR shares — a figure
-   * that answered no question anyone asks.
-   *
-   * This walks the trades in order with a running average, the way a broker
-   * does: each sale books proceeds minus what those shares cost AT THAT MOMENT,
-   * and the remaining position carries on unaffected.
-   *
-   * Overrides are deliberately NOT used here. An override sets what the shares
-   * held today cost; it says nothing about what shares sold last year cost, and
-   * using it that way is precisely the bug being fixed.
-   *
-   * `fromDate` scopes to the panel's period, matching how realized OPTION P&L
-   * is already scoped. The running cost is still built from the whole history —
-   * shares sold inside the period were bought before it — but only sales within
-   * the window are counted.
-   */
-  /**
-   * Every realized sale, in order, with the average cost at the moment it sold.
-   *
-   * The total and the itemised view come from this one walk so they cannot
-   * disagree — a separate query for the detail could reconcile to a different
-   * number and turn a real discrepancy into an argument about which is right.
-   */
-  _walkStockRealized(userId = 1, asOf = null, broker = null, opts = {}) {
-    const { overrides = {}, fromDate = null, fromDateBySymbol = {}, scopeToNewLots = false } = opts
-    const rows = db.prepare(`
-      SELECT symbol, trans_date, is_buy,
-             COALESCE(quantity,0) AS qty,
-             ABS(COALESCE(amount,0)) AS amt
-      FROM trades
-      WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
-        ${asOf ? 'AND trans_date <= ?' : ''}
-        ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
-      ORDER BY trans_date ASC, id ASC
-    `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
-
-    const splits = this.getSplits([...new Set(rows.map(r => r.symbol))])
-    const state = {}
-    const events = []
-
-    for (const r of rows) {
-      const f = this.splitFactor(splits[r.symbol], r.trans_date)
-      const qty = (r.qty || 0) * f
-      if (!(qty > 0)) continue
-      const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0, rebased: false, newShares: 0 })
-
-      // Rebase to the manual cost at the period start.
-      //
-      // Without this, a row measures its two halves against different bases:
-      // unrealized against the override, realized against the lifetime average.
-      // For a name accumulated over a year and then overridden, sales book gains
-      // against shares bought long before the position being asked about — the
-      // "banked money" that shows up as profit the holder never made.
-      //
-      // Shares bought after the start come in at what was actually paid and
-      // blend in normally, so a position built up over the period stays honest.
-      const symStart = fromDateBySymbol[r.symbol] || fromDate
-      if (symStart && !st.rebased && String(r.trans_date) >= symStart) {
-        st.rebased = true
-        const ov = overrides[r.symbol]
-        if (ov > 0 && st.shares > 1e-9) st.cost = st.shares * ov
-      }
-
-      const inPeriod = !symStart || String(r.trans_date) >= symStart
-
-      if (r.is_buy === 1) {
-        st.shares += qty
-        st.cost += (r.amt || 0)          // cash paid is unchanged by a split
-        // Shares bought inside the window are the position being asked about.
-        if (inPeriod) st.newShares += qty
-        continue
-      }
-
-      // A sale bigger than the shares on hand means the rest were bought
-      // before this export begins. Their cost is unknowable, so only the
-      // covered part is booked — inventing a basis would manufacture profit.
-      const covered = Math.min(qty, st.shares)
-      if (covered > 1e-9) {
-        const avgThen = st.cost / st.shares
-        const proceedsPerShare = (r.amt || 0) / qty
-        const pnl = (proceedsPerShare - avgThen) * covered
-        // Most-recent lots go first. A trim of a long-held stack sells the
-        // OLD shares — that gain belongs to the previous leg of the position,
-        // not the one being measured — while a sale that follows a recent
-        // purchase is this position's own activity and counts in full.
-        const fromNew = Math.min(covered, st.newShares)
-        st.newShares -= fromNew
-        const countedQty = scopeToNewLots ? fromNew : covered
-        const pnlCounted = covered > 1e-9 ? pnl * (countedQty / covered) : 0
-        events.push({
-          symbol: r.symbol, date: String(r.trans_date),
-          qty, covered, avgThen, proceedsPerShare, pnl,
-          fromNewLots: fromNew, countedQty, pnlCounted,
-        })
-        st.cost -= avgThen * covered
-        st.shares -= covered
-        if (st.shares <= 1e-9) { st.shares = 0; st.cost = 0 }
-      }
-    }
-    // State is returned alongside the events because the walk already knows the
-    // blended cost of what is still held — the rebased basis at the period
-    // start plus every later buy at what was actually paid. Recomputing that
-    // outside would be a second, divergent answer to the same question.
-    return { events, state }
-  }
-
-  /** Sales of one symbol, each flagged with whether the period counts it. */
-  getStockRealizedDetail(userId = 1, symbol, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}, overrides = {}, scopeToNewLots = false) {
+  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null) {
     try {
-      const sym = String(symbol).toUpperCase()
-      const start = fromDateBySymbol[sym] || fromDate
-      const r2 = (n) => Math.round(n * 100) / 100
-      const sales = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol, scopeToNewLots })
-        .events
-        .filter(e => e.symbol === sym)
-        .map(e => ({
-          date: e.date, qty: r2(e.qty), covered: r2(e.covered),
-          avgCostThen: r2(e.avgThen), soldAt: r2(e.proceedsPerShare),
-          pnl: r2(e.pnl), counted: !start || e.date >= start,
-          fromNewLots: r2(e.fromNewLots), pnlCounted: r2(e.pnlCounted),
-        }))
-      const pick = (e) => (scopeToNewLots ? e.pnlCounted : e.pnl)
-      return {
-        symbol: sym, start, scopeToNewLots,
-        allTime: r2(sales.reduce((a, e) => a + pick(e), 0)),
-        inPeriod: r2(sales.filter(e => e.counted).reduce((a, e) => a + pick(e), 0)),
-        countedSales: sales.filter(e => e.counted).length,
-        totalSales: sales.length,
-        sales,
-      }
-    } catch (e) {
-      console.error('Error getting realized detail:', e)
-      return { error: e.message }
-    }
-  }
-
-  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}, scopeToNewLots = false) {
-    try {
+      const rows = db.prepare(`
+        SELECT
+          symbol,
+          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought,
+          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) * COALESCE(price,0) ELSE 0 END) AS total_buy_cost,
+          SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) ELSE 0 END) AS total_sold,
+          SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) * COALESCE(price,0) ELSE 0 END) AS total_sell_proceeds
+        FROM trades
+        WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
+          ${asOf ? 'AND trans_date <= ?' : ''}
+        GROUP BY symbol
+      `).all(...(asOf ? [userId, asOf] : [userId]))
       const result = {}
-      const walked = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol, scopeToNewLots }).events
-      for (const e of walked) {
-        // A per-symbol start wins over the global one. Rolling positions get
-        // reopened, and "where am I on THIS position" needs a date per name
-        // — a flat holding otherwise reports a year of old sales as though
-        // they were its current standing.
-        const start = fromDateBySymbol[e.symbol] || fromDate
-        if (!start || e.date >= start) {
-          result[e.symbol] = (result[e.symbol] || 0) + (scopeToNewLots ? e.pnlCounted : e.pnl)
+      rows.forEach(r => {
+        if (r.total_sold > 0 && r.total_bought > 0) {
+          const computedAvg = r.total_buy_cost / r.total_bought
+          const avgCost = overrides[r.symbol] > 0 ? overrides[r.symbol] : computedAvg
+          result[r.symbol] = Math.round((r.total_sell_proceeds - avgCost * r.total_sold) * 100) / 100
         }
-      }
-      Object.keys(result).forEach(k => { result[k] = Math.round(result[k] * 100) / 100 })
+      })
       return result
     } catch (e) {
       console.error('Error getting stock realized P&L:', e)
-      return {}
-    }
-  }
-
-  /**
-   * Blended cost per share of what is still held, as { SYMBOL: avgCost }.
-   *
-   * A manual override is the cost of the position AT THE PERIOD START, not of
-   * every share that has been held since. Applying it flat to the whole
-   * position prices shares bought later at a cost that predates them: HOOD sold
-   * and bought back 100 shares near $104 against an $84.31 override, and those
-   * shares reported ~$20 each of gain that was never made.
-   *
-   * The walk already resolves this correctly for realized — rebase at the start,
-   * then blend every later buy at what was actually paid — so this returns the
-   * basis it ends on rather than deriving a second one.
-   *
-   * Only names still holding shares appear; a closed position has no basis.
-   */
-  getStockEffectiveCost(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
-    try {
-      const { state } = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol })
-      const result = {}
-      for (const [sym, st] of Object.entries(state)) {
-        // Only names with a manual cost. Without one the walk's average is a
-        // second opinion on a number the positions query already answers, and
-        // turning this on would quietly move rows the user never touched.
-        if (!(overrides[sym] > 0)) continue
-        if (st.shares > 1e-9) result[sym] = Math.round((st.cost / st.shares) * 10000) / 10000
-      }
-      return result
-    } catch (e) {
-      console.error('Error getting stock effective cost:', e)
       return {}
     }
   }
