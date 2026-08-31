@@ -4932,7 +4932,7 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
     // Solving a second vol from today's quote and walking between the two
     // leaves both ends exact and the middle a smooth transition, rather than a
     // curve that is only honest on its first day.
-    let sigmaNow = 0
+    let sigmaNow = 0, markNow = 0, markNowBasis = null
     const lastDate = (() => {
       for (let i = hist.length - 1; i >= 0; i--) {
         const d = (hist[i].date || '').slice(0, 10)
@@ -4945,11 +4945,27 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
         const polygonKey = process.env.POLYGON_API_KEY || ''
         const polyTicker = toPolygonTicker(entry.symbol)
         if (polygonKey && polyTicker) {
-          const mid = await fetchOptionQuoteMid(polyTicker, polygonKey)
+          // The same ladder the panel walks: live quote, then a fresh print,
+          // then the last market print. A single quote lookup is not enough —
+          // a call sold far out of the money often has no two-sided quote at
+          // all, which is exactly when the frozen-vol model is worst, so the
+          // chart would fall back to the model precisely where it is wrong.
+          markNow = await fetchOptionQuoteMid(polyTicker, polygonKey)
+          if (markNow > 0) markNowBasis = 'quote'
+          if (!(markNow > 0)) {
+            const url = `https://api.polygon.io/v3/snapshot/options/${parsed.ticker}/${polyTicker}`
+            const snap = (await axios.get(url, { params: { apiKey: polygonKey }, timeout: 6000 })).data?.results
+            if (snap) {
+              const fresh = freshOptionMark(snap)
+              const stale = staleOptionMark(snap)
+              if (fresh > 0) { markNow = fresh; markNowBasis = 'fresh' }
+              else if (stale > 0) { markNow = stale; markNowBasis = 'close' }
+            }
+          }
           const Snow = hist.find(h => (h.date || '').slice(0, 10) === lastDate)?.close
           const Tnow = yrs(lastDate, expiry)
-          if (mid > 0 && Snow > 0 && Tnow > 0) {
-            const s = impliedVolCall(mid, Snow, K, Tnow, r)
+          if (markNow > 0 && Snow > 0 && Tnow > 0) {
+            const s = impliedVolCall(markNow, Snow, K, Tnow, r)
             if (s > 0) sigmaNow = s
           }
         }
@@ -4988,6 +5004,12 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
       underlyingAtSale: Sat > 0 ? Sat : null,
       sigma: optionModeled ? Math.round(sigma * 1000) / 1000 : null,
       optionModeled,
+      // The second anchor, reported so a chart that still looks wrong can be
+      // told apart from one that simply found no mark to anchor to.
+      sigmaNow: sigmaNow > 0 ? Math.round(sigmaNow * 1000) / 1000 : null,
+      markNow: markNow > 0 ? Math.round(markNow * 100) / 100 : null,
+      markNowBasis,
+      twoAnchor: sigmaNow > 0,
       series
     })
   } catch (e) {
