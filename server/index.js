@@ -3610,6 +3610,13 @@ app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
         : null
     }
 
+    // Every term of Net, so a figure that looks wrong can be attributed to a
+    // component instead of guessed at. Net = realized options + realized stock
+    // + unrealized stock; Net + Open adds the open option marks.
+    const fromDate = req.query.startDate || null
+    const realizedAll = databaseService.getStockRealizedPnL(userId, {}, null, brokerFilter, null)
+    const realizedPeriod = databaseService.getStockRealizedPnL(userId, {}, null, brokerFilter, fromDate)
+
     // A manual override REPLACES the computed cost wherever it's set, so none
     // of the methods above would be in play for this ticker. Reported first
     // because it silently outranks everything else.
@@ -3627,6 +3634,13 @@ app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
         : null,
       basis,
       implied,
+      realized: {
+        allTime: realizedAll[ticker] ?? null,
+        // What Net actually uses, scoped to the panel's period. Pass
+        // ?startDate= to match whatever the panel is showing.
+        inPeriod: realizedPeriod[ticker] ?? null,
+        fromDate,
+      },
       trades: {
         count: trades.length,
         buyCount: buys.length,
