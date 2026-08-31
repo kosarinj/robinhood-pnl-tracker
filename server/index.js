@@ -3049,6 +3049,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       }))
     }
 
+    // Period move measured per share, not per position.
+    //
+    // shares x (price now - price at period start) pays every share the whole
+    // climb, including ones bought after it. HOOD held 104 shares from May 1 at
+    // $73.66 and bought 100 back near $104 in August; crediting all 204 with the
+    // full $31 move reported about $6,100 where roughly $3,000 of it happened
+    // before those shares were owned.
+    //
+    // Rebasing to the start price and blending later buys at what was actually
+    // paid is the same walk the cost basis uses, so a share is only ever paid
+    // for the part of the move it was present for.
+    const periodBasis = databaseService.getStockEffectiveCost(
+      userId, periodStartPrices, asOf, brokerFilter, globalStart, perSymbolDates)
+
     const stockPrices = {}
     if (allTickers.length > 0 && asOf) {
       // Historical close on the as-of date.
@@ -3169,7 +3183,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // shares x (price now - price at period start). Null when there's no
           // historical price, so callers can tell "no data" from "no move".
           stockPeriodPnl: (sp && cp && periodStartPrices[e.ticker] > 0)
-            ? r2(sp.position * (cp - periodStartPrices[e.ticker]))
+            ? r2(sp.position * (cp - (periodBasis[e.ticker] || periodStartPrices[e.ticker])))
             : null,
           periodStartPrice: periodStartPrices[e.ticker] ?? null,
           // Shown whether or not shares are still held.
@@ -3651,7 +3665,10 @@ app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
  */
 app.get('/api/debug-realized', requireAuth, (req, res) => {
   try {
-    const userId = req.user.id
+    // requireAuth attaches { userId, username, email } — .id is undefined, which
+    // fell through to the userId = 1 default and quietly reported another
+    // account's trades on any login that isn't user 1.
+    const userId = req.user.userId
     const ticker = String(req.query.ticker || '').toUpperCase()
     if (!ticker) return res.status(400).json({ success: false, error: 'ticker is required' })
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
