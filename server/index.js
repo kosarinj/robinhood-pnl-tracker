@@ -3619,7 +3619,7 @@ app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
     if (!ticker) return res.status(400).json({ error: 'ticker is required' })
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
 
-    const methods = ['moving', 'fifo', 'average']
+    const methods = ['moving', 'fifo', 'lifo', 'average']
     const basis = {}
     for (const m of methods) {
       const all = databaseService.getStockPositionsWithCost(userId, null, brokerFilter, m)
@@ -3693,7 +3693,7 @@ app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
           amount: t.amount,
         })),
       },
-      note: 'moving = broker-style average (sales remove shares at the running average). fifo = cost of the specific shares still held. average = lifetime average of every buy ever, including shares long since sold — what Options YTD currently uses.',
+      note: 'moving = broker-style average (sales remove shares at the running average). fifo = oldest sold first, so the shares still held are the newest. lifo = newest sold first, so the shares still held are the oldest — the right read after selling and buying straight back, where the repurchase covers what just left. average = lifetime average of every buy ever, including shares long since sold — what Options YTD currently uses.',
     })
   } catch (e) {
     res.status(500).json({ error: e.message })

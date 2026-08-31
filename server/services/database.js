@@ -2252,7 +2252,11 @@ export class DatabaseService {
    * @param method
    *   'moving'  — moving average, what a broker shows: a sale removes shares at
    *               the running average, so shares that are gone stop counting.
-   *   'fifo'    — the actual cost of the specific shares still held.
+   *   'fifo'    — the actual cost of the specific shares still held, oldest
+   *               sold first, so what remains is the newest.
+   *   'lifo'    — newest sold first, so what remains is the oldest. The right
+   *               reading when a position is sold and bought straight back: the
+   *               repurchase covers what just left and the original lot stands.
    *   'average' — a lifetime average of every buy ever made. Kept only for
    *               callers that were calibrated on it; it never forgets a closed
    *               position, which is how PLTR read $160.32 against a broker's
@@ -2337,6 +2341,23 @@ export class DatabaseService {
           // `need` left over means the open shares predate the imported history,
           // so price what's known and let the rest fall back to that same average
           // rather than reporting a basis of zero.
+          const covered = position - need
+          avgCost = covered > 1e-9 ? Math.round((cost / covered) * 100) / 100 : 0
+        } else if (method === 'lifo') {
+          // The mirror of FIFO: if the newest shares were the ones sold, what is
+          // still held is the OLDEST, so walk buys forward instead of back.
+          //
+          // This is the honest basis for selling and buying straight back. HOOD
+          // sold 100 at $110.17 and repurchased 100 at $110.48 the same day;
+          // under FIFO the original cheap lot is retired and the basis jumps to
+          // $99.14, when in substance the round trip was a wash and the old
+          // shares never left.
+          let need = position, cost = 0
+          for (let i = 0; i < a.buys.length && need > 1e-9; i++) {
+            const take = Math.min(a.buys[i].qty, need)
+            cost += take * a.buys[i].perShare
+            need -= take
+          }
           const covered = position - need
           avgCost = covered > 1e-9 ? Math.round((cost / covered) * 100) / 100 : 0
         } else {
