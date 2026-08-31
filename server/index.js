@@ -3196,8 +3196,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // "agree" with a bug instead of exposing it.
     if (req.query.ticker) {
       const t = String(req.query.ticker).toUpperCase()
-      const row = result[t]
-      if (!row) return res.json({ success: true, ticker: t, found: false, globalStart })
+      // result is an ARRAY (Object.values above), not a map — look it up by field.
+      const row = result.find(r => String(r.ticker).toUpperCase() === t)
+      if (!row) {
+        return res.json({
+          success: true, ticker: t, found: false, globalStart,
+          available: result.map(r => r.ticker).sort(),
+        })
+      }
       const stockRealizedTerm = row.stockRealizedPnL || 0
       const stockUnrealTerm = row.stockUnrealizedPnL || 0
       const optionsRealized = row.totalRealized || 0
