@@ -3612,6 +3612,27 @@ app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
  * what each implies. Built because three separate explanations were offered for
  * a figure without anyone being able to see the inputs — this shows them.
  */
+/**
+ * GET /api/debug-realized?ticker=MRVL&startDate=2026-05-01
+ *
+ * Every share sale of one name with the average cost at the moment it sold, and
+ * whether the period counts it. Answers "can this total come from these sales?"
+ * — which reasoning from a five-row preview cannot.
+ */
+app.get('/api/debug-realized', requireAuth, (req, res) => {
+  try {
+    const userId = req.user.id
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    if (!ticker) return res.status(400).json({ success: false, error: 'ticker is required' })
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const detail = databaseService.getStockRealizedDetail(
+      userId, ticker, req.query.asOf || null, brokerFilter, req.query.startDate || null, {})
+    res.json({ success: true, ...detail })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 app.get('/api/debug-stock-basis', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
