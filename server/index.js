@@ -4994,7 +4994,7 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
       if (!d || d < saleDate || d > endDate) continue
       const close = h.close
       if (!(close > 0)) continue
-      let callPrice = null
+      let callPrice = null, callNoDecay = null
       if (optionModeled) {
         const T = yrs(d, expiry)
         const w = sigmaNow > 0
@@ -5003,8 +5003,16 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
         const sig = sigma + (sigmaNow - sigma) * w
         const raw = T > 0 ? bsCall(close, K, T, r, sig) : Math.max(0, close - K)
         callPrice = Math.round(raw * 100) / 100
+        // Counterfactual: the same contract at the same stock price, but with
+        // time frozen at the sale date. The gap to callPrice is what decay has
+        // absorbed — the point of the strategy, and invisible on a single line.
+        // CRWV reads -$417 today against -$294 on 7/30 with the stock ~$10
+        // higher: nearly the same loss while the underlying ran, which is decay
+        // doing the work and nothing on the chart said so.
+        const rawNoDecay = Tsale > 0 ? bsCall(close, K, Tsale, r, sig) : Math.max(0, close - K)
+        callNoDecay = Math.round(rawNoDecay * 100) / 100
       }
-      series.push({ date: d, stock: Math.round(close * 100) / 100, callPrice })
+      series.push({ date: d, stock: Math.round(close * 100) / 100, callPrice, callNoDecay })
     }
 
     res.json({

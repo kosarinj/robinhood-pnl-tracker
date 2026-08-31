@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine
 } from 'recharts'
 
@@ -53,6 +53,19 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
     ...p,
     kept: p.callPrice != null && premiumPerShare > 0
       ? Math.round((premiumPerShare - p.callPrice) * 100 * contracts * 100) / 100
+      : null,
+    // Where the line would sit if the stock had moved exactly as it did but no
+    // time had passed. The distance up to `kept` is decay already captured.
+    keptNoDecay: p.callNoDecay != null && premiumPerShare > 0
+      ? Math.round((premiumPerShare - p.callNoDecay) * 100 * contracts * 100) / 100
+      : null,
+  })).map(p => ({
+    ...p,
+    // Stacked as a band: the invisible floor is the no-decay line, the green
+    // area on top is the gap. Recharts stacks by summing, so the top edge of
+    // the band lands exactly on `kept`.
+    decayGain: (p.kept != null && p.keptNoDecay != null)
+      ? Math.round((p.kept - p.keptNoDecay) * 100) / 100
       : null,
   }))
   const showCall = data?.optionModeled && series.some((p) => p.callPrice != null)
@@ -134,7 +147,9 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
                 <div style={{ fontSize: 11, color: textMid, marginBottom: 4 }}>
                   What you'd keep buying it back at each day's estimated price. Decay pushes it up
                   toward the ceiling; a rally pulls it down, and below zero it costs more to close
-                  than you sold it for.
+                  than you sold it for. The green band is decay already captured — the dashed floor
+                  is where this line would sit if the stock had moved the same way but no time had
+                  passed, so a wide band means the call is outrunning the stock.
                 </div>
                 <div style={{ width: '100%', height: '190px' }}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -153,6 +168,14 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
                                  position: 'insideTopRight', fill: GOOD, fontSize: 10 }} />
                       <ReferenceLine y={0} stroke={textMid} strokeDasharray="4 3"
                         label={{ value: 'break-even — worth what you sold it for', position: 'insideBottomLeft', fill: textMid, fontSize: 10 }} />
+                      {/* Band floor: invisible, exists only to lift the green area. */}
+                      <Area type="monotone" dataKey="keptNoDecay" stackId="decay" stroke="none"
+                            fill="none" fillOpacity={0} isAnimationActive={false} legendType="none" />
+                      <Area type="monotone" dataKey="decayGain" stackId="decay" stroke="none"
+                            name="Decay captured" fill={GOOD} fillOpacity={0.18} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="keptNoDecay" name="If no time had passed"
+                            stroke={textMid} strokeDasharray="4 3" strokeWidth={1} dot={false}
+                            isAnimationActive={false} />
                       <Line type="monotone" dataKey="kept" name="Premium kept" stroke={GOOD}
                             strokeWidth={2} dot={false} isAnimationActive={false} />
                     </ComposedChart>
@@ -217,6 +240,14 @@ function KeptTooltip({ active, payload, label, contracts }) {
       <div style={{ color: 'var(--textSecondary, #64748b)', fontSize: 11, marginTop: 2 }}>
         buy back at ${p.callPrice?.toFixed(2)}/sh × {contracts} contract{contracts === 1 ? '' : 's'}
       </div>
+      {p.decayGain != null && (
+        <div style={{ color: '#0ca30c', fontSize: 11, marginTop: 3 }}>
+          decay captured ${Math.round(p.decayGain).toLocaleString()}
+          <span style={{ color: 'var(--textSecondary, #64748b)' }}>
+            {' '}— without it, ${Math.round(p.keptNoDecay).toLocaleString()}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
