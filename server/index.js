@@ -4874,9 +4874,12 @@ app.post('/api/short-calls/rebuild', requireAuth, async (req, res) => {
 // GET /api/short-calls/:id/history — time series of the underlying stock price
 // and the MODELED short-call price since the sale date, for charting. There are
 // no historical option quotes on the data plan, so the call line is a
-// Black–Scholes reconstruction: implied vol is anchored once to the premium you
-// sold for on the sale date, then the contract is repriced against each day's
-// stock close. It's an estimate, labeled as such in the UI.
+// Black–Scholes reconstruction. Implied vol is anchored at BOTH ends — to the
+// premium sold for on the sale date, and to the contract's live quote today —
+// and walked between them, so the reconstruction lands on what the position is
+// actually worth now instead of drifting off a vol that describes only the day
+// it was sold. Falls back to the single sale-date anchor when no quote is
+// available. It's an estimate, labeled as such in the UI.
 app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
@@ -4916,6 +4919,46 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
     if (premiumPerShare > 0 && Sat > 0 && Tsale > 0) sigma = impliedVolCall(premiumPerShare, Sat, K, Tsale, r)
     const optionModeled = sigma > 0
 
+    // Second anchor: the vol implied by what the contract is worth NOW.
+    //
+    // One vol held from the sale date describes the world on the sale date. The
+    // panel already learned this — "MRVL was sold near $150 and now trades near
+    // $236, so a vol anchored to that sale is describing a different world" —
+    // and moved to a real quote. This endpoint kept repricing off the frozen
+    // sale-date vol, so a call sold far out of the money on a stock that then
+    // rallied is marked far above what anyone would pay: MRVL's 380 read a
+    // $2,200 loss where the panel, on a market mark, read -$230.
+    //
+    // Solving a second vol from today's quote and walking between the two
+    // leaves both ends exact and the middle a smooth transition, rather than a
+    // curve that is only honest on its first day.
+    let sigmaNow = 0
+    const lastDate = (() => {
+      for (let i = hist.length - 1; i >= 0; i--) {
+        const d = (hist[i].date || '').slice(0, 10)
+        if (d && d >= saleDate && d <= endDate && hist[i].close > 0) return d
+      }
+      return null
+    })()
+    if (optionModeled && lastDate) {
+      try {
+        const polygonKey = process.env.POLYGON_API_KEY || ''
+        const polyTicker = toPolygonTicker(entry.symbol)
+        if (polygonKey && polyTicker) {
+          const mid = await fetchOptionQuoteMid(polyTicker, polygonKey)
+          const Snow = hist.find(h => (h.date || '').slice(0, 10) === lastDate)?.close
+          const Tnow = yrs(lastDate, expiry)
+          if (mid > 0 && Snow > 0 && Tnow > 0) {
+            const s = impliedVolCall(mid, Snow, K, Tnow, r)
+            if (s > 0) sigmaNow = s
+          }
+        }
+      } catch { /* no quote — one anchor is still better than none */ }
+    }
+
+    // Fraction of the way from the sale date to the last plotted day.
+    const spanDays = lastDate ? Math.max(1, (new Date(lastDate) - new Date(saleDate)) / 86400000) : 1
+
     const series = []
     for (const h of hist) {
       const d = (h.date || '').slice(0, 10)
@@ -4925,7 +4968,11 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
       let callPrice = null
       if (optionModeled) {
         const T = yrs(d, expiry)
-        const raw = T > 0 ? bsCall(close, K, T, r, sigma) : Math.max(0, close - K)
+        const w = sigmaNow > 0
+          ? Math.min(1, Math.max(0, (new Date(d) - new Date(saleDate)) / 86400000 / spanDays))
+          : 0
+        const sig = sigma + (sigmaNow - sigma) * w
+        const raw = T > 0 ? bsCall(close, K, T, r, sig) : Math.max(0, close - K)
         callPrice = Math.round(raw * 100) / 100
       }
       series.push({ date: d, stock: Math.round(close * 100) / 100, callPrice })
