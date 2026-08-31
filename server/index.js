@@ -2994,8 +2994,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // some of those currently read correctly. Changing them to fix a different
     // name would trade a known-good number for an unverified one.
     const rebase = req.query.rebase === '1'
+    // netScope=position counts realized stock only on shares bought inside the
+    // window, newest lots consumed first. A trim of a long-held stack then
+    // belongs to the previous leg of the position rather than this one, while a
+    // sale following a recent purchase still counts in full. A plain on/off
+    // switch cannot do this: one name needs realized included and another needs
+    // it excluded, and both are right.
+    const scopeToNewLots = req.query.netScope === 'position'
     const stockRealized = databaseService.getStockRealizedPnL(
-      userId, rebase ? stockCostOverrides : {}, asOf, brokerFilter, globalStart, perSymbolDates)
+      userId, rebase ? stockCostOverrides : {}, asOf, brokerFilter, globalStart, perSymbolDates, scopeToNewLots)
 
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
@@ -3636,20 +3643,20 @@ app.get('/api/debug-realized', requireAuth, (req, res) => {
     // Both treatments side by side, so the choice is made by comparing numbers
     // rather than by argument.
     const asIs = databaseService.getStockRealizedDetail(
-      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, {})
-    const rebased = databaseService.getStockRealizedDetail(
-      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, overrides)
+      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, {}, false)
+    const scoped = databaseService.getStockRealizedDetail(
+      userId, ticker, req.query.asOf || null, brokerFilter, start, {}, {}, true)
     res.json({
       success: true,
       ticker, start,
       override: overrides[ticker] ?? null,
-      current: { inPeriod: asIs.inPeriod, allTime: asIs.allTime },
-      ifRebasedToOverride: { inPeriod: rebased.inPeriod, allTime: rebased.allTime },
-      difference: Math.round(((rebased.inPeriod || 0) - (asIs.inPeriod || 0)) * 100) / 100,
+      sincePeriodStart: asIs.inPeriod,
+      currentPositionOnly: scoped.inPeriod,
+      difference: Math.round(((scoped.inPeriod || 0) - (asIs.inPeriod || 0)) * 100) / 100,
       countedSales: asIs.countedSales,
       totalSales: asIs.totalSales,
-      sales: asIs.sales,
-      salesRebased: rebased.sales,
+      // Only the sales the period counts — the pre-period ones are noise here.
+      sales: scoped.sales.filter(x => x.counted),
     })
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })

@@ -28,6 +28,7 @@ const loadHidden = (broker) => {
   } catch { return [] }
 }
 const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
+const LS_NETSCOPE_KEY = 'ytdPanel_netScope'   // 'period' | 'position'
 // Cost overrides are cached per broker — one shared key was how the Robinhood
 // cost ended up showing on Webull rows.
 const costKey = (broker) => `ytdPanel_costOverrides_${broker || 'all'}`
@@ -56,6 +57,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // The period start decides which realized P&L is counted, so it follows the
   // user as well — otherwise two devices report different totals.
   const [globalStart, setGlobalStart] = useState(() => getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
+  // 'period'   — every share sale in the window counts (the default)
+  // 'position' — only shares bought inside the window, so trimming a long-held
+  //              stack doesn't book the previous leg's gain against this one
+  const [netScope, setNetScope] = useState(() => getPref(LS_NETSCOPE_KEY, 'period'))
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)
@@ -219,6 +224,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       const gs = overrideGlobal ?? globalStart
       const sd = overrideSymbolDates ?? symbolDates
       const params = new URLSearchParams({ startDate: gs })
+      if (netScope === 'position') params.set('netScope', 'position')
       if (Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
       if (asOf) params.set('asOf', asOf)
       if (broker && broker !== 'all') params.set('broker', broker)
@@ -231,7 +237,14 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     } finally {
       if (!quiet) setLoading(false)
     }
-  }, [globalStart, symbolDates, asOf, broker])
+  }, [globalStart, symbolDates, asOf, broker, netScope])
+
+  // Refetch when the scope changes; quiet so the table doesn't blank out.
+  const firstScope = useRef(true)
+  useEffect(() => {
+    if (firstScope.current) { firstScope.current = false; return }
+    fetchData(undefined, undefined, true)
+  }, [netScope])
 
   useEffect(() => { fetchData() }, [])
   // Refetch when the as-of date changes (or is cleared back to live)
@@ -1056,6 +1069,39 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               {key === 'stock' && stockOnlyCount > 0 && (
                 <span style={{ marginLeft: 5, opacity: 0.75, fontWeight: 500, fontSize: 11 }}>{stockOnlyCount}</span>
               )}
+            </button>
+          ))}
+        </div>
+
+        {/* Which share sales count toward Net.
+
+            "Since start" books every sale in the window. That is right for a
+            name sold once recently, and wrong for one that was trimmed out of a
+            long-held stack — the trim's gain belongs to the previous leg of the
+            position, not the one being measured. "This position" counts only
+            shares bought inside the window, newest lots first, which separates
+            the two without needing a start date per name. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <span style={{ fontSize: 12, color: textMid, fontWeight: 600, marginRight: 4 }}>
+            Realized:
+          </span>
+          {[
+            ['period', 'Since start', 'Every share sale in the period counts toward Net'],
+            ['position', 'This position', 'Only shares bought inside the period count — trimming a long-held stack does not book the previous position’s gain here'],
+          ].map(([key, label, tip]) => (
+            <button
+              key={key}
+              onClick={() => { setNetScope(key); setPref(LS_NETSCOPE_KEY, key) }}
+              title={tip}
+              style={{
+                padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                borderRadius: 6,
+                border: `1px solid ${netScope === key ? '#667eea' : border}`,
+                background: netScope === key ? '#667eea' : 'transparent',
+                color: netScope === key ? '#fff' : textMid,
+              }}
+            >
+              {label}
             </button>
           ))}
         </div>

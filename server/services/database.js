@@ -2387,7 +2387,7 @@ export class DatabaseService {
    * number and turn a real discrepancy into an argument about which is right.
    */
   _walkStockRealized(userId = 1, asOf = null, broker = null, opts = {}) {
-    const { overrides = {}, fromDate = null, fromDateBySymbol = {} } = opts
+    const { overrides = {}, fromDate = null, fromDateBySymbol = {}, scopeToNewLots = false } = opts
     const rows = db.prepare(`
       SELECT symbol, trans_date, is_buy,
              COALESCE(quantity,0) AS qty,
@@ -2407,7 +2407,7 @@ export class DatabaseService {
       const f = this.splitFactor(splits[r.symbol], r.trans_date)
       const qty = (r.qty || 0) * f
       if (!(qty > 0)) continue
-      const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0, rebased: false })
+      const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0, rebased: false, newShares: 0 })
 
       // Rebase to the manual cost at the period start.
       //
@@ -2426,9 +2426,13 @@ export class DatabaseService {
         if (ov > 0 && st.shares > 1e-9) st.cost = st.shares * ov
       }
 
+      const inPeriod = !symStart || String(r.trans_date) >= symStart
+
       if (r.is_buy === 1) {
         st.shares += qty
         st.cost += (r.amt || 0)          // cash paid is unchanged by a split
+        // Shares bought inside the window are the position being asked about.
+        if (inPeriod) st.newShares += qty
         continue
       }
 
@@ -2440,9 +2444,18 @@ export class DatabaseService {
         const avgThen = st.cost / st.shares
         const proceedsPerShare = (r.amt || 0) / qty
         const pnl = (proceedsPerShare - avgThen) * covered
+        // Most-recent lots go first. A trim of a long-held stack sells the
+        // OLD shares — that gain belongs to the previous leg of the position,
+        // not the one being measured — while a sale that follows a recent
+        // purchase is this position's own activity and counts in full.
+        const fromNew = Math.min(covered, st.newShares)
+        st.newShares -= fromNew
+        const countedQty = scopeToNewLots ? fromNew : covered
+        const pnlCounted = covered > 1e-9 ? pnl * (countedQty / covered) : 0
         events.push({
           symbol: r.symbol, date: String(r.trans_date),
           qty, covered, avgThen, proceedsPerShare, pnl,
+          fromNewLots: fromNew, countedQty, pnlCounted,
         })
         st.cost -= avgThen * covered
         st.shares -= covered
@@ -2453,22 +2466,24 @@ export class DatabaseService {
   }
 
   /** Sales of one symbol, each flagged with whether the period counts it. */
-  getStockRealizedDetail(userId = 1, symbol, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}, overrides = {}) {
+  getStockRealizedDetail(userId = 1, symbol, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}, overrides = {}, scopeToNewLots = false) {
     try {
       const sym = String(symbol).toUpperCase()
       const start = fromDateBySymbol[sym] || fromDate
       const r2 = (n) => Math.round(n * 100) / 100
-      const sales = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol })
+      const sales = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol, scopeToNewLots })
         .filter(e => e.symbol === sym)
         .map(e => ({
           date: e.date, qty: r2(e.qty), covered: r2(e.covered),
           avgCostThen: r2(e.avgThen), soldAt: r2(e.proceedsPerShare),
           pnl: r2(e.pnl), counted: !start || e.date >= start,
+          fromNewLots: r2(e.fromNewLots), pnlCounted: r2(e.pnlCounted),
         }))
+      const pick = (e) => (scopeToNewLots ? e.pnlCounted : e.pnl)
       return {
-        symbol: sym, start,
-        allTime: r2(sales.reduce((a, e) => a + e.pnl, 0)),
-        inPeriod: r2(sales.filter(e => e.counted).reduce((a, e) => a + e.pnl, 0)),
+        symbol: sym, start, scopeToNewLots,
+        allTime: r2(sales.reduce((a, e) => a + pick(e), 0)),
+        inPeriod: r2(sales.filter(e => e.counted).reduce((a, e) => a + pick(e), 0)),
         countedSales: sales.filter(e => e.counted).length,
         totalSales: sales.length,
         sales,
@@ -2479,17 +2494,18 @@ export class DatabaseService {
     }
   }
 
-  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
+  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}, scopeToNewLots = false) {
     try {
       const result = {}
-      for (const e of this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol })) {
+      const walked = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol, scopeToNewLots })
+      for (const e of walked) {
         // A per-symbol start wins over the global one. Rolling positions get
         // reopened, and "where am I on THIS position" needs a date per name
         // — a flat holding otherwise reports a year of old sales as though
         // they were its current standing.
         const start = fromDateBySymbol[e.symbol] || fromDate
         if (!start || e.date >= start) {
-          result[e.symbol] = (result[e.symbol] || 0) + e.pnl
+          result[e.symbol] = (result[e.symbol] || 0) + (scopeToNewLots ? e.pnlCounted : e.pnl)
         }
       }
       Object.keys(result).forEach(k => { result[k] = Math.round(result[k] * 100) / 100 })
