@@ -3004,6 +3004,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const stockRealized = databaseService.getStockRealizedPnL(
       userId, rebase ? stockCostOverrides : {}, asOf, brokerFilter, globalStart, perSymbolDates, scopeToNewLots)
 
+    // Under rebase the override is the cost of the position AT THE PERIOD
+    // START, so shares bought after it must come in at what was actually paid.
+    // Pricing the whole holding at the override books a gain on shares that
+    // never rose — HOOD's buy-back near $104 against an $84.31 override read
+    // ~$20/share of profit that was never made. Empty when rebase is off, so
+    // the flat-override behaviour below is untouched by default.
+    const effectiveCost = rebase
+      ? databaseService.getStockEffectiveCost(
+          userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
+      : {}
+    // Blended basis first, then the flat override, then the computed average.
+    const basisFor = (ticker, sp) =>
+      sp ? (effectiveCost[ticker] || stockCostOverrides[ticker] || sp.avgCost) : null
+
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
     // getStockPositionsWithCost already filters to HAVING position > 0, so this
@@ -3144,10 +3158,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // in the Positions panel's own render, so every other consumer — the
           // charts especially — silently used the computed cost instead.
           stockUnrealizedPnL: sp && cp
-            ? r2(sp.position * (cp - (stockCostOverrides[e.ticker] || sp.avgCost)))
+            ? r2(sp.position * (cp - basisFor(e.ticker, sp)))
             : null,
-          stockCostUsed: sp ? (stockCostOverrides[e.ticker] || sp.avgCost) : null,
+          stockCostUsed: basisFor(e.ticker, sp),
           stockCostIsOverride: !!stockCostOverrides[e.ticker],
+          // True when the basis blends the override with later buys rather than
+          // applying it flat — so the UI can say which number it is showing.
+          stockCostIsBlended: !!effectiveCost[e.ticker],
           // Movement over the selected period on the shares currently held —
           // shares x (price now - price at period start). Null when there's no
           // historical price, so callers can tell "no data" from "no move".

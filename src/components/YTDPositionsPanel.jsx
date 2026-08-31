@@ -29,6 +29,7 @@ const loadHidden = (broker) => {
 }
 const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
 const LS_NETSCOPE_KEY = 'ytdPanel_netScope'   // 'period' | 'position'
+const LS_REBASE_KEY = 'ytdPanel_rebase'       // measure against the manual cost
 // Cost overrides are cached per broker — one shared key was how the Robinhood
 // cost ended up showing on Webull rows.
 const costKey = (broker) => `ytdPanel_costOverrides_${broker || 'all'}`
@@ -61,6 +62,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // 'position' — only shares bought inside the window, so trimming a long-held
   //              stack doesn't book the previous leg's gain against this one
   const [netScope, setNetScope] = useState(() => getPref(LS_NETSCOPE_KEY, 'period'))
+  // Off  — realized books against the lifetime average, unrealized prices the
+  //        whole holding at the manual cost (the long-standing behaviour).
+  // On   — the manual cost is the basis AT THE PERIOD START: realized measures
+  //        against it, and shares bought later blend in at what was paid, so a
+  //        buy-back stops reporting a gain it never made.
+  const [rebase, setRebase] = useState(() => getPref(LS_REBASE_KEY, false))
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)
@@ -225,6 +232,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       const sd = overrideSymbolDates ?? symbolDates
       const params = new URLSearchParams({ startDate: gs })
       if (netScope === 'position') params.set('netScope', 'position')
+      if (rebase) params.set('rebase', '1')
       if (Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
       if (asOf) params.set('asOf', asOf)
       if (broker && broker !== 'all') params.set('broker', broker)
@@ -237,14 +245,14 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     } finally {
       if (!quiet) setLoading(false)
     }
-  }, [globalStart, symbolDates, asOf, broker, netScope])
+  }, [globalStart, symbolDates, asOf, broker, netScope, rebase])
 
-  // Refetch when the scope changes; quiet so the table doesn't blank out.
+  // Refetch when the scope or basis changes; quiet so the table doesn't blank out.
   const firstScope = useRef(true)
   useEffect(() => {
     if (firstScope.current) { firstScope.current = false; return }
     fetchData(undefined, undefined, true)
-  }, [netScope])
+  }, [netScope, rebase])
 
   useEffect(() => { fetchData() }, [])
   // Refetch when the as-of date changes (or is cleared back to live)
@@ -1099,6 +1107,40 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                 border: `1px solid ${netScope === key ? '#667eea' : border}`,
                 background: netScope === key ? '#667eea' : 'transparent',
                 color: netScope === key ? '#fff' : textMid,
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* What the manual cost means.
+
+            Off, it prices every share held at the override and books realized
+            against the lifetime average — two different bases in one row.
+            On, the override is the cost AT THE PERIOD START: realized measures
+            against it, and shares bought later blend in at what was actually
+            paid, so a sell-and-buy-back stops showing a gain on the shares that
+            came back. Opt-in, because it moves figures that were calibrated on
+            the old treatment. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <span style={{ fontSize: 12, color: textMid, fontWeight: 600, marginRight: 4 }}>
+            Cost basis:
+          </span>
+          {[
+            [false, 'Lifetime avg', 'Realized books against the lifetime average cost; a manual cost prices the whole holding'],
+            [true, 'My cost', 'The manual cost is the basis at the period start — shares bought after it come in at what you actually paid'],
+          ].map(([key, label, tip]) => (
+            <button
+              key={String(key)}
+              onClick={() => { setRebase(key); setPref(LS_REBASE_KEY, key) }}
+              title={tip}
+              style={{
+                padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                borderRadius: 6,
+                border: `1px solid ${rebase === key ? '#667eea' : border}`,
+                background: rebase === key ? '#667eea' : 'transparent',
+                color: rebase === key ? '#fff' : textMid,
               }}
             >
               {label}

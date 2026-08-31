@@ -2462,7 +2462,11 @@ export class DatabaseService {
         if (st.shares <= 1e-9) { st.shares = 0; st.cost = 0 }
       }
     }
-    return events
+    // State is returned alongside the events because the walk already knows the
+    // blended cost of what is still held — the rebased basis at the period
+    // start plus every later buy at what was actually paid. Recomputing that
+    // outside would be a second, divergent answer to the same question.
+    return { events, state }
   }
 
   /** Sales of one symbol, each flagged with whether the period counts it. */
@@ -2472,6 +2476,7 @@ export class DatabaseService {
       const start = fromDateBySymbol[sym] || fromDate
       const r2 = (n) => Math.round(n * 100) / 100
       const sales = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol, scopeToNewLots })
+        .events
         .filter(e => e.symbol === sym)
         .map(e => ({
           date: e.date, qty: r2(e.qty), covered: r2(e.covered),
@@ -2497,7 +2502,7 @@ export class DatabaseService {
   getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}, scopeToNewLots = false) {
     try {
       const result = {}
-      const walked = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol, scopeToNewLots })
+      const walked = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol, scopeToNewLots }).events
       for (const e of walked) {
         // A per-symbol start wins over the global one. Rolling positions get
         // reopened, and "where am I on THIS position" needs a date per name
@@ -2512,6 +2517,39 @@ export class DatabaseService {
       return result
     } catch (e) {
       console.error('Error getting stock realized P&L:', e)
+      return {}
+    }
+  }
+
+  /**
+   * Blended cost per share of what is still held, as { SYMBOL: avgCost }.
+   *
+   * A manual override is the cost of the position AT THE PERIOD START, not of
+   * every share that has been held since. Applying it flat to the whole
+   * position prices shares bought later at a cost that predates them: HOOD sold
+   * and bought back 100 shares near $104 against an $84.31 override, and those
+   * shares reported ~$20 each of gain that was never made.
+   *
+   * The walk already resolves this correctly for realized — rebase at the start,
+   * then blend every later buy at what was actually paid — so this returns the
+   * basis it ends on rather than deriving a second one.
+   *
+   * Only names still holding shares appear; a closed position has no basis.
+   */
+  getStockEffectiveCost(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
+    try {
+      const { state } = this._walkStockRealized(userId, asOf, broker, { overrides, fromDate, fromDateBySymbol })
+      const result = {}
+      for (const [sym, st] of Object.entries(state)) {
+        // Only names with a manual cost. Without one the walk's average is a
+        // second opinion on a number the positions query already answers, and
+        // turning this on would quietly move rows the user never touched.
+        if (!(overrides[sym] > 0)) continue
+        if (st.shares > 1e-9) result[sym] = Math.round((st.cost / st.shares) * 10000) / 10000
+      }
+      return result
+    } catch (e) {
+      console.error('Error getting stock effective cost:', e)
       return {}
     }
   }
