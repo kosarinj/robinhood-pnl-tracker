@@ -2358,28 +2358,79 @@ export class DatabaseService {
   // For a fully-closed position this equals sells − buys, matching the Dashboard's realized P&L.
   // `overrides` is an optional { SYMBOL: avgCost } map; when present for a symbol, the
   // manual cost basis is used instead of the computed average cost.
-  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null) {
+  /**
+   * Realized stock P&L, booked against the cost prevailing at each sale.
+   *
+   * The previous version computed `proceeds − avgCost × totalSold` using ONE
+   * cost for every sale ever made. With a manual override that meant applying
+   * today's basis to sales from a year ago, across 2,327 PLTR shares — a figure
+   * that answered no question anyone asks.
+   *
+   * This walks the trades in order with a running average, the way a broker
+   * does: each sale books proceeds minus what those shares cost AT THAT MOMENT,
+   * and the remaining position carries on unaffected.
+   *
+   * Overrides are deliberately NOT used here. An override sets what the shares
+   * held today cost; it says nothing about what shares sold last year cost, and
+   * using it that way is precisely the bug being fixed.
+   *
+   * `fromDate` scopes to the panel's period, matching how realized OPTION P&L
+   * is already scoped. The running cost is still built from the whole history —
+   * shares sold inside the period were bought before it — but only sales within
+   * the window are counted.
+   */
+  getStockRealizedPnL(userId = 1, overrides = {}, asOf = null, broker = null, fromDate = null, fromDateBySymbol = {}) {
     try {
       const rows = db.prepare(`
-        SELECT
-          symbol,
-          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE 0 END) AS total_bought,
-          SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) * COALESCE(price,0) ELSE 0 END) AS total_buy_cost,
-          SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) ELSE 0 END) AS total_sold,
-          SUM(CASE WHEN is_buy = 0 THEN COALESCE(quantity,0) * COALESCE(price,0) ELSE 0 END) AS total_sell_proceeds
+        SELECT symbol, trans_date, is_buy,
+               COALESCE(quantity,0) AS qty,
+               ABS(COALESCE(amount,0)) AS amt
         FROM trades
         WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ?
           ${asOf ? 'AND trans_date <= ?' : ''}
-        GROUP BY symbol
-      `).all(...(asOf ? [userId, asOf] : [userId]))
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC, id ASC
+      `).all(...[userId, ...(asOf ? [asOf] : []), ...(broker ? [broker] : [])])
+
+      const splits = this.getSplits([...new Set(rows.map(r => r.symbol))])
+      const state = {}
       const result = {}
-      rows.forEach(r => {
-        if (r.total_sold > 0 && r.total_bought > 0) {
-          const computedAvg = r.total_buy_cost / r.total_bought
-          const avgCost = overrides[r.symbol] > 0 ? overrides[r.symbol] : computedAvg
-          result[r.symbol] = Math.round((r.total_sell_proceeds - avgCost * r.total_sold) * 100) / 100
+
+      for (const r of rows) {
+        const f = this.splitFactor(splits[r.symbol], r.trans_date)
+        const qty = (r.qty || 0) * f
+        if (!(qty > 0)) continue
+        const st = state[r.symbol] || (state[r.symbol] = { shares: 0, cost: 0 })
+
+        if (r.is_buy === 1) {
+          st.shares += qty
+          st.cost += (r.amt || 0)          // cash paid is unchanged by a split
+          continue
         }
-      })
+
+        // A sale bigger than the shares on hand means the rest were bought
+        // before this export begins. Their cost is unknowable, so only the
+        // covered part is booked — inventing a basis would manufacture profit.
+        const covered = Math.min(qty, st.shares)
+        if (covered > 1e-9) {
+          const avgThen = st.cost / st.shares
+          const proceedsPerShare = (r.amt || 0) / qty
+          const pnl = (proceedsPerShare - avgThen) * covered
+          // A per-symbol start wins over the global one. Rolling positions get
+          // reopened, and "where am I on THIS position" needs a date per name
+          // — a flat holding otherwise reports a year of old sales as though
+          // they were its current standing.
+          const start = fromDateBySymbol[r.symbol] || fromDate
+          if (!start || String(r.trans_date) >= start) {
+            result[r.symbol] = (result[r.symbol] || 0) + pnl
+          }
+          st.cost -= avgThen * covered
+          st.shares -= covered
+          if (st.shares <= 1e-9) { st.shares = 0; st.cost = 0 }
+        }
+      }
+
+      Object.keys(result).forEach(k => { result[k] = Math.round(result[k] * 100) / 100 })
       return result
     } catch (e) {
       console.error('Error getting stock realized P&L:', e)
