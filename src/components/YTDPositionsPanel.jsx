@@ -59,7 +59,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [globalStart, setGlobalStart] = useState(() => getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
   // Compact rows. 28 columns and a long list means the limit is how much fits
   // on screen, not how much is rendered — this trades breathing room for rows.
-  const [dense, setDense] = useState(() => getPref(LS_DENSE_KEY, false))
+  const [dense, setDense] = useState(() => getPref(LS_DENSE_KEY, true))
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)

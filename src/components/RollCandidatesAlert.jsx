@@ -56,6 +56,14 @@ export default function RollCandidatesAlert({ broker }) {
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
+  // Legs with no usable mark can't be judged either way. They used to vanish,
+  // which made "why isn't X showing?" unanswerable from the screen — so they're
+  // now listed separately instead of dropped.
+  const unpriced = rows.filter(p => {
+    const n = Math.abs(p.openContracts || 0)
+    return n > 0 && (p.unrealizedPnl == null || !(p.markPrice > 0) && p.markSource !== 'intrinsic')
+  })
+
   const winners = rows
     .map(p => {
       const n = Math.abs(p.openContracts || 0)
@@ -73,7 +81,7 @@ export default function RollCandidatesAlert({ broker }) {
     .filter(Boolean)
     .sort((a, b) => b.perShare - a.perShare)
 
-  if (winners.length === 0) return null
+  if (winners.length === 0 && unpriced.length === 0) return null
 
   const usd = (n) => `$${Number(n).toFixed(2)}`
   const whole = (n) => `$${Math.round(n).toLocaleString()}`
@@ -92,6 +100,9 @@ export default function RollCandidatesAlert({ broker }) {
         }}
       >
         {winners.length} leg{winners.length === 1 ? '' : 's'} up ${threshold}+/sh
+        {unpriced.length > 0 && (
+          <span style={{ color: '#d97706', fontWeight: 600 }}>· {unpriced.length} unpriced</span>
+        )}
         <span style={{ fontWeight: 400, fontSize: 10 }}>{open ? '▲' : '▼'}</span>
       </button>
 
@@ -157,6 +168,20 @@ export default function RollCandidatesAlert({ broker }) {
               ))}
             </tbody>
           </table>
+          {unpriced.length > 0 && (
+            <div style={{ marginTop: 8, paddingTop: 6, borderTop: `1px solid ${border}` }}>
+              <div style={{ fontSize: 10, color: '#d97706', fontWeight: 700, marginBottom: 3 }}>
+                No usable price — can't be judged either way
+              </div>
+              {unpriced.map(p => (
+                <div key={p.symbol} style={{ fontSize: 11, color: textMid, padding: '1px 6px' }}>
+                  {p.ticker} {p.strike}{p.optionType === 'call' ? 'C' : 'P'} ×{Math.abs(p.openContracts)}
+                  {' · '}{p.isLong ? 'Long' : 'Short'}
+                  {' · '}no quote{p.stockPrice > 0 ? '' : ', no stock price either'}
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ fontSize: 10, color: textMid, marginTop: 6 }}>
             Gain on the contract itself, per share — what closing it at the current mark would bank.
             A long gains as the mark rises, a short as it falls.
