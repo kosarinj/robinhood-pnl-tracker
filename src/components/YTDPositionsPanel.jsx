@@ -28,6 +28,7 @@ const loadHidden = (broker) => {
   } catch { return [] }
 }
 const LS_ROWVIEW_KEY = 'ytdPanel_rowView'
+const LS_DENSE_KEY   = 'ytdPanel_dense'   // compact rows
 // Cost overrides are cached per broker — one shared key was how the Robinhood
 // cost ended up showing on Webull rows.
 const costKey = (broker) => `ytdPanel_costOverrides_${broker || 'all'}`
@@ -56,6 +57,9 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // The period start decides which realized P&L is counted, so it follows the
   // user as well — otherwise two devices report different totals.
   const [globalStart, setGlobalStart] = useState(() => getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
+  // Compact rows. 28 columns and a long list means the limit is how much fits
+  // on screen, not how much is rendered — this trades breathing room for rows.
+  const [dense, setDense] = useState(() => getPref(LS_DENSE_KEY, false))
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
   // Horizon for the theta projection column (months ahead, underlying held flat)
   const [projectMonths, setProjectMonths] = useState(1)
@@ -536,12 +540,18 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     return <span style={{ fontSize: '10px' }}> {sortDir === 'asc' ? '↑' : '↓'}</span>
   }
 
+  const padCell = dense ? '3px 12px' : '10px 12px'
+  const padPin  = dense ? '3px 4px'  : '10px 4px'
+
   const thStyle = (field) => ({
-    padding: '10px 12px', textAlign: 'right', fontSize: '11px', fontWeight: '600',
+    padding: dense ? '5px 12px' : '10px 12px', textAlign: 'right', fontSize: '11px', fontWeight: '600',
     color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em',
     cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
     background: sortField === field ? (isDark ? '#1a2035' : '#f0f4ff') : headerBg,
-    borderBottom: `2px solid ${border}`
+    borderBottom: `2px solid ${border}`,
+    // Keeps the column names in view through a long list. The page scrolls, not
+    // a nested box, so this pins to the viewport rather than a container.
+    position: 'sticky', top: 0, zIndex: 1,
   })
 
 
@@ -1071,6 +1081,22 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           ))}
         </div>
 
+        {/* Row height. The table is 28 columns and the list is long, so the real
+            limit is what fits on screen. Compact trades padding for rows. */}
+        <button
+          onClick={() => { const v = !dense; setDense(v); setPref(LS_DENSE_KEY, v) }}
+          title={dense ? 'Comfortable row height' : 'Compact rows — fit more on screen'}
+          style={{
+            padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            borderRadius: 6,
+            border: `1px solid ${dense ? '#667eea' : border}`,
+            background: dense ? '#667eea' : 'transparent',
+            color: dense ? '#fff' : textMid,
+          }}
+        >
+          {dense ? '▤ Compact' : '▤ Compact'}
+        </button>
+
         {/* What if every stock moved x% right now. The mirror of the theta
             column: that holds price and moves time, this holds time and moves
             price. Off by default so the table looks the same until asked. */}
@@ -1263,7 +1289,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                         ...cellBorder(col),
                         ...(pinned
                           ? {
-                              position: 'sticky', left: 0, zIndex: 2,
+                              position: 'sticky', left: 0, top: 0, zIndex: 4,
                               background: sortField === 'ticker' ? (isDark ? '#1a2035' : '#f0f4ff') : (isDark ? '#151929' : '#f8fafc'),
                               boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
                             }
@@ -1291,7 +1317,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                   >
                     {orderedColumns.map(col => col.pinned ? (
                       <td key={col.key} style={{
-                        padding: '10px 4px', fontWeight: 700, color: text, letterSpacing: '0.03em',
+                        padding: padPin, fontWeight: 700, color: text, letterSpacing: '0.03em',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         position: 'sticky', left: 0, zIndex: 1, background: c.tickerBg,
                         boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
@@ -1321,7 +1347,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                             fontWeight: 700, color: '#fff', background: '#ef4444' }}>{'×'}</button>
                       </td>
                     ) : (
-                      <td key={col.key} style={{ padding: '10px 12px', textAlign: col.align || 'right', ...cellBorder(col) }}>
+                      <td key={col.key} style={{ padding: padCell, textAlign: col.align || 'right', ...cellBorder(col) }}>
                         {col.cell ? col.cell(row, c) : null}
                       </td>
                     ))}
@@ -1344,16 +1370,18 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               <tr style={{ borderTop: `2px solid ${border}`, background: headerBg }}>
                 {orderedColumns.map(col => col.pinned ? (
                   <td key={col.key} style={{
-                    padding: '10px 4px', fontWeight: 700, color: text, fontSize: 11,
+                    padding: padPin, fontWeight: 700, color: text, fontSize: 11,
                     textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
-                    position: 'sticky', left: 0, zIndex: 1,
+                    // Totals stay visible while scanning, so a row can be judged
+                    // against the portfolio without scrolling to the bottom.
+                    position: 'sticky', left: 0, bottom: 0, zIndex: 4,
                     background: isDark ? '#151929' : '#f8fafc',
                     boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
                   }}>
                     Total ({sorted.length})
                   </td>
                 ) : (
-                  <td key={col.key} style={{ padding: '10px 12px', textAlign: col.align || 'right', ...cellBorder(col) }}>
+                  <td key={col.key} style={{ padding: padCell, textAlign: col.align || 'right', position: 'sticky', bottom: 0, zIndex: 1, background: headerBg, ...cellBorder(col) }}>
                     {col.foot ? col.foot(totals) : null}
                   </td>
                 ))}
