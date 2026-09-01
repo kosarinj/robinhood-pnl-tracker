@@ -23,6 +23,8 @@ const DEFAULT_THRESHOLD = 10
 export default function RollCandidatesAlert({ broker }) {
   const { isDark } = useTheme()
   const [rows, setRows] = useState([])
+  const [err, setErr] = useState('')
+  const [loaded, setLoaded] = useState(false)
   const [open, setOpen] = useState(false)
   const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD)
   const boxRef = useRef(null)
@@ -40,9 +42,17 @@ export default function RollCandidatesAlert({ broker }) {
         const qs = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
         const res = await fetch(`/api/options-pnl/open-positions${qs}`, { credentials: 'include' })
         const json = await res.json()
-        if (cancelled || !json.success) return
+        if (cancelled) return
+        setLoaded(true)
+        // A failure here used to leave the pill absent, which looks identical to
+        // "nothing qualifies" — the state that made this impossible to diagnose
+        // from the screen. Say so instead.
+        if (!json.success) { setErr(json.error || 'request failed'); setRows([]); return }
+        setErr('')
         setRows(json.positions || [])
-      } catch { /* a missing alert must not break the page under it */ }
+      } catch (e) {
+        if (!cancelled) { setLoaded(true); setErr(e.message || 'could not load') }
+      }
     }
     load()
     const t = setInterval(load, 120000)
@@ -81,6 +91,19 @@ export default function RollCandidatesAlert({ broker }) {
     .filter(Boolean)
     .sort((a, b) => b.perShare - a.perShare)
 
+  if (err) {
+    return (
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8,
+        padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700,
+        border: '1px solid #d03b3b', background: isDark ? '#3a0d0d' : '#fef2f2', color: '#d03b3b',
+      }} title={`GET /api/options-pnl/open-positions failed: ${err}`}>
+        option check unavailable — {err}
+      </div>
+    )
+  }
+  // Loaded, no open legs at all: nothing to say.
+  if (loaded && rows.length === 0) return null
   if (winners.length === 0 && unpriced.length === 0) return null
 
   const usd = (n) => `$${Number(n).toFixed(2)}`
