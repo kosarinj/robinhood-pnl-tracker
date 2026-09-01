@@ -2,22 +2,25 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 
 /**
- * Deep-in-the-money open option legs, as a single pill on the Positions page.
+ * Open option legs sitting on a gain, as a single pill on the Positions page.
  *
- * With enough contracts open, the ones worth acting on stop being findable by
- * eye — a roll candidate is a leg that has gone far enough ITM that its
- * extrinsic value is mostly gone, and spotting that means comparing every
- * strike to its underlying by hand.
+ * The question is "what could I sell back into the market right now", so the
+ * measure is the contract's own price move — what it's worth now against what
+ * was paid — not how far the strike is from the underlying. A leg can be deep
+ * ITM and still be a loser to close, and a leg nowhere near the money can be up
+ * $10 a share because volatility moved.
  *
- * So: a count, and nothing else, until it's clicked. It renders nothing at all
- * when no leg qualifies, which is most days, and takes one line when it does.
+ * Sign comes from the endpoint's unrealizedPnl, which already accounts for the
+ * side: a long gains when the mark rises, a short when it falls. Per share, so
+ * the threshold reads the way the contract is quoted — $10 a share is $1,000 a
+ * contract.
  *
- * Depth is measured against the strike, not against P&L — a short call $12 ITM
- * is a roll candidate whether or not the overall position is green.
+ * Renders nothing when nothing qualifies, which is the point: one line of real
+ * estate when it matters, none when it doesn't.
  */
 const DEFAULT_THRESHOLD = 10
 
-export default function DeepItmAlert({ broker }) {
+export default function RollCandidatesAlert({ broker }) {
   const { isDark } = useTheme()
   const [rows, setRows] = useState([])
   const [open, setOpen] = useState(false)
@@ -28,7 +31,7 @@ export default function DeepItmAlert({ broker }) {
   const textMid = isDark ? '#94a3b8' : '#64748b'
   const surface = isDark ? '#0f172a' : '#ffffff'
   const border = isDark ? '#334155' : '#e2e8f0'
-  const WARN = '#d97706'
+  const GOOD = '#0ca30c'
 
   useEffect(() => {
     let cancelled = false
@@ -42,13 +45,10 @@ export default function DeepItmAlert({ broker }) {
       } catch { /* a missing alert must not break the page under it */ }
     }
     load()
-    // Cheap enough to follow the underlying: the whole point is catching a leg
-    // that went ITM while you were looking elsewhere.
     const t = setInterval(load, 120000)
     return () => { cancelled = true; clearInterval(t) }
   }, [broker])
 
-  // Close on an outside click, so the popover behaves like a menu.
   useEffect(() => {
     if (!open) return
     const onDown = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false) }
@@ -56,34 +56,37 @@ export default function DeepItmAlert({ broker }) {
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  const deep = rows
+  const winners = rows
     .map(p => {
-      const px = p.stockPrice
-      if (!(px > 0) || !(p.strike > 0)) return null
-      const depth = p.optionType === 'call' ? px - p.strike : p.strike - px
-      return depth >= threshold ? { ...p, depth } : null
+      const n = Math.abs(p.openContracts || 0)
+      // No mark means no honest gain to report — an intrinsic-only fallback
+      // would flag legs on a number nobody would fill at.
+      if (!n || p.unrealizedPnl == null || p.markSource === 'intrinsic') return null
+      const perShare = p.unrealizedPnl / (100 * n)
+      return perShare >= threshold ? { ...p, perShare, total: p.unrealizedPnl } : null
     })
     .filter(Boolean)
-    .sort((a, b) => b.depth - a.depth)
+    .sort((a, b) => b.perShare - a.perShare)
 
-  if (deep.length === 0) return null
+  if (winners.length === 0) return null
 
-  const fmt = (n) => `$${Math.abs(n).toFixed(2)}`
+  const usd = (n) => `$${Number(n).toFixed(2)}`
+  const whole = (n) => `$${Math.round(n).toLocaleString()}`
   const shortExp = (e) => { const [, m, d] = (e || '').split('-'); return m ? `${parseInt(m)}/${parseInt(d)}` : '' }
 
   return (
     <div ref={boxRef} style={{ position: 'relative', display: 'inline-block', marginBottom: 8 }}>
       <button
         onClick={() => setOpen(o => !o)}
-        title="Open option legs far enough in the money to be worth rolling"
+        title="Open legs worth at least this much more per share than you paid — candidates to close or roll"
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
-          border: `1px solid ${WARN}`, background: isDark ? '#3b2a08' : '#fffbeb',
-          color: WARN, fontSize: 12, fontWeight: 700,
+          border: `1px solid ${GOOD}`, background: isDark ? '#08300b' : '#f0fdf4',
+          color: GOOD, fontSize: 12, fontWeight: 700,
         }}
       >
-        {deep.length} leg{deep.length === 1 ? '' : 's'} over ${threshold} ITM
+        {winners.length} leg{winners.length === 1 ? '' : 's'} up ${threshold}+/sh
         <span style={{ fontWeight: 400, fontSize: 10 }}>{open ? '▲' : '▼'}</span>
       </button>
 
@@ -91,42 +94,50 @@ export default function DeepItmAlert({ broker }) {
         <div style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
           background: surface, border: `1px solid ${border}`, borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.18)', padding: 8, minWidth: 340,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.18)', padding: 8, minWidth: 420,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-            <span style={{ fontSize: 11, color: textMid }}>at least</span>
+            <span style={{ fontSize: 11, color: textMid }}>up at least</span>
             {[5, 10, 20].map(v => (
               <button key={v} onClick={() => setThreshold(v)}
                 style={{
                   padding: '2px 8px', fontSize: 11, borderRadius: 5, cursor: 'pointer',
-                  border: `1px solid ${threshold === v ? WARN : border}`,
-                  background: threshold === v ? WARN : 'transparent',
+                  border: `1px solid ${threshold === v ? GOOD : border}`,
+                  background: threshold === v ? GOOD : 'transparent',
                   color: threshold === v ? '#fff' : textMid, fontWeight: 600,
                 }}>${v}</button>
             ))}
-            <span style={{ fontSize: 11, color: textMid }}>in the money</span>
+            <span style={{ fontSize: 11, color: textMid }}>per share</span>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ color: textMid, fontSize: 10, textAlign: 'left' }}>
                 <th style={{ padding: '2px 6px' }}>Contract</th>
                 <th style={{ padding: '2px 6px' }}>Side</th>
-                <th style={{ padding: '2px 6px', textAlign: 'right' }}>ITM by</th>
+                <th style={{ padding: '2px 6px', textAlign: 'right' }}>Paid → Now</th>
+                <th style={{ padding: '2px 6px', textAlign: 'right' }}>+/sh</th>
+                <th style={{ padding: '2px 6px', textAlign: 'right' }}>Total</th>
                 <th style={{ padding: '2px 6px', textAlign: 'right' }}>Exp</th>
               </tr>
             </thead>
             <tbody>
-              {deep.map(p => (
+              {winners.map(p => (
                 <tr key={p.symbol} style={{ borderTop: `1px solid ${border}`, color: text }}>
                   <td style={{ padding: '3px 6px', fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {p.ticker} {p.strike}{p.optionType === 'call' ? 'C' : 'P'}
                     <span style={{ color: textMid, fontWeight: 400 }}> ×{Math.abs(p.openContracts)}</span>
                   </td>
-                  <td style={{ padding: '3px 6px', color: p.isLong ? '#0ca30c' : WARN, fontWeight: 600 }}>
+                  <td style={{ padding: '3px 6px', color: p.isLong ? GOOD : '#d97706', fontWeight: 600 }}>
                     {p.isLong ? 'Long' : 'Short'}
                   </td>
-                  <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 700 }}>
-                    {fmt(p.depth)}
+                  <td style={{ padding: '3px 6px', textAlign: 'right', color: textMid, whiteSpace: 'nowrap' }}>
+                    {usd((p.avgCostPerContract || 0) / 100)} → {usd(p.markPrice)}
+                  </td>
+                  <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 700, color: GOOD }}>
+                    {usd(p.perShare)}
+                  </td>
+                  <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 700, color: GOOD }}>
+                    {whole(p.total)}
                   </td>
                   <td style={{ padding: '3px 6px', textAlign: 'right', color: textMid, whiteSpace: 'nowrap' }}>
                     {shortExp(p.expiry)}
@@ -136,7 +147,8 @@ export default function DeepItmAlert({ broker }) {
             </tbody>
           </table>
           <div style={{ fontSize: 10, color: textMid, marginTop: 6 }}>
-            Distance from the strike to the underlying. Calls count up, puts count down.
+            Gain on the contract itself, per share — what closing it at the current mark would bank.
+            A long gains as the mark rises, a short as it falls.
           </div>
         </div>
       )}

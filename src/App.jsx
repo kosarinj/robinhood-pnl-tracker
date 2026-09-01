@@ -21,7 +21,7 @@ import ScreenerPanel from './components/ScreenerPanel'
 import DCAAlertPanel from './components/DCAAlertPanel'
 import StrategyPnLSplit from './components/StrategyPnLSplit'
 import YTDPositionsPanel from './components/YTDPositionsPanel'
-import DeepItmAlert from './components/DeepItmAlert'
+import RollCandidatesAlert from './components/RollCandidatesAlert'
 import ShortCallTracker from './components/ShortCallTracker'
 import VolScanner from './components/VolScanner'
 import TaxCenter from './components/TaxCenter'
@@ -2575,7 +2575,7 @@ function AuthenticatedApp({ user }) {
       {/* Positions tab */}
       {activeMainTab === 'positions' && (
         <div style={{ padding: '8px 0' }}>
-          <DeepItmAlert broker={brokerFilter} />
+          <RollCandidatesAlert broker={brokerFilter} />
           <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
           <ShortCallTracker broker={brokerFilter} />
         </div>
