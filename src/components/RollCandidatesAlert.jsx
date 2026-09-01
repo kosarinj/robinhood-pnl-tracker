@@ -102,9 +102,13 @@ export default function RollCandidatesAlert({ broker }) {
       </div>
     )
   }
-  // Loaded, no open legs at all: nothing to say.
+  // No open option legs at all: nothing to say, so say nothing.
   if (loaded && rows.length === 0) return null
-  if (winners.length === 0 && unpriced.length === 0) return null
+  // Open legs but none qualifying still gets a pill — muted. Without it, "none
+  // are up $10" and "the alert is broken" look identical, and there is nothing
+  // to click to lower the threshold.
+  const quiet = winners.length === 0 && unpriced.length === 0
+  if (!loaded && quiet) return null
 
   const usd = (n) => `$${Number(n).toFixed(2)}`
   const whole = (n) => `$${Math.round(n).toLocaleString()}`
@@ -118,8 +122,9 @@ export default function RollCandidatesAlert({ broker }) {
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
           padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
-          border: `1px solid ${GOOD}`, background: isDark ? '#08300b' : '#f0fdf4',
-          color: GOOD, fontSize: 12, fontWeight: 700,
+          border: `1px solid ${quiet ? border : GOOD}`,
+          background: quiet ? 'transparent' : (isDark ? '#08300b' : '#f0fdf4'),
+          color: quiet ? textMid : GOOD, fontSize: 12, fontWeight: quiet ? 500 : 700,
         }}
       >
         {winners.length} leg{winners.length === 1 ? '' : 's'} up ${threshold}+/sh
@@ -148,6 +153,12 @@ export default function RollCandidatesAlert({ broker }) {
             ))}
             <span style={{ fontSize: 11, color: textMid }}>per share</span>
           </div>
+          {quiet && (
+            <div style={{ fontSize: 11, color: textMid, padding: '6px 6px 8px' }}>
+              None of your {rows.length} open leg{rows.length === 1 ? '' : 's'} is up ${threshold} or
+              more per share right now. Try a lower threshold above.
+            </div>
+          )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ color: textMid, fontSize: 10, textAlign: 'left' }}>
