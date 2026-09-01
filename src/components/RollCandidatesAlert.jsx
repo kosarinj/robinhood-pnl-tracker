@@ -59,11 +59,16 @@ export default function RollCandidatesAlert({ broker }) {
   const winners = rows
     .map(p => {
       const n = Math.abs(p.openContracts || 0)
-      // No mark means no honest gain to report — an intrinsic-only fallback
-      // would flag legs on a number nobody would fill at.
-      if (!n || p.unrealizedPnl == null || p.markSource === 'intrinsic') return null
+      // Intrinsic-marked legs are kept, and this matters most for the best
+      // case there is: a short call that has gone worthless has no live quote,
+      // falls back to intrinsic 0, and books the whole premium as profit.
+      // Excluding it hid exactly the position most worth closing. The mark is
+      // still an estimate, so it is labelled rather than dropped.
+      if (!n || p.unrealizedPnl == null) return null
       const perShare = p.unrealizedPnl / (100 * n)
-      return perShare >= threshold ? { ...p, perShare, total: p.unrealizedPnl } : null
+      // A hair of tolerance so a leg that reads $10.00 everywhere else isn't
+      // held out by floating point.
+      return perShare >= threshold - 0.005 ? { ...p, perShare, total: p.unrealizedPnl } : null
     })
     .filter(Boolean)
     .sort((a, b) => b.perShare - a.perShare)
@@ -132,6 +137,12 @@ export default function RollCandidatesAlert({ broker }) {
                   </td>
                   <td style={{ padding: '3px 6px', textAlign: 'right', color: textMid, whiteSpace: 'nowrap' }}>
                     {usd((p.avgCostPerContract || 0) / 100)} → {usd(p.markPrice)}
+                    {p.markSource !== 'quote' && (
+                      <span title={p.markSource === 'intrinsic'
+                        ? 'No live quote — marked at intrinsic value, so an out-of-the-money short reads as worth ~$0'
+                        : 'No live quote — Black-Scholes estimate'}
+                        style={{ marginLeft: 4, fontSize: 9, color: '#d97706', fontWeight: 700 }}>est</span>
+                    )}
                   </td>
                   <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: 700, color: GOOD }}>
                     {usd(p.perShare)}
