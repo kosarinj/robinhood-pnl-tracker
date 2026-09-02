@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useTheme } from '../contexts/ThemeContext'
 
 /**
@@ -36,6 +37,8 @@ export default function RollCandidatesAlert({ broker }) {
     try { return localStorage.getItem(LS_UNIT_KEY) === 'share' ? 'share' : 'total' } catch { return 'total' }
   })
   const boxRef = useRef(null)
+  const btnRef = useRef(null)
+  const [anchor, setAnchor] = useState(null)
 
   const text = isDark ? '#e2e8f0' : '#1e293b'
   const textMid = isDark ? '#94a3b8' : '#64748b'
@@ -69,9 +72,33 @@ export default function RollCandidatesAlert({ broker }) {
 
   useEffect(() => {
     if (!open) return
-    const onDown = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false) }
+    // The popover is portalled, so it is not inside the wrapper any more —
+    // the button has to be excluded explicitly or its own mousedown closes
+    // the menu and the click that follows reopens it.
+    const onDown = (e) => {
+      if (btnRef.current?.contains(e.target)) return
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false)
+    }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  // The table header is sticky, so it rides over anything left in the normal
+  // flow no matter its z-index. The panel solves this the same way: render to
+  // document.body and position from the button's rect.
+  useEffect(() => {
+    if (!open) { setAnchor(null); return }
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect()
+      if (r) setAnchor({ top: r.bottom + 4, left: r.left })
+    }
+    place()
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
   }, [open])
 
   // Legs with no usable mark can't be judged either way. They used to vanish,
@@ -131,6 +158,7 @@ export default function RollCandidatesAlert({ broker }) {
       // wrapper puts the whole popover above it.
       zIndex: 60 }}>
       <button
+        ref={btnRef}
         onClick={() => setOpen(o => !o)}
         title="Open legs worth at least this much more per share than you paid — candidates to close or roll"
         style={{
@@ -148,9 +176,9 @@ export default function RollCandidatesAlert({ broker }) {
         <span style={{ fontWeight: 400, fontSize: 10 }}>{open ? '▲' : '▼'}</span>
       </button>
 
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
+      {open && anchor && createPortal(
+        <div ref={boxRef} style={{
+          position: 'fixed', top: anchor.top, left: anchor.left, zIndex: 3000,
           background: surface, border: `1px solid ${border}`, borderRadius: 8,
           boxShadow: '0 8px 24px rgba(0,0,0,0.18)', padding: 8, minWidth: 420,
           maxHeight: '70vh', overflowY: 'auto',
@@ -248,7 +276,8 @@ export default function RollCandidatesAlert({ broker }) {
             Gain on the contract itself, per share — what closing it at the current mark would bank.
             A long gains as the mark rises, a short as it falls.
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
