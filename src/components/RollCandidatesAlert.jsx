@@ -124,7 +124,12 @@ export default function RollCandidatesAlert({ broker }) {
   const shortExp = (e) => { const [, m, d] = (e || '').split('-'); return m ? `${parseInt(m)}/${parseInt(d)}` : '' }
 
   return (
-    <div ref={boxRef} style={{ position: 'relative', display: 'inline-block', marginBottom: 8 }}>
+    <div ref={boxRef} style={{ position: 'relative', display: 'inline-block', marginBottom: 8,
+      // The panel below is position:relative and later in the DOM, so it wins
+      // the paint order against anything inside an unlifted wrapper — the
+      // dropdown was landing under the table's sticky header. Lifting the
+      // wrapper puts the whole popover above it.
+      zIndex: 60 }}>
       <button
         onClick={() => setOpen(o => !o)}
         title="Open legs worth at least this much more per share than you paid — candidates to close or roll"
@@ -148,6 +153,7 @@ export default function RollCandidatesAlert({ broker }) {
           position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
           background: surface, border: `1px solid ${border}`, borderRadius: 8,
           boxShadow: '0 8px 24px rgba(0,0,0,0.18)', padding: 8, minWidth: 420,
+          maxHeight: '70vh', overflowY: 'auto',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <span style={{ fontSize: 11, color: textMid }}>up at least</span>
