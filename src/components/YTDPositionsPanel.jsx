@@ -1163,7 +1163,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
               🚫 {hiddenTickers.length} hidden ▾
             </button>
             {showHiddenList && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 20, background: surface, border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', minWidth: '180px', maxWidth: '260px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 200, background: surface, border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', minWidth: '180px', maxWidth: '260px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
                   {hiddenTickers.map(t => (
                     <button key={t} onClick={() => restoreTicker(t)} title={`Restore ${t}`}
@@ -1197,7 +1197,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             ⇅ Columns
           </button>
           {showColumnEditor && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 20, background: surface,
+            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 200, background: surface,
               border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', minWidth: '250px',
               maxHeight: '60vh', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
               <div style={{ fontSize: '10px', color: textMid, marginBottom: '6px', lineHeight: 1.4 }}>
