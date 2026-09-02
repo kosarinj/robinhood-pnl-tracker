@@ -19,6 +19,11 @@ import { useTheme } from '../contexts/ThemeContext'
  * estate when it matters, none when it doesn't.
  */
 const DEFAULT_THRESHOLD = 10
+// Total dollars by default. "Worth $10 more than I paid" reads as the position's
+// gain, not the quoted price moving $10 a share — which on an out-of-the-money
+// contract is an enormous move and matched almost nothing.
+const LS_UNIT_KEY = 'rollAlert_unit'      // 'total' | 'share'
+const PRESETS = { total: [10, 100, 500], share: [1, 5, 10] }
 
 export default function RollCandidatesAlert({ broker }) {
   const { isDark } = useTheme()
@@ -27,6 +32,9 @@ export default function RollCandidatesAlert({ broker }) {
   const [loaded, setLoaded] = useState(false)
   const [open, setOpen] = useState(false)
   const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD)
+  const [unit, setUnit] = useState(() => {
+    try { return localStorage.getItem(LS_UNIT_KEY) === 'share' ? 'share' : 'total' } catch { return 'total' }
+  })
   const boxRef = useRef(null)
 
   const text = isDark ? '#e2e8f0' : '#1e293b'
@@ -84,12 +92,13 @@ export default function RollCandidatesAlert({ broker }) {
       // still an estimate, so it is labelled rather than dropped.
       if (!n || p.unrealizedPnl == null) return null
       const perShare = p.unrealizedPnl / (100 * n)
-      // A hair of tolerance so a leg that reads $10.00 everywhere else isn't
-      // held out by floating point.
-      return perShare >= threshold - 0.005 ? { ...p, perShare, total: p.unrealizedPnl } : null
+      const measure = unit === 'share' ? perShare : p.unrealizedPnl
+      // A hair of tolerance so a leg reading exactly at the threshold elsewhere
+      // isn't held out by floating point.
+      return measure >= threshold - 0.005 ? { ...p, perShare, total: p.unrealizedPnl } : null
     })
     .filter(Boolean)
-    .sort((a, b) => b.perShare - a.perShare)
+    .sort((a, b) => (unit === 'share' ? b.perShare - a.perShare : b.total - a.total))
 
   if (err) {
     return (
@@ -127,7 +136,7 @@ export default function RollCandidatesAlert({ broker }) {
           color: quiet ? textMid : GOOD, fontSize: 12, fontWeight: quiet ? 500 : 700,
         }}
       >
-        {winners.length} leg{winners.length === 1 ? '' : 's'} up ${threshold}+/sh
+        {winners.length} leg{winners.length === 1 ? '' : 's'} up ${threshold}+{unit === 'share' ? '/sh' : ''}
         {unpriced.length > 0 && (
           <span style={{ color: '#d97706', fontWeight: 600 }}>· {unpriced.length} unpriced</span>
         )}
@@ -142,7 +151,7 @@ export default function RollCandidatesAlert({ broker }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
             <span style={{ fontSize: 11, color: textMid }}>up at least</span>
-            {[5, 10, 20].map(v => (
+            {PRESETS[unit].map(v => (
               <button key={v} onClick={() => setThreshold(v)}
                 style={{
                   padding: '2px 8px', fontSize: 11, borderRadius: 5, cursor: 'pointer',
@@ -151,12 +160,25 @@ export default function RollCandidatesAlert({ broker }) {
                   color: threshold === v ? '#fff' : textMid, fontWeight: 600,
                 }}>${v}</button>
             ))}
-            <span style={{ fontSize: 11, color: textMid }}>per share</span>
+            {['total', 'share'].map(u => (
+              <button key={u}
+                onClick={() => {
+                  setUnit(u)
+                  setThreshold(PRESETS[u][u === 'total' ? 0 : 2])
+                  try { localStorage.setItem(LS_UNIT_KEY, u) } catch { /* private mode */ }
+                }}
+                style={{
+                  padding: '2px 8px', fontSize: 11, borderRadius: 5, cursor: 'pointer',
+                  border: `1px solid ${unit === u ? textMid : border}`,
+                  background: 'transparent', color: unit === u ? text : textMid,
+                  fontWeight: unit === u ? 700 : 500,
+                }}>{u === 'total' ? 'total' : 'per share'}</button>
+            ))}
           </div>
           {quiet && (
             <div style={{ fontSize: 11, color: textMid, padding: '6px 6px 8px' }}>
-              None of your {rows.length} open leg{rows.length === 1 ? '' : 's'} is up ${threshold} or
-              more per share right now. Try a lower threshold above.
+              None of your {rows.length} open leg{rows.length === 1 ? '' : 's'} is up ${threshold}
+              {unit === 'share' ? ' per share' : ' in total'} right now. Try a lower threshold above.
             </div>
           )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
