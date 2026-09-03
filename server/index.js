@@ -5500,6 +5500,64 @@ app.get('/api/health', (req, res) => {
 // so we can see exactly why an option price is/ isn't updating (e.g. MRVL/CRWV).
 // Usage: /api/debug-option-mark?symbol=MRVL  (substring match; omit for all)
 /**
+ * The realized-P&L walk, run over an arbitrary set of option trades.
+ *
+ * Mirrors the LIFO matching inside /api/options-pnl/ytd so the SAME algorithm
+ * can be pointed at raw rows and at the grouped rows the panel actually uses,
+ * and the two compared. If they disagree, the grouping is changing the answer.
+ *
+ * Kept deliberately close to the original; if that walk changes, this must too.
+ * It exists to decide whether the walk should be reading raw trades at all.
+ */
+function realizedWalk(trades) {
+  const isOpening = tc => ['BTO', 'STO'].includes((tc || '').toUpperCase())
+  const sorted = [...trades].sort((a, b) =>
+    String(a.trans_date).localeCompare(String(b.trans_date)) ||
+    (isOpening(a.trans_code) ? 0 : 1) - (isOpening(b.trans_code) ? 0 : 1)
+  )
+  const stacksBySym = {}
+  let total = 0, booked = 0, unmatched = 0
+  const unmatchedRows = []
+  sorted.forEach(t => {
+    const tc = (t.trans_code || '').toUpperCase()
+    const parsed = parseOptionDescription(t.symbol || '')
+    const key = parsed
+      ? `${t.broker || 'robinhood'}::${parsed.ticker}|${parsed.year}${parsed.month}${parsed.day}|${parsed.type}|${parsed.strike}`
+      : `${t.broker || 'robinhood'}::${t.symbol || ''}`
+    const contracts = Math.abs(t.contracts || 1)
+    const amount = Math.abs(t.amount)
+    const ppc = contracts > 0 ? amount / contracts : amount
+    const stacks = stacksBySym[key] || (stacksBySym[key] = { long: [], short: [] })
+    if (tc === 'BTO') { stacks.long.push({ ppc, remaining: contracts }); return }
+    if (tc === 'STO') { stacks.short.push({ ppc, remaining: contracts }); return }
+    if (!['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) return
+    let closingShort, stack
+    if (tc === 'BTC') { stack = stacks.short; closingShort = true }
+    else if (tc === 'STC' || tc === 'OEXC') { stack = stacks.long; closingShort = false }
+    else { closingShort = stacks.short.length > 0; stack = closingShort ? stacks.short : stacks.long }
+    let left = contracts, costBasis = 0
+    while (left > 0 && stack.length > 0) {
+      const top = stack[stack.length - 1]
+      const matched = Math.min(left, top.remaining)
+      costBasis += matched * top.ppc
+      left -= matched; top.remaining -= matched
+      if (top.remaining === 0) stack.pop()
+    }
+    if (left === 0) {
+      const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
+      total += (closingShort ? costBasis - proceeds : proceeds - costBasis)
+      booked += 1
+    } else {
+      // Nothing books at all when the stack is short of contracts — the close
+      // is silently dropped. This is where lost lots turn into missing P&L.
+      unmatched += 1
+      unmatchedRows.push({ date: t.trans_date, code: tc, symbol: t.symbol, contracts, shortBy: left })
+    }
+  })
+  return { total: Math.round(total * 100) / 100, booked, unmatched, unmatchedRows: unmatchedRows.slice(0, 25) }
+}
+
+/**
  * GET /api/debug-reconcile?ticker=MRVL&start=YYYY-MM-DD
  *
  * Reconciles a hand-summed cash total against the panel's Options Total.
@@ -5610,6 +5668,25 @@ app.get('/api/debug-reconcile', requireAuth, async (req, res) => {
         premiumOfOpenShorts: r2(openShortPremium),
       },
       impliedOptionsTotal: r2(impliedRealized),
+      realized: (() => {
+        const rawRows = databaseService.getRawOptionTrades(userId, brokerFilter)
+          .filter(t => (parseOptionDescription(t.symbol)?.ticker || '') === ticker)
+        const grpRows = databaseService.getOptionTradesForYTD(userId)
+          .filter(t => !brokerFilter || (t.broker || 'robinhood') === brokerFilter)
+          .filter(t => (parseOptionDescription(t.symbol)?.ticker || '') === ticker)
+        const fromRaw = realizedWalk(rawRows)
+        const fromGrouped = realizedWalk(grpRows)
+        return {
+          fromRawTrades: fromRaw,
+          fromGroupedTrades: fromGrouped,
+          difference: r2(fromRaw.total - fromGrouped.total),
+          verdict: Math.abs(fromRaw.total - fromGrouped.total) < 0.01
+            ? 'grouping does not change realized on this ticker'
+            : 'grouping CHANGES realized — the panel is computing on flattened rows',
+          note: 'unmatched counts closes the walk could not fill from the stack. '
+              + 'Those book NOTHING at all, so every one is P&L silently dropped.',
+        }
+      })(),
       grouping: {
         rawCash: r2(cash), groupedCash: r2(groupedCash),
         cashLostToGrouping: r2(cash - groupedCash),
