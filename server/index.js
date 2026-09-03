@@ -2462,6 +2462,34 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     if (!asOf) {
       const shortEntries = databaseService.getShortCallEntries(userId, brokerFilter)
       const openPositions = databaseService.getOpenOptionPositions(userId, brokerFilter)
+      // What was held INTO today vs opened today. A leg opened this morning has
+      // no business carrying yesterday's move: a PLTR $170 put re-bought for
+      // pennies was charged the 3.15 -> 0.12 collapse it was flat through.
+      const dayBaseline = databaseService.getOptionDayBaseline(userId, todayStrLocal(), brokerFilter)
+      // Split a leg's size into the part held overnight and the part added today,
+      // and price each from the right starting point. Returns total dollars.
+      //   overnightPerShare — the leg's move from yesterday's close (already signed
+      //                       for the side by the caller)
+      //   nowMark           — the current mark per share
+      //   entryPrice        — average price paid/received per share for today's opens
+      const daySplit = (symbol, contracts, side, overnightPerShare, nowMark) => {
+        const b = dayBaseline[symbol]
+        if (!b) return overnightPerShare * contracts * 100
+        const prior = side === 'short' ? b.priorShort : b.priorLong
+        const held = Math.max(0, Math.min(prior, contracts))
+        const fresh = Math.max(0, contracts - held)
+        let total = overnightPerShare * held * 100
+        if (fresh > 0) {
+          const entry = side === 'short' ? b.openedShortPrice : b.openedLongPrice
+          // No usable entry price means nothing honest to say about the new part;
+          // leaving it out beats inventing a move from a close it never saw.
+          if (entry > 0 && nowMark > 0) {
+            const perShare = side === 'short' ? (entry - nowMark) : (nowMark - entry)
+            total += perShare * fresh * 100
+          }
+        }
+        return total
+      }
       const netShortBySymbol = {}
       openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
       const openShortSymbols = new Set(openPositions.filter(p => p.net_short > 0).map(p => p.symbol))
@@ -2743,7 +2771,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // reconciles. MRVL read -835 that way. Reporting nothing is honest.
           if (dayOptPerShare == null) dayGapTickers.add(ticker)
           if (dayOptPerShare != null) {
-            openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayOptPerShare * shares
+            openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) +
+              daySplit(entry.symbol, effContracts, 'short', dayOptPerShare, currentOptionPrice)
             const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
             if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) bs.market += 1
             else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) bs.model += 1
@@ -2875,7 +2904,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         }
 
         if (dayLongPerShare != null) {
-          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dayLongPerShare * shares
+          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) +
+            daySplit(leg.symbol, leg.contracts, 'long', dayLongPerShare, nowMark)
           const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
           bs[basis] += 1
         } else {

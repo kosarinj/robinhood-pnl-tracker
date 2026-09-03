@@ -2168,6 +2168,79 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * What each option position looked like BEFORE today, and what was opened today.
+   *
+   * Day P&L measures every leg from yesterday's close. That is only right for a
+   * position you actually held overnight. Re-open a contract this morning and the
+   * whole of yesterday's move gets billed to today — a PLTR $170 put bought back
+   * for pennies was charged the 3.15 -> 0.12 collapse it was flat through, about
+   * -606 that never happened.
+   *
+   * Returns per symbol: the long/short contracts held into today, and the
+   * contracts opened today with their average price PER SHARE, so the caller can
+   * price the held part from yesterday's close and the new part from what was
+   * actually paid.
+   */
+  getOptionDayBaseline(userId = 1, today, broker = null) {
+    const brokerClause = broker ? "AND COALESCE(broker,'robinhood') = ?" : ''
+    const args = (extra) => [userId, ...(broker ? [broker] : []), ...extra]
+    try {
+      // Netted the same way as getOpenOptionPositions, but cut off before today.
+      const prior = db.prepare(`
+        SELECT symbol,
+          SUM(CASE WHEN trans_code = 'BTO' THEN COALESCE(contracts, 1) ELSE 0 END) AS bto,
+          SUM(CASE WHEN trans_code = 'STC' THEN COALESCE(contracts, 1) ELSE 0 END) AS stc,
+          SUM(CASE WHEN trans_code = 'STO' THEN COALESCE(contracts, 1) ELSE 0 END) AS sto,
+          SUM(CASE WHEN trans_code = 'BTC' THEN COALESCE(contracts, 1) ELSE 0 END) AS btc,
+          SUM(CASE WHEN trans_code IN ('OEXP','OASGN','OEXC') THEN COALESCE(contracts, 1) ELSE 0 END) AS settled
+        FROM trades
+        WHERE is_option = 1 AND user_id = ? ${brokerClause} AND trans_date < ?
+        GROUP BY symbol
+      `).all(...args([today]))
+
+      // Opens dated today, with what they actually cost per share.
+      const opened = db.prepare(`
+        SELECT symbol, trans_code,
+               SUM(COALESCE(contracts, 1)) AS contracts,
+               SUM(ABS(amount)) AS amount
+        FROM trades
+        WHERE is_option = 1 AND user_id = ? ${brokerClause} AND trans_date = ?
+          AND trans_code IN ('BTO','STO')
+        GROUP BY symbol, trans_code
+      `).all(...args([today]))
+
+      const out = {}
+      const row = sym => (out[sym] = out[sym] || {
+        priorLong: 0, priorShort: 0,
+        openedLong: 0, openedLongPrice: 0,
+        openedShort: 0, openedShortPrice: 0,
+      })
+      prior.forEach(r => {
+        const longOpen = (r.bto || 0) - (r.stc || 0)
+        const shortOpen = (r.sto || 0) - (r.btc || 0)
+        const settled = r.settled || 0
+        const settleLong = Math.min(settled, Math.max(0, longOpen))
+        const settleShort = Math.min(settled - settleLong, Math.max(0, shortOpen))
+        const e = row(r.symbol)
+        e.priorLong = Math.max(0, longOpen - settleLong)
+        e.priorShort = Math.max(0, shortOpen - settleShort)
+      })
+      opened.forEach(r => {
+        const e = row(r.symbol)
+        const c = r.contracts || 0
+        // amount is the whole ticket; per SHARE to match how marks are carried.
+        const perShare = c > 0 ? Math.abs(r.amount || 0) / (c * 100) : 0
+        if (r.trans_code === 'BTO') { e.openedLong = c; e.openedLongPrice = perShare }
+        else { e.openedShort = c; e.openedShortPrice = perShare }
+      })
+      return out
+    } catch (e) {
+      console.error('Error building option day baseline:', e)
+      return {}
+    }
+  }
+
   getOpenOptionPositions(userId = 1, broker = null) {
     const rows = db.prepare(`
       SELECT
