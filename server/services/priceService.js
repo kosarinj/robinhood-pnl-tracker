@@ -548,6 +548,33 @@ export class PriceService {
       console.log(`Daily change: spark missed ${missing.length}, chart recovered ${missing.length - stillMissing.length}` +
         (stillMissing.length ? `, still missing ${stillMissing.join(',')}` : ''))
     }
+    // Same overlay fetchPrices does. The spark meta holds the last REGULAR
+    // session price, so pre-market `current` comes back equal to prevClose and
+    // the day move computes to zero — Day Stock shows nothing while Day Options,
+    // priced from Polygon quotes, moves. Two sources for one row is exactly the
+    // split that made a partial day publishable before.
+    const session = currentUsSession()
+    if (session === 'pre' || session === 'post') {
+      try {
+        const ext = await this.fetchExtendedHoursCached(symbols)
+        for (const sym of Object.keys(result)) {
+          const e = ext[sym]
+          // `stale` means nothing has printed outside the session yet.
+          if (e && e.price > 0 && !e.stale) {
+            const prevClose = result[sym].prevClose
+            result[sym] = {
+              current: e.price,
+              prevClose,
+              change: Math.round((e.price - prevClose) * 100) / 100,
+              pct: Math.round(((e.price - prevClose) / prevClose) * 10000) / 100,
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('fetchDailyChange extended-hours overlay failed:', err.message)
+      }
+    }
+
     return result
   }
 
