@@ -5512,6 +5512,11 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
     const userId = req.user.userId
     const year = String(req.query.year || new Date().getFullYear())
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    // The Options YTD panel skips any trade before its start date
+    // (`if (t.trans_date < effectiveStart) return`), so a settlement earlier than
+    // that never books and must not be counted here either. Pass the same
+    // startDate the panel is using.
+    const start = (req.query.start || req.query.startDate || '2000-01-01').slice(0, 10)
 
     const tally = (rows) => {
       const bySym = {}
@@ -5530,6 +5535,8 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
         else if (tc === 'STC') b.stc += n
         else if (tc === 'BTC') b.btc += n
         else {
+          // Only settlements on or after the panel's start date can book.
+          if (String(t.trans_date || '') < start) return
           b.settled += n; b.settleRows += 1
           b.settledYear = String(t.trans_date || '').slice(0, 4)
           // Only OEXP is a worthless expiry. OEXC is an EXERCISE — the long turned
@@ -5587,7 +5594,10 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
     const rawLoss = raw.longsExpiredWorthless.totalPremiumPaid
     const grpLoss = grouped.longsExpiredWorthless.totalPremiumPaid
     res.json({
-      year,
+      year, start,
+      startNote: start === '2000-01-01'
+        ? 'No start given, so this counts every settlement ever. Pass ?start=2026-05-01 (the same startDate the Options YTD panel uses) for the comparable figure.'
+        : `Only settlements on or after ${start} are counted, matching the panel.`,
       // What Options YTD should have dropped by, if the grouped data is sound.
       // Only worthless expiries are losses; exercises became stock.
       expectedDropFromLongExpiries: -grouped.longsExpiredWorthless.totalLostToWorthlessExpiry,
