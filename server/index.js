@@ -5521,6 +5521,7 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
         if (String(t.trans_date || '').slice(0, 4) > year) return
         const b = bySym[t.symbol] || (bySym[t.symbol] = {
           symbol: t.symbol, bto: 0, sto: 0, stc: 0, btc: 0, settled: 0,
+          expired: 0, exercisedOrAssigned: 0,
           paid: 0, received: 0, settledYear: null, settleRows: 0,
         })
         const n = Math.abs(t.contracts || 1)
@@ -5528,7 +5529,16 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
         else if (tc === 'STO') { b.sto += n; b.received += Math.abs(t.amount || 0) }
         else if (tc === 'STC') b.stc += n
         else if (tc === 'BTC') b.btc += n
-        else { b.settled += n; b.settleRows += 1; b.settledYear = String(t.trans_date || '').slice(0, 4) }
+        else {
+          b.settled += n; b.settleRows += 1
+          b.settledYear = String(t.trans_date || '').slice(0, 4)
+          // Only OEXP is a worthless expiry. OEXC is an EXERCISE — the long turned
+          // into stock, so its premium is not a loss — and OASGN is assignment.
+          // Lumping all three together overstates what the settlement change can
+          // possibly have cost.
+          if (tc === 'OEXP') b.expired += n
+          else b.exercisedOrAssigned += n
+        }
       })
       const longs = [], shorts = []
       Object.values(bySym).forEach(b => {
@@ -5536,10 +5546,19 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
         // Longs first, remainder short — the same way getOpenOptionPositions decides.
         const settleLong = Math.min(b.settled, Math.max(0, b.bto - b.stc))
         const settleShort = Math.min(b.settled - settleLong, Math.max(0, b.sto - b.btc))
-        if (settleLong > 0) longs.push({
-          symbol: b.symbol, contracts: settleLong, settlementRows: b.settleRows,
-          premiumPaid: Math.round((b.bto > 0 ? b.paid / b.bto : 0) * settleLong * 100) / 100,
-        })
+        if (settleLong > 0) {
+          const perContract = b.bto > 0 ? b.paid / b.bto : 0
+          // Split the long settlement between worthless expiry and exercise, in
+          // the same proportion the contract's settlements were.
+          const expShare = b.settled > 0 ? b.expired / b.settled : 1
+          const expiredLong = settleLong * expShare
+          longs.push({
+            symbol: b.symbol, contracts: settleLong, settlementRows: b.settleRows,
+            premiumPaid: Math.round(perContract * settleLong * 100) / 100,
+            premiumLostToExpiry: Math.round(perContract * expiredLong * 100) / 100,
+            exercised: b.exercisedOrAssigned > 0,
+          })
+        }
         if (settleShort > 0) shorts.push({
           symbol: b.symbol, contracts: settleShort,
           premiumKept: Math.round((b.sto > 0 ? b.received / b.sto : 0) * settleShort * 100) / 100,
@@ -5547,7 +5566,14 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
       })
       const sum = (a, k) => Math.round(a.reduce((s, r) => s + r[k], 0) * 100) / 100
       return {
-        longsExpiredWorthless: { count: longs.length, contracts: longs.reduce((s, r) => s + r.contracts, 0), totalPremiumPaid: sum(longs, 'premiumPaid') },
+        longsExpiredWorthless: {
+          count: longs.length,
+          contracts: longs.reduce((s, r) => s + r.contracts, 0),
+          totalPremiumPaid: sum(longs, 'premiumPaid'),
+          // The only part that is a real loss from a worthless expiry.
+          totalLostToWorthlessExpiry: sum(longs, 'premiumLostToExpiry'),
+          exercisedContracts: longs.filter(r => r.exercised).length,
+        },
         shortsExpiredWorthless: { count: shorts.length, contracts: shorts.reduce((s, r) => s + r.contracts, 0), totalPremiumKept: sum(shorts, 'premiumKept') },
         _longs: longs,
       }
@@ -5563,7 +5589,9 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
     res.json({
       year,
       // What Options YTD should have dropped by, if the grouped data is sound.
-      expectedDropFromLongExpiries: -grpLoss,
+      // Only worthless expiries are losses; exercises became stock.
+      expectedDropFromLongExpiries: -grouped.longsExpiredWorthless.totalLostToWorthlessExpiry,
+      upperBoundIfEveryLongSettlementWereWorthless: -grpLoss,
       raw: { longs: raw.longsExpiredWorthless, shorts: raw.shortsExpiredWorthless },
       grouped: { longs: grouped.longsExpiredWorthless, shorts: grouped.shortsExpiredWorthless },
       groupingDistortion: {
