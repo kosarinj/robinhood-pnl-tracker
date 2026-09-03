@@ -3089,6 +3089,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           ticker, startDate: effectiveStart,
           realizedShortCalls: 0, realizedLongCalls: 0,
           realizedShortPuts: 0, realizedLongPuts: 0,
+          // The settlement slice of totalRealized — reported so the panel can
+          // show what expiries cost WITHOUT adding a term to Net. It is a
+          // subset, never an addend: Net stays Stock P&L + Stock Realized +
+          // Options Total.
+          realizedExpired: 0,
           totalRealized: 0, tradeCount: 0
         }
       }
@@ -3101,6 +3106,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       entry.tradeCount++
       if (isClosing && t._realizedPnl != null) {
         entry.totalRealized += t._realizedPnl
+        if (['OEXP', 'OASGN', 'OEXC'].includes(tc)) entry.realizedExpired += t._realizedPnl
         if (optionType === 'call') {
           if (t._closingShort) entry.realizedShortCalls += t._realizedPnl
           else entry.realizedLongCalls += t._realizedPnl
@@ -3256,6 +3262,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           realizedShortPuts: r2(e.realizedShortPuts),
           realizedLongPuts: r2(e.realizedLongPuts),
           totalRealized: r2(e.totalRealized),
+          // A SUBSET of totalRealized, not a separate term of Net.
+          realizedExpired: r2(e.realizedExpired),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),
           openUnrealizedPnL: openUnrealizedByTicker[e.ticker] != null ? r2(openUnrealizedByTicker[e.ticker]) : null,
           // Open P&L projected forward on theta alone (underlying held flat).
