@@ -25,6 +25,8 @@ const pnlColor = (n, isDark) => {
   return n > 0 ? '#22c55e' : '#ef4444'
 }
 
+const r2 = n => Math.round(n * 100) / 100
+
 /**
  * Where option premium actually went at expiry.
  *
@@ -33,6 +35,10 @@ const pnlColor = (n, isDark) => {
  * all for it. The totals here are what that correction is made of, and the
  * drill-down exists so a number that looks too big can be checked contract by
  * contract rather than taken on trust.
+ *
+ * Totals and rollups are derived from the SAME filtered rows the detail shows,
+ * so a search narrows every number on the panel together. Totals that ignored
+ * the filter would be the more confusing half of a search.
  */
 export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
   const { isDark } = useTheme()
@@ -42,6 +48,7 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
   const [groupBy, setGroupBy] = useState('month')
   const [openKey, setOpenKey] = useState(null)
   const [hideExercised, setHideExercised] = useState(true)
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -54,20 +61,66 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
       .catch(e => { setError(e.message); setLoading(false) })
   }, [broker, startDate])
 
-  const groups = useMemo(() => {
-    if (!data) return []
-    return groupBy === 'month' ? data.byMonth : data.byTicker
-  }, [data, groupBy])
+  // Space-separated terms, all of which must match somewhere on the row — so
+  // "pltr put" narrows to PLTR puts rather than everything mentioning either.
+  const rows = useMemo(() => {
+    const all = data?.rows || []
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (!terms.length) return all
+    return all.filter(r => {
+      const hay = [
+        r.symbol, r.ticker, r.type, r.side, r.outcome,
+        r.settledOn, fmtDate(r.settledOn), fmtMonth((r.settledOn || '').slice(0, 7)),
+        r.strike != null ? String(r.strike) : '',
+      ].join(' ').toLowerCase()
+      return terms.every(t => hay.includes(t))
+    })
+  }, [data, query])
 
-  // The rows behind whichever group is expanded.
+  const totals = useMemo(() => {
+    const worthless = rows.filter(r => r.outcome === 'expired worthless')
+    return {
+      contracts: r2(rows.reduce((s, r) => s + r.contracts, 0)),
+      realized: r2(worthless.reduce((s, r) => s + r.realized, 0)),
+      lostOnLongs: r2(worthless.filter(r => r.realized < 0).reduce((s, r) => s + r.realized, 0)),
+      keptOnShorts: r2(worthless.filter(r => r.realized > 0).reduce((s, r) => s + r.realized, 0)),
+      expiredWorthless: worthless.length,
+      exercisedOrAssigned: rows.length - worthless.length,
+    }
+  }, [rows])
+
+  // Rolled up here rather than taken from the server, so the search reaches them.
+  const groups = useMemo(() => {
+    const m = {}
+    rows.forEach(r => {
+      const k = groupBy === 'month' ? (r.settledOn || '').slice(0, 7) : r.ticker
+      if (!k) return
+      const e = m[k] || (m[k] = { key: k, contracts: 0, realized: 0, lostOnLongs: 0, keptOnShorts: 0, count: 0 })
+      e.count += 1
+      e.contracts += r.contracts
+      if (r.outcome === 'expired worthless') {
+        e.realized += r.realized
+        if (r.realized < 0) e.lostOnLongs += r.realized
+        else e.keptOnShorts += r.realized
+      }
+    })
+    const list = Object.values(m).map(e => ({
+      ...e, contracts: r2(e.contracts), realized: r2(e.realized),
+      lostOnLongs: r2(e.lostOnLongs), keptOnShorts: r2(e.keptOnShorts),
+    }))
+    return groupBy === 'month'
+      ? list.sort((a, b) => (a.key < b.key ? 1 : -1))
+      : list.sort((a, b) => a.realized - b.realized)
+  }, [rows, groupBy])
+
   const detail = useMemo(() => {
-    if (!data || !openKey) return []
+    if (!openKey) return []
     const match = groupBy === 'month'
       ? r => (r.settledOn || '').slice(0, 7) === openKey
       : r => r.ticker === openKey
-    const rows = data.rows.filter(match)
-    return hideExercised ? rows.filter(r => r.outcome === 'expired worthless') : rows
-  }, [data, openKey, groupBy, hideExercised])
+    const list = rows.filter(match)
+    return hideExercised ? list.filter(r => r.outcome === 'expired worthless') : list
+  }, [rows, openKey, groupBy, hideExercised])
 
   const card = {
     background: isDark ? '#1e293b' : '#fff',
@@ -87,17 +140,42 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
   if (error) return <div style={{ ...card, color: '#ef4444' }}>Couldn't load expirations: {error}</div>
   if (!data) return null
 
-  const t = data.totals
+  const total = data.rows.length
+  const filtering = rows.length !== total
 
   return (
     <div style={card}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <h3 style={{ margin: 0, fontSize: 15, color: isDark ? '#f1f5f9' : '#0f172a' }}>Expirations</h3>
         <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
           {data.start !== '2000-01-01' ? `since ${fmtDate(data.start)}` : 'all time'}
           {broker !== 'all' ? ` · ${broker}` : ''}
+          {filtering ? ` · ${rows.length} of ${total}` : ''}
         </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ position: 'relative' }}>
+            <input
+              type="text"
+              value={query}
+              onChange={e => { setQuery(e.target.value); setOpenKey(null) }}
+              placeholder="Search ticker, strike, month…"
+              style={{
+                fontSize: 12, padding: '5px 26px 5px 10px', borderRadius: 6, width: 200,
+                border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                background: isDark ? '#0f172a' : '#fff',
+                color: isDark ? '#e2e8f0' : '#0f172a',
+              }}
+            />
+            {query && (
+              <button onClick={() => setQuery('')} title="Clear search"
+                style={{
+                  position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+                  border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, lineHeight: 1,
+                  color: isDark ? '#64748b' : '#94a3b8', padding: '2px 4px',
+                }}>×</button>
+            )}
+          </div>
           {[['month', 'By month'], ['ticker', 'By ticker']].map(([k, label]) => (
             <button key={k} onClick={() => { setGroupBy(k); setOpenKey(null) }}
               style={{
@@ -114,10 +192,10 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
           side is the bought options, which is the whole point of this panel. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 14 }}>
         {[
-          ['Lost on bought options', t.lostOnLongs, 'expired worthless'],
-          ['Kept on sold options', t.keptOnShorts, 'expired worthless'],
-          ['Net from expiries', t.realized, `${t.expiredWorthless} settlements`],
-          ['Exercised / assigned', null, `${t.exercisedOrAssigned} — became stock, not a loss`],
+          ['Lost on bought options', totals.lostOnLongs, 'expired worthless'],
+          ['Kept on sold options', totals.keptOnShorts, 'expired worthless'],
+          ['Net from expiries', totals.realized, `${totals.expiredWorthless} settlements`],
+          ['Exercised / assigned', null, `${totals.exercisedOrAssigned} — became stock, not a loss`],
         ].map(([label, value, sub]) => (
           <div key={label} style={{
             padding: '10px 12px', borderRadius: 6,
@@ -150,7 +228,7 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
           <tbody>
             {groups.length === 0 && (
               <tr><td style={{ ...td, color: isDark ? '#64748b' : '#94a3b8' }} colSpan={6}>
-                No expirations in this period.
+                {query ? `Nothing matches "${query}".` : 'No expirations in this period.'}
               </td></tr>
             )}
             {groups.map(g => {
