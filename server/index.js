@@ -3478,12 +3478,44 @@ app.get('/api/debug-day-inputs', requireAuth, async (req, res) => {
       legs.push(row)
     }
 
+    // ── Short-entry audit ──
+    // Day Options scales each short leg by the contracts on its short_call_entries
+    // row, while the true open size is netted from the trades table. Those two
+    // disagreeing is invisible in every other figure and doubles a ticker's day
+    // move if the same sale is on file twice — so compare them head-on.
+    const shortEntries = databaseService.getShortCallEntries(userId, brokerFilter)
+    const netShortBySymbol = {}
+    open.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
+    const bySymbol = {}
+    shortEntries.forEach(e => {
+      const b = bySymbol[e.symbol] || (bySymbol[e.symbol] = { rows: 0, contracts: 0, ids: [] })
+      b.rows += 1
+      b.contracts += (e.contracts || 1)
+      b.ids.push(e.id)
+    })
+    const shortEntryAudit = Object.entries(bySymbol).map(([symbol, b]) => {
+      const netShort = netShortBySymbol[symbol] ?? 0
+      return {
+        symbol,
+        ticker: parseOptionDescription(symbol)?.ticker || null,
+        entryRows: b.rows,
+        entryContracts: b.contracts,
+        netShortFromTrades: netShort,
+        // >1 means Day Options is scaling this leg up by that factor.
+        overstatedBy: netShort > 0 ? Math.round((b.contracts / netShort) * 100) / 100 : null,
+        entryIds: b.ids,
+      }
+    }).filter(r => r.netShortFromTrades > 0 && r.entryContracts !== r.netShortFromTrades)
+      .sort((a, b) => (b.overstatedBy || 0) - (a.overstatedBy || 0))
+
     const stockDayTotal = stocks.reduce((s, r) => s + (r.dayStockPnl || 0), 0)
     res.json({
       success: true, broker: brokerFilter || 'all',
       polygonEnabled: !!polygonKey,
       stockDayTotal: Math.round(stockDayTotal * 100) / 100,
       stocksMissingPrice: stocks.filter(s => s.priceMissing).map(s => s.ticker),
+      shortEntryAudit,
+      shortEntryAuditNote: 'Symbols where short_call_entries disagrees with the net short from trades. overstatedBy 2 means Day Options counts that leg twice.',
       stocks, legs,
       note: 'quoteMid = live mid; dayClose = today\'s print; prevClose = yesterday\'s. A leg with only dayClose/prevClose and no quoteMid is the case that used to invent moves.',
     })
