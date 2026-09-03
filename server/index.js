@@ -3454,7 +3454,14 @@ app.get('/api/debug-day-inputs', requireAuth, async (req, res) => {
 
     // The three marks each leg is judged on, straight from Polygon.
     const legs = []
-    for (const p of active.slice(0, 60)) {
+    // ?ticker=PLTR narrows to one underlying. The 60-leg cap is ordered by
+    // symbol, so without a filter everything past the N's is invisible — PLTR,
+    // RDDT, TQQQ and UBER all fell off the end of the list they were needed in.
+    const wantTicker = (req.query.ticker || '').trim().toUpperCase()
+    const legSource = wantTicker
+      ? active.filter(p => parseOptionDescription(p.symbol)?.ticker === wantTicker)
+      : active
+    for (const p of legSource.slice(0, wantTicker ? 200 : 60)) {
       const parsed = parseOptionDescription(p.symbol)
       const polyTicker = toPolygonTicker(p.symbol)
       const row = {
