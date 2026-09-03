@@ -2423,7 +2423,22 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // selected broker, which is the same rule the stock P&L follows.
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
 
-    const allTrades0 = databaseService.getOptionTradesForYTD(userId)
+    // RAW trades, not getOptionTradesForYTD.
+    //
+    // That query groups by (date, symbol, code, is_buy, amount) and reads
+    // `contracts` off one arbitrary row per group instead of summing, so
+    // same-day fills at the same price collapse into one and every settlement
+    // (amount = 0) collapses with the day's others. Lots then go missing from
+    // the LIFO stack, and a close that cannot be filled books NOTHING — the
+    // `left === 0` guard drops it in silence.
+    //
+    // Measured on PLTR: grouped read -4,884.95 with 35 closes dropped and 78
+    // contracts lost; raw reads -3,462.15 with none dropped, against -3,434.48
+    // from the independent cash identity (cash + open long cost − open short
+    // premium). The dropped closes were mostly winning STCs, which is why the
+    // panel came out MORE negative than the cash could account for on every
+    // ticker checked.
+    const allTrades0 = databaseService.getRawOptionTrades(userId)
     let allTrades = asOf ? allTrades0.filter(t => t.trans_date <= asOf) : allTrades0
     if (brokerFilter) allTrades = allTrades.filter(t => (t.broker || 'robinhood') === brokerFilter)
 
