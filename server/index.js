@@ -103,6 +103,48 @@ function marketMarkIsToday(snap) {
 // Starter (delayed) plan the snapshot's last_quote is null, but /v3/quotes still
 // serves the (15-min delayed) NBBO — this is the actual market mid. Returns 0 if
 // unavailable (no quote, or key not entitled → caller falls back to the model).
+/**
+ * Allocate a symbol's netted open short position across its sale entries.
+ *
+ * short_call_entries is a log of SALES, not a position. Buy some back and the
+ * entries still total what was sold, so sizing exposure from them overstates a
+ * partly-closed position — HOOD showed 3 contracts against an actual 2 and its
+ * Day P&L came out half again too large.
+ *
+ * Newest sale first, because a re-sold contract is the position held now; the
+ * older entry it replaced is the one that was closed. A partly-covered entry
+ * keeps the part still open rather than being dropped — half a position is
+ * still a position.
+ *
+ * Returns { [entryId]: openContracts }. Entries past the allocation get 0.
+ *
+ * /api/short-calls worked this out first and the other two callers kept an
+ * older rescale that only fired for single-entry symbols and only corrected
+ * undercounts. This is that logic, shared, so the tracker and the P&L figures
+ * can't drift apart again.
+ */
+function allocateOpenShortContracts(entries, openShortSymbols, netShortBySymbol) {
+  const openContractsByEntry = {}
+  const bySymbol = {}
+  entries.forEach(e => {
+    if (!openShortSymbols.has(e.symbol)) return
+    ;(bySymbol[e.symbol] = bySymbol[e.symbol] || []).push(e)
+  })
+  Object.entries(bySymbol).forEach(([sym, list]) => {
+    let remaining = netShortBySymbol[sym] || 0
+    list
+      .slice()
+      .sort((a, b) => String(b.sale_date || '').localeCompare(String(a.sale_date || '')) || (b.id - a.id))
+      .forEach(e => {
+        const want = Math.abs(e.contracts || 1)
+        const take = Math.max(0, Math.min(want, remaining))
+        openContractsByEntry[e.id] = take
+        remaining -= take
+      })
+  })
+  return openContractsByEntry
+}
+
 async function fetchOptionQuoteMid(polygonTicker, polygonKey) {
   const q = await fetchOptionQuote(polygonTicker, polygonKey)
   return q.mid
@@ -2438,9 +2480,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         return `${p.year}-${p.month}-${p.day}` >= todayStrLocal()
       }
       const openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol) && notExpired(e.symbol))
-      // Only rescale to net_short when a symbol has a single open entry (avoids double-count).
-      const openEntryCount = {}
-      openEntries.forEach(e => { openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
+      // How many of each entry's contracts are still open, netted from trades.
+      const openContractsByEntry = allocateOpenShortContracts(
+        openEntries, openShortSymbols, netShortBySymbol)
 
       // Open LONG legs. Everything below used to run off short_call_entries only,
       // so a bought contract contributed nothing to Open P&L, Day P&L, the theta
@@ -2565,11 +2607,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       openEntries.forEach(entry => {
         const ticker = entry.ticker
         if (!ticker) return
-        // Scale to the ACTUAL open contract count when the stored entry undercounts
-        // (split-fill collapse) and it's the only entry for this symbol.
+        // Size from the position still OPEN, not from what was once sold. The
+        // old rescale only fired for single-entry symbols and only corrected
+        // undercounts, so a partly-bought-back contract stayed overstated.
         const entryContracts = entry.contracts || 1
-        const netShort = netShortBySymbol[entry.symbol] || entryContracts
-        const effContracts = (openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
+        const alloc = openContractsByEntry[entry.id]
+        const effContracts = alloc != null ? alloc : entryContracts
         const shares = effContracts * 100
         const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
         const parsed = parseOptionDescription(entry.symbol)
@@ -4515,9 +4558,6 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
     )
     const netShortBySymbol = {}
     openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
-    // Count open entries per symbol so we only rescale to net_short for single-entry symbols.
-    const openEntryCount = {}
-    entries.forEach(e => { if (openShortSymbols.has(e.symbol)) openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
 
     // ── Which ENTRIES are still open ─────────────────────────────────────
     //
@@ -4531,28 +4571,8 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
     // Newest-first because a re-sold contract is the position actually held
     // now; the older entry it replaced is the one that was closed. Entries past
     // the allocation are marked closed.
-    const openContractsByEntry = {}
-    {
-      const bySymbol = {}
-      entries.forEach(e => {
-        if (!openShortSymbols.has(e.symbol)) return
-        ;(bySymbol[e.symbol] = bySymbol[e.symbol] || []).push(e)
-      })
-      Object.entries(bySymbol).forEach(([sym, list]) => {
-        let remaining = netShortBySymbol[sym] || 0
-        list
-          .slice()
-          .sort((a, b) => String(b.sale_date || '').localeCompare(String(a.sale_date || '')) || (b.id - a.id))
-          .forEach(e => {
-            const want = Math.abs(e.contracts || 1)
-            // A partly-covered entry keeps the part that's still open rather
-            // than being dropped entirely — half a position is still a position.
-            const take = Math.max(0, Math.min(want, remaining))
-            openContractsByEntry[e.id] = take
-            remaining -= take
-          })
-      })
-    }
+    const openContractsByEntry = allocateOpenShortContracts(
+      entries, openShortSymbols, netShortBySymbol)
 
     // ── Covering long calls ──────────────────────────────────────────────
     // short_call_entries only ever holds STO calls, so the long leg of a
@@ -4685,13 +4705,10 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
       // entry undercounts (split-fill collapse) and it's the only open entry for the
       // symbol, scale to the actual open contract count from trades (net_short).
       const entryContracts = entry.contracts || 1
-      const netShort = netShortBySymbol[entry.symbol] || entryContracts
       // How many of this entry's contracts are actually still open. The
       // allocation above knows, so prefer it; the old rescale only worked when
       // a symbol had exactly one entry and guessed otherwise.
-      const effContracts = isOpen && entryOpenContracts > 0
-        ? entryOpenContracts
-        : (isOpen && openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
+      const effContracts = isOpen && entryOpenContracts > 0 ? entryOpenContracts : entryContracts
       const shares = effContracts * 100
       const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
       const callGainPerShare = (currentOptionPrice != null) ? (premiumPerShare - currentOptionPrice) : null
@@ -5462,8 +5479,10 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
     openPositions.forEach(p => { netShortBySymbol[p.symbol] = p.net_short })
     const openShortSymbols = new Set(openPositions.filter(p => p.net_short > 0).map(p => p.symbol))
     let openEntries = shortEntries.filter(e => openShortSymbols.has(e.symbol))
-    const openEntryCount = {}
-    openEntries.forEach(e => { openEntryCount[e.symbol] = (openEntryCount[e.symbol] || 0) + 1 })
+    // Allocated before the ticker filter, so narrowing to one underlying can't
+    // change the sizing — this endpoint exists to explain the real number.
+    const openContractsByEntry = allocateOpenShortContracts(
+      openEntries, openShortSymbols, netShortBySymbol)
     if (ticker) openEntries = openEntries.filter(e => (e.ticker || '').toUpperCase() === ticker)
     const rows = []
     let total = 0
@@ -5471,8 +5490,8 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
       const polyTicker = toPolygonTicker(entry.symbol)
       const parsed = parseOptionDescription(entry.symbol)
       const entryContracts = entry.contracts || 1
-      const netShort = netShortBySymbol[entry.symbol] || entryContracts
-      const effContracts = (openEntryCount[entry.symbol] === 1 && netShort > entryContracts) ? netShort : entryContracts
+      const alloc = openContractsByEntry[entry.id]
+      const effContracts = alloc != null ? alloc : entryContracts
       const shares = effContracts * 100
       const premiumPerShare = entryContracts > 0 ? entry.premium / (entryContracts * 100) : entry.premium
       let price = null, source = null
