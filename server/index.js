@@ -5491,6 +5491,95 @@ app.get('/api/health', (req, res) => {
 // Debug: show the raw Polygon snapshot + computed mark for open short calls,
 // so we can see exactly why an option price is/ isn't updating (e.g. MRVL/CRWV).
 // Usage: /api/debug-option-mark?symbol=MRVL  (substring match; omit for all)
+/**
+ * GET /api/debug-expiry-losses?year=2026
+ *
+ * What the settlement change is actually made of, and whether the numbers it
+ * runs on are trustworthy.
+ *
+ * Reports the same totals twice: once from the RAW trades and once from the
+ * grouped query the P&L actually uses. getOptionTradesForYTD groups by
+ * (date, symbol, code, is_buy, amount) and reads `contracts` off one arbitrary
+ * row per group instead of summing — and every settlement has amount = 0, so a
+ * day's expiries on one contract collapse into a single row. If `raw` and
+ * `grouped` disagree, the realized figure is being computed on flattened data
+ * and the drop in Options YTD is not simply the missing expiry losses.
+ *
+ * Read-only.
+ */
+app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const year = String(req.query.year || new Date().getFullYear())
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+
+    const tally = (rows) => {
+      const bySym = {}
+      rows.forEach(t => {
+        const tc = (t.trans_code || '').toUpperCase()
+        if (!['BTO','STO','STC','BTC','OEXP','OASGN','OEXC'].includes(tc)) return
+        if (String(t.trans_date || '').slice(0, 4) > year) return
+        const b = bySym[t.symbol] || (bySym[t.symbol] = {
+          symbol: t.symbol, bto: 0, sto: 0, stc: 0, btc: 0, settled: 0,
+          paid: 0, received: 0, settledYear: null, settleRows: 0,
+        })
+        const n = Math.abs(t.contracts || 1)
+        if (tc === 'BTO') { b.bto += n; b.paid += Math.abs(t.amount || 0) }
+        else if (tc === 'STO') { b.sto += n; b.received += Math.abs(t.amount || 0) }
+        else if (tc === 'STC') b.stc += n
+        else if (tc === 'BTC') b.btc += n
+        else { b.settled += n; b.settleRows += 1; b.settledYear = String(t.trans_date || '').slice(0, 4) }
+      })
+      const longs = [], shorts = []
+      Object.values(bySym).forEach(b => {
+        if (!b.settled || b.settledYear !== year) return
+        // Longs first, remainder short — the same way getOpenOptionPositions decides.
+        const settleLong = Math.min(b.settled, Math.max(0, b.bto - b.stc))
+        const settleShort = Math.min(b.settled - settleLong, Math.max(0, b.sto - b.btc))
+        if (settleLong > 0) longs.push({
+          symbol: b.symbol, contracts: settleLong, settlementRows: b.settleRows,
+          premiumPaid: Math.round((b.bto > 0 ? b.paid / b.bto : 0) * settleLong * 100) / 100,
+        })
+        if (settleShort > 0) shorts.push({
+          symbol: b.symbol, contracts: settleShort,
+          premiumKept: Math.round((b.sto > 0 ? b.received / b.sto : 0) * settleShort * 100) / 100,
+        })
+      })
+      const sum = (a, k) => Math.round(a.reduce((s, r) => s + r[k], 0) * 100) / 100
+      return {
+        longsExpiredWorthless: { count: longs.length, contracts: longs.reduce((s, r) => s + r.contracts, 0), totalPremiumPaid: sum(longs, 'premiumPaid') },
+        shortsExpiredWorthless: { count: shorts.length, contracts: shorts.reduce((s, r) => s + r.contracts, 0), totalPremiumKept: sum(shorts, 'premiumKept') },
+        _longs: longs,
+      }
+    }
+
+    const raw = tally(databaseService.getRawOptionTrades(userId, brokerFilter))
+    const groupedRows = databaseService.getOptionTradesForYTD(userId)
+      .filter(t => !brokerFilter || (t.broker || 'robinhood') === brokerFilter)
+    const grouped = tally(groupedRows)
+
+    const rawLoss = raw.longsExpiredWorthless.totalPremiumPaid
+    const grpLoss = grouped.longsExpiredWorthless.totalPremiumPaid
+    res.json({
+      year,
+      // What Options YTD should have dropped by, if the grouped data is sound.
+      expectedDropFromLongExpiries: -grpLoss,
+      raw: { longs: raw.longsExpiredWorthless, shorts: raw.shortsExpiredWorthless },
+      grouped: { longs: grouped.longsExpiredWorthless, shorts: grouped.shortsExpiredWorthless },
+      groupingDistortion: {
+        premiumDifference: Math.round((rawLoss - grpLoss) * 100) / 100,
+        contractsDifference: raw.longsExpiredWorthless.contracts - grouped.longsExpiredWorthless.contracts,
+        verdict: Math.abs(rawLoss - grpLoss) < 1
+          ? 'grouped matches raw — the drop is the real expiry losses'
+          : 'grouped DISAGREES with raw — realized is computed on flattened rows, so the drop is not simply the missing losses',
+      },
+      biggestLongExpiries: raw._longs.sort((a, b) => b.premiumPaid - a.premiumPaid).slice(0, 40),
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/debug-option-mark', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId

@@ -2699,6 +2699,31 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * Every option trade, UNGROUPED, with true contract counts.
+   *
+   * getOptionTradesForYTD groups by (date, symbol, code, is_buy, amount) and then
+   * reads `contracts` off one arbitrary row of each group rather than summing it.
+   * Same-day fills at the same price collapse into one, and every settlement has
+   * amount = 0 so a day's expiries collapse together too. This is the unflattened
+   * truth to compare that against.
+   */
+  getRawOptionTrades(userId = 1, broker = null) {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy,
+               COALESCE(contracts, 1) AS contracts, COALESCE(broker,'robinhood') AS broker
+        FROM trades
+        WHERE is_option = 1 AND user_id = ?
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC, id ASC
+      `).all(...[userId, ...(broker ? [broker] : [])])
+    } catch (e) {
+      console.error('Error getting raw option trades:', e)
+      return []
+    }
+  }
+
   // Raw (ungrouped) option trades for one ticker — for diagnosing premium/P&L issues.
   getRawOptionTradesForTicker(userId = 1, ticker = '') {
     try {
