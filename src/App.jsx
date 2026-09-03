@@ -23,6 +23,7 @@ import StrategyPnLSplit from './components/StrategyPnLSplit'
 import YTDPositionsPanel from './components/YTDPositionsPanel'
 import RollCandidatesAlert from './components/RollCandidatesAlert'
 import ShortCallTracker from './components/ShortCallTracker'
+import ExpirationsPanel from './components/ExpirationsPanel'
 import VolScanner from './components/VolScanner'
 import TaxCenter from './components/TaxCenter'
 import AvgCostCalculator from './components/AvgCostCalculator'
@@ -2578,6 +2579,7 @@ function AuthenticatedApp({ user }) {
           <RollCandidatesAlert broker={brokerFilter} />
           <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
           <ShortCallTracker broker={brokerFilter} />
+          <ExpirationsPanel broker={brokerFilter} />
         </div>
       )}
 

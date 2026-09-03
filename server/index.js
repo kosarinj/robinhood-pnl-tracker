@@ -5492,6 +5492,119 @@ app.get('/api/health', (req, res) => {
 // so we can see exactly why an option price is/ isn't updating (e.g. MRVL/CRWV).
 // Usage: /api/debug-option-mark?symbol=MRVL  (substring match; omit for all)
 /**
+ * GET /api/expirations?start=YYYY-MM-DD&broker=
+ *
+ * Every option that ended at expiry, with what it cost or kept, plus month and
+ * ticker rollups for the drill-down.
+ *
+ * Built on RAW trades rather than getOptionTradesForYTD: that query groups by
+ * (date, symbol, code, is_buy, amount) and reads `contracts` off one arbitrary
+ * row per group instead of summing, which silently loses contracts — 15 of them
+ * across this book. A screen about expiries should count every one.
+ *
+ * Direction is decided LONGS FIRST, matching getOpenOptionPositions ("an
+ * expiring long is the common case"). The realized calculation still decides it
+ * shorts-first, which is a known inconsistency; where the two disagree this
+ * screen is the one that matches the position netting.
+ */
+app.get('/api/expirations', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const start = (req.query.start || '2000-01-01').slice(0, 10)
+    const end = (req.query.end || '9999-12-31').slice(0, 10)
+
+    const bySym = {}
+    databaseService.getRawOptionTrades(userId, brokerFilter).forEach(t => {
+      const tc = (t.trans_code || '').toUpperCase()
+      if (!['BTO','STO','STC','BTC','OEXP','OASGN','OEXC'].includes(tc)) return
+      const b = bySym[t.symbol] || (bySym[t.symbol] = {
+        symbol: t.symbol, bto: 0, sto: 0, stc: 0, btc: 0,
+        paid: 0, received: 0, settlements: [],
+      })
+      const n = Math.abs(t.contracts || 1)
+      if (tc === 'BTO') { b.bto += n; b.paid += Math.abs(t.amount || 0) }
+      else if (tc === 'STO') { b.sto += n; b.received += Math.abs(t.amount || 0) }
+      else if (tc === 'STC') b.stc += n
+      else if (tc === 'BTC') b.btc += n
+      else b.settlements.push({ date: String(t.trans_date || '').slice(0, 10), code: tc, contracts: n })
+    })
+
+    const rows = []
+    Object.values(bySym).forEach(b => {
+      if (!b.settlements.length) return
+      const parsed = parseOptionDescription(b.symbol)
+      const totalSettled = b.settlements.reduce((s, x) => s + x.contracts, 0)
+      // Longs first, remainder short — the same order the position netting uses.
+      const settleLong = Math.min(totalSettled, Math.max(0, b.bto - b.stc))
+      const settleShort = Math.min(totalSettled - settleLong, Math.max(0, b.sto - b.btc))
+      const perLong = b.bto > 0 ? b.paid / b.bto : 0
+      const perShort = b.sto > 0 ? b.received / b.sto : 0
+      b.settlements.forEach(st => {
+        if (st.date < start || st.date > end) return
+        const share = totalSettled > 0 ? st.contracts / totalSettled : 0
+        const longC = settleLong * share, shortC = settleShort * share
+        // A worthless expiry loses the whole premium on a long and keeps the
+        // whole premium on a short. An exercise or assignment turned into stock,
+        // so its premium is not a loss and is reported separately.
+        const worthless = st.code === 'OEXP'
+        const pnl = worthless ? (shortC * perShort) - (longC * perLong) : 0
+        rows.push({
+          symbol: b.symbol,
+          ticker: parsed?.ticker || null,
+          type: parsed?.type || null,
+          strike: parsed?.strike ?? null,
+          expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : null,
+          settledOn: st.date,
+          outcome: worthless ? 'expired worthless' : (st.code === 'OEXC' ? 'exercised' : 'assigned'),
+          side: longC >= shortC ? 'long' : 'short',
+          contracts: Math.round((longC + shortC) * 100) / 100,
+          premium: Math.round(((longC * perLong) + (shortC * perShort)) * 100) / 100,
+          realized: Math.round(pnl * 100) / 100,
+        })
+      })
+    })
+
+    rows.sort((a, b) => (a.settledOn < b.settledOn ? 1 : a.settledOn > b.settledOn ? -1 : 0))
+    const r2 = n => Math.round(n * 100) / 100
+    const roll = (keyFn) => {
+      const m = {}
+      rows.forEach(r => {
+        const k = keyFn(r); if (!k) return
+        const e = m[k] || (m[k] = { key: k, contracts: 0, realized: 0, lostOnLongs: 0, keptOnShorts: 0, count: 0 })
+        e.count += 1
+        e.contracts += r.contracts
+        e.realized += r.realized
+        if (r.realized < 0) e.lostOnLongs += r.realized
+        else e.keptOnShorts += r.realized
+      })
+      return Object.values(m).map(e => ({
+        ...e, contracts: r2(e.contracts), realized: r2(e.realized),
+        lostOnLongs: r2(e.lostOnLongs), keptOnShorts: r2(e.keptOnShorts),
+      }))
+    }
+
+    const worthless = rows.filter(r => r.outcome === 'expired worthless')
+    res.json({
+      start, end, broker: brokerFilter || 'all',
+      totals: {
+        contracts: r2(rows.reduce((s, r) => s + r.contracts, 0)),
+        realized: r2(rows.reduce((s, r) => s + r.realized, 0)),
+        lostOnLongs: r2(worthless.filter(r => r.realized < 0).reduce((s, r) => s + r.realized, 0)),
+        keptOnShorts: r2(worthless.filter(r => r.realized > 0).reduce((s, r) => s + r.realized, 0)),
+        expiredWorthless: worthless.length,
+        exercisedOrAssigned: rows.length - worthless.length,
+      },
+      byMonth: roll(r => (r.settledOn || '').slice(0, 7)).sort((a, b) => (a.key < b.key ? 1 : -1)),
+      byTicker: roll(r => r.ticker).sort((a, b) => a.realized - b.realized),
+      rows,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/debug-expiry-losses?year=2026
  *
  * What the settlement change is actually made of, and whether the numbers it
