@@ -53,9 +53,40 @@ function optionMarkFromSnapshot(snap) {
 // when the data plan doesn't serve option quotes (common here). Callers then fall
 // back to the Black–Scholes model mark so every contract is priced consistently,
 // rather than mixing smooth model marks with jumpy single-trade prints.
+/**
+ * The most current MARKET price for a contract: a live quote midpoint, or
+ * failing that a trade that printed TODAY.
+ *
+ * The today's-trade half was removed on 2026-07-01 (dfd58ae) so every contract
+ * would price through one smooth model rather than mixing in "jumpy" single
+ * prints. That was explicitly a bet that "a real quote still wins automatically
+ * if the plan is upgraded" — and the plan answers /v3/quotes with 403 Not
+ * Entitled, so the quote never arrives and this function could only ever return
+ * 0. The model became the primary mark by accident rather than by choice.
+ *
+ * A print from today is real market data about this contract. A model is an
+ * inference from the underlying. Preferring the inference to the observation,
+ * because the observation is occasionally jumpy, is the wrong way round — and it
+ * is what 66d2ddb found first, when a modelled MRVL LEAP read 74 against a live 86.
+ *
+ * A print from an EARLIER day is NOT covered here: that is a frozen number, and
+ * staleOptionMark handles it below the model, which is right.
+ */
 function freshOptionMark(snap) {
-  const q = snap?.last_quote || {}
-  return q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0)
+  if (!snap) return 0
+  const q = snap.last_quote || {}
+  const qMid = q.midpoint || (q.bid && q.ask ? (q.bid + q.ask) / 2 : 0)
+  if (qMid > 0) return qMid
+  const lt = snap.last_trade || {}
+  const price = lt.price || 0
+  if (!(price > 0)) return 0
+  // Polygon sends nanoseconds; older payloads used `t` in milliseconds.
+  const rawTs = lt.sip_timestamp ?? lt.participant_timestamp ?? lt.t ?? 0
+  if (!rawTs) return 0
+  const ms = Number(rawTs) > 1e15 ? Number(rawTs) / 1e6 : Number(rawTs)
+  if (!Number.isFinite(ms) || ms <= 0) return 0
+  return new Date(ms).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10)
+    ? price : 0
 }
 function staleOptionMark(snap) {
   if (!snap) return 0
