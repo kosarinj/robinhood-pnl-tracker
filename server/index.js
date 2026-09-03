@@ -5500,6 +5500,108 @@ app.get('/api/health', (req, res) => {
 // so we can see exactly why an option price is/ isn't updating (e.g. MRVL/CRWV).
 // Usage: /api/debug-option-mark?symbol=MRVL  (substring match; omit for all)
 /**
+ * GET /api/debug-reconcile?ticker=MRVL&start=YYYY-MM-DD
+ *
+ * Reconciles a hand-summed cash total against the panel's Options Total.
+ *
+ * Adding up BTO/STO/BTC/STC from the CSV gives the CASH that moved. Options
+ * Total is realized P&L on positions that actually CLOSED. They are different
+ * quantities and they differ by exactly the still-open positions:
+ *
+ *   cash = realized(closed) − cost of open longs + premium of open shorts
+ *
+ * A short call sold but not yet closed has its whole premium in the cash sum
+ * and nothing in realized — it is not earned until the contract is closed or
+ * expires. Same for a long still held: its cost is out of pocket but its loss
+ * is not booked.
+ *
+ * Expiries need no separate term, which is the thing that makes hand-summing
+ * feel like it should work: a bought option that expired worthless already has
+ * its full cost in the BTO line and its settlement is a zero. The panel books
+ * the same money as an explicit −premium at expiry instead. Same answer, shown
+ * differently.
+ *
+ * Read-only.
+ */
+app.get('/api/debug-reconcile', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const ticker = (req.query.ticker || '').toUpperCase()
+    if (!ticker) return res.status(400).json({ error: 'Pass ?ticker=MRVL' })
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const start = (req.query.start || '2000-01-01').slice(0, 10)
+
+    // Signed cash: money out is negative, money in positive.
+    const SIGN = { BTO: -1, BTC: -1, STO: +1, STC: +1, OEXP: 0, OASGN: 0, OEXC: +1 }
+    const trades = databaseService.getRawOptionTrades(userId, brokerFilter)
+      .filter(t => (parseOptionDescription(t.symbol)?.ticker || '') === ticker)
+      .filter(t => String(t.trans_date || '') >= start)
+
+    const byCode = {}
+    const bySym = {}
+    let cash = 0
+    trades.forEach(t => {
+      const tc = (t.trans_code || '').toUpperCase()
+      if (!(tc in SIGN)) return
+      const amt = Math.abs(t.amount || 0) * SIGN[tc]
+      cash += amt
+      const c = byCode[tc] || (byCode[tc] = { code: tc, trades: 0, contracts: 0, cash: 0 })
+      c.trades += 1; c.contracts += Math.abs(t.contracts || 1); c.cash += amt
+      const b = bySym[t.symbol] || (bySym[t.symbol] = { symbol: t.symbol, cash: 0, bto: 0, sto: 0, stc: 0, btc: 0, settled: 0 })
+      b.cash += amt
+      if (tc === 'BTO') b.bto += Math.abs(t.contracts || 1)
+      else if (tc === 'STO') b.sto += Math.abs(t.contracts || 1)
+      else if (tc === 'STC') b.stc += Math.abs(t.contracts || 1)
+      else if (tc === 'BTC') b.btc += Math.abs(t.contracts || 1)
+      else b.settled += Math.abs(t.contracts || 1)
+    })
+
+    // What is still open, and what it is carrying.
+    const open = databaseService.getOpenOptionPositions(userId, brokerFilter)
+      .filter(p => (parseOptionDescription(p.symbol)?.ticker || '') === ticker)
+    let openLongCost = 0, openShortPremium = 0
+    const openRows = open.map(p => {
+      const costPer = p.bto_contracts > 0 ? Math.abs(p.total_paid) / p.bto_contracts : 0
+      const premPer = p.sto_contracts > 0 ? Math.abs(p.total_received) / p.sto_contracts : 0
+      const longCost = p.net_long * costPer
+      const shortPrem = p.net_short * premPer
+      openLongCost += longCost
+      openShortPremium += shortPrem
+      return {
+        symbol: p.symbol, netLong: p.net_long, netShort: p.net_short,
+        costOfOpenLongs: Math.round(longCost * 100) / 100,
+        premiumOfOpenShorts: Math.round(shortPrem * 100) / 100,
+      }
+    })
+
+    const r2 = n => Math.round(n * 100) / 100
+    // Rearranged from cash = realized − openLongCost + openShortPremium.
+    const impliedRealized = cash + openLongCost - openShortPremium
+    res.json({
+      ticker, start, broker: brokerFilter || 'all',
+      yourCashSum: r2(cash),
+      cashByCode: Object.values(byCode).map(c => ({ ...c, cash: r2(c.cash) })),
+      stillOpen: {
+        rows: openRows,
+        costOfOpenLongs: r2(openLongCost),
+        premiumOfOpenShorts: r2(openShortPremium),
+      },
+      impliedOptionsTotal: r2(impliedRealized),
+      identity: 'cash = realized(closed) − costOfOpenLongs + premiumOfOpenShorts, '
+              + 'so Options Total should equal cash + costOfOpenLongs − premiumOfOpenShorts',
+      note: 'Compare impliedOptionsTotal with the Options Total on the YTD panel. '
+          + 'A gap between your hand-summed cash and Options Total is normally the open '
+          + 'positions: premium collected on a short you still hold is cash in hand but is '
+          + 'not realized until it closes or expires. Expiries need no term of their own — '
+          + 'the cost is already in the BTO line.',
+      bySymbol: Object.values(bySym).map(b => ({ ...b, cash: r2(b.cash) })).sort((a, b) => a.cash - b.cash),
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/expirations?start=YYYY-MM-DD&broker=
  *
  * Every option that ended at expiry, with what it cost or kept, plus month and
