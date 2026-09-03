@@ -2454,12 +2454,21 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         stacks.long.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
       } else if (tc === 'STO') {
         stacks.short.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
-      } else if (['OEXP', 'OASGN', 'OEXC'].includes(tc) && !corrected) {
-        // Legacy: a settlement's symbol used to carry an "Option Expiration for"
-        // prefix, so it never matched the contract it closed and booked nothing.
-        // Skipped rather than matched, to keep realized exactly as it read.
-        return
       } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+        // Settlements book on BOTH bases now.
+        //
+        // The legacy basis used to skip them. That was a faithful reproduction of
+        // an older bug — a settlement's symbol carried an "Option Expiration for"
+        // prefix, so it never matched the contract it closed — kept deliberately
+        // so the figure read as it always had. It was calibrated on a book whose
+        // expiries were mostly SHORT calls expiring worthless, where booking
+        // nothing and keeping the premium land in roughly the same place.
+        //
+        // It is wrong for bought options. A long that expires out of the money is
+        // a real loss of the whole premium, and skipping it made those losses
+        // disappear from Options YTD entirely — a weekly habit of cheap OTM puts
+        // put thousands a year into that gap while the Dashboard, on the corrected
+        // basis, booked them correctly all along.
         let closingShort, stack
         if (tc === 'BTC') { stack = stacks.short; closingShort = true }
         else if (tc === 'STC' || tc === 'OEXC') { stack = stacks.long; closingShort = false }
