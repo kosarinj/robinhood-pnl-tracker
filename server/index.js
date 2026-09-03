@@ -5574,6 +5574,29 @@ app.get('/api/debug-reconcile', requireAuth, async (req, res) => {
       }
     })
 
+    // The realized walk does NOT run on these raw rows — it runs on
+    // getOptionTradesForYTD, which groups by (date, symbol, code, is_buy,
+    // amount) and takes `contracts` from one arbitrary row per group instead of
+    // summing. Same-day fills at the same price collapse, and every settlement
+    // has amount = 0 so a day's expiries on one contract collapse too. Measure
+    // what that costs for this ticker: any difference here feeds straight into
+    // Options Total.
+    let groupedCash = 0, groupedContracts = 0
+    const groupedByCode = {}
+    databaseService.getOptionTradesForYTD(userId)
+      .filter(t => !brokerFilter || (t.broker || 'robinhood') === brokerFilter)
+      .filter(t => (parseOptionDescription(t.symbol)?.ticker || '') === ticker)
+      .filter(t => String(t.trans_date || '') >= start)
+      .forEach(t => {
+        const tc = (t.trans_code || '').toUpperCase()
+        if (!(tc in SIGN)) return
+        groupedCash += Math.abs(t.amount || 0) * SIGN[tc]
+        groupedContracts += Math.abs(t.contracts || 1)
+        const c = groupedByCode[tc] || (groupedByCode[tc] = { code: tc, trades: 0, contracts: 0 })
+        c.trades += 1; c.contracts += Math.abs(t.contracts || 1)
+      })
+    const rawContracts = trades.reduce((n, t) => n + Math.abs(t.contracts || 1), 0)
+
     const r2 = n => Math.round(n * 100) / 100
     // Rearranged from cash = realized − openLongCost + openShortPremium.
     const impliedRealized = cash + openLongCost - openShortPremium
@@ -5587,6 +5610,16 @@ app.get('/api/debug-reconcile', requireAuth, async (req, res) => {
         premiumOfOpenShorts: r2(openShortPremium),
       },
       impliedOptionsTotal: r2(impliedRealized),
+      grouping: {
+        rawCash: r2(cash), groupedCash: r2(groupedCash),
+        cashLostToGrouping: r2(cash - groupedCash),
+        rawContracts, groupedContracts,
+        contractsLostToGrouping: rawContracts - groupedContracts,
+        byCode: Object.values(groupedByCode),
+        verdict: Math.abs(cash - groupedCash) < 0.01 && rawContracts === groupedContracts
+          ? 'grouping loses nothing on this ticker'
+          : 'the realized walk sees LESS than the raw trades — this feeds straight into Options Total',
+      },
       identity: 'cash = realized(closed) − costOfOpenLongs + premiumOfOpenShorts, '
               + 'so Options Total should equal cash + costOfOpenLongs − premiumOfOpenShorts',
       note: 'Compare impliedOptionsTotal with the Options Total on the YTD panel. '
