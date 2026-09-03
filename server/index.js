@@ -158,16 +158,46 @@ async function fetchOptionQuoteMid(polygonTicker, polygonKey) {
  * taking the bid. On a wide spread those differ from the mid by real money, so
  * the exit column needs the sides kept rather than averaged away.
  */
+/**
+ * Why quote fetching is failing, if it is.
+ *
+ * This used to swallow every error into { mid: 0 }, which is indistinguishable
+ * from a contract that simply has no quote. So when option quotes stopped coming
+ * back entirely, nothing said so — every mark quietly fell through to the model
+ * or to two daily prints, which is the exact condition that has produced wrong
+ * day figures here before. A silent dependency failure is worse than a loud one.
+ */
+const optionQuoteHealth = {
+  attempts: 0, withQuote: 0, empty: 0, errors: 0,
+  lastStatus: null, lastError: null, lastErrorAt: null, lastOkAt: null,
+}
+
 async function fetchOptionQuote(polygonTicker, polygonKey) {
+  optionQuoteHealth.attempts++
   try {
     const url = `https://api.polygon.io/v3/quotes/${polygonTicker}`
     const resp = await axios.get(url, { params: { apiKey: polygonKey, limit: 1, order: 'desc', sort: 'timestamp' }, timeout: 6000 })
     const q = resp.data?.results?.[0]
-    if (!q) return { mid: 0, bid: 0, ask: 0 }
+    if (!q) {
+      // A 200 with no results. On an unentitled key Polygon answers this way
+      // rather than refusing, so it looks like an illiquid contract.
+      optionQuoteHealth.empty++
+      optionQuoteHealth.lastStatus = resp.data?.status || 'no results'
+      return { mid: 0, bid: 0, ask: 0 }
+    }
     const bid = q.bid_price || 0, ask = q.ask_price || 0
     const mid = (bid > 0 && ask > 0) ? (bid + ask) / 2 : (bid || ask || 0)
+    optionQuoteHealth.withQuote++
+    optionQuoteHealth.lastOkAt = new Date().toISOString()
     return { mid, bid, ask }
-  } catch { return { mid: 0, bid: 0, ask: 0 } }
+  } catch (e) {
+    optionQuoteHealth.errors++
+    optionQuoteHealth.lastStatus = e.response?.status || null
+    // NOT_AUTHORIZED here means the key has no options-quotes entitlement.
+    optionQuoteHealth.lastError = e.response?.data?.message || e.response?.data?.error || e.message
+    optionQuoteHealth.lastErrorAt = new Date().toISOString()
+    return { mid: 0, bid: 0, ask: 0 }
+  }
 }
 
 // ── Black–Scholes marking (math lives in utils/blackScholes.js) ──
@@ -5367,6 +5397,15 @@ app.get('/api/debug-option-trades', requireAuth, (req, res) => {
 const INSTANCE_ID = Math.random().toString(36).slice(2, 10)
 const PROCESS_STARTED = Date.now()
 app.get('/api/health', (req, res) => {
+  // Included so an options key that has quietly lost its quotes entitlement is
+  // visible here rather than only as marks that look a bit stale.
+  const oq = {
+    ...optionQuoteHealth,
+    verdict: optionQuoteHealth.attempts === 0 ? 'not tried yet'
+      : optionQuoteHealth.withQuote > 0 ? 'quotes working'
+      : optionQuoteHealth.errors > 0 ? 'every quote call errored — check the key and its entitlement'
+      : 'every quote call returned no results — key is probably not entitled to option quotes',
+  }
   let shortCalls = null
   try { shortCalls = databaseService.getShortCallEntries(1).length } catch (e) { shortCalls = `err:${e.message}` }
   // Report where data actually lives so we can confirm it's on the persistent volume.
@@ -5396,6 +5435,7 @@ app.get('/api/health', (req, res) => {
       })
   } catch { /* ignore */ }
   res.json({
+    optionQuotes: oq,
     ok: true,
     instanceId: INSTANCE_ID,
     dbPath,
