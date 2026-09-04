@@ -47,7 +47,8 @@ export default function CashCheckPanel({ broker = 'all' }) {
   const [cash, setCash] = useState(null)
   const [ytd, setYtd] = useState([])
   const [error, setError] = useState(null)
-  const [hideEmpty, setHideEmpty] = useState(true)
+  const [openOnly, setOpenOnly] = useState(true)
+  const [query, setQuery] = useState('')
 
   // Open P&L and Stock P&L come from /api/options-pnl/ytd, the same source the
   // Positions table reads. The `pnlData` prop this first took is a different
@@ -87,14 +88,19 @@ export default function CashCheckPanel({ broker = 'all' }) {
         optionsCash: c.optionsCash,
         openShortCredit: c.openShortCredit,
         openLongCost: c.openLongCost,
+        // Open means something is still on: shares held, or an option contract
+        // still live. A ticker fully closed out has history but nothing running.
+        hasOpen: (p.stockPosition > 0) || c.openShortCredit > 0 || c.openLongCost > 0,
+        shares: p.stockPosition ?? 0,
         openPnl, stockPnl, total,
       })
     })
-    const live = hideEmpty
-      ? out.filter(r => r.optionsCash || r.openShortCredit || r.openPnl || r.stockPnl)
-      : out
-    return live.sort((a, b) => a.total - b.total)
-  }, [cash, ytd, hideEmpty])
+    let live = out.filter(r => r.optionsCash || r.openShortCredit || r.openPnl || r.stockPnl)
+    if (openOnly) live = live.filter(r => r.hasOpen)
+    const q = query.trim().toUpperCase()
+    if (q) live = live.filter(r => r.ticker.includes(q))
+    return live.sort((a, b) => a.ticker.localeCompare(b.ticker))
+  }, [cash, ytd, openOnly, query])
 
   const totals = useMemo(() => rows.reduce((a, r) => ({
     optionsCash: a.optionsCash + r.optionsCash,
@@ -131,10 +137,30 @@ export default function CashCheckPanel({ broker = 'all' }) {
         <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
           since {start} · independent of Options Total — shares no cost basis or trade matching
         </span>
-        <label style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: isDark ? '#94a3b8' : '#64748b', cursor: 'pointer' }}>
-          <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} />
-          Hide empty
-        </label>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ position: 'relative' }}>
+            <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+              placeholder="Search ticker…"
+              style={{
+                fontSize: 12, padding: '5px 24px 5px 10px', borderRadius: 6, width: 150,
+                border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                background: isDark ? '#0f172a' : '#fff',
+                color: isDark ? '#e2e8f0' : '#0f172a',
+              }} />
+            {query && (
+              <button onClick={() => setQuery('')} title="Clear"
+                style={{
+                  position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+                  border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14,
+                  lineHeight: 1, color: isDark ? '#64748b' : '#94a3b8', padding: '2px 4px',
+                }}>×</button>
+            )}
+          </div>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: isDark ? '#94a3b8' : '#64748b', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={openOnly} onChange={e => setOpenOnly(e.target.checked)} />
+            Open positions only
+          </label>
+        </div>
       </div>
 
       <div style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', marginBottom: 12 }}>
@@ -156,7 +182,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
           <tbody>
             {rows.length === 0 && (
               <tr><td style={{ ...td, textAlign: 'left', color: isDark ? '#64748b' : '#94a3b8' }} colSpan={6}>
-                Nothing to show.
+                {query ? `No ticker matches "${query}".` : (openOnly ? 'No open positions.' : 'Nothing to show.')}
               </td></tr>
             )}
             {rows.map(r => (
