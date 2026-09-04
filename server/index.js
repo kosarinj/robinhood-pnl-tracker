@@ -5830,6 +5830,122 @@ app.get('/api/options-cash', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/long-options?start=YYYY-MM-DD&broker=
+ *
+ * Every BOUGHT contract, grouped by ticker and type, with what it cost and what
+ * came back — closes included, not only the ones that expired.
+ *
+ * The Expirations view and the "of which Expired" column both show the cost side
+ * alone: a long that PAID was closed with an STC and never appears in either. So
+ * "these expired worthless" is not the same claim as "these lost money", and
+ * only this can answer the second.
+ *
+ * Strike and expiry are reported per contract rather than a verdict, because the
+ * same expired call can be a failed bet or the premium on insurance that was
+ * never needed, and nothing in the trade record tells them apart. That is the
+ * holder's call; the drill-down gives them the strikes to make it.
+ *
+ * Read-only.
+ */
+app.get('/api/long-options', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const start = (req.query.start || '2000-01-01').slice(0, 10)
+
+    const bySym = {}
+    databaseService.getRawOptionTrades(userId, brokerFilter).forEach(t => {
+      const tc = (t.trans_code || '').toUpperCase()
+      if (!['BTO', 'STC', 'OEXP', 'OEXC', 'OASGN'].includes(tc)) return
+      if (String(t.trans_date || '') < start) return
+      const parsed = parseOptionDescription(t.symbol)
+      if (!parsed) return
+      const b = bySym[t.symbol] || (bySym[t.symbol] = {
+        symbol: t.symbol, ticker: parsed.ticker, type: parsed.type,
+        strike: parsed.strike, expiry: `${parsed.year}-${parsed.month}-${parsed.day}`,
+        bought: 0, paid: 0, closed: 0, proceeds: 0, expired: 0, exercised: 0,
+        firstBuy: null, lastAction: null,
+      })
+      const n = Math.abs(t.contracts || 1)
+      const amt = Math.abs(t.amount || 0)
+      const d = String(t.trans_date || '').slice(0, 10)
+      if (tc === 'BTO') {
+        b.bought += n; b.paid += amt
+        if (!b.firstBuy || d < b.firstBuy) b.firstBuy = d
+      } else if (tc === 'STC') { b.closed += n; b.proceeds += amt }
+      else if (tc === 'OEXP') b.expired += n
+      else { b.exercised += n; b.proceeds += amt }
+      if (!b.lastAction || d > b.lastAction) b.lastAction = d
+    })
+
+    const r2 = n => Math.round(n * 100) / 100
+    // Only contracts actually bought — a short leg's settlement lands here
+    // otherwise and would read as a long that cost nothing.
+    const contracts = Object.values(bySym)
+      .filter(b => b.bought > 0)
+      .map(b => {
+        const settled = b.closed + b.expired + b.exercised
+        const perContract = b.bought > 0 ? b.paid / b.bought : 0
+        return {
+          ...b,
+          paid: r2(b.paid), proceeds: r2(b.proceeds),
+          stillOpen: Math.max(0, b.bought - settled),
+          costOfSettled: r2(perContract * settled),
+          // Realised only: what is still held has no outcome yet.
+          net: r2(b.proceeds - perContract * settled),
+          premiumLostToExpiry: r2(perContract * b.expired),
+          outcome: b.expired > 0 && b.closed === 0 && b.exercised === 0 ? 'expired worthless'
+            : b.exercised > 0 ? 'exercised'
+            : b.closed > 0 && b.expired > 0 ? 'part closed, part expired'
+            : b.closed > 0 ? 'closed'
+            : 'open',
+        }
+      })
+
+    const groups = {}
+    contracts.forEach(c => {
+      const key = `${c.ticker}|${c.type}`
+      const g = groups[key] || (groups[key] = {
+        ticker: c.ticker, type: c.type, contracts: 0, paid: 0, proceeds: 0,
+        expiredContracts: 0, lostToExpiry: 0, net: 0, positions: 0, stillOpen: 0,
+      })
+      g.positions += 1
+      g.contracts += c.bought
+      g.paid += c.paid
+      g.proceeds += c.proceeds
+      g.expiredContracts += c.expired
+      g.lostToExpiry += c.premiumLostToExpiry
+      g.net += c.net
+      g.stillOpen += c.stillOpen
+    })
+
+    const list = Object.values(groups).map(g => ({
+      ...g, paid: r2(g.paid), proceeds: r2(g.proceeds),
+      lostToExpiry: r2(g.lostToExpiry), net: r2(g.net),
+      percentLostToExpiry: g.paid > 0 ? Math.round((g.lostToExpiry / g.paid) * 1000) / 10 : null,
+    })).sort((a, b) => a.net - b.net)
+
+    const sum = (arr, k) => r2(arr.reduce((s, x) => s + x[k], 0))
+    const calls = list.filter(g => g.type === 'call')
+    const puts = list.filter(g => g.type === 'put')
+    res.json({
+      start, broker: brokerFilter || 'all',
+      totals: {
+        calls: { paid: sum(calls, 'paid'), proceeds: sum(calls, 'proceeds'), net: sum(calls, 'net'), lostToExpiry: sum(calls, 'lostToExpiry') },
+        puts:  { paid: sum(puts, 'paid'),  proceeds: sum(puts, 'proceeds'),  net: sum(puts, 'net'),  lostToExpiry: sum(puts, 'lostToExpiry') },
+      },
+      note: 'net counts only contracts that reached an outcome; anything still held is excluded. '
+          + 'An expired contract is not necessarily a bad one — insurance never needed expires '
+          + 'worthless by design. The strikes in the drill-down are what separate the two.',
+      byTickerAndType: list,
+      contracts: contracts.sort((a, b) => a.net - b.net),
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/expirations?start=YYYY-MM-DD&broker=
  *
  * Every option that ended at expiry, with what it cost or kept, plus month and
