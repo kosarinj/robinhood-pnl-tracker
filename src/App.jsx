@@ -14,7 +14,7 @@ import BrokerTabs from './components/BrokerTabs'
 import DashboardCharts from './components/DashboardCharts'
 import EarningsPanel from './components/EarningsPanel'
 import FibRsiScreener from './components/FibRsiScreener'
-import { loadPrefs } from './services/prefs'
+import { loadPrefs, getPref, setPref } from './services/prefs'
 import UploadButton from './components/UploadButton'
 import PreMoveVolumePanel from './components/PreMoveVolumePanel'
 import ScreenerPanel from './components/ScreenerPanel'
@@ -199,6 +199,10 @@ function AuthenticatedApp({ user }) {
   const [showSearchChart, setShowSearchChart] = useState(false) // Whether to show chart search input
   const [displayChartSymbol, setDisplayChartSymbol] = useState(null) // Symbol to display in chart
   const [activeMainTab, setActiveMainTab] = useState('dashboard')
+  // Sub-tabs under Positions. Six panels stacked vertically meant scrolling past
+  // the one you wanted, and every one of them fetching on load. Only the active
+  // panel mounts, so switching costs a fetch instead of the page costing six.
+  const [positionsTab, setPositionsTab] = useState(() => getPref('positionsTab', 'table'))
 
   // Helper function to get dynamic color for Daily PNL
   const getDailyPnLColor = (value) => {
@@ -2578,12 +2582,45 @@ function AuthenticatedApp({ user }) {
       {/* Positions tab */}
       {activeMainTab === 'positions' && (
         <div style={{ padding: '8px 0' }}>
+          {/* The roll alert stays above the tabs: it is a notification about the
+              book, not a view of it, and it is useless if you have to go looking. */}
           <RollCandidatesAlert broker={brokerFilter} />
-          <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
-          <CashCheckPanel broker={brokerFilter} />
-          <ShortCallTracker broker={brokerFilter} />
-          <ExpirationsPanel broker={brokerFilter} />
-          <LongOptionsPanel broker={brokerFilter} />
+
+          <nav style={{
+            display: 'flex', gap: 2, overflowX: 'auto', marginBottom: 12,
+            borderBottom: '1px solid var(--border)',
+          }}>
+            {[
+              ['table', 'Positions'],
+              ['cash', 'Cash Check'],
+              ['shorts', 'Short Calls'],
+              ['expiries', 'Expirations'],
+              ['longs', 'Long Options'],
+            ].map(([key, label]) => {
+              const active = positionsTab === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => { setPositionsTab(key); setPref('positionsTab', key) }}
+                  aria-current={active ? 'page' : undefined}
+                  style={{
+                    padding: '8px 14px', fontSize: '13px', fontWeight: 600,
+                    border: 'none', cursor: 'pointer', background: 'none',
+                    fontFamily: 'inherit', whiteSpace: 'nowrap',
+                    color: active ? 'var(--text)' : 'var(--textSecondary)',
+                    borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+                    marginBottom: '-1px', transition: 'color 0.15s',
+                  }}
+                >{label}</button>
+              )
+            })}
+          </nav>
+
+          {positionsTab === 'table'    && <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />}
+          {positionsTab === 'cash'     && <CashCheckPanel broker={brokerFilter} />}
+          {positionsTab === 'shorts'   && <ShortCallTracker broker={brokerFilter} />}
+          {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}
+          {positionsTab === 'longs'    && <LongOptionsPanel broker={brokerFilter} />}
         </div>
       )}
 
