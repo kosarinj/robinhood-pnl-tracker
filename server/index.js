@@ -5867,12 +5867,17 @@ app.get('/api/call-coverage', requireAuth, async (req, res) => {
     const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
     const open = databaseService.getOpenOptionPositions(userId, brokerFilter)
 
-    // Both sides use the same window: a contract expiring inside the target
-    // week. These are weekly positions — spike protection above the short call,
-    // and a protective put underneath — bought and replaced week to week, so
-    // "do I have one on for this week" is the question, not "is something still
-    // alive somewhere". A contract expiring Wednesday still covers the week, so
-    // the whole week counts rather than the Friday alone.
+    // The two sides are counted differently, because they are held differently.
+    //
+    // PUTS are weekly: bought and replaced week to week, so the question is
+    // whether one is on for THIS week — a put expiring inside the window counts,
+    // and one that already expired does not.
+    //
+    // CALLS are the spike guard above the short call, and that is sometimes
+    // bought much further out. A call expiring in three months protects this
+    // week as well as a weekly does — better — so anything still alive at the
+    // end of the week counts. Requiring it to expire inside the week reported a
+    // longer-dated guard as no protection at all.
     const cover = { call: {}, put: {} }
     const legs = { call: {}, put: {} }
     open.forEach(p => {
@@ -5882,7 +5887,10 @@ app.get('/api/call-coverage', requireAuth, async (req, res) => {
       const kind = parsed.type
       if (kind !== 'call' && kind !== 'put') return
       const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
-      if (expiry < weekStart || expiry > weekEnd) return
+      const counts = kind === 'call'
+        ? expiry >= weekEnd                                  // still alive through the week
+        : (expiry >= weekStart && expiry <= weekEnd)         // expiring inside it
+      if (!counts) return
       const t = parsed.ticker
       cover[kind][t] = (cover[kind][t] || 0) + p.net_long
       ;(legs[kind][t] = legs[kind][t] || []).push({

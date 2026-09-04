@@ -108,7 +108,7 @@ export default function CallCoveragePanel({ broker = 'all' }) {
               <th style={{ ...th, textAlign: 'left' }}>Ticker</th>
               <th style={th}>Shares</th>
               <th style={th} title="Shares divided by 100, rounded down.">Needed</th>
-              <th style={{ ...th, borderLeft: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>Calls</th>
+              <th style={{ ...th, borderLeft: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }} title="Long calls still alive at the end of the week — a further-dated guard counts.">Calls</th>
               <th style={th}>Short</th>
               <th style={{ ...th, textAlign: 'left' }}>Call legs</th>
               <th style={{ ...th, borderLeft: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>Puts</th>
@@ -163,7 +163,8 @@ export default function CallCoveragePanel({ broker = 'all' }) {
       <div style={{ fontSize: 11, color: muted, marginTop: 10, lineHeight: 1.5 }}>
         Checked on {fmtDate(w.checkedOn)}. Monday to Thursday this looks at the current week's expiry;
         from Friday it looks at the next one, since by then this week's protection is expiring that
-        afternoon. A contract expiring any day inside the week counts, not only the Friday.
+        afternoon. Puts count when they expire inside the week — they're replaced week to week. Calls
+        count when they're still alive at the end of it, so a guard bought months out still counts.
       </div>
     </div>
   )
