@@ -28,18 +28,28 @@ const pnlColor = (n, isDark) => {
  * OTM contracts that is a small understatement, and it keeps the arithmetic to
  * terms that can be checked against a brokerage statement without a model.
  */
-export default function CashCheckPanel({ pnlData = [], broker = 'all' }) {
+export default function CashCheckPanel({ broker = 'all' }) {
   const { isDark } = useTheme()
   const [cash, setCash] = useState(null)
+  const [ytd, setYtd] = useState([])
   const [error, setError] = useState(null)
   const [hideEmpty, setHideEmpty] = useState(true)
 
+  // Open P&L and Stock P&L come from /api/options-pnl/ytd, the same source the
+  // Positions table reads. The `pnlData` prop this first took is a different
+  // dataset and carries neither field, so both columns rendered blank.
   useEffect(() => {
-    const qs = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
-    fetch(`/api/options-cash${qs}`, { credentials: 'include' })
-      .then(r => r.json())
-      .then(d => { if (d.error) throw new Error(d.error); setCash(d) })
-      .catch(e => setError(e.message))
+    const bq = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+    const yq = new URLSearchParams({ startDate: '2000-01-01' })
+    if (broker && broker !== 'all') yq.set('broker', broker)
+    Promise.all([
+      fetch(`/api/options-cash${bq}`, { credentials: 'include' }).then(r => r.json()),
+      fetch(`/api/options-pnl/ytd?${yq}`, { credentials: 'include' }).then(r => r.json()),
+    ]).then(([c, y]) => {
+      if (c.error) throw new Error(c.error)
+      setCash(c)
+      setYtd(Array.isArray(y?.byUnderlying) ? y.byUnderlying : [])
+    }).catch(e => setError(e.message))
   }, [broker])
 
   const rows = useMemo(() => {
@@ -48,12 +58,12 @@ export default function CashCheckPanel({ pnlData = [], broker = 'all' }) {
     cash.forEach(c => { byTicker[c.ticker] = c })
     const tickers = new Set([
       ...cash.map(c => c.ticker),
-      ...pnlData.map(p => p.ticker).filter(Boolean),
+      ...ytd.map(p => p.ticker).filter(Boolean),
     ])
     const out = []
     tickers.forEach(ticker => {
       const c = byTicker[ticker] || { optionsCash: 0, openShortCredit: 0, openLongCost: 0 }
-      const p = pnlData.find(x => x.ticker === ticker) || {}
+      const p = ytd.find(x => x.ticker === ticker) || {}
       const openPnl = p.openUnrealizedPnL ?? 0
       const stockPnl = p.stockUnrealizedPnL ?? 0
       const total = c.optionsCash - c.openShortCredit + openPnl + stockPnl
@@ -69,7 +79,7 @@ export default function CashCheckPanel({ pnlData = [], broker = 'all' }) {
       ? out.filter(r => r.optionsCash || r.openShortCredit || r.openPnl || r.stockPnl)
       : out
     return live.sort((a, b) => a.total - b.total)
-  }, [cash, pnlData, hideEmpty])
+  }, [cash, ytd, hideEmpty])
 
   const totals = useMemo(() => rows.reduce((a, r) => ({
     optionsCash: a.optionsCash + r.optionsCash,
@@ -87,7 +97,7 @@ export default function CashCheckPanel({ pnlData = [], broker = 'all' }) {
   const th = {
     textAlign: 'right', padding: '6px 8px', fontSize: 11, fontWeight: 600,
     textTransform: 'uppercase', letterSpacing: '0.04em',
-    color: isDark ? '#94a3b8' : '#64748b',
+    color: isDark ? '#e2e8f0' : '#334155',
     borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, whiteSpace: 'nowrap',
   }
   const td = {
@@ -102,7 +112,7 @@ export default function CashCheckPanel({ pnlData = [], broker = 'all' }) {
   return (
     <div style={card}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
-        <h3 style={{ margin: 0, fontSize: 15, color: isDark ? '#f1f5f9' : '#0f172a' }}>Cash Check</h3>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: isDark ? '#ffffff' : '#0f172a' }}>Cash Check</h3>
         <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
           independent of Options Total — shares no cost basis or trade matching
         </span>

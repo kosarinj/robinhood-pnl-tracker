@@ -2579,7 +2579,7 @@ function AuthenticatedApp({ user }) {
         <div style={{ padding: '8px 0' }}>
           <RollCandidatesAlert broker={brokerFilter} />
           <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
-          <CashCheckPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
+          <CashCheckPanel broker={brokerFilter} />
           <ShortCallTracker broker={brokerFilter} />
           <ExpirationsPanel broker={brokerFilter} />
         </div>
