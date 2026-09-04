@@ -25,6 +25,7 @@ import RollCandidatesAlert from './components/RollCandidatesAlert'
 import ShortCallTracker from './components/ShortCallTracker'
 import ExpirationsPanel from './components/ExpirationsPanel'
 import CashCheckPanel from './components/CashCheckPanel'
+import LongOptionsPanel from './components/LongOptionsPanel'
 import VolScanner from './components/VolScanner'
 import TaxCenter from './components/TaxCenter'
 import AvgCostCalculator from './components/AvgCostCalculator'
@@ -2582,6 +2583,7 @@ function AuthenticatedApp({ user }) {
           <CashCheckPanel broker={brokerFilter} />
           <ShortCallTracker broker={brokerFilter} />
           <ExpirationsPanel broker={brokerFilter} />
+          <LongOptionsPanel broker={brokerFilter} />
         </div>
       )}
 
