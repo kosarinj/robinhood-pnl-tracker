@@ -5727,6 +5727,69 @@ app.get('/api/debug-reconcile', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/options-cash?broker=
+ *
+ * Per ticker: the CASH that moved through options, and the credit still sitting
+ * in open short positions.
+ *
+ * Deliberately dumb. No cost basis, no LIFO matching, no settlement direction —
+ * just the amounts on the trades, summed. That is the point: it shares no
+ * machinery with Options Total, so if the two agree the agreement means
+ * something. Every discrepancy chased today lived in the matching, and none of
+ * it can reach this number.
+ *
+ * Expiries need no term: a bought option that expired worthless already has its
+ * full cost in the BTO line and a zero settlement.
+ */
+app.get('/api/options-cash', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    // Money out negative, money in positive. OEXC is an exercise, which carries
+    // a real amount; OEXP/OASGN settle at zero.
+    const SIGN = { BTO: -1, BTC: -1, STO: +1, STC: +1, OEXC: +1, OEXP: 0, OASGN: 0 }
+
+    const byTicker = {}
+    const row = t => (byTicker[t] = byTicker[t] || {
+      ticker: t, optionsCash: 0, openShortCredit: 0, openLongCost: 0, trades: 0,
+    })
+
+    databaseService.getRawOptionTrades(userId, brokerFilter).forEach(t => {
+      const tc = (t.trans_code || '').toUpperCase()
+      if (!(tc in SIGN)) return
+      const ticker = parseOptionDescription(t.symbol)?.ticker
+      if (!ticker) return
+      const r = row(ticker)
+      r.optionsCash += Math.abs(t.amount || 0) * SIGN[tc]
+      r.trades += 1
+    })
+
+    // What is still open, and what it is carrying.
+    databaseService.getOpenOptionPositions(userId, brokerFilter).forEach(p => {
+      const ticker = parseOptionDescription(p.symbol)?.ticker
+      if (!ticker) return
+      const r = row(ticker)
+      if (p.net_short > 0 && p.sto_contracts > 0) {
+        r.openShortCredit += p.net_short * (Math.abs(p.total_received) / p.sto_contracts)
+      }
+      if (p.net_long > 0 && p.bto_contracts > 0) {
+        r.openLongCost += p.net_long * (Math.abs(p.total_paid) / p.bto_contracts)
+      }
+    })
+
+    const r2 = n => Math.round(n * 100) / 100
+    res.json(Object.values(byTicker).map(r => ({
+      ...r,
+      optionsCash: r2(r.optionsCash),
+      openShortCredit: r2(r.openShortCredit),
+      openLongCost: r2(r.openLongCost),
+    })).sort((a, b) => (a.ticker < b.ticker ? -1 : 1)))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/expirations?start=YYYY-MM-DD&broker=
  *
  * Every option that ended at expiry, with what it cost or kept, plus month and

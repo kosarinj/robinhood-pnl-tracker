@@ -24,6 +24,7 @@ import YTDPositionsPanel from './components/YTDPositionsPanel'
 import RollCandidatesAlert from './components/RollCandidatesAlert'
 import ShortCallTracker from './components/ShortCallTracker'
 import ExpirationsPanel from './components/ExpirationsPanel'
+import CashCheckPanel from './components/CashCheckPanel'
 import VolScanner from './components/VolScanner'
 import TaxCenter from './components/TaxCenter'
 import AvgCostCalculator from './components/AvgCostCalculator'
@@ -2578,6 +2579,7 @@ function AuthenticatedApp({ user }) {
         <div style={{ padding: '8px 0' }}>
           <RollCandidatesAlert broker={brokerFilter} />
           <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
+          <CashCheckPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
           <ShortCallTracker broker={brokerFilter} />
           <ExpirationsPanel broker={brokerFilter} />
         </div>
