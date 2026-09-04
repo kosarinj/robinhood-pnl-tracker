@@ -82,7 +82,10 @@ export default function CashCheckPanel({ broker = 'all' }) {
       const p = ytd.find(x => x.ticker === ticker) || {}
       const openPnl = p.openUnrealizedPnL ?? 0
       const stockPnl = p.stockUnrealizedPnL ?? 0
-      const total = c.optionsCash - c.openShortCredit + openPnl + stockPnl
+      // Shares actually SOLD. Was missing, which left the panel short by every
+      // realised stock gain — on PLTR a 100-share round trip worth $5,000.
+      const stockRealized = p.stockRealizedAll ?? 0
+      const total = c.optionsCash - c.openShortCredit + openPnl + stockPnl + stockRealized
       out.push({
         ticker,
         optionsCash: c.optionsCash,
@@ -92,10 +95,10 @@ export default function CashCheckPanel({ broker = 'all' }) {
         // still live. A ticker fully closed out has history but nothing running.
         hasOpen: (p.stockPosition > 0) || c.openShortCredit > 0 || c.openLongCost > 0,
         shares: p.stockPosition ?? 0,
-        openPnl, stockPnl, total,
+        openPnl, stockPnl, stockRealized, total,
       })
     })
-    let live = out.filter(r => r.optionsCash || r.openShortCredit || r.openPnl || r.stockPnl)
+    let live = out.filter(r => r.optionsCash || r.openShortCredit || r.openPnl || r.stockPnl || r.stockRealized)
     if (openOnly) live = live.filter(r => r.hasOpen)
     const q = query.trim().toUpperCase()
     if (q) live = live.filter(r => r.ticker.includes(q))
@@ -107,8 +110,9 @@ export default function CashCheckPanel({ broker = 'all' }) {
     openShortCredit: a.openShortCredit + r.openShortCredit,
     openPnl: a.openPnl + r.openPnl,
     stockPnl: a.stockPnl + r.stockPnl,
+    stockRealized: a.stockRealized + r.stockRealized,
     total: a.total + r.total,
-  }), { optionsCash: 0, openShortCredit: 0, openPnl: 0, stockPnl: 0, total: 0 }), [rows])
+  }), { optionsCash: 0, openShortCredit: 0, openPnl: 0, stockPnl: 0, stockRealized: 0, total: 0 }), [rows])
 
   const card = {
     background: isDark ? '#1e293b' : '#fff',
@@ -164,7 +168,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
       </div>
 
       <div style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', marginBottom: 12 }}>
-        Options cash − open short credit + Open P&amp;L + Stock P&amp;L
+        Options cash − open short credit + Open P&amp;L + Stock P&amp;L + Stock Realized
       </div>
 
       <div style={{ overflowX: 'auto' }}>
@@ -176,12 +180,13 @@ export default function CashCheckPanel({ broker = 'all' }) {
               <th style={th} title="Premium collected on short options you still hold. Cash in hand, but not earned until the contract closes or expires — so it comes out here and returns through Open P&L.">Open short credit</th>
               <th style={th} title="Mark-to-market on open option positions.">Open P&amp;L</th>
               <th style={th} title="Shares held x (price now - cost). Unrealized only.">Stock P&amp;L</th>
+              <th style={th} title="Booked gains and losses on shares actually sold.">Stock Realized</th>
               <th style={th}>Total</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td style={{ ...td, textAlign: 'left', color: isDark ? '#64748b' : '#94a3b8' }} colSpan={6}>
+              <tr><td style={{ ...td, textAlign: 'left', color: isDark ? '#64748b' : '#94a3b8' }} colSpan={7}>
                 {query ? `No ticker matches "${query}".` : (openOnly ? 'No open positions.' : 'Nothing to show.')}
               </td></tr>
             )}
@@ -206,6 +211,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
                 </td>
                 <td style={{ ...td, color: pnlColor(r.openPnl, isDark) }}>{r.openPnl ? fmt(r.openPnl) : '—'}</td>
                 <td style={{ ...td, color: pnlColor(r.stockPnl, isDark) }}>{r.stockPnl ? fmt(r.stockPnl) : '—'}</td>
+                <td style={{ ...td, color: pnlColor(r.stockRealized, isDark) }}>{r.stockRealized ? fmt(r.stockRealized) : '—'}</td>
                 <td style={{ ...td, fontWeight: 700, color: pnlColor(r.total, isDark) }}>{fmt(r.total)}</td>
               </tr>
             ))}
@@ -217,6 +223,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
               <td style={{ ...footTd, color: isDark ? '#94a3b8' : '#64748b' }}>{fmt(-totals.openShortCredit)}</td>
               <td style={{ ...footTd, color: pnlColor(totals.openPnl, isDark) }}>{fmt(totals.openPnl)}</td>
               <td style={{ ...footTd, color: pnlColor(totals.stockPnl, isDark) }}>{fmt(totals.stockPnl)}</td>
+              <td style={{ ...footTd, color: pnlColor(totals.stockRealized, isDark) }}>{fmt(totals.stockRealized)}</td>
               <td style={{ ...footTd, color: pnlColor(totals.total, isDark) }}>{fmt(totals.total)}</td>
             </tr>
           </tfoot>
@@ -226,7 +233,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
       <div style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', marginTop: 10, lineHeight: 1.5 }}>
         Open long options are carried at cost — their current value isn't added, so a ticker holding
         cheap bought contracts reads slightly low by the amount noted beside its name. Stock P&amp;L is
-        unrealized only; shares you've sold are not in this total.
+        unrealized on shares still held; Stock Realized carries the ones you've sold.
       </div>
     </div>
   )
