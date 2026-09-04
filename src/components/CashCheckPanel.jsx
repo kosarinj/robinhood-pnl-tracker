@@ -156,7 +156,11 @@ export default function CashCheckPanel({ broker = 'all' }) {
                   )}
                 </td>
                 <td style={{ ...td, color: pnlColor(r.optionsCash, isDark) }}>{fmt(r.optionsCash)}</td>
-                <td style={{ ...td, color: pnlColor(-r.openShortCredit, isDark) }}>
+                {/* Neutral on purpose: this is premium being MOVED, not lost. It
+                    leaves Options cash because it isn't earned yet and returns
+                    through Open P&L on the same short. Red would read as a cost
+                    it never was; green would imply it helps the total. */}
+                <td style={{ ...td, color: isDark ? '#94a3b8' : '#64748b' }}>
                   {r.openShortCredit ? fmt(-r.openShortCredit) : '—'}
                 </td>
                 <td style={{ ...td, color: pnlColor(r.openPnl, isDark) }}>{r.openPnl ? fmt(r.openPnl) : '—'}</td>
@@ -169,7 +173,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
             <tr>
               <td style={{ ...footTd, textAlign: 'left' }}>Total</td>
               <td style={{ ...footTd, color: pnlColor(totals.optionsCash, isDark) }}>{fmt(totals.optionsCash)}</td>
-              <td style={{ ...footTd, color: pnlColor(-totals.openShortCredit, isDark) }}>{fmt(-totals.openShortCredit)}</td>
+              <td style={{ ...footTd, color: isDark ? '#94a3b8' : '#64748b' }}>{fmt(-totals.openShortCredit)}</td>
               <td style={{ ...footTd, color: pnlColor(totals.openPnl, isDark) }}>{fmt(totals.openPnl)}</td>
               <td style={{ ...footTd, color: pnlColor(totals.stockPnl, isDark) }}>{fmt(totals.stockPnl)}</td>
               <td style={{ ...footTd, color: pnlColor(totals.total, isDark) }}>{fmt(totals.total)}</td>
