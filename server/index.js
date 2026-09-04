@@ -5867,20 +5867,25 @@ app.get('/api/call-coverage', requireAuth, async (req, res) => {
     const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
     const open = databaseService.getOpenOptionPositions(userId, brokerFilter)
 
-    // Long calls expiring inside the target week, by ticker. A contract expiring
-    // Wednesday still covers that week, so the whole week counts rather than the
-    // Friday alone.
-    const coverByTicker = {}
-    const legsByTicker = {}
+    // Both sides use the same window: a contract expiring inside the target
+    // week. These are weekly positions — spike protection above the short call,
+    // and a protective put underneath — bought and replaced week to week, so
+    // "do I have one on for this week" is the question, not "is something still
+    // alive somewhere". A contract expiring Wednesday still covers the week, so
+    // the whole week counts rather than the Friday alone.
+    const cover = { call: {}, put: {} }
+    const legs = { call: {}, put: {} }
     open.forEach(p => {
       if (!(p.net_long > 0)) return
       const parsed = parseOptionDescription(p.symbol)
-      if (!parsed || parsed.type !== 'call') return
+      if (!parsed) return
+      const kind = parsed.type
+      if (kind !== 'call' && kind !== 'put') return
       const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
       if (expiry < weekStart || expiry > weekEnd) return
       const t = parsed.ticker
-      coverByTicker[t] = (coverByTicker[t] || 0) + p.net_long
-      ;(legsByTicker[t] = legsByTicker[t] || []).push({
+      cover[kind][t] = (cover[kind][t] || 0) + p.net_long
+      ;(legs[kind][t] = legs[kind][t] || []).push({
         symbol: p.symbol, strike: parsed.strike, expiry, contracts: p.net_long,
       })
     })
@@ -5890,30 +5895,39 @@ app.get('/api/call-coverage', requireAuth, async (req, res) => {
         const shares = p.position || 0
         if (shares < 100) return null
         const needed = Math.floor(shares / 100)
-        const covered = coverByTicker[ticker] || 0
+        const calls = cover.call[ticker] || 0
+        const puts = cover.put[ticker] || 0
         return {
-          ticker, shares, needed, covered,
-          shortfall: Math.max(0, needed - covered),
-          covering: (legsByTicker[ticker] || []).sort((a, b) => a.strike - b.strike),
+          ticker, shares, needed,
+          calls, puts,
+          callsShort: Math.max(0, needed - calls),
+          putsShort: Math.max(0, needed - puts),
+          callLegs: (legs.call[ticker] || []).sort((a, b) => a.strike - b.strike),
+          putLegs: (legs.put[ticker] || []).sort((a, b) => b.strike - a.strike),
         }
       })
       .filter(Boolean)
-      .sort((a, b) => (b.shortfall - a.shortfall) || a.ticker.localeCompare(b.ticker))
+      .sort((a, b) => ((b.callsShort + b.putsShort) - (a.callsShort + a.putsShort))
+        || a.ticker.localeCompare(b.ticker))
 
     res.json({
       window: { label, weekStart, weekEnd, checkedOn: iso(now) },
       totals: {
         positions: rows.length,
         needed: rows.reduce((s, r) => s + r.needed, 0),
-        covered: rows.reduce((s, r) => s + Math.min(r.covered, r.needed), 0),
-        uncovered: rows.reduce((s, r) => s + r.shortfall, 0),
-        tickersShort: rows.filter(r => r.shortfall > 0).length,
+        callsCovered: rows.reduce((s, r) => s + Math.min(r.calls, r.needed), 0),
+        putsCovered: rows.reduce((s, r) => s + Math.min(r.puts, r.needed), 0),
+        callsShort: rows.reduce((s, r) => s + r.callsShort, 0),
+        putsShort: rows.reduce((s, r) => s + r.putsShort, 0),
+        tickersShortCalls: rows.filter(r => r.callsShort > 0).length,
+        tickersShortPuts: rows.filter(r => r.putsShort > 0).length,
       },
-      // Long calls held in the window that no share position calls for. Not a
+      // Long contracts in the window with no share position behind them. Not a
       // problem, just not coverage — usually a bet or a leg of something else.
-      extraCallsWithoutShares: Object.keys(coverByTicker)
-        .filter(t => !(positions[t]?.position >= 100))
-        .map(t => ({ ticker: t, contracts: coverByTicker[t], legs: legsByTicker[t] })),
+      extraWithoutShares: ['call', 'put'].flatMap(kind =>
+        Object.keys(cover[kind])
+          .filter(t => !(positions[t]?.position >= 100))
+          .map(t => ({ kind, ticker: t, contracts: cover[kind][t] }))),
       rows,
     })
   } catch (e) {
