@@ -8,12 +8,7 @@ const fmtDate = (s) => {
 }
 
 /**
- * One protective put per 100 shares, for the week that matters.
- *
- * Puts only. The endpoint still returns the call side, and the columns for it
- * are one edit away if it is ever wanted — but a check you scan for gaps is
- * worth more narrow than wide, and the calls in this book are a spike guard
- * bought as needed rather than a standing requirement.
+ * One long call and one long put per 100 shares, for the week that matters.
  *
  * The window follows the trading week rather than a rolling seven days: Monday
  * to Thursday it asks about THIS week's expiry, and from Friday onward about
@@ -62,8 +57,10 @@ export default function CallCoveragePanel({ broker = 'all' }) {
   if (!data) return <div style={card}>Loading coverage…</div>
 
   const { window: w, totals } = data
-  const rows = shortOnly ? data.rows.filter(r => r.putsShort > 0) : data.rows
-  const allCovered = totals.putsShort === 0
+  const rows = shortOnly
+    ? data.rows.filter(r => r.callsShort > 0 || r.putsShort > 0)
+    : data.rows
+  const allCovered = totals.callsShort === 0 && totals.putsShort === 0
 
   const legText = (list) => list.length === 0
     ? null
@@ -72,9 +69,9 @@ export default function CallCoveragePanel({ broker = 'all' }) {
   return (
     <div style={card}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: isDark ? '#ffffff' : '#0f172a' }}>Put Coverage</h3>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: isDark ? '#ffffff' : '#0f172a' }}>Coverage</h3>
         <span style={{ fontSize: 12, color: muted }}>
-          {w.label} · {fmtDate(w.weekStart)}–{fmtDate(w.weekEnd)} · one protective put per 100 shares
+          {w.label} · {fmtDate(w.weekStart)}–{fmtDate(w.weekEnd)} · one call and one put per 100 shares
         </span>
         <label style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: muted, cursor: 'pointer' }}>
           <input type="checkbox" checked={shortOnly} onChange={e => setShortOnly(e.target.checked)} />
@@ -83,7 +80,8 @@ export default function CallCoveragePanel({ broker = 'all' }) {
       </div>
 
       {/* The headline is the gap, not the total: a number you can act on beats a
-          number you have to interpret. */}
+          number you have to interpret. Calls and puts stay separate because they
+          are different jobs — a spike guard above, a hedge below. */}
       <div style={{
         padding: '12px 14px', borderRadius: 6, marginBottom: 14,
         background: allCovered ? (isDark ? '#052e16' : '#f0fdf4') : (isDark ? '#450a0a' : '#fef2f2'),
@@ -91,11 +89,15 @@ export default function CallCoveragePanel({ broker = 'all' }) {
       }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: allCovered ? '#22c55e' : '#ef4444' }}>
           {allCovered
-            ? `Protected — all ${totals.needed} puts in place`
-            : `${totals.putsShort} put${totals.putsShort === 1 ? '' : 's'} short across ${totals.tickersShortPuts} ticker${totals.tickersShortPuts === 1 ? '' : 's'}`}
+            ? `Covered — ${totals.needed} calls and ${totals.needed} puts in place`
+            : [
+                totals.callsShort ? `${totals.callsShort} call${totals.callsShort === 1 ? '' : 's'} short` : null,
+                totals.putsShort ? `${totals.putsShort} put${totals.putsShort === 1 ? '' : 's'} short` : null,
+              ].filter(Boolean).join(' · ')}
         </div>
         <div style={{ fontSize: 11, color: muted, marginTop: 4 }}>
-          {totals.putsCovered} of {totals.needed} needed, across {totals.positions} share position{totals.positions === 1 ? '' : 's'} of 100+
+          calls {totals.callsCovered}/{totals.needed} · puts {totals.putsCovered}/{totals.needed},
+          across {totals.positions} share position{totals.positions === 1 ? '' : 's'} of 100+
         </div>
       </div>
 
@@ -106,26 +108,37 @@ export default function CallCoveragePanel({ broker = 'all' }) {
               <th style={{ ...th, textAlign: 'left' }}>Ticker</th>
               <th style={th}>Shares</th>
               <th style={th} title="Shares divided by 100, rounded down.">Needed</th>
-              <th style={th} title="Long puts held that expire inside this week.">Held</th>
-              <th style={th}>Short by</th>
-              <th style={{ ...th, textAlign: 'left' }}>Protective puts</th>
+              <th style={{ ...th, borderLeft: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>Calls</th>
+              <th style={th}>Short</th>
+              <th style={{ ...th, textAlign: 'left' }}>Call legs</th>
+              <th style={{ ...th, borderLeft: `1px solid ${isDark ? '#334155' : '#e2e8f0'}` }}>Puts</th>
+              <th style={th}>Short</th>
+              <th style={{ ...th, textAlign: 'left' }}>Put legs</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td style={{ ...td, textAlign: 'left', color: muted }} colSpan={6}>
-                {shortOnly ? 'No gaps — every position has its puts.' : 'No share positions of 100 or more.'}
+              <tr><td style={{ ...td, textAlign: 'left', color: muted }} colSpan={9}>
+                {shortOnly ? 'No gaps — every position is covered both ways.' : 'No share positions of 100 or more.'}
               </td></tr>
             )}
             {rows.map(r => {
-              const short = r.putsShort > 0
+              const short = r.callsShort > 0 || r.putsShort > 0
               return (
                 <tr key={r.ticker} style={short ? { background: isDark ? '#1c1917' : '#fffbeb' } : undefined}>
                   <td style={{ ...td, textAlign: 'left', fontWeight: 600 }}>{r.ticker}</td>
                   <td style={td}>{r.shares}</td>
                   <td style={td}>{r.needed}</td>
 
-                  <td style={{ ...td, color: r.puts >= r.needed ? '#22c55e' : undefined }}>{r.puts}</td>
+                  <td style={{ ...td, borderLeft: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, color: r.calls >= r.needed ? '#22c55e' : undefined }}>{r.calls}</td>
+                  <td style={{ ...td, fontWeight: 700, color: r.callsShort > 0 ? '#ef4444' : muted }}>
+                    {r.callsShort > 0 ? r.callsShort : '—'}
+                  </td>
+                  <td style={{ ...td, textAlign: 'left', fontSize: 11, color: muted }}>
+                    {legText(r.callLegs) || <span style={{ color: '#ef4444' }}>none</span>}
+                  </td>
+
+                  <td style={{ ...td, borderLeft: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, color: r.puts >= r.needed ? '#22c55e' : undefined }}>{r.puts}</td>
                   <td style={{ ...td, fontWeight: 700, color: r.putsShort > 0 ? '#ef4444' : muted }}>
                     {r.putsShort > 0 ? r.putsShort : '—'}
                   </td>
@@ -139,10 +152,10 @@ export default function CallCoveragePanel({ broker = 'all' }) {
         </table>
       </div>
 
-      {data.extraWithoutShares?.some(e => e.kind === 'put') && (
+      {data.extraWithoutShares?.length > 0 && (
         <div style={{ fontSize: 11, color: muted, marginTop: 12, lineHeight: 1.5 }}>
           <strong style={{ color: isDark ? '#e2e8f0' : '#334155' }}>Also held this week, without 100+ shares behind them:</strong>{' '}
-          {data.extraWithoutShares.filter(e => e.kind === 'put').map(e => `${e.ticker} (${e.contracts})`).join(', ')}
+          {data.extraWithoutShares.map(e => `${e.ticker} ${e.contracts}${e.kind === 'call' ? 'C' : 'P'}`).join(', ')}
           {' — '}not a problem, just not coverage.
         </div>
       )}

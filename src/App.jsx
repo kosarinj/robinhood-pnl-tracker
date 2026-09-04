@@ -2597,7 +2597,7 @@ function AuthenticatedApp({ user }) {
               ['shorts', 'Short Calls'],
               ['expiries', 'Expirations'],
               ['longs', 'Long Options'],
-              ['coverage', 'Put Coverage'],
+              ['coverage', 'Coverage'],
             ].map(([key, label]) => {
               const active = positionsTab === key
               return (
