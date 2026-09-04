@@ -5745,6 +5745,10 @@ app.get('/api/options-cash', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
     const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    // Must match the startDate the Positions table is using, or the two panels
+    // describe different periods — the exact mismatch that made an afternoon of
+    // hand-reconciliation disagree for no real reason.
+    const start = (req.query.start || '2000-01-01').slice(0, 10)
     // Money out negative, money in positive. OEXC is an exercise, which carries
     // a real amount; OEXP/OASGN settle at zero.
     const SIGN = { BTO: -1, BTC: -1, STO: +1, STC: +1, OEXC: +1, OEXP: 0, OASGN: 0 }
@@ -5754,7 +5758,10 @@ app.get('/api/options-cash', requireAuth, async (req, res) => {
       ticker: t, optionsCash: 0, openShortCredit: 0, openLongCost: 0, trades: 0,
     })
 
-    databaseService.getRawOptionTrades(userId, brokerFilter).forEach(t => {
+    const all = databaseService.getRawOptionTrades(userId, brokerFilter)
+    const inWindow = all.filter(t => String(t.trans_date || '') >= start)
+
+    inWindow.forEach(t => {
       const tc = (t.trans_code || '').toUpperCase()
       if (!(tc in SIGN)) return
       const ticker = parseOptionDescription(t.symbol)?.ticker
@@ -5764,22 +5771,45 @@ app.get('/api/options-cash', requireAuth, async (req, res) => {
       r.trades += 1
     })
 
-    // What is still open, and what it is carrying.
+    // Opening trades by symbol, newest first, WITHIN the window.
+    //
+    // The credit removed has to be the credit that is actually in optionsCash.
+    // A short opened before the window has no premium in that sum, so removing
+    // it would subtract money that was never added. Same for a long's cost.
+    const opensBySymbol = {}
+    inWindow.forEach(t => {
+      const tc = (t.trans_code || '').toUpperCase()
+      if (tc !== 'BTO' && tc !== 'STO') return
+      const b = opensBySymbol[t.symbol] || (opensBySymbol[t.symbol] = { BTO: [], STO: [] })
+      b[tc].push({
+        date: String(t.trans_date || ''),
+        contracts: Math.abs(t.contracts || 1),
+        perContract: Math.abs(t.amount || 0) / Math.abs(t.contracts || 1),
+      })
+    })
+    // Newest first, matching how open contracts are allocated elsewhere.
+    const takeNewest = (list, want) => {
+      let left = want, sum = 0
+      list.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).forEach(o => {
+        const take = Math.max(0, Math.min(o.contracts, left))
+        sum += take * o.perContract
+        left -= take
+      })
+      return sum
+    }
+
     databaseService.getOpenOptionPositions(userId, brokerFilter).forEach(p => {
       const ticker = parseOptionDescription(p.symbol)?.ticker
       if (!ticker) return
       const r = row(ticker)
-      if (p.net_short > 0 && p.sto_contracts > 0) {
-        r.openShortCredit += p.net_short * (Math.abs(p.total_received) / p.sto_contracts)
-      }
-      if (p.net_long > 0 && p.bto_contracts > 0) {
-        r.openLongCost += p.net_long * (Math.abs(p.total_paid) / p.bto_contracts)
-      }
+      const opens = opensBySymbol[p.symbol] || { BTO: [], STO: [] }
+      if (p.net_short > 0) r.openShortCredit += takeNewest(opens.STO, p.net_short)
+      if (p.net_long > 0) r.openLongCost += takeNewest(opens.BTO, p.net_long)
     })
 
     const r2 = n => Math.round(n * 100) / 100
     res.json(Object.values(byTicker).map(r => ({
-      ...r,
+      ...r, start,
       optionsCash: r2(r.optionsCash),
       openShortCredit: r2(r.openShortCredit),
       openLongCost: r2(r.openLongCost),

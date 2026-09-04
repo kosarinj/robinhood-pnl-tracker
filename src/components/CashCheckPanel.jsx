@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import { getPref, subscribePrefs } from '../services/prefs'
 
 const fmt = (n) => {
   if (n == null || isNaN(n)) return '—'
@@ -28,8 +29,21 @@ const pnlColor = (n, isDark) => {
  * OTM contracts that is a small understatement, and it keeps the arithmetic to
  * terms that can be checked against a brokerage statement without a model.
  */
+// Same key and default the Positions table uses. Read rather than duplicated,
+// so the two panels can never end up describing different periods — comparing a
+// windowed figure against an all-time one is what made an afternoon of
+// hand-reconciliation disagree for no real reason.
+const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
+const DEFAULT_GLOBAL_START = '2026-03-15'
+
 export default function CashCheckPanel({ broker = 'all' }) {
   const { isDark } = useTheme()
+  const [start, setStart] = useState(() => getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
+
+  // Follow the table when its start date is changed.
+  useEffect(() => subscribePrefs(() => {
+    setStart(getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
+  }), [])
   const [cash, setCash] = useState(null)
   const [ytd, setYtd] = useState([])
   const [error, setError] = useState(null)
@@ -39,18 +53,19 @@ export default function CashCheckPanel({ broker = 'all' }) {
   // Positions table reads. The `pnlData` prop this first took is a different
   // dataset and carries neither field, so both columns rendered blank.
   useEffect(() => {
-    const bq = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
-    const yq = new URLSearchParams({ startDate: '2000-01-01' })
+    const cq = new URLSearchParams({ start })
+    if (broker && broker !== 'all') cq.set('broker', broker)
+    const yq = new URLSearchParams({ startDate: start })
     if (broker && broker !== 'all') yq.set('broker', broker)
     Promise.all([
-      fetch(`/api/options-cash${bq}`, { credentials: 'include' }).then(r => r.json()),
+      fetch(`/api/options-cash?${cq}`, { credentials: 'include' }).then(r => r.json()),
       fetch(`/api/options-pnl/ytd?${yq}`, { credentials: 'include' }).then(r => r.json()),
     ]).then(([c, y]) => {
       if (c.error) throw new Error(c.error)
       setCash(c)
       setYtd(Array.isArray(y?.byUnderlying) ? y.byUnderlying : [])
     }).catch(e => setError(e.message))
-  }, [broker])
+  }, [broker, start])
 
   const rows = useMemo(() => {
     if (!cash) return []
@@ -97,7 +112,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
   const th = {
     textAlign: 'right', padding: '6px 8px', fontSize: 11, fontWeight: 600,
     textTransform: 'uppercase', letterSpacing: '0.04em',
-    color: isDark ? '#e2e8f0' : '#334155',
+    color: isDark ? '#ffffff' : '#0f172a',
     borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, whiteSpace: 'nowrap',
   }
   const td = {
@@ -114,7 +129,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
         <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: isDark ? '#ffffff' : '#0f172a' }}>Cash Check</h3>
         <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
-          independent of Options Total — shares no cost basis or trade matching
+          since {start} · independent of Options Total — shares no cost basis or trade matching
         </span>
         <label style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: isDark ? '#94a3b8' : '#64748b', cursor: 'pointer' }}>
           <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} />
