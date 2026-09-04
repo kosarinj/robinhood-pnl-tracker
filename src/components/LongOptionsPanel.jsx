@@ -81,7 +81,7 @@ export default function LongOptionsPanel({ broker = 'all' }) {
     borderRadius: 8, padding: 16, marginBottom: 16,
   }
   const th = {
-    textAlign: 'right', padding: '6px 8px', fontSize: 11, fontWeight: 600,
+    textAlign: 'right', padding: '6px 8px', fontSize: 11, fontWeight: 500,
     textTransform: 'uppercase', letterSpacing: '0.04em',
     color: isDark ? '#ffffff' : '#0f172a',
     borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, whiteSpace: 'nowrap',
@@ -117,7 +117,7 @@ export default function LongOptionsPanel({ broker = 'all' }) {
   return (
     <div style={card}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: isDark ? '#ffffff' : '#0f172a' }}>Long Options</h3>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: isDark ? '#ffffff' : '#0f172a' }}>Long Options</h3>
         <span style={{ fontSize: 12, color: muted }}>
           since {fmtDate(start)} · winners included, not just expiries
         </span>
