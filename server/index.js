@@ -72,41 +72,6 @@ function optionMarkFromSnapshot(snap) {
  * A print from an EARLIER day is NOT covered here: that is a frozen number, and
  * staleOptionMark handles it below the model, which is right.
  */
-/**
- * Is a print-to-print "day move" directionally possible?
- *
- * A call cannot rise while its underlying falls, and a put cannot rise while it
- * climbs. Vol changes the SIZE of a move, never its sign against the underlying.
- * So when the two prints disagree with the stock's direction, they are not from
- * adjacent sessions — one of them is stale — and the difference is a move that
- * never happened.
- *
- * This is how a short RDDT Sep-2028 $300 call read -715 on a day the stock fell
- * 1.33%: marked 25.85 -> 33.00, up 27.7%, on a DOWN day. The existing stale-print
- * guard did not catch it because today's print WAS today's; it is
- * `previous_close` on a barely-traded LEAP that came from some earlier session.
- * Freshness was being verified on one side only.
- *
- * Deliberately narrow. Preferring a model to real market data is how several
- * figures here went wrong before (a modelled MRVL LEAP read 74 against a live
- * 86), so this rejects only what is IMPOSSIBLE, not what is merely surprising:
- * the sign must contradict the underlying, and both moves must be big enough to
- * be meaningful rather than rounding on a penny option.
- *
- * Returns true when the pair can be trusted.
- */
-function printPairIsPlausible({ type, markNow, markPrev, underNow, underPrev }) {
-  if (!(markNow > 0) || !(markPrev > 0) || !(underNow > 0) || !(underPrev > 0)) return true
-  const underMove = (underNow - underPrev) / underPrev
-  const markMove = (markNow - markPrev) / markPrev
-  // Too small to judge: a penny option rounds either way, and a flat underlying
-  // gives no direction to contradict.
-  if (Math.abs(underMove) < 0.002 || Math.abs(markMove) < 0.10) return true
-  // Calls track the underlying, puts oppose it.
-  const expectedSign = type === 'put' ? -Math.sign(underMove) : Math.sign(underMove)
-  return Math.sign(markMove) === expectedSign
-}
-
 function freshOptionMark(snap) {
   if (!snap) return 0
   const q = snap.last_quote || {}
@@ -2865,17 +2830,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // contracts that barely trade. So: live quote, then the model, then
           // two daily prints.
           let dayOptPerShare = null
-          const mktNow = optFresh[entry.symbol] || optToday[entry.symbol]
-          // Only trust the pair if the move is directionally possible against the
-          // underlying. `previous_close` on an illiquid LEAP is not necessarily
-          // yesterday, and we were checking the freshness of today's print alone.
-          const pairOk = printPairIsPlausible({
-            type: parsed?.type, markNow: mktNow, markPrev: prevMkt,
-            underNow: stockByTicker[ticker], underPrev: openPrevUnderlying[ticker],
-          })
-          if (mktNow > 0 && prevMkt > 0 && pairOk) {
+          if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) {
             // A LIVE quote against yesterday's close. Both market, both current.
-            dayOptPerShare = prevMkt - mktNow
+            dayOptPerShare = prevMkt - (optFresh[entry.symbol] || optToday[entry.symbol])
           } else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) {
             const mNow = modelOptionMark(entry, parsed, stockByTicker[ticker])
             const mPrev = modelOptionMark(entry, parsed, openPrevUnderlying[ticker])
@@ -2890,11 +2847,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // whole row positive while the stock was down 5%. The model tracks the
           // underlying and is the better answer for exactly these contracts.
           if (dayOptPerShare == null && optClose[entry.symbol] > 0 && prevMkt > 0
-              && markBasis !== 'model'
-              && printPairIsPlausible({
-                   type: parsed?.type, markNow: optClose[entry.symbol], markPrev: prevMkt,
-                   underNow: stockByTicker[ticker], underPrev: openPrevUnderlying[ticker],
-                 })) {
+              && markBasis !== 'model') {
             dayOptPerShare = prevMkt - optClose[entry.symbol]
           }
           // Still nothing means no comparable pair at all. Subtracting a market
@@ -3016,11 +2969,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const prevMark = optPrevClose[leg.symbol]
         let dayLongPerShare = null
         let basis = null
-        const longPairOk = (markNow) => printPairIsPlausible({
-          type: leg.parsed?.type, markNow, markPrev: prevMark,
-          underNow: S, underPrev: openPrevUnderlying[ticker],
-        })
-        if (optFresh[leg.symbol] > 0 && prevMark > 0 && longPairOk(optFresh[leg.symbol])) {
+        if (optFresh[leg.symbol] > 0 && prevMark > 0) {
           dayLongPerShare = optFresh[leg.symbol] - prevMark
           basis = 'market'
         } else if (sigma != null && openPrevUnderlying[ticker] > 0) {
@@ -3034,7 +2983,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           if (mPrev > 0) { dayLongPerShare = nowMark - mPrev; basis = 'model' }
         }
         if (dayLongPerShare == null && prevMark > 0 && optClose[leg.symbol] > 0
-            && optFresh[leg.symbol] > 0 && longPairOk(optClose[leg.symbol])) {
+            && optFresh[leg.symbol] > 0) {
           dayLongPerShare = optClose[leg.symbol] - prevMark
           basis = 'market'
         }
