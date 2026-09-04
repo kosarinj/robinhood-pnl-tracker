@@ -5830,6 +5830,98 @@ app.get('/api/options-cash', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/call-coverage?broker=
+ *
+ * Does every 100 shares have a long call covering it this week?
+ *
+ * The window follows the trading week rather than a rolling 7 days: Monday to
+ * Thursday it checks THIS week's expiry, and from Friday onward it checks NEXT
+ * week's — because once Friday arrives the current week's protection is expiring
+ * that afternoon and the question worth asking is about the week ahead.
+ *
+ * Shares are floored, not rounded: 250 shares needs 2 contracts, because a third
+ * would cover stock that isn't there.
+ *
+ * Read-only.
+ */
+app.get('/api/call-coverage', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+
+    // Which week to check.
+    const now = new Date()
+    const dow = now.getDay()                 // 0 Sun .. 6 Sat
+    // Mon-Thu: this week's Friday. Fri/Sat: the next one — this week's is gone
+    // or going. Sun: the Friday of the week about to start.
+    const daysToFriday = (dow >= 1 && dow <= 4) ? 5 - dow
+      : dow === 5 ? 7
+      : dow === 6 ? 6
+      : 5
+    const friday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysToFriday)
+    const monday = new Date(friday.getFullYear(), friday.getMonth(), friday.getDate() - 4)
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const weekStart = iso(monday), weekEnd = iso(friday)
+    const label = (dow >= 1 && dow <= 4) ? 'this week' : 'next week'
+
+    const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
+    const open = databaseService.getOpenOptionPositions(userId, brokerFilter)
+
+    // Long calls expiring inside the target week, by ticker. A contract expiring
+    // Wednesday still covers that week, so the whole week counts rather than the
+    // Friday alone.
+    const coverByTicker = {}
+    const legsByTicker = {}
+    open.forEach(p => {
+      if (!(p.net_long > 0)) return
+      const parsed = parseOptionDescription(p.symbol)
+      if (!parsed || parsed.type !== 'call') return
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      if (expiry < weekStart || expiry > weekEnd) return
+      const t = parsed.ticker
+      coverByTicker[t] = (coverByTicker[t] || 0) + p.net_long
+      ;(legsByTicker[t] = legsByTicker[t] || []).push({
+        symbol: p.symbol, strike: parsed.strike, expiry, contracts: p.net_long,
+      })
+    })
+
+    const rows = Object.entries(positions)
+      .map(([ticker, p]) => {
+        const shares = p.position || 0
+        if (shares < 100) return null
+        const needed = Math.floor(shares / 100)
+        const covered = coverByTicker[ticker] || 0
+        return {
+          ticker, shares, needed, covered,
+          shortfall: Math.max(0, needed - covered),
+          covering: (legsByTicker[ticker] || []).sort((a, b) => a.strike - b.strike),
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.shortfall - a.shortfall) || a.ticker.localeCompare(b.ticker))
+
+    res.json({
+      window: { label, weekStart, weekEnd, checkedOn: iso(now) },
+      totals: {
+        positions: rows.length,
+        needed: rows.reduce((s, r) => s + r.needed, 0),
+        covered: rows.reduce((s, r) => s + Math.min(r.covered, r.needed), 0),
+        uncovered: rows.reduce((s, r) => s + r.shortfall, 0),
+        tickersShort: rows.filter(r => r.shortfall > 0).length,
+      },
+      // Long calls held in the window that no share position calls for. Not a
+      // problem, just not coverage — usually a bet or a leg of something else.
+      extraCallsWithoutShares: Object.keys(coverByTicker)
+        .filter(t => !(positions[t]?.position >= 100))
+        .map(t => ({ ticker: t, contracts: coverByTicker[t], legs: legsByTicker[t] })),
+      rows,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/long-options?start=YYYY-MM-DD&broker=
  *
  * Every BOUGHT contract, grouped by ticker and type, with what it cost and what

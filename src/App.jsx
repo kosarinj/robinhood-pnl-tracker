@@ -26,6 +26,7 @@ import ShortCallTracker from './components/ShortCallTracker'
 import ExpirationsPanel from './components/ExpirationsPanel'
 import CashCheckPanel from './components/CashCheckPanel'
 import LongOptionsPanel from './components/LongOptionsPanel'
+import CallCoveragePanel from './components/CallCoveragePanel'
 import VolScanner from './components/VolScanner'
 import TaxCenter from './components/TaxCenter'
 import AvgCostCalculator from './components/AvgCostCalculator'
@@ -2596,6 +2597,7 @@ function AuthenticatedApp({ user }) {
               ['shorts', 'Short Calls'],
               ['expiries', 'Expirations'],
               ['longs', 'Long Options'],
+              ['coverage', 'Coverage'],
             ].map(([key, label]) => {
               const active = positionsTab === key
               return (
@@ -2621,6 +2623,7 @@ function AuthenticatedApp({ user }) {
           {positionsTab === 'shorts'   && <ShortCallTracker broker={brokerFilter} />}
           {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}
           {positionsTab === 'longs'    && <LongOptionsPanel broker={brokerFilter} />}
+          {positionsTab === 'coverage' && <CallCoveragePanel broker={brokerFilter} />}
         </div>
       )}
 
