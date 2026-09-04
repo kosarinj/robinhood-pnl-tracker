@@ -516,6 +516,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
       totalRealized: acc.totalRealized + (r.totalRealized || 0),
       realizedExpired: acc.realizedExpired + (r.realizedExpired || 0),
+      realizedExpiredCalls: acc.realizedExpiredCalls + (r.realizedExpiredCalls || 0),
+      realizedExpiredPuts: acc.realizedExpiredPuts + (r.realizedExpiredPuts || 0),
       taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
@@ -534,7 +536,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -661,11 +663,30 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     // Net would double-count it. Net stays Stock P&L + Stock Realized +
     // Options Total.
     { key: 'realizedExpired', label: 'of which Expired', sort: 'realizedExpired',
-      title: 'The part of Options Total that came from expiry rather than a closing trade — premium lost on bought options that expired worthless, and kept on sold ones. Already included in Options Total, so it is NOT a separate term of Net.',
+      title: 'The part of Options Total that came from expiry rather than a closing trade — premium lost on bought options that expired worthless, and kept on sold ones. C and P split it by contract type. Already included in Options Total, so it is NOT a separate term of Net.',
+      // Calls and puts underneath rather than beside: they are halves of this
+      // column, not new terms. Two more columns would read as addends of Net,
+      // which is the mistake that broke this table before.
       cell: (r) => r.realizedExpired
-        ? <span style={{ color: pnlColor(r.realizedExpired, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500 }}>({fmt(r.realizedExpired)})</span>
+        ? <span style={{ color: pnlColor(r.realizedExpired, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500 }}>
+            ({fmt(r.realizedExpired)})
+            {(r.realizedExpiredCalls || r.realizedExpiredPuts) ? (
+              <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
+                {r.realizedExpiredCalls ? <span style={{ color: pnlColor(r.realizedExpiredCalls, isDark) }}>C {fmt(r.realizedExpiredCalls)}</span> : null}
+                {r.realizedExpiredCalls && r.realizedExpiredPuts ? <span style={{ color: textMid }}> · </span> : null}
+                {r.realizedExpiredPuts ? <span style={{ color: pnlColor(r.realizedExpiredPuts, isDark) }}>P {fmt(r.realizedExpiredPuts)}</span> : null}
+              </span>
+            ) : null}
+          </span>
         : <span style={{ color: textMid, opacity: 0.5 }}>—</span>,
-      foot: (t) => <span style={{ color: pnlColor(t.realizedExpired, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 600 }}>({fmt(t.realizedExpired)})</span> },
+      foot: (t) => <span style={{ color: pnlColor(t.realizedExpired, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 600 }}>
+          ({fmt(t.realizedExpired)})
+          <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
+            <span style={{ color: pnlColor(t.realizedExpiredCalls, isDark) }}>C {fmt(t.realizedExpiredCalls)}</span>
+            <span style={{ color: textMid }}> · </span>
+            <span style={{ color: pnlColor(t.realizedExpiredPuts, isDark) }}>P {fmt(t.realizedExpiredPuts)}</span>
+          </span>
+        </span> },
 
     { key: 'estTax', label: 'Est. Tax',
       title: 'Estimated tax on this year’s REALIZED gains (options + stock sold) at your ordinary rate from the Tax tab. Unrealized gains aren’t taxed until sold; losses show as a negative (tax benefit).',

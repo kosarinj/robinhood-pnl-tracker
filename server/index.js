@@ -3109,6 +3109,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // subset, never an addend: Net stays Stock P&L + Stock Realized +
           // Options Total.
           realizedExpired: 0,
+          realizedExpiredCalls: 0, realizedExpiredPuts: 0,
           totalRealized: 0, tradeCount: 0
         }
       }
@@ -3121,7 +3122,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       entry.tradeCount++
       if (isClosing && t._realizedPnl != null) {
         entry.totalRealized += t._realizedPnl
-        if (['OEXP', 'OASGN', 'OEXC'].includes(tc)) entry.realizedExpired += t._realizedPnl
+        if (['OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+          entry.realizedExpired += t._realizedPnl
+          // Split by contract type: puts and calls expire for opposite reasons,
+          // and on a book that buys puts and sells calls the two halves say
+          // different things about the same year.
+          if (optionType === 'call') entry.realizedExpiredCalls += t._realizedPnl
+          else if (optionType === 'put') entry.realizedExpiredPuts += t._realizedPnl
+        }
         if (optionType === 'call') {
           if (t._closingShort) entry.realizedShortCalls += t._realizedPnl
           else entry.realizedLongCalls += t._realizedPnl
@@ -3279,6 +3287,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           totalRealized: r2(e.totalRealized),
           // A SUBSET of totalRealized, not a separate term of Net.
           realizedExpired: r2(e.realizedExpired),
+          realizedExpiredCalls: r2(e.realizedExpiredCalls),
+          realizedExpiredPuts: r2(e.realizedExpiredPuts),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),
           openUnrealizedPnL: openUnrealizedByTicker[e.ticker] != null ? r2(openUnrealizedByTicker[e.ticker]) : null,
           // Open P&L projected forward on theta alone (underlying held flat).
