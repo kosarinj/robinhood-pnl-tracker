@@ -162,11 +162,17 @@ export default function OpenInterestPanel() {
                       {/* Bars scaled to the whole chain, so the two sides stay comparable. */}
                       <td style={{ ...td, textAlign: 'right' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', width: '100%' }}>
-                          <span style={{ color: muted, fontSize: 11 }}>
-                            {s.callOi ? num(s.callOi) : ''}
-                            {s.callOiChange ? <span style={{ color: s.callOiChange > 0 ? '#22c55e' : '#ef4444', marginLeft: 3 }}>
-                              {s.callOiChange > 0 ? '+' : ''}{num(s.callOiChange)}
-                            </span> : null}
+                          {/* Volume under the count, because open interest alone
+                              cannot tell a level being traded today from one
+                              established weeks ago and left there. */}
+                          <span style={{ color: muted, fontSize: 11, lineHeight: 1.25 }}>
+                            <span style={{ display: 'block' }}>
+                              {s.callOi ? num(s.callOi) : ''}
+                              {s.callOiChange ? <span style={{ color: s.callOiChange > 0 ? '#22c55e' : '#ef4444', marginLeft: 3 }}>
+                                {s.callOiChange > 0 ? '+' : ''}{num(s.callOiChange)}
+                              </span> : null}
+                            </span>
+                            {s.callVol ? <span style={{ display: 'block', fontSize: 9, opacity: 0.8 }}>vol {num(s.callVol)}</span> : null}
                           </span>
                           <span style={{ display: 'inline-block', height: 10, borderRadius: 2, background: '#22c55e', width: `${(s.callOi / maxOi) * 140}px` }} />
                         </span>
@@ -187,11 +193,14 @@ export default function OpenInterestPanel() {
                       <td style={{ ...td, textAlign: 'left' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ display: 'inline-block', height: 10, borderRadius: 2, background: '#ef4444', width: `${(s.putOi / maxOi) * 140}px` }} />
-                          <span style={{ color: muted, fontSize: 11 }}>
-                            {s.putOi ? num(s.putOi) : ''}
-                            {s.putOiChange ? <span style={{ color: s.putOiChange > 0 ? '#22c55e' : '#ef4444', marginLeft: 3 }}>
-                              {s.putOiChange > 0 ? '+' : ''}{num(s.putOiChange)}
-                            </span> : null}
+                          <span style={{ color: muted, fontSize: 11, lineHeight: 1.25 }}>
+                            <span style={{ display: 'block' }}>
+                              {s.putOi ? num(s.putOi) : ''}
+                              {s.putOiChange ? <span style={{ color: s.putOiChange > 0 ? '#22c55e' : '#ef4444', marginLeft: 3 }}>
+                                {s.putOiChange > 0 ? '+' : ''}{num(s.putOiChange)}
+                              </span> : null}
+                            </span>
+                            {s.putVol ? <span style={{ display: 'block', fontSize: 9, opacity: 0.8 }}>vol {num(s.putVol)}</span> : null}
                           </span>
                         </span>
                       </td>
@@ -205,7 +214,9 @@ export default function OpenInterestPanel() {
           <div style={{ fontSize: 11, color: muted, marginTop: 10, lineHeight: 1.5 }}>
             {data.contracts} contracts · {num(data.totals?.callOi)} call OI · {num(data.totals?.putOi)} put OI
             {data.priorDate ? ` · change vs ${fmtDate(data.priorDate)}` : ' · no earlier reading yet, so no change shown'}.
-            Blue marks contracts you hold long, amber short.
+            Blue marks contracts you hold long, amber short. Volume is today's trading at that
+            strike — high open interest with little volume is positioning left from earlier, not a
+            level being defended now.
             Heavy call interest above the price is read as resistance and heavy put interest below it as
             support. That is a description of where positioning sits, not a forecast — a large block far
             from the money is often one holder's hedge rather than a level anyone trades around.
