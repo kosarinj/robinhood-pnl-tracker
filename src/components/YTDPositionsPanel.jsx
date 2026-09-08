@@ -46,6 +46,37 @@ const fmtDate = (s) => {
   return `${m}/${d}/${y.slice(2)}`
 }
 
+/**
+ * The expiry breakdown under the "of which Expired" total.
+ *
+ * Two lines, calls then puts, each split long and short — a bought contract
+ * expiring worthless loses its whole premium, a sold one keeps it, so netting
+ * them inside a type hides which half the year came from. Parts that are zero
+ * are left out rather than printed, so a row that only ever sold calls shows one
+ * short entry instead of four columns of dashes.
+ *
+ * All of it is a subset of Options Total. Nothing here is a term of Net.
+ */
+function expiredBreakdown(r, isDark, textMid, bold = false) {
+  const line = (label, longV, shortV) => {
+    if (!longV && !shortV) return null
+    return (
+      <span key={label} style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
+        <span style={{ color: textMid }}>{label} </span>
+        {longV ? <span style={{ color: pnlColor(longV, isDark) }}>L {fmt(longV)}</span> : null}
+        {longV && shortV ? <span style={{ color: textMid }}> · </span> : null}
+        {shortV ? <span style={{ color: pnlColor(shortV, isDark) }}>S {fmt(shortV)}</span> : null}
+      </span>
+    )
+  }
+  const rows = [
+    line('C', r.realizedExpiredLongCalls, r.realizedExpiredShortCalls),
+    line('P', r.realizedExpiredLongPuts, r.realizedExpiredShortPuts),
+  ].filter(Boolean)
+  if (!rows.length) return null
+  return <span style={{ fontWeight: bold ? 600 : 400 }}>{rows}</span>
+}
+
 const pnlColor = (n, isDark) => {
   if (n == null || n === 0) return isDark ? '#94a3b8' : '#64748b'
   return n > 0 ? '#22c55e' : '#ef4444'
@@ -518,6 +549,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       realizedExpired: acc.realizedExpired + (r.realizedExpired || 0),
       realizedExpiredCalls: acc.realizedExpiredCalls + (r.realizedExpiredCalls || 0),
       realizedExpiredPuts: acc.realizedExpiredPuts + (r.realizedExpiredPuts || 0),
+      realizedExpiredLongCalls: acc.realizedExpiredLongCalls + (r.realizedExpiredLongCalls || 0),
+      realizedExpiredShortCalls: acc.realizedExpiredShortCalls + (r.realizedExpiredShortCalls || 0),
+      realizedExpiredLongPuts: acc.realizedExpiredLongPuts + (r.realizedExpiredLongPuts || 0),
+      realizedExpiredShortPuts: acc.realizedExpiredShortPuts + (r.realizedExpiredShortPuts || 0),
       taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
@@ -536,7 +571,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedExpiredLongCalls: 0, realizedExpiredShortCalls: 0, realizedExpiredLongPuts: 0, realizedExpiredShortPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -663,29 +698,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     // Net would double-count it. Net stays Stock P&L + Stock Realized +
     // Options Total.
     { key: 'realizedExpired', label: 'of which Expired', sort: 'realizedExpired',
-      title: 'The part of Options Total that came from expiry rather than a closing trade — premium lost on bought options that expired worthless, and kept on sold ones. C and P split it by contract type. Already included in Options Total, so it is NOT a separate term of Net.',
+      title: 'The part of Options Total that came from expiry rather than a closing trade. C and P are calls and puts; L and S are bought and sold. A bought contract expiring worthless loses its whole premium, a sold one keeps it. Already included in Options Total, so it is NOT a separate term of Net.',
       // Calls and puts underneath rather than beside: they are halves of this
       // column, not new terms. Two more columns would read as addends of Net,
       // which is the mistake that broke this table before.
       cell: (r) => r.realizedExpired
         ? <span style={{ color: pnlColor(r.realizedExpired, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500 }}>
             ({fmt(r.realizedExpired)})
-            {(r.realizedExpiredCalls || r.realizedExpiredPuts) ? (
-              <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
-                {r.realizedExpiredCalls ? <span style={{ color: pnlColor(r.realizedExpiredCalls, isDark) }}>C {fmt(r.realizedExpiredCalls)}</span> : null}
-                {r.realizedExpiredCalls && r.realizedExpiredPuts ? <span style={{ color: textMid }}> · </span> : null}
-                {r.realizedExpiredPuts ? <span style={{ color: pnlColor(r.realizedExpiredPuts, isDark) }}>P {fmt(r.realizedExpiredPuts)}</span> : null}
-              </span>
-            ) : null}
+            {expiredBreakdown(r, isDark, textMid)}
           </span>
         : <span style={{ color: textMid, opacity: 0.5 }}>—</span>,
       foot: (t) => <span style={{ color: pnlColor(t.realizedExpired, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 600 }}>
           ({fmt(t.realizedExpired)})
-          <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
-            <span style={{ color: pnlColor(t.realizedExpiredCalls, isDark) }}>C {fmt(t.realizedExpiredCalls)}</span>
-            <span style={{ color: textMid }}> · </span>
-            <span style={{ color: pnlColor(t.realizedExpiredPuts, isDark) }}>P {fmt(t.realizedExpiredPuts)}</span>
-          </span>
+          {expiredBreakdown(t, isDark, textMid, true)}
         </span> },
 
     { key: 'estTax', label: 'Est. Tax',
