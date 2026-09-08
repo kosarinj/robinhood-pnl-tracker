@@ -531,6 +531,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       realizedLongPuts: acc.realizedLongPuts + (r.realizedLongPuts || 0),
       totalRealized: acc.totalRealized + (r.totalRealized || 0),
       realizedExpired: acc.realizedExpired + (r.realizedExpired || 0),
+      shortCallsThisWeek: acc.shortCallsThisWeek + (r.shortCallsThisWeek || 0),
+      shortCallsLastWeek: acc.shortCallsLastWeek + (r.shortCallsLastWeek || 0),
       realizedExpiredCalls: acc.realizedExpiredCalls + (r.realizedExpiredCalls || 0),
       realizedExpiredPuts: acc.realizedExpiredPuts + (r.realizedExpiredPuts || 0),
       taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
@@ -551,7 +553,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -700,6 +702,29 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             <span style={{ color: pnlColor(t.realizedExpiredCalls, isDark) }}>C {fmt(t.realizedExpiredCalls)}</span>
             <span style={{ color: textMid }}> · </span>
             <span style={{ color: pnlColor(t.realizedExpiredPuts, isDark) }}>P {fmt(t.realizedExpiredPuts)}</span>
+          </span>
+        </span> },
+
+    // Money BOOKED on short calls in the last two weeks — premium kept on ones
+    // that expired or were bought back. Like the expiry column it is a slice of
+    // Options Total, scoped by date rather than by type, so it is shown muted
+    // and is NOT a term of Net. Adding it would double-count.
+    { key: 'shortCallsThisWeek', label: 'Short calls wk', sort: 'shortCallsThisWeek',
+      title: 'Realized on SHORT CALLS this calendar week (from Monday) — premium kept on contracts that expired or were bought back. Last week underneath. Already inside Options Total, so it is NOT a separate term of Net.',
+      cell: (r) => (r.shortCallsThisWeek || r.shortCallsLastWeek)
+        ? <span style={{ fontWeight: 600, color: pnlColor(r.shortCallsThisWeek, isDark) }}>
+            {r.shortCallsThisWeek ? fmt(r.shortCallsThisWeek) : '—'}
+            {r.shortCallsLastWeek ? (
+              <span style={{ display: 'block', fontSize: 10, fontWeight: 400, opacity: 0.75, color: pnlColor(r.shortCallsLastWeek, isDark) }}>
+                last {fmt(r.shortCallsLastWeek)}
+              </span>
+            ) : null}
+          </span>
+        : <span style={{ color: textMid, opacity: 0.5 }}>—</span>,
+      foot: (t) => <span style={{ fontWeight: 700, color: pnlColor(t.shortCallsThisWeek, isDark) }}>
+          {fmt(t.shortCallsThisWeek)}
+          <span style={{ display: 'block', fontSize: 10, fontWeight: 400, opacity: 0.75, color: pnlColor(t.shortCallsLastWeek, isDark) }}>
+            last {fmt(t.shortCallsLastWeek)}
           </span>
         </span> },
 

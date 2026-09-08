@@ -2469,6 +2469,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
   const corrected = req.query.basis === 'corrected'
   try {
     const userId = req.user.userId
+    // Monday of the current week, for the "this week" column. Realised money is
+    // dated by when it was BOOKED, so this is the plain calendar trading week —
+    // not the Coverage tab's look-ahead window, which answers a different
+    // question about protection that has not happened yet.
+    const weekStartForCols = (() => {
+      const d = new Date()
+      const back = (d.getDay() + 6) % 7          // Mon 0 .. Sun 6
+      const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - back)
+      return mon
+    })()
+    const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const thisMonday = iso(weekStartForCols)
+    const lastMonday = iso(new Date(
+      weekStartForCols.getFullYear(), weekStartForCols.getMonth(), weekStartForCols.getDate() - 7))
     const globalStart = req.query.startDate || '2000-01-01'
     const perSymbolDates = req.query.symbolDates ? JSON.parse(req.query.symbolDates) : {}
     // Point-in-time "as of" date (YYYY-MM-DD): chop off trades after it and price
@@ -3166,6 +3180,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // subset, never an addend: Net stays Stock P&L + Stock Realized +
           // Options Total.
           realizedExpired: 0,
+          // Booked THIS WEEK on short calls — premium kept on ones that expired
+          // or were bought back since Monday. A subset of Options Total scoped
+          // by date, never a term of Net.
+          shortCallsThisWeek: 0, shortCallsLastWeek: 0,
           realizedExpiredCalls: 0, realizedExpiredPuts: 0,
           totalRealized: 0, tradeCount: 0
         }
@@ -3186,6 +3204,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // different things about the same year.
           if (optionType === 'call') entry.realizedExpiredCalls += t._realizedPnl
           else if (optionType === 'put') entry.realizedExpiredPuts += t._realizedPnl
+        }
+        if (optionType === 'call' && t._closingShort) {
+          const d = String(t.trans_date || '')
+          if (d >= thisMonday) entry.shortCallsThisWeek += t._realizedPnl
+          else if (d >= lastMonday) entry.shortCallsLastWeek += t._realizedPnl
         }
         if (optionType === 'call') {
           if (t._closingShort) entry.realizedShortCalls += t._realizedPnl
@@ -3344,6 +3367,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           totalRealized: r2(e.totalRealized),
           // A SUBSET of totalRealized, not a separate term of Net.
           realizedExpired: r2(e.realizedExpired),
+          shortCallsThisWeek: r2(e.shortCallsThisWeek),
+          shortCallsLastWeek: r2(e.shortCallsLastWeek),
           realizedExpiredCalls: r2(e.realizedExpiredCalls),
           realizedExpiredPuts: r2(e.realizedExpiredPuts),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),
