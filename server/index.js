@@ -5675,9 +5675,40 @@ app.get('/api/open-interest', requireAuth, async (req, res) => {
       try { spot = (await priceService.fetchPrices([ticker]))[ticker] || 0 } catch { /* leave 0 */ }
     }
 
-    const strikes = Object.values(byStrike)
+    let strikes = Object.values(byStrike)
       .map(r => ({ ...r, totalOi: r.callOi + r.putOi }))
       .sort((a, b) => a.strike - b.strike)
+
+    // Record today's chain and attach the change since the last reading.
+    //
+    // Where positioning is BUILDING is the part that speaks to "is this stock
+    // hitting a wall" — a static number cannot separate a fresh wall from one
+    // that has stood for a month. Recorded on view rather than by a job walking
+    // every ticker, so history exists for what has actually been looked at.
+    const chainExpiry = req.query.expiry || expiries[0] || null
+    let priorDate = null
+    if (chainExpiry) {
+      try {
+        const today = todayStrLocal()
+        databaseService.recordOpenInterest(ticker, chainExpiry, today, strikes)
+        const yesterday = (() => {
+          const d = new Date(); d.setDate(d.getDate() - 1)
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        })()
+        const prior = databaseService.getOpenInterestAsOf(ticker, chainExpiry, yesterday)
+        const byPrior = {}
+        prior.forEach(r => { byPrior[r.strike] = r; if (!priorDate || r.snap_date > priorDate) priorDate = r.snap_date })
+        strikes = strikes.map(s => {
+          const p = byPrior[s.strike]
+          // Null, not zero: no prior reading is not "no change".
+          return p
+            ? { ...s, callOiChange: s.callOi - p.call_oi, putOiChange: s.putOi - p.put_oi }
+            : { ...s, callOiChange: null, putOiChange: null }
+        })
+      } catch (e) {
+        console.warn('open interest history failed:', e.message)
+      }
+    }
 
     // Calls above spot and puts below it are the halves the convention reads.
     // Reported separately rather than as one ranking, because the top of a
@@ -5699,6 +5730,25 @@ app.get('/api/open-interest', requireAuth, async (req, res) => {
         putOi: strikes.reduce((n, s) => n + s.putOi, 0),
       },
       resistance, support, strikes,
+      // Which day the change is measured against, so a stale comparison can be
+      // labelled rather than passed off as a day's move.
+      priorDate,
+      // The user's own open contracts on this underlying, so a hedge can be seen
+      // against the walls rather than held in the head.
+      holdings: (() => {
+        try {
+          return databaseService.getOpenOptionPositions(req.user.userId)
+            .map(p => ({ p, parsed: parseOptionDescription(p.symbol) }))
+            .filter(x => x.parsed && x.parsed.ticker === ticker
+              && (!chainExpiry || `${x.parsed.year}-${x.parsed.month}-${x.parsed.day}` === chainExpiry))
+            .map(({ p, parsed }) => ({
+              strike: parsed.strike,
+              type: parsed.type,
+              side: p.net_long > 0 ? 'long' : 'short',
+              contracts: p.net_long > 0 ? p.net_long : p.net_short,
+            }))
+        } catch { return [] }
+      })(),
       note: 'Heavy call OI above spot is read as resistance, heavy put OI below as support. '
           + 'It shows where positioning sits, not where price has to go.',
     })

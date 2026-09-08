@@ -48,6 +48,14 @@ export default function OpenInterestPanel() {
 
   useEffect(() => { if (ticker) load(ticker, expiry) }, [ticker])
 
+  // The user's own contracts on this expiry, by strike — so a hedge can be read
+  // against the walls instead of held in the head.
+  const mine = useMemo(() => {
+    const m = {}
+    ;(data?.holdings || []).forEach(h => { (m[h.strike] = m[h.strike] || []).push(h) })
+    return m
+  }, [data])
+
   const maxOi = useMemo(
     () => Math.max(1, ...(data?.strikes || []).map(s => Math.max(s.callOi, s.putOi))),
     [data])
@@ -154,18 +162,37 @@ export default function OpenInterestPanel() {
                       {/* Bars scaled to the whole chain, so the two sides stay comparable. */}
                       <td style={{ ...td, textAlign: 'right' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', width: '100%' }}>
-                          <span style={{ color: muted, fontSize: 11 }}>{s.callOi ? num(s.callOi) : ''}</span>
+                          <span style={{ color: muted, fontSize: 11 }}>
+                            {s.callOi ? num(s.callOi) : ''}
+                            {s.callOiChange ? <span style={{ color: s.callOiChange > 0 ? '#22c55e' : '#ef4444', marginLeft: 3 }}>
+                              {s.callOiChange > 0 ? '+' : ''}{num(s.callOiChange)}
+                            </span> : null}
+                          </span>
                           <span style={{ display: 'inline-block', height: 10, borderRadius: 2, background: '#22c55e', width: `${(s.callOi / maxOi) * 140}px` }} />
                         </span>
                       </td>
                       <td style={{ ...td, textAlign: 'center', fontWeight: near ? 700 : 500 }}>
                         ${s.strike}
                         {near && <span style={{ fontSize: 9, color: muted, display: 'block' }}>spot</span>}
+                        {mine[s.strike]?.map((h, i) => (
+                          <span key={i} title={`You hold ${h.contracts} ${h.side} ${h.type}${h.contracts === 1 ? '' : 's'} here`}
+                            style={{
+                              display: 'block', fontSize: 9, fontWeight: 700,
+                              color: h.side === 'long' ? '#3b82f6' : '#f59e0b',
+                            }}>
+                            {h.side === 'long' ? '+' : '-'}{h.contracts}{h.type === 'call' ? 'C' : 'P'}
+                          </span>
+                        ))}
                       </td>
                       <td style={{ ...td, textAlign: 'left' }}>
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           <span style={{ display: 'inline-block', height: 10, borderRadius: 2, background: '#ef4444', width: `${(s.putOi / maxOi) * 140}px` }} />
-                          <span style={{ color: muted, fontSize: 11 }}>{s.putOi ? num(s.putOi) : ''}</span>
+                          <span style={{ color: muted, fontSize: 11 }}>
+                            {s.putOi ? num(s.putOi) : ''}
+                            {s.putOiChange ? <span style={{ color: s.putOiChange > 0 ? '#22c55e' : '#ef4444', marginLeft: 3 }}>
+                              {s.putOiChange > 0 ? '+' : ''}{num(s.putOiChange)}
+                            </span> : null}
+                          </span>
                         </span>
                       </td>
                     </tr>
@@ -176,7 +203,9 @@ export default function OpenInterestPanel() {
           </div>
 
           <div style={{ fontSize: 11, color: muted, marginTop: 10, lineHeight: 1.5 }}>
-            {data.contracts} contracts · {num(data.totals?.callOi)} call OI · {num(data.totals?.putOi)} put OI.
+            {data.contracts} contracts · {num(data.totals?.callOi)} call OI · {num(data.totals?.putOi)} put OI
+            {data.priorDate ? ` · change vs ${fmtDate(data.priorDate)}` : ' · no earlier reading yet, so no change shown'}.
+            Blue marks contracts you hold long, amber short.
             Heavy call interest above the price is read as resistance and heavy put interest below it as
             support. That is a description of where positioning sits, not a forecast — a large block far
             from the money is often one holder's hedge rather than a level anyone trades around.

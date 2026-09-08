@@ -82,6 +82,27 @@ db.exec(`
   --
   -- No history before the first run, by design: an invented back-fill would be
   -- the estimate this exists to avoid.
+  -- Open interest per strike, recorded daily.
+  --
+  -- A snapshot says where positioning IS; the useful signal for "is this stock
+  -- hitting a wall" is where it is BUILDING. 3,000 contracts that appeared this
+  -- week mean something different from 3,000 that have sat there a month, and a
+  -- single reading cannot tell them apart.
+  --
+  -- Not per user: open interest is the whole market's, not anyone's position.
+  CREATE TABLE IF NOT EXISTS oi_history (
+    ticker      TEXT NOT NULL,
+    expiry      TEXT NOT NULL,
+    strike      REAL NOT NULL,
+    snap_date   TEXT NOT NULL,
+    call_oi     INTEGER DEFAULT 0,
+    put_oi      INTEGER DEFAULT 0,
+    created_at  INTEGER DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (ticker, expiry, strike, snap_date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_oi_history_lookup
+    ON oi_history(ticker, expiry, snap_date DESC);
+
   CREATE TABLE IF NOT EXISTS short_call_pnl_history (
     user_id      INTEGER NOT NULL,
     snap_date    TEXT NOT NULL,
@@ -2203,6 +2224,53 @@ export class DatabaseService {
    * price the held part from yesterday's close and the new part from what was
    * actually paid.
    */
+  /** Record one chain's open interest for a day. Re-running replaces it. */
+  recordOpenInterest(ticker, expiry, snapDate, rows) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO oi_history (ticker, expiry, strike, snap_date, call_oi, put_oi)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(ticker, expiry, strike, snap_date) DO UPDATE SET
+          call_oi = excluded.call_oi, put_oi = excluded.put_oi
+      `)
+      const run = db.transaction(list => {
+        for (const r of list) stmt.run(ticker, expiry, r.strike, snapDate, r.callOi | 0, r.putOi | 0)
+      })
+      run(rows)
+      return rows.length
+    } catch (e) {
+      console.error('Error recording open interest:', e)
+      return 0
+    }
+  }
+
+  /**
+   * The most recent reading on or before a date, per strike.
+   *
+   * On-or-before because the chain is only recorded when someone looks at it —
+   * there is no job walking every ticker — so yesterday's row may be from last
+   * week. The date it actually came from is returned so a stale comparison can
+   * be labelled rather than passed off as a day's change.
+   */
+  getOpenInterestAsOf(ticker, expiry, onOrBefore) {
+    try {
+      return db.prepare(`
+        SELECT h.strike, h.call_oi, h.put_oi, h.snap_date
+        FROM oi_history h
+        JOIN (
+          SELECT strike, MAX(snap_date) AS d
+          FROM oi_history
+          WHERE ticker = ? AND expiry = ? AND snap_date <= ?
+          GROUP BY strike
+        ) latest ON latest.strike = h.strike AND latest.d = h.snap_date
+        WHERE h.ticker = ? AND h.expiry = ?
+      `).all(ticker, expiry, onOrBefore, ticker, expiry)
+    } catch (e) {
+      console.error('Error reading open interest history:', e)
+      return []
+    }
+  }
+
   /** Record today's open short-call P&L per ticker. Re-running replaces the day. */
   recordShortCallPnl(userId, snapDate, rows) {
     try {
