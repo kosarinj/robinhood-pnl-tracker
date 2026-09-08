@@ -3136,11 +3136,6 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Options Total.
           realizedExpired: 0,
           realizedExpiredCalls: 0, realizedExpiredPuts: 0,
-          // Long and short expire for opposite reasons: a bought contract loses
-          // its whole premium, a sold one keeps it. Netting them inside a type
-          // hides which half a year came from.
-          realizedExpiredLongCalls: 0, realizedExpiredShortCalls: 0,
-          realizedExpiredLongPuts: 0, realizedExpiredShortPuts: 0,
           totalRealized: 0, tradeCount: 0
         }
       }
@@ -3158,16 +3153,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Split by contract type: puts and calls expire for opposite reasons,
           // and on a book that buys puts and sells calls the two halves say
           // different things about the same year.
-          const short = !!t._closingShort
-          if (optionType === 'call') {
-            entry.realizedExpiredCalls += t._realizedPnl
-            if (short) entry.realizedExpiredShortCalls += t._realizedPnl
-            else entry.realizedExpiredLongCalls += t._realizedPnl
-          } else if (optionType === 'put') {
-            entry.realizedExpiredPuts += t._realizedPnl
-            if (short) entry.realizedExpiredShortPuts += t._realizedPnl
-            else entry.realizedExpiredLongPuts += t._realizedPnl
-          }
+          if (optionType === 'call') entry.realizedExpiredCalls += t._realizedPnl
+          else if (optionType === 'put') entry.realizedExpiredPuts += t._realizedPnl
         }
         if (optionType === 'call') {
           if (t._closingShort) entry.realizedShortCalls += t._realizedPnl
@@ -3328,10 +3315,6 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           realizedExpired: r2(e.realizedExpired),
           realizedExpiredCalls: r2(e.realizedExpiredCalls),
           realizedExpiredPuts: r2(e.realizedExpiredPuts),
-          realizedExpiredLongCalls: r2(e.realizedExpiredLongCalls),
-          realizedExpiredShortCalls: r2(e.realizedExpiredShortCalls),
-          realizedExpiredLongPuts: r2(e.realizedExpiredLongPuts),
-          realizedExpiredShortPuts: r2(e.realizedExpiredShortPuts),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),
           openUnrealizedPnL: openUnrealizedByTicker[e.ticker] != null ? r2(openUnrealizedByTicker[e.ticker]) : null,
           // Open P&L projected forward on theta alone (underlying held flat).
