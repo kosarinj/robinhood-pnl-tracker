@@ -5627,6 +5627,77 @@ const PROCESS_STARTED = Date.now()
  * calls each one made. Answers which endpoint is slow and whether the external
  * calls are the reason, rather than leaving it to inference.
  */
+/**
+ * GET /api/debug/open-interest?ticker=CRWV&expiry=YYYY-MM-DD
+ *
+ * Open interest by strike for one expiry, calls and puts side by side.
+ *
+ * Built to answer a purchasing question before any money is spent: the chain
+ * snapshot carries open_interest, and this key already reads snapshots happily
+ * — it is only /v3/quotes it refuses. So the open-interest analysis may already
+ * be available on the current subscription.
+ *
+ * The high-OI strikes are the ones said to act as support and resistance;
+ * whether that holds is a separate matter, but the data for testing it is here
+ * or it is not, and this says which.
+ *
+ * Read-only.
+ */
+app.get('/api/debug/open-interest', requireAuth, async (req, res) => {
+  try {
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return res.status(400).json({ error: 'No POLYGON_API_KEY set' })
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    if (!ticker) return res.status(400).json({ error: 'Pass ?ticker=CRWV' })
+    const expiry = req.query.expiry || null
+
+    const params = { apiKey: polygonKey, limit: 250 }
+    if (expiry) params.expiration_date = expiry
+    const url = `https://api.polygon.io/v3/snapshot/options/${ticker}`
+    const resp = await axios.get(url, { params, timeout: 12000 })
+    const results = resp.data?.results || []
+
+    const byStrike = {}
+    let withOi = 0
+    results.forEach(r => {
+      const d = r.details || {}
+      const strike = d.strike_price
+      if (strike == null) return
+      const oi = r.open_interest ?? null
+      if (oi != null) withOi++
+      const row = byStrike[strike] || (byStrike[strike] = { strike, callOi: 0, putOi: 0, callVol: 0, putVol: 0 })
+      const isCall = d.contract_type === 'call'
+      if (isCall) { row.callOi += oi || 0; row.callVol += r.day?.volume || 0 }
+      else { row.putOi += oi || 0; row.putVol += r.day?.volume || 0 }
+      row.expiry = d.expiration_date || row.expiry
+    })
+
+    const strikes = Object.values(byStrike)
+      .map(r => ({ ...r, totalOi: r.callOi + r.putOi }))
+      .sort((a, b) => a.strike - b.strike)
+
+    const underlying = results[0]?.underlying_asset?.price ?? null
+    const top = [...strikes].sort((a, b) => b.totalOi - a.totalOi).slice(0, 10)
+    res.json({
+      ticker, expiry, underlying,
+      contractsReturned: results.length,
+      contractsWithOpenInterest: withOi,
+      verdict: withOi > 0
+        ? 'open_interest IS available on this key — no new subscription needed for this'
+        : 'the chain came back but carries no open_interest on this key',
+      // The strikes said to act as support and resistance.
+      heaviestStrikes: top,
+      strikes,
+    })
+  } catch (e) {
+    res.status(e.response?.status || 500).json({
+      error: e.response?.data?.message || e.message,
+      status: e.response?.status || null,
+      note: 'A 403 here means the chain snapshot itself is not entitled, which would be different from the quotes refusal.',
+    })
+  }
+})
+
 app.get('/api/debug/slow', requireAuth, (req, res) => {
   res.json({
     thresholdMs: SLOW_MS,
