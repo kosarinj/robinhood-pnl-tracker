@@ -519,6 +519,37 @@ app.use((req, res, next) => {
 })
 
 app.use(cors(corsOptions))
+// ── Request timing ──
+// Records how long each /api request takes, with the connection pool of doomed
+// external calls it made along the way, so "the panel is slow" can be answered
+// with a measurement instead of by reverting features one at a time hoping one
+// of them was it. In memory only, readable at /api/debug/slow.
+const SLOW_MS = 1000
+const slowLog = []
+app.use('/api', (req, res, next) => {
+  const started = process.hrtime.bigint()
+  const quotesAtStart = optionQuoteHealth.attempts + (optionQuoteHealth.skipped || 0)
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - started) / 1e6
+    if (ms < SLOW_MS || req.path.startsWith('/debug/slow')) return
+    const entry = {
+      at: new Date().toISOString(),
+      method: req.method,
+      url: (req.originalUrl || '').split('?')[0],
+      query: req.query,
+      ms: Math.round(ms),
+      status: res.statusCode,
+      // How many option-quote calls this request made or skipped — the thing
+      // that used to dominate, so its absence is as informative as its presence.
+      quoteCalls: optionQuoteHealth.attempts + (optionQuoteHealth.skipped || 0) - quotesAtStart,
+    }
+    slowLog.push(entry)
+    if (slowLog.length > 100) slowLog.shift()
+    console.warn(`SLOW ${entry.ms}ms ${entry.method} ${entry.url} quoteCalls=${entry.quoteCalls}`)
+  })
+  next()
+})
+
 app.use(express.json())
 app.use(cookieParser())
 
@@ -5495,6 +5526,26 @@ app.get('/api/debug-option-trades', requireAuth, (req, res) => {
 // SAME instanceId + count — if they flip, more than one replica is serving (volume bug).
 const INSTANCE_ID = Math.random().toString(36).slice(2, 10)
 const PROCESS_STARTED = Date.now()
+/**
+ * GET /api/debug/slow
+ *
+ * The slowest recent /api requests, newest last, with how many option-quote
+ * calls each one made. Answers which endpoint is slow and whether the external
+ * calls are the reason, rather than leaving it to inference.
+ */
+app.get('/api/debug/slow', requireAuth, (req, res) => {
+  res.json({
+    thresholdMs: SLOW_MS,
+    optionQuotes: {
+      attempts: optionQuoteHealth.attempts,
+      skipped: optionQuoteHealth.skipped || 0,
+      withQuote: optionQuoteHealth.withQuote,
+      pausedUntil: optionQuoteHealth.pausedUntil,
+    },
+    requests: slowLog,
+  })
+})
+
 app.get('/api/health', (req, res) => {
   // Included so an options key that has quietly lost its quotes entitlement is
   // visible here rather than only as marks that look a bit stale.
