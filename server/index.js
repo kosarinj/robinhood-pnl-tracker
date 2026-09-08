@@ -5628,6 +5628,89 @@ const PROCESS_STARTED = Date.now()
  * calls are the reason, rather than leaving it to inference.
  */
 /**
+ * GET /api/open-interest?ticker=CRWV&expiry=YYYY-MM-DD
+ *
+ * Open interest by strike for one expiry, with the underlying's price attached
+ * so strikes can be placed above or below it.
+ *
+ * The convention: put open interest below spot is read as support, call open
+ * interest above it as resistance. It describes where positioning sits, not
+ * where price must go — so the endpoint reports the concentrations and leaves
+ * the interpretation alone.
+ *
+ * The chain snapshot's underlying_asset.price comes back null on this key, so
+ * spot is taken from the price service that feeds the rest of the app rather
+ * than left missing.
+ */
+app.get('/api/open-interest', requireAuth, async (req, res) => {
+  try {
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return res.status(400).json({ error: 'No POLYGON_API_KEY set on the server' })
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    if (!ticker) return res.status(400).json({ error: 'Pass a ticker' })
+
+    const params = { apiKey: polygonKey, limit: 250 }
+    if (req.query.expiry) params.expiration_date = req.query.expiry
+    const resp = await axios.get(`https://api.polygon.io/v3/snapshot/options/${ticker}`,
+      { params, timeout: 12000 })
+    const results = resp.data?.results || []
+
+    // Expiries present, so the client can offer them without a second call.
+    const expiries = [...new Set(results.map(r => r.details?.expiration_date).filter(Boolean))].sort()
+
+    const byStrike = {}
+    results.forEach(r => {
+      const d = r.details || {}
+      const strike = d.strike_price
+      if (strike == null) return
+      const row = byStrike[strike] || (byStrike[strike] = {
+        strike, callOi: 0, putOi: 0, callVol: 0, putVol: 0,
+      })
+      if (d.contract_type === 'call') { row.callOi += r.open_interest || 0; row.callVol += r.day?.volume || 0 }
+      else { row.putOi += r.open_interest || 0; row.putVol += r.day?.volume || 0 }
+    })
+
+    let spot = results[0]?.underlying_asset?.price || 0
+    if (!(spot > 0)) {
+      try { spot = (await priceService.fetchPrices([ticker]))[ticker] || 0 } catch { /* leave 0 */ }
+    }
+
+    const strikes = Object.values(byStrike)
+      .map(r => ({ ...r, totalOi: r.callOi + r.putOi }))
+      .sort((a, b) => a.strike - b.strike)
+
+    // Calls above spot and puts below it are the halves the convention reads.
+    // Reported separately rather than as one ranking, because the top of a
+    // combined list is just whatever is nearest the money.
+    const resistance = spot > 0
+      ? strikes.filter(s => s.strike > spot).sort((a, b) => b.callOi - a.callOi).slice(0, 5)
+      : []
+    const support = spot > 0
+      ? strikes.filter(s => s.strike < spot).sort((a, b) => b.putOi - a.putOi).slice(0, 5)
+      : []
+
+    res.json({
+      ticker, spot: spot || null,
+      expiry: req.query.expiry || null,
+      expiries,
+      contracts: results.length,
+      totals: {
+        callOi: strikes.reduce((n, s) => n + s.callOi, 0),
+        putOi: strikes.reduce((n, s) => n + s.putOi, 0),
+      },
+      resistance, support, strikes,
+      note: 'Heavy call OI above spot is read as resistance, heavy put OI below as support. '
+          + 'It shows where positioning sits, not where price has to go.',
+    })
+  } catch (e) {
+    res.status(e.response?.status || 500).json({
+      error: e.response?.data?.message || e.message,
+      status: e.response?.status || null,
+    })
+  }
+})
+
+/**
  * GET /api/debug/open-interest?ticker=CRWV&expiry=YYYY-MM-DD
  *
  * Open interest by strike for one expiry, calls and puts side by side.
