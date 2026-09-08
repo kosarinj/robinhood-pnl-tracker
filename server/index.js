@@ -4396,9 +4396,23 @@ app.delete('/api/preferences/:key', requireAuth, (req, res) => {
 // ─── Stock splits ────────────────────────────────────────────────────────────
 // Detected from Yahoo rather than entered by hand. The chart endpoint reports
 // them via events=split and, unlike quoteSummary, still works without a crumb.
+// Last successful sweep per user, so the same 40 Yahoo lookups aren't repeated
+// on every page load. Splits are announced days ahead and happen overnight;
+// checking twice a day is ample, and the client fires this on every session
+// start. Each sweep is up to 40 sequential requests with a 10s timeout apiece,
+// which is several seconds of server time competing with the panel's own calls.
+const splitSweepAt = new Map()
+const SPLIT_SWEEP_MS = 12 * 60 * 60 * 1000
+
 app.post('/api/splits/refresh', requireAuth, async (req, res) => {
   try {
     const userId = req.user.userId
+    const last = splitSweepAt.get(userId) || 0
+    if (!req.query.force && Date.now() - last < SPLIT_SWEEP_MS) {
+      return res.json({ success: true, skipped: true, lastSweptAt: new Date(last).toISOString(),
+        note: 'Swept recently. Pass ?force=1 to run it now.' })
+    }
+    splitSweepAt.set(userId, Date.now())
     // Anything already carrying a split goes first and is always checked. Both
     // position lists drop a symbol whose share count isn't above zero, so a bad
     // ratio that shrank a position to nothing would take that symbol out of the

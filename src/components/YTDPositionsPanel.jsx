@@ -238,13 +238,28 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   }, [globalStart, symbolDates, asOf, broker])
 
   useEffect(() => { fetchData() }, [])
-  // Refetch when the as-of date changes (or is cleared back to live)
-  useEffect(() => { fetchData(undefined, undefined, true) }, [asOf])
+  // Refetch when the as-of date changes (or is cleared back to live).
+  //
+  // Skipping the first run matters: a dependency effect fires on mount as well
+  // as on change, so this and the broker effect below each issued their own
+  // identical request alongside the mount fetch — three calls to an endpoint
+  // that takes a couple of seconds, every time the panel opened. They are
+  // change handlers, and should only run on a change.
+  const firstAsOf = useRef(true)
+  useEffect(() => {
+    if (firstAsOf.current) { firstAsOf.current = false; return }
+    fetchData(undefined, undefined, true)
+  }, [asOf])
   // ...and when the broker tab changes. Stock holdings have to refetch too, or
   // the Shares / Avg Cost / Stock P&L columns would keep showing every broker
   // while the options columns beside them show only the selected one.
+  const firstBroker = useRef(true)
   useEffect(() => {
-    fetchData(undefined, undefined, true)
+    // Same reason as above: on mount the mount-effect already fetched. The other
+    // three calls here are cheap and are wanted on first render, so only the
+    // expensive one is skipped.
+    if (firstBroker.current) firstBroker.current = false
+    else fetchData(undefined, undefined, true)
     fetchStockHoldings()
     fetchCostOverrides()
     // Hidden tickers are per broker, so swap in this tab's list.
