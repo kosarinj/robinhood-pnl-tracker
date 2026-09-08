@@ -199,11 +199,27 @@ async function fetchOptionQuoteMid(polygonTicker, polygonKey) {
  * day figures here before. A silent dependency failure is worse than a loud one.
  */
 const optionQuoteHealth = {
-  attempts: 0, withQuote: 0, empty: 0, errors: 0,
+  attempts: 0, withQuote: 0, empty: 0, errors: 0, skipped: 0, pausedUntil: null,
   lastStatus: null, lastError: null, lastErrorAt: null, lastOkAt: null,
 }
 
+// Once the key has been told it is not entitled, stop asking.
+//
+// Every open leg triggers a quote request, and with a 403 they all fail — 300
+// doomed round trips on every load of the Positions panel, each waiting on the
+// network to be refused. That is a large part of why that panel is slow.
+//
+// Re-probed periodically rather than latched off for the life of the process, so
+// restoring the subscription starts working on its own instead of needing a
+// redeploy. One request every 30 minutes to find out, instead of 300 every load.
+const QUOTE_RETRY_MS = 30 * 60 * 1000
+let quotesUnentitledUntil = 0
+
 async function fetchOptionQuote(polygonTicker, polygonKey) {
+  if (Date.now() < quotesUnentitledUntil) {
+    optionQuoteHealth.skipped = (optionQuoteHealth.skipped || 0) + 1
+    return { mid: 0, bid: 0, ask: 0 }
+  }
   optionQuoteHealth.attempts++
   try {
     const url = `https://api.polygon.io/v3/quotes/${polygonTicker}`
@@ -220,13 +236,23 @@ async function fetchOptionQuote(polygonTicker, polygonKey) {
     const mid = (bid > 0 && ask > 0) ? (bid + ask) / 2 : (bid || ask || 0)
     optionQuoteHealth.withQuote++
     optionQuoteHealth.lastOkAt = new Date().toISOString()
+    quotesUnentitledUntil = 0
+    optionQuoteHealth.pausedUntil = null
     return { mid, bid, ask }
   } catch (e) {
     optionQuoteHealth.errors++
-    optionQuoteHealth.lastStatus = e.response?.status || null
+    const status = e.response?.status || null
+    optionQuoteHealth.lastStatus = status
     // NOT_AUTHORIZED here means the key has no options-quotes entitlement.
     optionQuoteHealth.lastError = e.response?.data?.message || e.response?.data?.error || e.message
     optionQuoteHealth.lastErrorAt = new Date().toISOString()
+    // 401/403 is about the KEY, not this contract — every other leg gets the
+    // same answer, so asking 300 more times only costs time. Rate limiting (429)
+    // is deliberately excluded: that one is temporary and per-request.
+    if (status === 401 || status === 403) {
+      quotesUnentitledUntil = Date.now() + QUOTE_RETRY_MS
+      optionQuoteHealth.pausedUntil = new Date(quotesUnentitledUntil).toISOString()
+    }
     return { mid: 0, bid: 0, ask: 0 }
   }
 }
