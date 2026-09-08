@@ -2582,6 +2582,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // panels disagreed. Mirroring the tracker keeps Open Premium / Open P&L consistent.
     const openPremiumByTicker = {}
     const openUnrealizedByTicker = {}
+    // Short calls alone, kept apart from openUnrealizedByTicker (which includes
+    // long legs) because the weekly change is asked about the sold side.
+    const openShortCallPnlByTicker = {}
     const openDailyByTicker = {}   // option side of today's mark-to-market move (EOD close → now)
     // Which basis each ticker's day move came from, so a figure that disagrees
     // with a broker can be explained instead of guessed at.
@@ -2887,6 +2890,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Short call P&L = (premium collected − current cost to buy back) × shares.
           openUnrealizedByTicker[ticker] =
             (openUnrealizedByTicker[ticker] || 0) + (premiumPerShare - currentOptionPrice) * shares
+          if (parsed?.type === 'call') {
+            openShortCallPnlByTicker[ticker] =
+              (openShortCallPnlByTicker[ticker] || 0) + (premiumPerShare - currentOptionPrice) * shares
+          }
           // Today's option move for a short: (yesterday's mark − now) × shares. Positive when
           // the call got cheaper today. Price both ends on the same basis so the option
           // correctly offsets the stock (short call loses when the stock rises):
@@ -3316,6 +3323,50 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       try { dailyChange = await priceService.fetchDailyChange(allTickers) } catch (e) { console.warn('YTD daily change fetch failed:', e.message) }
     }
 
+    const r2raw = n => Math.round(n * 100) / 100
+    // Record today's open short-call value, and read the two weekly baselines.
+    //
+    // Recorded here rather than from a background job so both ends of a week are
+    // measured by the SAME code path — the whole reason for storing it instead
+    // of re-modelling the past. Only on the live view: an as-of request is
+    // asking about a past date and must not overwrite today's row. Skipped when
+    // marks are unavailable, since a snapshot of nothing is worse than a gap.
+    let weekChangeByTicker = {}, lastWeekChangeByTicker = {}, snapshotNote = null
+    if (!asOf) {
+      try {
+        const today = todayStrLocal()
+        const rows = Object.entries(openShortCallPnlByTicker)
+          .map(([ticker, openPnl]) => ({ ticker, openPnl: r2raw(openPnl) }))
+        if (rows.length) databaseService.recordShortCallPnl(userId, today, rows)
+
+        const dayBefore = (iso) => {
+          const [y, m, d] = iso.split('-').map(Number)
+          const dt = new Date(y, m - 1, d - 1)
+          return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+        }
+        const atThisMonday = {}
+        databaseService.getShortCallPnlAsOf(userId, dayBefore(thisMonday))
+          .forEach(r => { atThisMonday[r.ticker] = r.open_pnl })
+        const atLastMonday = {}
+        databaseService.getShortCallPnlAsOf(userId, dayBefore(lastMonday))
+          .forEach(r => { atLastMonday[r.ticker] = r.open_pnl })
+
+        // Null, not zero, when there is no baseline. A missing history is not a
+        // week with no movement, and showing 0 would read as one.
+        Object.keys(openShortCallPnlByTicker).forEach(t => {
+          if (atThisMonday[t] != null) weekChangeByTicker[t] = r2raw(openShortCallPnlByTicker[t] - atThisMonday[t])
+          if (atThisMonday[t] != null && atLastMonday[t] != null) {
+            lastWeekChangeByTicker[t] = r2raw(atThisMonday[t] - atLastMonday[t])
+          }
+        })
+        if (!Object.keys(atThisMonday).length) {
+          snapshotNote = 'No snapshot from before this Monday yet — the weekly change fills in once a week of history exists.'
+        }
+      } catch (e) {
+        console.warn('short call P&L snapshot failed:', e.message)
+      }
+    }
+
     const r2 = n => Math.round(n * 100) / 100
     const result = Object.values(byUnderlying)
       .map(e => {
@@ -3369,6 +3420,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           realizedExpired: r2(e.realizedExpired),
           shortCallsThisWeek: r2(e.shortCallsThisWeek),
           shortCallsLastWeek: r2(e.shortCallsLastWeek),
+          // Mark-to-market movement on open short calls. Null when there is no
+          // snapshot old enough to measure against.
+          shortCallsWeekChange: weekChangeByTicker[e.ticker] ?? null,
+          shortCallsLastWeekChange: lastWeekChangeByTicker[e.ticker] ?? null,
           realizedExpiredCalls: r2(e.realizedExpiredCalls),
           realizedExpiredPuts: r2(e.realizedExpiredPuts),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),

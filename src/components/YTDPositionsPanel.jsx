@@ -46,6 +46,23 @@ const fmtDate = (s) => {
   return `${m}/${d}/${y.slice(2)}`
 }
 
+// The week on short calls: premium booked plus the mark-to-market move on what
+// is still open. The market half is null until a week of snapshots exists —
+// null rather than zero, because "no history" and "no movement" are different
+// answers and only one of them means the position went nowhere.
+const weekTotal = (r) => {
+  const booked = r.shortCallsThisWeek || 0
+  const mkt = r.shortCallsWeekChange
+  if (!booked && mkt == null) return null
+  return Math.round((booked + (mkt || 0)) * 100) / 100
+}
+const lastTotal = (r) => {
+  const booked = r.shortCallsLastWeek || 0
+  const mkt = r.shortCallsLastWeekChange
+  if (!booked && mkt == null) return null
+  return Math.round((booked + (mkt || 0)) * 100) / 100
+}
+
 const pnlColor = (n, isDark) => {
   if (n == null || n === 0) return isDark ? '#94a3b8' : '#64748b'
   return n > 0 ? '#22c55e' : '#ef4444'
@@ -533,6 +550,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       realizedExpired: acc.realizedExpired + (r.realizedExpired || 0),
       shortCallsThisWeek: acc.shortCallsThisWeek + (r.shortCallsThisWeek || 0),
       shortCallsLastWeek: acc.shortCallsLastWeek + (r.shortCallsLastWeek || 0),
+      shortCallsWeekChange: acc.shortCallsWeekChange + (r.shortCallsWeekChange || 0),
+      shortCallsLastWeekChange: acc.shortCallsLastWeekChange + (r.shortCallsLastWeekChange || 0),
       realizedExpiredCalls: acc.realizedExpiredCalls + (r.realizedExpiredCalls || 0),
       realizedExpiredPuts: acc.realizedExpiredPuts + (r.realizedExpiredPuts || 0),
       taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
@@ -553,7 +572,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -711,20 +730,34 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     // and is NOT a term of Net. Adding it would double-count.
     { key: 'shortCallsThisWeek', label: 'Short calls wk', sort: 'shortCallsThisWeek',
       title: 'Realized on SHORT CALLS this calendar week (from Monday) — premium kept on contracts that expired or were bought back. Last week underneath. Already inside Options Total, so it is NOT a separate term of Net.',
-      cell: (r) => (r.shortCallsThisWeek || r.shortCallsLastWeek)
-        ? <span style={{ fontWeight: 600, color: pnlColor(r.shortCallsThisWeek, isDark) }}>
-            {r.shortCallsThisWeek ? fmt(r.shortCallsThisWeek) : '—'}
-            {r.shortCallsLastWeek ? (
-              <span style={{ display: 'block', fontSize: 10, fontWeight: 400, opacity: 0.75, color: pnlColor(r.shortCallsLastWeek, isDark) }}>
-                last {fmt(r.shortCallsLastWeek)}
+      cell: (r) => {
+        // Booked plus the movement on what is still open — the week's total on
+        // short calls. The parts are shown too, because "made 400" means
+        // something different when it is all mark-to-market on a position you
+        // still hold.
+        const wk = weekTotal(r)
+        if (wk == null) return <span style={{ color: textMid, opacity: 0.5 }}>—</span>
+        return (
+          <span style={{ fontWeight: 600, color: pnlColor(wk, isDark) }}>
+            {fmt(wk)}
+            <span style={{ display: 'block', fontSize: 10, fontWeight: 400, opacity: 0.75, color: textMid }}>
+              {r.shortCallsThisWeek ? `bkd ${fmt(r.shortCallsThisWeek)}` : null}
+              {r.shortCallsThisWeek && r.shortCallsWeekChange != null ? ' · ' : null}
+              {r.shortCallsWeekChange != null ? `mkt ${fmt(r.shortCallsWeekChange)}` : null}
+            </span>
+            {lastTotal(r) != null ? (
+              <span style={{ display: 'block', fontSize: 10, fontWeight: 400, opacity: 0.75, color: pnlColor(lastTotal(r), isDark) }}>
+                last {fmt(lastTotal(r))}
               </span>
             ) : null}
           </span>
-        : <span style={{ color: textMid, opacity: 0.5 }}>—</span>,
-      foot: (t) => <span style={{ fontWeight: 700, color: pnlColor(t.shortCallsThisWeek, isDark) }}>
-          {fmt(t.shortCallsThisWeek)}
-          <span style={{ display: 'block', fontSize: 10, fontWeight: 400, opacity: 0.75, color: pnlColor(t.shortCallsLastWeek, isDark) }}>
-            last {fmt(t.shortCallsLastWeek)}
+        )
+      },
+      foot: (t) => <span style={{ fontWeight: 700, color: pnlColor(weekTotal(t), isDark) }}>
+          {fmt(weekTotal(t))}
+          <span style={{ display: 'block', fontSize: 10, fontWeight: 400, opacity: 0.75, color: textMid }}>
+            bkd {fmt(t.shortCallsThisWeek)}
+            {t.shortCallsWeekChange != null ? ` · mkt ${fmt(t.shortCallsWeekChange)}` : ''}
           </span>
         </span> },
 

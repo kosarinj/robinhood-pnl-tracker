@@ -72,6 +72,27 @@ db.exec(`
   );
 
   -- Daily IV / HV snapshots per ticker, so IV Rank / Percentile can build over time
+  -- Daily mark-to-market on OPEN short calls, per user and ticker.
+  --
+  -- "What did I make this week" on positions still open needs a valuation at
+  -- both ends of the week. Re-modelling the earlier end now would difference a
+  -- model against today's market print, which measures model-vs-market rather
+  -- than a week — the mistake that had MRVL reading -835 indefinitely. So both
+  -- ends are recorded the same way instead, once a day.
+  --
+  -- No history before the first run, by design: an invented back-fill would be
+  -- the estimate this exists to avoid.
+  CREATE TABLE IF NOT EXISTS short_call_pnl_history (
+    user_id      INTEGER NOT NULL,
+    snap_date    TEXT NOT NULL,
+    ticker       TEXT NOT NULL,
+    open_pnl     REAL NOT NULL,
+    contracts    REAL,
+    mark_basis   TEXT,
+    created_at   INTEGER DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (user_id, snap_date, ticker)
+  );
+
   CREATE TABLE IF NOT EXISTS iv_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -2182,6 +2203,54 @@ export class DatabaseService {
    * price the held part from yesterday's close and the new part from what was
    * actually paid.
    */
+  /** Record today's open short-call P&L per ticker. Re-running replaces the day. */
+  recordShortCallPnl(userId, snapDate, rows) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO short_call_pnl_history (user_id, snap_date, ticker, open_pnl, contracts, mark_basis)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, snap_date, ticker) DO UPDATE SET
+          open_pnl = excluded.open_pnl,
+          contracts = excluded.contracts,
+          mark_basis = excluded.mark_basis
+      `)
+      const run = db.transaction(list => {
+        for (const r of list) stmt.run(userId, snapDate, r.ticker, r.openPnl, r.contracts ?? null, r.markBasis ?? null)
+      })
+      run(rows)
+      return rows.length
+    } catch (e) {
+      console.error('Error recording short call P&L history:', e)
+      return 0
+    }
+  }
+
+  /**
+   * The most recent snapshot on or before a date, per ticker.
+   *
+   * On-or-before rather than exact: the job does not run at weekends or if the
+   * service was down, and Monday's answer is still the right baseline for the
+   * week even when it was actually written on the Friday before.
+   */
+  getShortCallPnlAsOf(userId, onOrBefore) {
+    try {
+      return db.prepare(`
+        SELECT h.ticker, h.open_pnl, h.snap_date
+        FROM short_call_pnl_history h
+        JOIN (
+          SELECT ticker, MAX(snap_date) AS d
+          FROM short_call_pnl_history
+          WHERE user_id = ? AND snap_date <= ?
+          GROUP BY ticker
+        ) latest ON latest.ticker = h.ticker AND latest.d = h.snap_date
+        WHERE h.user_id = ?
+      `).all(userId, onOrBefore, userId)
+    } catch (e) {
+      console.error('Error reading short call P&L history:', e)
+      return []
+    }
+  }
+
   getOptionDayBaseline(userId = 1, today, broker = null) {
     const brokerClause = broker ? "AND COALESCE(broker,'robinhood') = ?" : ''
     const args = (extra) => [userId, ...(broker ? [broker] : []), ...extra]
