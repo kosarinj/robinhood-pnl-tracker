@@ -8,6 +8,26 @@ const fmtDate = (s) => {
 }
 const num = (n) => (n == null ? '—' : Math.round(n).toLocaleString('en-US'))
 
+// "9/18 · 8d · monthly" — the days matter more than the date here, and counting
+// them off a calendar is exactly the step that gets skipped.
+const expiryLabel = (m) => [
+  fmtDate(m.date),
+  m.dte <= 0 ? 'today' : `${m.dte}d`,
+  m.monthly ? 'monthly' : null,
+].filter(Boolean).join(' · ')
+
+/**
+ * How far either side of spot is worth showing, as a fraction.
+ *
+ * A strike price cannot reach inside the life of the contract is not a level,
+ * and on a one-day chain most of the chain is exactly that: open interest sits
+ * there, but with no time left it carries no delta and nobody hedges against
+ * it. The band grows with the square root of the days left, the way a price
+ * range does — about 4% at a day, 13% at a week and a half, 25% at a month.
+ */
+const strikeBand = (dte) =>
+  dte == null ? 0.4 : Math.min(0.5, Math.max(0.04, 0.045 * Math.sqrt(Math.max(dte, 0.5))))
+
 /**
  * Open interest by strike, with spot marked.
  *
@@ -39,9 +59,10 @@ export default function OpenInterestPanel() {
       .then(d => {
         if (d.error) throw new Error(d.error)
         setData(d); setLoading(false)
-        // First load has no expiry — adopt the nearest one so the view is a
-        // single expiry rather than every contract stacked together.
-        if (!e && d.expiries?.length) { setExpiry(d.expiries[0]); load(t, d.expiries[0]) }
+        // The server picks the expiry when none was asked for, skipping a chain
+        // that expires before the next session. Adopt what came back rather
+        // than assuming the request decided it.
+        if (d.expiry) setExpiry(d.expiry)
       })
       .catch(err => { setError(err.message); setLoading(false) })
   }
@@ -60,12 +81,15 @@ export default function OpenInterestPanel() {
     () => Math.max(1, ...(data?.strikes || []).map(s => Math.max(s.callOi, s.putOi))),
     [data])
 
-  // Only the strikes worth looking at: a chain runs to strikes nobody holds.
+  // Only the strikes worth looking at: a chain runs to strikes nobody holds,
+  // and the reachable range narrows sharply as the expiry approaches.
   const shown = useMemo(() => {
     const all = data?.strikes || []
     const spot = data?.spot
     if (!spot) return all.filter(s => s.totalOi > 0)
-    return all.filter(s => s.totalOi > 0 && s.strike > spot * 0.6 && s.strike < spot * 1.5)
+    const band = strikeBand(data?.dte)
+    return all.filter(s => s.totalOi > 0
+      && s.strike > spot * (1 - band) && s.strike < spot * (1 + band))
   }, [data])
 
   const card = {
@@ -96,14 +120,16 @@ export default function OpenInterestPanel() {
               border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
               background: isDark ? '#0f172a' : '#fff', color: isDark ? '#e2e8f0' : '#0f172a',
             }} />
-          {data?.expiries?.length > 0 && (
+          {data?.expiryMeta?.length > 0 && (
             <select value={expiry} onChange={e => { setExpiry(e.target.value); load(ticker, e.target.value) }}
               style={{
                 fontSize: 12, padding: '5px 8px', borderRadius: 6,
                 border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
                 background: isDark ? '#0f172a' : '#fff', color: isDark ? '#e2e8f0' : '#0f172a',
               }}>
-              {data.expiries.map(x => <option key={x} value={x}>{fmtDate(x)}</option>)}
+              {data.expiryMeta.map(m => (
+                <option key={m.date} value={m.date}>{expiryLabel(m)}</option>
+              ))}
             </select>
           )}
           <button type="submit" className="btn btn-sm" style={{
@@ -220,6 +246,16 @@ export default function OpenInterestPanel() {
             Heavy call interest above the price is read as resistance and heavy put interest below it as
             support. That is a description of where positioning sits, not a forecast — a large block far
             from the money is often one holder's hedge rather than a level anyone trades around.
+            {data.dte != null && data.dte <= 1 && (
+              <> This chain expires {data.dte <= 0 ? 'today' : 'tomorrow'}, so its walls describe where
+              the stock settles at that close and nothing after it — the whole chain is gone by the next
+              session. For levels that outlive this week, pick a later expiry{' '}
+              {data.expiryMeta?.some(m => m.monthly && m.dte > 1) ? '— the monthly carries the most' : ''}.</>
+            )}
+            {data.truncated && (
+              <> This chain is longer than the data feed returns in one read, so some strikes are missing
+              rather than empty.</>
+            )}
           </div>
         </>
       )}

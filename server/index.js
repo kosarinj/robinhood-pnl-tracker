@@ -5627,6 +5627,83 @@ const PROCESS_STARTED = Date.now()
  * calls each one made. Answers which endpoint is slow and whether the external
  * calls are the reason, rather than leaving it to inference.
  */
+// Polygon caps the chain snapshot at 250 contracts a page, and a clipped page
+// is not marked as one — the chain simply ends. SPY's monthly is past the cap
+// on its own, so an unpaged call drops strikes that sort late. Follow next_url
+// so a wall cannot go missing for being high in the chain.
+const CHAIN_PAGE_CAP = 8
+async function fetchOptionChain(ticker, expiry, polygonKey) {
+  let url = `https://api.polygon.io/v3/snapshot/options/${ticker}`
+  const params = { apiKey: polygonKey, limit: 250 }
+  if (expiry) params.expiration_date = expiry
+  let opts = { params, timeout: 12000 }
+  const results = []
+  for (let page = 0; page < CHAIN_PAGE_CAP; page++) {
+    const resp = await axios.get(url, opts)
+    results.push(...(resp.data?.results || []))
+    if (!resp.data?.next_url) return { results, truncated: false }
+    // next_url carries its own cursor and arrives without the key.
+    url = resp.data.next_url
+    opts = { params: { apiKey: polygonKey }, timeout: 12000 }
+  }
+  return { results, truncated: true }
+}
+
+/**
+ * Every expiration listed on an underlying, nearest first.
+ *
+ * Not read off the chain snapshot. That returns contracts, and one page of 250
+ * covers about two expiries on a busy name — on a Thursday it ends at the next
+ * Monday, so the monthly is never offered and the only expiries selectable are
+ * the two about to die.
+ *
+ * The reference endpoint is asked for calls in a narrow band around spot
+ * instead. The band is what makes this one call rather than five: every expiry
+ * has strikes near the money, so a tight band samples all of them, while a wide
+ * one spends the whole page on the near weeks. At 20% SPY fills 1000 rows by
+ * the third week out and the list stops there; at 4% the same page reaches
+ * 2028. The floor keeps a low-priced stock, where 4% is less than one strike
+ * increment, from banding down to nothing.
+ */
+const EXPIRY_SCAN_BAND = 0.04
+async function listExpiries(ticker, spot, polygonKey) {
+  if (!(spot > 0)) return []
+  const half = Math.max(spot * EXPIRY_SCAN_BAND, 2.5)
+  const resp = await axios.get('https://api.polygon.io/v3/reference/options/contracts', {
+    params: {
+      apiKey: polygonKey,
+      underlying_ticker: ticker,
+      'expiration_date.gte': todayStrLocal(),
+      'strike_price.gte': +Math.max(0, spot - half).toFixed(2),
+      'strike_price.lte': +(spot + half).toFixed(2),
+      contract_type: 'call',
+      sort: 'expiration_date', order: 'asc', limit: 1000,
+    },
+    timeout: 12000,
+  })
+  return [...new Set((resp.data?.results || []).map(r => r.expiration_date).filter(Boolean))].sort()
+}
+
+// The third Friday. Monthlies carry the slow positioning — index hedges, rolled
+// LEAPs — where a weekly is mostly the current week's trading, so which of the
+// two a wall sits on changes how much to make of it.
+function isMonthlyExpiry(date) {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 5 && d >= 15 && d <= 21
+}
+
+function isFridayExpiry(date) {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 5
+}
+
+function describeExpiries(dates, today) {
+  return dates.map(d => ({
+    date: d, dte: daysBetween(d, today),
+    monthly: isMonthlyExpiry(d), friday: isFridayExpiry(d),
+  }))
+}
+
 /**
  * GET /api/open-interest?ticker=CRWV&expiry=YYYY-MM-DD
  *
@@ -5649,14 +5726,43 @@ app.get('/api/open-interest', requireAuth, async (req, res) => {
     const ticker = String(req.query.ticker || '').toUpperCase()
     if (!ticker) return res.status(400).json({ error: 'Pass a ticker' })
 
-    const params = { apiKey: polygonKey, limit: 250 }
-    if (req.query.expiry) params.expiration_date = req.query.expiry
-    const resp = await axios.get(`https://api.polygon.io/v3/snapshot/options/${ticker}`,
-      { params, timeout: 12000 })
-    const results = resp.data?.results || []
+    // Spot first, because the expiry list is fetched in a band around it. The
+    // chain's own underlying_asset.price comes back null on this key anyway.
+    let spot = 0
+    try { spot = (await priceService.fetchPrices([ticker]))[ticker] || 0 } catch { /* leave 0 */ }
 
-    // Expiries present, so the client can offer them without a second call.
-    const expiries = [...new Set(results.map(r => r.details?.expiration_date).filter(Boolean))].sort()
+    const today = todayStrLocal()
+    let expiries = await listExpiries(ticker, spot, polygonKey).catch(() => [])
+    let expiryMeta = describeExpiries(expiries, today)
+
+    // Which expiry to open on when the caller did not name one.
+    //
+    // The nearest is the wrong answer late in the week. On a Thursday it is
+    // tomorrow, and that chain is gone by the next session — its walls describe
+    // where the stock settles at Friday's close and nothing beyond it.
+    //
+    // Skipping to the next expiry outright is not enough either: the big names
+    // now list Monday and Wednesday weeklies, so "the next one" on a Thursday
+    // is a Monday chain carrying a fraction of the interest. The Friday is the
+    // one positioning collects on and the one "this week" and "next week"
+    // actually refer to, so that is the default, with the front week still
+    // there to be picked deliberately.
+    const preferred = expiryMeta.find(x => x.dte >= 2 && x.friday)
+      || expiryMeta.find(x => x.dte >= 2)
+      || expiryMeta[0]
+    let chainExpiry = req.query.expiry || preferred?.date || null
+
+    const chain = await fetchOptionChain(ticker, chainExpiry, polygonKey)
+    const results = chain.results
+    if (!(spot > 0)) spot = results[0]?.underlying_asset?.price || 0
+
+    // If the reference listing gave nothing, fall back to whatever expiries the
+    // chain page happened to carry — a short list beats an empty picker.
+    if (!expiries.length) {
+      expiries = [...new Set(results.map(r => r.details?.expiration_date).filter(Boolean))].sort()
+      expiryMeta = describeExpiries(expiries, today)
+      chainExpiry = chainExpiry || expiries[0] || null
+    }
 
     const byStrike = {}
     results.forEach(r => {
@@ -5670,11 +5776,6 @@ app.get('/api/open-interest', requireAuth, async (req, res) => {
       else { row.putOi += r.open_interest || 0; row.putVol += r.day?.volume || 0 }
     })
 
-    let spot = results[0]?.underlying_asset?.price || 0
-    if (!(spot > 0)) {
-      try { spot = (await priceService.fetchPrices([ticker]))[ticker] || 0 } catch { /* leave 0 */ }
-    }
-
     let strikes = Object.values(byStrike)
       .map(r => ({ ...r, totalOi: r.callOi + r.putOi }))
       .sort((a, b) => a.strike - b.strike)
@@ -5685,11 +5786,9 @@ app.get('/api/open-interest', requireAuth, async (req, res) => {
     // hitting a wall" — a static number cannot separate a fresh wall from one
     // that has stood for a month. Recorded on view rather than by a job walking
     // every ticker, so history exists for what has actually been looked at.
-    const chainExpiry = req.query.expiry || expiries[0] || null
     let priorDate = null
     if (chainExpiry) {
       try {
-        const today = todayStrLocal()
         databaseService.recordOpenInterest(ticker, chainExpiry, today, strikes)
         const yesterday = (() => {
           const d = new Date(); d.setDate(d.getDate() - 1)
@@ -5722,8 +5821,18 @@ app.get('/api/open-interest', requireAuth, async (req, res) => {
 
     res.json({
       ticker, spot: spot || null,
-      expiry: req.query.expiry || null,
+      // The expiry actually shown, which is the server's pick when none was
+      // asked for — the caller should label what it got, not what it requested.
+      expiry: chainExpiry,
+      dte: chainExpiry ? daysBetween(chainExpiry, today) : null,
+      monthly: chainExpiry ? isMonthlyExpiry(chainExpiry) : false,
       expiries,
+      // Days to expiry and monthly flag per date, so the picker can be read
+      // without counting on a calendar.
+      expiryMeta,
+      // A chain that hit the page cap is short, and a short chain must say so
+      // rather than pass its missing strikes off as absent interest.
+      truncated: chain.truncated,
       contracts: results.length,
       totals: {
         callOi: strikes.reduce((n, s) => n + s.callOi, 0),
