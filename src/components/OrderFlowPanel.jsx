@@ -48,6 +48,11 @@ export default function OrderFlowPanel() {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // What the server knows, fetched alongside the data. An empty panel has
+  // several causes that look identical -- nothing recorded, rows written under
+  // a different user, the recorder pushing to another instance entirely -- and
+  // guessing between them from a blank table wastes a trading session.
+  const [diag, setDiag] = useState(null)
 
   useEffect(() => {
     fetch('/api/orderflow/sessions', { credentials: 'include' })
@@ -58,15 +63,20 @@ export default function OrderFlowPanel() {
 
   const load = (t, s) => {
     if (!t) return
-    setLoading(true); setError('')
-    fetch(`/api/orderflow?ticker=${encodeURIComponent(t)}&session=${s}`,
-      { credentials: 'include' })
+    setLoading(true); setError(''); setDiag(null)
+    const url = `/api/orderflow?ticker=${encodeURIComponent(t)}&session=${s}`
+    fetch(url, { credentials: 'include' })
       .then(r => r.json())
       .then(d => {
         if (d.error) throw new Error(d.error)
         setData(d); setLoading(false)
+        setDiag(x => ({ ...(x || {}), url, got: `${d.levels?.length || 0} levels, ${d.events?.length || 0} events` }))
       })
       .catch(e => { setError(e.message); setLoading(false) })
+    fetch('/api/orderflow/debug', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setDiag(x => ({ ...(x || {}), ...d })))
+      .catch(() => {})
   }
 
   useEffect(() => { if (ticker) load(ticker, session) }, [ticker, session])
@@ -150,9 +160,41 @@ export default function OrderFlowPanel() {
 
       {ticker && !loading && !error && !hasData && (
         <div style={{ color: muted, fontSize: 13 }}>
-          Nothing recorded for {ticker} on {session}. The recorder has to have been
-          running during that session — unlike open interest, order flow cannot be
-          fetched after the fact.
+          <div style={{ marginBottom: 8 }}>
+            Nothing recorded for {ticker} on {session}. The recorder has to have been
+            running during that session — unlike open interest, order flow cannot be
+            fetched after the fact.
+          </div>
+          {diag && (
+            <div style={{
+              fontSize: 11, fontFamily: 'ui-monospace, monospace', lineHeight: 1.6,
+              padding: '8px 10px', borderRadius: 6,
+              background: isDark ? '#0f172a' : '#f8fafc',
+              border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+            }}>
+              <div>queried: {diag.url}</div>
+              <div>returned: {diag.got}</div>
+              <div>you are user {String(diag.youAre)} · recorder writes as user {String(diag.recorderWritesAs)}</div>
+              <div>
+                push token on this server:{' '}
+                <strong style={{ color: diag.tokenConfigured ? '#22c55e' : '#ef4444' }}>
+                  {diag.tokenConfigured ? 'configured' : 'NOT SET — pushes will be refused'}
+                </strong>
+              </div>
+              <div style={{ marginTop: 4 }}>rows this server actually holds:</div>
+              {(diag.storedBy || []).length === 0
+                ? <div style={{ paddingLeft: 10 }}>none at all — nothing has ever been pushed here</div>
+                : diag.storedBy.map((r, i) => (
+                    <div key={i} style={{
+                      paddingLeft: 10,
+                      color: r.user_id === diag.youAre ? (isDark ? '#e2e8f0' : '#0f172a') : muted,
+                    }}>
+                      user {r.user_id} · {r.ticker} · {r.session} · {r.levels} levels
+                      {r.user_id !== diag.youAre && ' (not yours)'}
+                    </div>
+                  ))}
+            </div>
+          )}
         </div>
       )}
 

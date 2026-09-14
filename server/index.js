@@ -7553,6 +7553,7 @@ app.get('/api/orderflow/debug', requireAuth, (req, res) => {
     res.json({
       youAre: req.user.userId,
       recorderWritesAs: Number(process.env.ORDERFLOW_USER_ID || 1),
+      instanceId: INSTANCE_ID,
       tokenConfigured: Boolean(process.env.ORDERFLOW_TOKEN),
       storedBy: rows,
       matches: rows.some(r => r.user_id === req.user.userId),
