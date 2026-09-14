@@ -7442,6 +7442,99 @@ app.post('/api/ema-crossovers', requireAuth, async (req, res) => {
 })
 
 // Get support/resistance configuration
+// ─── Order flow (Level 2 absorption) ───────────────────────────────────────
+//
+// The recorder runs on the trading machine beside IB Gateway, because the
+// gateway is a local program holding a logged-in brokerage session and its
+// credentials have no business in a cloud environment. It pushes finished
+// absorption events here so the panel, and the history, live with the rest of
+// the app rather than on one desktop.
+
+/**
+ * A recorder's own credential, separate from the browser session.
+ *
+ * A machine that runs unattended cannot hold a login cookie, and giving it one
+ * would hand a desktop process the user's whole session. This token authorises
+ * exactly one thing: pushing order flow for the user it belongs to.
+ */
+function orderFlowUser(req) {
+  const token = req.get('x-orderflow-token') || ''
+  const expected = process.env.ORDERFLOW_TOKEN || ''
+  if (expected && token && token === expected) {
+    const id = Number(process.env.ORDERFLOW_USER_ID || 1)
+    return { userId: id }
+  }
+  // A signed-in browser can push too, which is what makes local testing
+  // possible without minting a token first.
+  const user = authService.verifySession(req.cookies?.session_token)
+  return user || null
+}
+
+/**
+ * POST /api/orderflow/events
+ *
+ * One push from the recorder: { ticker, session, events[], levels[] }.
+ */
+app.post('/api/orderflow/events', async (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  try {
+    const ticker = String(req.body?.ticker || '').toUpperCase()
+    const session = String(req.body?.session || '').slice(0, 10)
+    if (!ticker || !/^\d{4}-\d{2}-\d{2}$/.test(session)) {
+      return res.status(400).json({ error: 'ticker and session (YYYY-MM-DD) required' })
+    }
+    const events = Array.isArray(req.body?.events) ? req.body.events : []
+    const levels = Array.isArray(req.body?.levels) ? req.body.levels : []
+    const out = databaseService.recordOrderFlow(user.userId, ticker, session, events, levels)
+    res.json({ success: true, ...out })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
+ * GET /api/orderflow?ticker=MRVL&session=YYYY-MM-DD
+ *
+ * Levels ranked by how much they actually absorbed, with the event log beside
+ * them. Absorption is what a level ate relative to the most it ever showed at
+ * once: a level that displayed 20k and ate 300k was one seller working an
+ * order, and that is where a move usually runs out.
+ */
+app.get('/api/orderflow', requireAuth, (req, res) => {
+  try {
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    const session = String(req.query.session || todayStrLocal()).slice(0, 10)
+    if (!ticker) return res.status(400).json({ error: 'Pass a ticker' })
+
+    const { levels, events } = databaseService.getOrderFlow(req.user.userId, ticker, session)
+    // Ranked separately from the ladder: the top of a price-ordered list is
+    // just whatever is highest, not what mattered.
+    const ranked = [...levels].sort((a, b) => b.consumed - a.consumed).slice(0, 8)
+    res.json({
+      ticker, session, levels, events, ranked,
+      totals: {
+        consumed: levels.reduce((n, l) => n + l.consumed, 0),
+        pulled: levels.reduce((n, l) => n + l.pulled, 0),
+        refreshed: levels.reduce((n, l) => n + l.refreshed, 0),
+      },
+      note: 'Absorption is what a level ate against the most it ever displayed. '
+          + 'It describes where size actually changed hands, not where price must go.',
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/** GET /api/orderflow/sessions — what the recorder has captured, newest first. */
+app.get('/api/orderflow/sessions', requireAuth, (req, res) => {
+  try {
+    res.json(databaseService.getOrderFlowSessions(req.user.userId))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/level2/config', requireAuth, (req, res) => {
   try {
     res.json({

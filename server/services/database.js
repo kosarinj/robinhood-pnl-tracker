@@ -103,6 +103,57 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_oi_history_lookup
     ON oi_history(ticker, expiry, snap_date DESC);
 
+  -- Order flow absorption, pushed up by the local recorder.
+  --
+  -- An event log, not a tick archive: the recorder holds the book in memory and
+  -- writes only when something worth seeing happens -- a level got big, got
+  -- eaten, got pulled, or kept refilling. A few hundred rows a ticker a day
+  -- rather than the millions a full depth feed would produce.
+  CREATE TABLE IF NOT EXISTS orderflow_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    ticker      TEXT NOT NULL,
+    session     TEXT NOT NULL,   -- YYYY-MM-DD, the trading day
+    kind        TEXT NOT NULL,   -- wall | absorbed | consumed | pulled
+    side        TEXT NOT NULL,   -- bid | ask
+    price       REAL NOT NULL,
+    ts          REAL NOT NULL,   -- epoch seconds, from the feed
+    displayed   REAL DEFAULT 0,
+    max_displayed REAL DEFAULT 0,
+    consumed    REAL DEFAULT 0,
+    pulled      REAL DEFAULT 0,
+    refreshed   REAL DEFAULT 0,
+    volume      REAL DEFAULT 0,
+    buy_volume  REAL DEFAULT 0,
+    sell_volume REAL DEFAULT 0,
+    ratio       REAL DEFAULT 0,
+    created_at  INTEGER DEFAULT (strftime('%s','now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_orderflow_events_lookup
+    ON orderflow_events(user_id, ticker, session, ts DESC);
+
+  -- Where each price level finished the session. One row per level, replaced as
+  -- the recorder reports, so the panel can rank levels without replaying events.
+  CREATE TABLE IF NOT EXISTS orderflow_levels (
+    user_id     INTEGER NOT NULL,
+    ticker      TEXT NOT NULL,
+    session     TEXT NOT NULL,
+    side        TEXT NOT NULL,
+    price       REAL NOT NULL,
+    max_displayed REAL DEFAULT 0,
+    consumed    REAL DEFAULT 0,
+    pulled      REAL DEFAULT 0,
+    refreshed   REAL DEFAULT 0,
+    volume      REAL DEFAULT 0,
+    buy_volume  REAL DEFAULT 0,
+    sell_volume REAL DEFAULT 0,
+    ratio       REAL DEFAULT 0,
+    updated_at  INTEGER DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (user_id, ticker, session, side, price)
+  );
+  CREATE INDEX IF NOT EXISTS idx_orderflow_levels_lookup
+    ON orderflow_levels(user_id, ticker, session, consumed DESC);
+
   CREATE TABLE IF NOT EXISTS short_call_pnl_history (
     user_id      INTEGER NOT NULL,
     snap_date    TEXT NOT NULL,
@@ -2225,6 +2276,83 @@ export class DatabaseService {
    * actually paid.
    */
   /** Record one chain's open interest for a day. Re-running replaces it. */
+  /**
+   * Absorption events and level state from one recorder push.
+   *
+   * Events append; levels replace. An event is a thing that happened at a
+   * moment and never changes, where a level is a running total that only the
+   * latest reading is worth keeping.
+   */
+  recordOrderFlow(userId, ticker, session, events = [], levels = []) {
+    try {
+      const evStmt = db.prepare(`
+        INSERT INTO orderflow_events
+          (user_id, ticker, session, kind, side, price, ts, displayed,
+           max_displayed, consumed, pulled, refreshed, volume, buy_volume,
+           sell_volume, ratio)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `)
+      const lvStmt = db.prepare(`
+        INSERT INTO orderflow_levels
+          (user_id, ticker, session, side, price, max_displayed, consumed,
+           pulled, refreshed, volume, buy_volume, sell_volume, ratio, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%s','now'))
+        ON CONFLICT(user_id, ticker, session, side, price) DO UPDATE SET
+          max_displayed = excluded.max_displayed, consumed = excluded.consumed,
+          pulled = excluded.pulled, refreshed = excluded.refreshed,
+          volume = excluded.volume, buy_volume = excluded.buy_volume,
+          sell_volume = excluded.sell_volume, ratio = excluded.ratio,
+          updated_at = excluded.updated_at
+      `)
+      const run = db.transaction(() => {
+        for (const e of events) {
+          evStmt.run(userId, ticker, session, e.kind, e.side, e.price, e.ts,
+            e.displayed || 0, e.max_displayed || 0, e.consumed || 0, e.pulled || 0,
+            e.refreshed || 0, e.volume || 0, e.buy_volume || 0, e.sell_volume || 0,
+            e.ratio || 0)
+        }
+        for (const l of levels) {
+          lvStmt.run(userId, ticker, session, l.side, l.price,
+            l.max_displayed || 0, l.consumed || 0, l.pulled || 0, l.refreshed || 0,
+            l.volume || 0, l.buy_volume || 0, l.sell_volume || 0, l.ratio || 0)
+        }
+      })
+      run()
+      return { events: events.length, levels: levels.length }
+    } catch (e) {
+      console.error('Error recording order flow:', e)
+      return { events: 0, levels: 0, error: e.message }
+    }
+  }
+
+  getOrderFlow(userId, ticker, session, limit = 200) {
+    const levels = db.prepare(`
+      SELECT side, price, max_displayed, consumed, pulled, refreshed, volume,
+             buy_volume, sell_volume, ratio, updated_at
+      FROM orderflow_levels
+      WHERE user_id = ? AND ticker = ? AND session = ?
+      ORDER BY price DESC
+    `).all(userId, ticker, session)
+    const events = db.prepare(`
+      SELECT kind, side, price, ts, displayed, max_displayed, consumed, pulled,
+             refreshed, volume, buy_volume, sell_volume, ratio
+      FROM orderflow_events
+      WHERE user_id = ? AND ticker = ? AND session = ?
+      ORDER BY ts DESC LIMIT ?
+    `).all(userId, ticker, session, limit)
+    return { levels, events }
+  }
+
+  /** Which tickers and days the recorder has pushed, newest first. */
+  getOrderFlowSessions(userId, limit = 30) {
+    return db.prepare(`
+      SELECT ticker, session, COUNT(*) AS levels, MAX(updated_at) AS updated_at
+      FROM orderflow_levels WHERE user_id = ?
+      GROUP BY ticker, session
+      ORDER BY session DESC, updated_at DESC LIMIT ?
+    `).all(userId, limit)
+  }
+
   recordOpenInterest(ticker, expiry, snapDate, rows) {
     try {
       const stmt = db.prepare(`

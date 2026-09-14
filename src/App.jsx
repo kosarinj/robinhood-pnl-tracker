@@ -28,6 +28,7 @@ import CashCheckPanel from './components/CashCheckPanel'
 import LongOptionsPanel from './components/LongOptionsPanel'
 import CallCoveragePanel from './components/CallCoveragePanel'
 import OpenInterestPanel from './components/OpenInterestPanel'
+import OrderFlowPanel from './components/OrderFlowPanel'
 import VolScanner from './components/VolScanner'
 import TaxCenter from './components/TaxCenter'
 import AvgCostCalculator from './components/AvgCostCalculator'
@@ -2642,6 +2643,7 @@ function AuthenticatedApp({ user }) {
 
       {/* Research tab */}
       {activeMainTab === 'research' && <OpenInterestPanel />}
+      {activeMainTab === 'research' && <OrderFlowPanel />}
       {activeMainTab === 'research' && <FibRsiScreener />}
       {activeMainTab === 'research' && <VolScanner />}
       {activeMainTab === 'research' && <PreMoveVolumePanel />}
