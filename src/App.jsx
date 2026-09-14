@@ -1312,6 +1312,7 @@ function AuthenticatedApp({ user }) {
           ['analytics', 'Analytics'],
           ['tax', 'Tax'],
           ['research', 'Research'],
+          ['orderbook', 'Order Book'],
         ].map(([key, label]) => {
           const active = activeMainTab === key
           return (
@@ -2643,7 +2644,7 @@ function AuthenticatedApp({ user }) {
 
       {/* Research tab */}
       {activeMainTab === 'research' && <OpenInterestPanel />}
-      {activeMainTab === 'research' && <OrderFlowPanel />}
+      {activeMainTab === 'orderbook' && <OrderFlowPanel />}
       {activeMainTab === 'research' && <FibRsiScreener />}
       {activeMainTab === 'research' && <VolScanner />}
       {activeMainTab === 'research' && <PreMoveVolumePanel />}

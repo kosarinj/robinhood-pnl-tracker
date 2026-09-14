@@ -7526,6 +7526,29 @@ app.get('/api/orderflow', requireAuth, (req, res) => {
   }
 })
 
+/**
+ * GET /api/orderflow/debug
+ *
+ * Who the browser is, and which users the stored rows actually belong to.
+ * The recorder authenticates as a configured user id rather than as a session,
+ * so a push can succeed and still be invisible to the person looking -- this
+ * says so directly instead of leaving it to be guessed at.
+ */
+app.get('/api/orderflow/debug', requireAuth, (req, res) => {
+  try {
+    const rows = databaseService.orderFlowOwners()
+    res.json({
+      youAre: req.user.userId,
+      recorderWritesAs: Number(process.env.ORDERFLOW_USER_ID || 1),
+      tokenConfigured: Boolean(process.env.ORDERFLOW_TOKEN),
+      storedBy: rows,
+      matches: rows.some(r => r.user_id === req.user.userId),
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 /** GET /api/orderflow/sessions — what the recorder has captured, newest first. */
 app.get('/api/orderflow/sessions', requireAuth, (req, res) => {
   try {

@@ -57,17 +57,26 @@ class Thresholds:
     are arguments rather than constants. `from_profile` derives a starting set
     from the average trade size, which is the cheapest honest calibration.
     """
-    min_wall_size: float = 10_000        # shares displayed at one level
+    # Measured, not guessed. Sampling NVDA on SMART depth gave displayed sizes
+    # of median 100, p90 508, max 1132 -- the book arrives in small slices
+    # rather than the blocks a single-venue feed shows. A 10k wall threshold
+    # could never trigger, so the first live run produced zero events from a
+    # perfectly working pipeline. calibrate.py re-measures for a given name.
+    #
+    # Note the two scale differently: displayed size does not grow with the
+    # session, but volume through a level does, so the wall threshold is set
+    # from the book and the absorbed threshold from a day's worth of trading.
+    min_wall_size: float = 1_000         # shares displayed at one level
     min_absorbed_volume: float = 25_000  # shares printed through a level
     min_absorption_ratio: float = 3.0    # consumed / max displayed at once
-    min_flush_size: float = 5_000        # ignore the emptying of tiny levels
+    min_flush_size: float = 500          # ignore the emptying of tiny levels
     dominance: float = 0.7               # share of the flush one cause must own
     # Size a level must reach once before its adds and cancels are counted.
     # Without this the inside of the book buries the signal: the touch flickers
     # between 100 and 200 shares hundreds of times a minute, and each flicker
     # books as a cancel and a refill. On one NVDA run that produced 1.5M
     # "pulled" at a level that never showed more than 100 shares.
-    min_track_size: float = 2_000
+    min_track_size: float = 200
 
     @classmethod
     def from_profile(cls, avg_trade_size: float, multiple: float = 40.0) -> "Thresholds":

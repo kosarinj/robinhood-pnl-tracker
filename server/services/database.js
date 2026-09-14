@@ -2344,6 +2344,15 @@ export class DatabaseService {
   }
 
   /** Which tickers and days the recorder has pushed, newest first. */
+  /** Which user id the stored order flow rows belong to, and how many. */
+  orderFlowOwners() {
+    return db.prepare(`
+      SELECT user_id, ticker, session, COUNT(*) AS levels
+      FROM orderflow_levels GROUP BY user_id, ticker, session
+      ORDER BY session DESC LIMIT 20
+    `).all()
+  }
+
   getOrderFlowSessions(userId, limit = 30) {
     return db.prepare(`
       SELECT ticker, session, COUNT(*) AS levels, MAX(updated_at) AS updated_at
