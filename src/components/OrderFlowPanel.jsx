@@ -271,18 +271,47 @@ export default function OrderFlowPanel() {
             </div>
           )}
 
-          {imbalance.total > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: muted, marginBottom: 4 }}>
-                Who absorbed — {num(imbalance.bid)} into bids (sellers hitting) ·
-                {' '}{num(imbalance.ask)} into offers (buyers lifting)
+          {imbalance.total > 0 && (() => {
+            const askPct = 100 - imbalance.bidPct
+            const lead = Math.max(imbalance.bidPct, askPct)
+            const askSide = askPct > imbalance.bidPct
+            // Deliberately spelled out. Absorption at the offer means buyers
+            // were lifting AND a seller kept supplying -- so the side that ate
+            // more marks where the other side's aggression was being met, which
+            // reads the opposite way round to most people's first instinct.
+            const verdict = lead < 58
+              ? 'Balanced — neither side clearly absorbed more'
+              : askSide
+                ? 'Sellers supplying into buying — the offer side is where size was met'
+                : 'Buyers supplying into selling — the bid side is where size was met'
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                  <span style={{ color: '#22c55e', fontWeight: 700 }}>
+                    BIDS ate {num(imbalance.bid)} ({imbalance.bidPct.toFixed(0)}%)
+                  </span>
+                  <span style={{ color: '#ef4444', fontWeight: 700 }}>
+                    ({askPct.toFixed(0)}%) OFFERS ate {num(imbalance.ask)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', height: 18, borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${imbalance.bidPct}%`, background: '#22c55e', display: 'flex',
+                    alignItems: 'center', paddingLeft: 6, fontSize: 10, fontWeight: 700, color: '#052e16',
+                  }}>{imbalance.bidPct >= 18 ? 'buyers supplying' : ''}</div>
+                  <div style={{
+                    width: `${askPct}%`, background: '#ef4444', display: 'flex',
+                    alignItems: 'center', justifyContent: 'flex-end', paddingRight: 6,
+                    fontSize: 10, fontWeight: 700, color: '#450a0a',
+                  }}>{askPct >= 18 ? 'sellers supplying' : ''}</div>
+                </div>
+                <div style={{
+                  fontSize: 12, marginTop: 5, fontWeight: 600,
+                  color: lead < 58 ? muted : (askSide ? '#ef4444' : '#22c55e'),
+                }}>{verdict}</div>
               </div>
-              <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden' }}>
-                <div style={{ width: `${imbalance.bidPct}%`, background: '#22c55e' }} />
-                <div style={{ width: `${100 - imbalance.bidPct}%`, background: '#ef4444' }} />
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
           <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto', marginBottom: 14 }}>
             {view === 'price' ? (
