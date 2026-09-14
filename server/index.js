@@ -2693,32 +2693,43 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         })
         .filter(Boolean)
 
-      // Open SHORT legs that short_call_entries does not carry.
+      // Open SHORT contracts the entries table does not account for.
       //
-      // That table is populated from STO *calls* only -- the name is accurate
-      // and the consequence was not. Open P&L for short legs was accumulated by
-      // walking it, so a sold put contributed nothing at all: C showed +120
-      // against a true -103, the whole gap being one short put at -223. Across
-      // the book it was -661 missing, which is the wrong direction to be wrong
-      // in, since it flatters every put spread that is currently losing.
+      // short_call_entries is written from STO *calls* only, and keyed on
+      // (user_id, symbol, sale_date). Two consequences, both of which silently
+      // drop real positions out of Open P&L:
       //
-      // Derived from open positions rather than by teaching the entries table
-      // about puts: the position data already knows every open leg, so nothing
-      // new can be forgotten by a writer that only looked at one side.
-      // shortEntries is this route's own copy; shortEntryBySymbol belongs to a
-      // different handler's scope and reaching for it here took the whole
-      // endpoint down with a ReferenceError.
-      const entriedSymbols = new Set(shortEntries.map(e => e.symbol))
-      const openShortPuts = openPositions
-        .filter(p => p.net_short > 0 && !entriedSymbols.has(p.symbol) && notExpired(p.symbol))
+      //   - A sold PUT has no entry at all, so every put spread reported only
+      //     its long leg. C read +120 against a true -103, the gap being one
+      //     short $138 put at -223; across the book, -661 uncounted.
+      //   - Two sells of the same contract on the same day collide on that key
+      //     and the second overwrites the first. UBER shows two 1-contract STOs
+      //     on 9/9, so the entry says 1 where 2 are open -- and allocation caps
+      //     at `min(entry.contracts, remaining)`, so the second contract is
+      //     never priced. Exactly half the position, missing.
+      //
+      // Rather than teach the entries table about puts and same-day lots, take
+      // the shortfall from open positions, which already nets every trade. What
+      // the entries path covers it keeps -- it allocates to real lots, which is
+      // better than a flat average across lots since bought back -- and this
+      // only fills what was left out.
+      const coveredBySymbol = {}
+      openEntries.forEach(e => {
+        coveredBySymbol[e.symbol] =
+          (coveredBySymbol[e.symbol] || 0) + (openContractsByEntry[e.id] || 0)
+      })
+      const uncoveredShorts = openPositions
+        .filter(p => p.net_short > 0 && notExpired(p.symbol))
         .map(p => {
+          const missing = p.net_short - (coveredBySymbol[p.symbol] || 0)
+          if (missing <= 0) return null
           const parsed = parseOptionDescription(p.symbol)
           if (!parsed) return null
           return {
             symbol: p.symbol,
             ticker: parsed.ticker,
             parsed,
-            contracts: p.net_short,
+            contracts: missing,
             // Per SHARE, matching how the rest of the short side carries premium.
             premiumPerShare: p.sto_contracts > 0
               ? Math.abs(p.total_received) / p.sto_contracts / 100 : 0,
@@ -2728,7 +2739,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
       // Every leg that needs a mark, long or short.
       const priceLegs = [
-        ...openShortPuts.map(l => ({ symbol: l.symbol, ticker: l.ticker })),
+        ...uncoveredShorts.map(l => ({ symbol: l.symbol, ticker: l.ticker })),
         ...openEntries.map(e => ({ symbol: e.symbol, ticker: e.ticker })),
         // Priced on both bases: the legacy basis still needs these for the day
         // move, even though it leaves them out of the cumulative figures.
@@ -3054,7 +3065,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // the book and reading backwards against the broker on any real move.
       // Short legs the entries table missed. Priced the same way as everything
       // else; only the sign differs, because a short gains as the mark falls.
-      openShortPuts.forEach(leg => {
+      uncoveredShorts.forEach(leg => {
         const ticker = leg.ticker
         if (!ticker) return
         const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
