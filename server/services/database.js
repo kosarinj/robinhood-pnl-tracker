@@ -2999,6 +2999,14 @@ export class DatabaseService {
   }
 
   // Raw (ungrouped) option trades for one ticker — for diagnosing premium/P&L issues.
+  /**
+   * Raw option trades for one underlying.
+   *
+   * The space in the pattern is load-bearing. Option symbols read "C 9/18/2026
+   * Put $138.00", so a bare `${ticker}%` made a query for C return CRCL and
+   * CRWV as well -- which turns a diagnosis of one position into a reading of
+   * three, and did.
+   */
   getRawOptionTradesForTicker(userId = 1, ticker = '') {
     try {
       return db.prepare(`
@@ -3006,7 +3014,7 @@ export class DatabaseService {
         FROM trades
         WHERE is_option = 1 AND user_id = ? AND symbol LIKE ?
         ORDER BY trans_date ASC, id ASC
-      `).all(userId, `${ticker}%`)
+      `).all(userId, `${ticker} %`)
     } catch (e) {
       console.error('Error getting raw option trades:', e)
       return []
