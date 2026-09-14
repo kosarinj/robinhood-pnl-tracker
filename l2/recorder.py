@@ -34,7 +34,15 @@ from ib_async import IB, Stock
 
 from engine import AbsorptionEngine, Aggressor, Side, Thresholds
 
-DEFAULT_URL = os.environ.get("ORDERFLOW_URL", "http://localhost:3001")
+# The deployment has two backends and only one of them is real. The app is
+# served by robinhood-pnl-tracker-production, which answers both the UI and the
+# API; the -805d instance is a spare that responds to every API call, holds its
+# own volume, and is read by nothing. A push to it succeeds, returns ok, and
+# vanishes -- which is exactly how an hour went into wondering why a working
+# recorder produced an empty panel. VITE_SERVER_URL in .env.local still points
+# at the spare, so do not take the URL from there.
+MAIN_SERVER = "https://robinhood-pnl-tracker-production.up.railway.app"
+DEFAULT_URL = os.environ.get("ORDERFLOW_URL", MAIN_SERVER)
 
 
 class Uploader:
@@ -176,6 +184,9 @@ def main():
     recorders = [Recorder(ib, s.upper(), up, args.rows) for s in args.symbols]
     session = datetime.now().strftime("%Y-%m-%d")
 
+    if "805d" in args.url:
+        print("WARNING: pushing to the -805d spare. Nothing reads that instance; "
+              "the app is served by robinhood-pnl-tracker-production.")
     print(f"Recording {', '.join(r.symbol for r in recorders)} -> {args.url}")
     print(f"session {session}, flushing every {args.flush:.0f}s. Ctrl+C to stop.")
     try:
