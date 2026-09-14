@@ -4,6 +4,14 @@ import {
   Tooltip, ResponsiveContainer, ReferenceLine, Cell, Legend,
 } from 'recharts'
 import { useTheme } from '../contexts/ThemeContext'
+import { getPref, subscribePrefs } from '../services/prefs'
+
+// The same key and default the Options YTD panel uses. Duplicating the literals
+// is what let the two drift apart in the first place, so they are named here
+// rather than retyped.
+const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
+const LS_SYMBOL_KEY = 'ytdPanel_symbolDates'
+const DEFAULT_GLOBAL_START = '2026-03-15'
 
 /**
  * Dashboard charts.
@@ -33,20 +41,33 @@ const moneySigned = (n) => `${(Number(n) || 0) >= 0 ? '+' : '−'}$${Math.abs(Nu
 export default function DashboardCharts({ broker = 'all' }) {
   const { tokens } = useTheme()
   const [rows, setRows] = useState(null)
+  const [start, setStart] = useState(() => getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
+
+  // Re-read when the panel's period changes, so moving the start date there
+  // moves these bars with it instead of leaving them on a stale window.
+  useEffect(() => subscribePrefs(() => {
+    setStart(getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
+  }), [])
 
   useEffect(() => {
     const params = new URLSearchParams()
     if (broker && broker !== 'all') params.set('broker', broker)
-    // Same basis as the Options YTD panel deliberately. These charts sit beside
-    // that panel and get read against it, so a silent difference in cost basis
-    // reads as one of them being broken. Account P&L above is where the
-    // broker-comparable figure lives, and it needs no basis at all.
-    const qs = params.toString()
-    fetch(`/api/options-pnl/ytd${qs ? `?${qs}` : ''}`, { credentials: 'include' })
+    // Same basis AND the same period as the Options YTD panel. These charts sit
+    // beside that panel and get read against it, so a silent difference reads
+    // as one of them being broken.
+    //
+    // The period used to be omitted entirely, which left the server on its
+    // 2000-01-01 default while the panel used the saved start. Same formula,
+    // different window: PLTR read 79k here against 16k there, with nothing on
+    // either saying they were measuring different spans of time.
+    params.set('startDate', start)
+    const sd = getPref(LS_SYMBOL_KEY, null)
+    if (sd && Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
+    fetch(`/api/options-pnl/ytd?${params}`, { credentials: 'include' })
       .then(r => r.json())
       .then(d => setRows(d?.success && Array.isArray(d.byUnderlying) ? d.byUnderlying : []))
       .catch(() => setRows([]))
-  }, [broker])
+  }, [broker, start])
 
   // Open positions only. A name fully exited earlier in the year still carries
   // realized P&L and would otherwise sit near the top of "biggest movers" — but
@@ -154,7 +175,7 @@ export default function DashboardCharts({ broker = 'all' }) {
         </div>
         <div style={{ ...sub, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span>
-            Realized + unrealized stock + open options — the Options YTD panel's Net + Open
+            Since {start} · realized + unrealized stock + open options — the Options YTD panel's Net + Open
             {closedCount > 0 && ` · ${closedCount} closed hidden`}
           </span>
 
