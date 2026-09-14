@@ -3075,6 +3075,25 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           (openUnrealizedByTicker[ticker] || 0) + (leg.premiumPerShare - nowMark) * shares
         openPremiumByTicker[ticker] =
           (openPremiumByTicker[ticker] || 0) + leg.premiumPerShare * shares
+
+        // Today's move, on the same footing as every other leg. Leaving this
+        // out was the other half of the same omission: CRCL's short $97 put
+        // went 7.70 -> 4.15 for +355 on the day, and without it the ticker
+        // reported roughly nothing against a real +244. A leg counted in the
+        // cumulative figure but not the daily one is arguably worse than one
+        // missing from both, because the two then disagree by a number nothing
+        // on screen explains.
+        const prevMark = optPrevClose[leg.symbol]
+        if (prevMark > 0) {
+          // Short: the position gains as the mark falls.
+          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) +
+            daySplit(leg.symbol, leg.contracts, 'short', prevMark - nowMark, nowMark)
+          const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
+          bs.market += 1
+        } else {
+          // No comparable yesterday: say so rather than invent a move.
+          dayGapTickers.add(ticker)
+        }
       })
 
       openLongs.forEach(leg => {
