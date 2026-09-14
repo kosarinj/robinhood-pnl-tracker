@@ -5954,6 +5954,19 @@ app.get('/api/debug/slow', requireAuth, (req, res) => {
 })
 
 app.get('/api/health', (req, res) => {
+  // Whether the recorder's token is configured on THIS instance, and its length
+  // and shape -- never the value. A token set on one service while the domain
+  // routes to another looks identical from outside to no token at all, and a
+  // trailing space pasted into a dashboard is invisible everywhere else.
+  const ofTok = process.env.ORDERFLOW_TOKEN || ''
+  const orderflow = {
+    tokenConfigured: Boolean(ofTok),
+    tokenLength: ofTok.length,
+    tokenTrimmedLength: ofTok.trim().length,
+    tokenFirst4: ofTok ? ofTok.slice(0, 4) : null,
+    userId: Number(process.env.ORDERFLOW_USER_ID || 1),
+  }
+
   // Included so an options key that has quietly lost its quotes entitlement is
   // visible here rather than only as marks that look a bit stale.
   const oq = {
@@ -5991,7 +6004,7 @@ app.get('/api/health', (req, res) => {
         return { mount: mnt, type: p[2], hasTradingDb: hasDb, files }
       })
   } catch { /* ignore */ }
-  res.json({
+  res.json({ orderflow,
     optionQuotes: oq,
     ok: true,
     instanceId: INSTANCE_ID,
