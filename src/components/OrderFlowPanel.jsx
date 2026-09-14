@@ -53,6 +53,15 @@ export default function OrderFlowPanel() {
   // a different user, the recorder pushing to another instance entirely -- and
   // guessing between them from a blank table wastes a trading session.
   const [diag, setDiag] = useState(null)
+  // Remembered per browser: which layout someone reads a book in is a habit,
+  // and having to reset it every visit is its own small tax.
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem('orderflow-view') || 'price' } catch { return 'price' }
+  })
+  const setViewSaved = (v) => {
+    setView(v)
+    try { localStorage.setItem('orderflow-view', v) } catch { /* private window */ }
+  }
 
   useEffect(() => {
     fetch('/api/orderflow/sessions', { credentials: 'include' })
@@ -86,6 +95,36 @@ export default function OrderFlowPanel() {
   const maxWork = useMemo(
     () => Math.max(1, ...(data?.levels || []).map(l => Math.max(l.consumed, l.pulled))),
     [data])
+
+  /**
+   * One row per price, with each side's figures beside it.
+   *
+   * A price is not a bid or an offer for the whole session -- it is the bid,
+   * then the offer, as the market moves through it. Splitting the table by side
+   * files the same level in two places and hides the thing worth seeing: whether
+   * buyers or sellers were the ones absorbing there.
+   */
+  const byPrice = useMemo(() => {
+    const m = new Map()
+    for (const l of data?.levels || []) {
+      const row = m.get(l.price) || { price: l.price, bid: null, ask: null }
+      row[l.side === 'bid' ? 'bid' : 'ask'] = l
+      m.set(l.price, row)
+    }
+    return [...m.values()].sort((a, b) => b.price - a.price)
+  }, [data])
+
+  // Which side did the absorbing. Sellers eating into bids and buyers eating
+  // into offers are opposite readings, and one number for both would cancel
+  // them out into nothing.
+  const imbalance = useMemo(() => {
+    let bid = 0, ask = 0
+    for (const l of data?.levels || []) {
+      if (l.side === 'bid') bid += l.consumed; else ask += l.consumed
+    }
+    const total = bid + ask
+    return { bid, ask, total, bidPct: total ? (bid / total) * 100 : 0 }
+  }, [data])
 
   const card = {
     background: isDark ? '#1e293b' : '#fff',
@@ -130,6 +169,17 @@ export default function OrderFlowPanel() {
             ...input_, cursor: 'pointer', background: isDark ? '#334155' : '#e2e8f0',
           }}>Load</button>
         </form>
+
+        <div style={{ display: 'flex', gap: 2 }}>
+          {[['price', 'Both sides'], ['list', 'Flat list']].map(([k, label]) => (
+            <button key={k} onClick={() => setViewSaved(k)} style={{
+              ...input_, cursor: 'pointer', padding: '5px 9px',
+              background: view === k ? (isDark ? '#334155' : '#e2e8f0')
+                                     : (isDark ? '#0f172a' : '#fff'),
+              fontWeight: view === k ? 700 : 400,
+            }}>{label}</button>
+          ))}
+        </div>
       </div>
 
       {sessions.length > 0 && (
@@ -221,7 +271,74 @@ export default function OrderFlowPanel() {
             </div>
           )}
 
+          {imbalance.total > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: muted, marginBottom: 4 }}>
+                Who absorbed — {num(imbalance.bid)} into bids (sellers hitting) ·
+                {' '}{num(imbalance.ask)} into offers (buyers lifting)
+              </div>
+              <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ width: `${imbalance.bidPct}%`, background: '#22c55e' }} />
+                <div style={{ width: `${100 - imbalance.bidPct}%`, background: '#ef4444' }} />
+              </div>
+            </div>
+          )}
+
           <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto', marginBottom: 14 }}>
+            {view === 'price' ? (
+              /* Bid side left, ask side right, one row per price -- the same
+                 shape as the Open Interest table above, so the two read the
+                 same way. */
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...th, textAlign: 'right' }} colSpan={2}>Bids — sellers hitting</th>
+                    <th style={{ ...th, textAlign: 'center', width: 86 }}>Price</th>
+                    <th style={{ ...th, textAlign: 'left' }} colSpan={2}>Offers — buyers lifting</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {byPrice.map(row => {
+                    const hot = (l) => l && l.ratio >= 3 && l.consumed >= 25000
+                    const warm = hot(row.bid) || hot(row.ask)
+                    return (
+                      <tr key={row.price}
+                        style={warm ? { background: isDark ? '#292524' : '#fffbeb' } : undefined}>
+                        <td style={{ ...td, textAlign: 'right', fontSize: 11, color: muted, whiteSpace: 'nowrap' }}>
+                          {row.bid ? <>
+                            {num(row.bid.consumed)} ate
+                            {row.bid.pulled > 0 && <span> · {num(row.bid.pulled)} pulled</span>}
+                            {row.bid.ratio >= 3 && <strong style={{ color: '#f59e0b' }}> · {row.bid.ratio.toFixed(1)}×</strong>}
+                          </> : ''}
+                        </td>
+                        <td style={{ ...td, textAlign: 'right', width: 130 }}>
+                          {row.bid && <span style={{
+                            display: 'inline-block', height: 10, borderRadius: 2, background: '#22c55e',
+                            width: `${(row.bid.consumed / maxWork) * 120}px`,
+                          }} />}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center', fontWeight: warm ? 700 : 500 }}>
+                          ${row.price.toFixed(2)}
+                        </td>
+                        <td style={{ ...td, textAlign: 'left', width: 130 }}>
+                          {row.ask && <span style={{
+                            display: 'inline-block', height: 10, borderRadius: 2, background: '#ef4444',
+                            width: `${(row.ask.consumed / maxWork) * 120}px`,
+                          }} />}
+                        </td>
+                        <td style={{ ...td, textAlign: 'left', fontSize: 11, color: muted, whiteSpace: 'nowrap' }}>
+                          {row.ask ? <>
+                            {num(row.ask.consumed)} ate
+                            {row.ask.pulled > 0 && <span> · {num(row.ask.pulled)} pulled</span>}
+                            {row.ask.ratio >= 3 && <strong style={{ color: '#f59e0b' }}> · {row.ask.ratio.toFixed(1)}×</strong>}
+                          </> : ''}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
@@ -278,6 +395,7 @@ export default function OrderFlowPanel() {
                 })}
               </tbody>
             </table>
+            )}
           </div>
 
           {data.events?.length > 0 && (
