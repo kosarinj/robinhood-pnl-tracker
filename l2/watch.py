@@ -182,7 +182,7 @@ def main():
     ap.add_argument("symbol")
     ap.add_argument("--port", type=int, default=4001)
     ap.add_argument("--client-id", type=int, default=78)
-    ap.add_argument("--rows", type=int, default=10)
+    ap.add_argument("--rows", type=int, default=30)
     args = ap.parse_args()
 
     ib = IB()

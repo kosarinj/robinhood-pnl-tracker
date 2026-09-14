@@ -164,7 +164,11 @@ def main():
     ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--port", type=int, default=4001)
     ap.add_argument("--client-id", type=int, default=79)
-    ap.add_argument("--rows", type=int, default=10)
+    # 10 rows covers about 3% of price on a name like MRVL -- too narrow to
+    # contain the levels anyone actually watches. 30 reaches far enough to hold
+    # a wall several percent away, which is where support and resistance get
+    # argued about.
+    ap.add_argument("--rows", type=int, default=30)
     ap.add_argument("--flush", type=float, default=15.0,
                     help="seconds between pushes")
     args = ap.parse_args()
