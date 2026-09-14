@@ -2705,8 +2705,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // Derived from open positions rather than by teaching the entries table
       // about puts: the position data already knows every open leg, so nothing
       // new can be forgotten by a writer that only looked at one side.
+      // shortEntries is this route's own copy; shortEntryBySymbol belongs to a
+      // different handler's scope and reaching for it here took the whole
+      // endpoint down with a ReferenceError.
+      const entriedSymbols = new Set(shortEntries.map(e => e.symbol))
       const openShortPuts = openPositions
-        .filter(p => p.net_short > 0 && !shortEntryBySymbol[p.symbol] && notExpired(p.symbol))
+        .filter(p => p.net_short > 0 && !entriedSymbols.has(p.symbol) && notExpired(p.symbol))
         .map(p => {
           const parsed = parseOptionDescription(p.symbol)
           if (!parsed) return null
