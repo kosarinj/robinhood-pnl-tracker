@@ -66,8 +66,13 @@ class ErrorLog:
         else:
             self.general.append(entry)
 
-    def for_req(self, reqId):
-        return self.by_req.get(reqId, [])
+    def mark(self):
+        """Current position, so a probe can claim only the errors it caused."""
+        return sum(len(v) for v in self.by_req.values()) + len(self.general)
+
+    def since(self, mark):
+        every = [e for lst in self.by_req.values() for e in lst] + self.general
+        return every[mark:]
 
 
 def connect(port_arg, client_id):
@@ -75,7 +80,12 @@ def connect(port_arg, client_id):
     ports = [(port_arg, f"port {port_arg}")] if port_arg else CANDIDATE_PORTS
     for port, label in ports:
         try:
-            ib.connect("127.0.0.1", port, clientId=client_id, timeout=6)
+            # readonly=True stops ib_async asking for open and completed
+            # orders on connect. Nothing here wants order data, and without it
+            # a Gateway in Read-Only mode logs a timeout for a request we never
+            # needed -- which reads as "write access required" when it is not.
+            ib.connect("127.0.0.1", port, clientId=client_id, timeout=6,
+                       readonly=True)
             print(f"  connected: {label} on 127.0.0.1:{port}")
             return ib, port
         except Exception as e:
@@ -84,22 +94,22 @@ def connect(port_arg, client_id):
 
 
 def probe_depth(ib, errors, symbol, exchange, smart):
-    """One depth request. Returns (rows_seen, [errors])."""
+    """One depth request. Returns (bid_levels, ask_levels, [errors])."""
     contract = Stock(symbol, exchange, "USD")
+    mark = errors.mark()
     try:
         qualified = ib.qualifyContracts(contract)
         if not qualified:
-            return 0, [(0, f"could not qualify {symbol} on {exchange}")]
+            return [], [], [(0, f"could not qualify {symbol} on {exchange}")]
         contract = qualified[0]
     except Exception as e:
-        return 0, [(0, f"qualify failed: {e}")]
+        return [], [], [(0, f"qualify failed: {e}")]
 
     try:
         ticker = ib.reqMktDepth(contract, numRows=10, isSmartDepth=smart)
     except Exception as e:
-        return 0, [(0, f"reqMktDepth raised: {e}")]
+        return [], [], [(0, f"reqMktDepth raised: {e}")]
 
-    req_id = getattr(ticker, "reqId", None) or 0
     # Depth arrives as a stream of insert/update/delete rows. Give it a few
     # seconds: outside market hours a real entitlement can still be quiet.
     deadline = time.time() + 6
@@ -108,47 +118,65 @@ def probe_depth(ib, errors, symbol, exchange, smart):
         if ticker.domBids or ticker.domAsks:
             break
 
-    rows = len(ticker.domBids) + len(ticker.domAsks)
-    found = errors.for_req(req_id) if req_id else []
-    if not found:
-        # reqId is not always exposed on the ticker; fall back to anything new.
-        found = [e for lst in errors.by_req.values() for e in lst]
+    # Copy before cancelling. cancelMktDepth empties the ticker's DOM lists, so
+    # reading them afterwards reports an entitled book as zero levels.
+    bids = list(ticker.domBids or [])
+    asks = list(ticker.domAsks or [])
+    found = errors.since(mark)
 
     try:
         ib.cancelMktDepth(contract, isSmartDepth=smart)
     except Exception:
         pass
 
-    return rows, found, ticker
+    return bids, asks, found
 
 
-def probe_ticks(ib, errors, symbol):
+def probe_ticks(ib, errors, symbol, seconds=5):
+    """
+    Count trades and quote updates over a window.
+
+    Accumulated from the update event rather than read off the Ticker: ib_async
+    clears `tickByTicks` after every event loop pass, so polling the attribute
+    after a sleep reports only the final batch and makes a busy tape look dead.
+    The recorder needs the streaming pattern regardless, so it is used here too.
+    """
     contract = Stock(symbol, "SMART", "USD")
     qualified = ib.qualifyContracts(contract)
     if not qualified:
         return None
     contract = qualified[0]
 
-    trades = ib.reqTickByTickData(contract, "AllLast", 0, False)
-    quotes = ib.reqTickByTickData(contract, "BidAsk", 0, False)
-    ib.sleep(5)
+    prints, quotes_seen = [], []
 
-    n_trades = len(trades.tickByTicks) if trades else 0
-    n_quotes = len(quotes.tickByTicks) if quotes else 0
+    def on_update(ticker):
+        for t in ticker.tickByTicks:
+            # A trade carries price/size; a quote carries bid/ask pairs.
+            if hasattr(t, "size"):
+                prints.append(t)
+            elif hasattr(t, "bidPrice"):
+                quotes_seen.append(t)
 
-    sample = None
-    if trades and trades.tickByTicks:
-        t = trades.tickByTicks[-1]
-        sample = f"{t.size} @ {t.price} on {getattr(t, 'exchange', '?')}"
+    trades_tkr = ib.reqTickByTickData(contract, "AllLast", 0, False)
+    quotes_tkr = ib.reqTickByTickData(contract, "BidAsk", 0, False)
+    for tkr in {id(trades_tkr): trades_tkr, id(quotes_tkr): quotes_tkr}.values():
+        tkr.updateEvent += on_update
 
-    for c in (contract,):
+    ib.sleep(seconds)
+
+    for tkr in {id(trades_tkr): trades_tkr, id(quotes_tkr): quotes_tkr}.values():
+        tkr.updateEvent -= on_update
+    for kind in ("AllLast", "BidAsk"):
         try:
-            ib.cancelTickByTickData(c, "AllLast")
-            ib.cancelTickByTickData(c, "BidAsk")
+            ib.cancelTickByTickData(contract, kind)
         except Exception:
             pass
 
-    return n_trades, n_quotes, sample
+    sample = None
+    if prints:
+        t = prints[-1]
+        sample = f"{t.size} @ {t.price} on {getattr(t, 'exchange', '?')}"
+    return len(prints), len(quotes_seen), sample
 
 
 def main():
@@ -187,17 +215,15 @@ def main():
             ("ARCA", False, "NYSE ArcaBook"),
             ("SMART", True, "any depth subscription"),
         ]:
-            result = probe_depth(ib, errors, symbol, exchange, smart)
-            rows, errs = result[0], result[1]
+            bids, asks, errs = probe_depth(ib, errors, symbol, exchange, smart)
             tag = f"  {symbol:<6} {exchange:<7}"
-            if rows:
-                ticker = result[2]
-                best_bid = ticker.domBids[0] if ticker.domBids else None
-                best_ask = ticker.domAsks[0] if ticker.domAsks else None
-                print(f"{tag} OK -- {len(ticker.domBids)} bid / {len(ticker.domAsks)} ask levels")
-                if best_bid and best_ask:
-                    print(f"{'':<16}top: {best_bid.size} @ {best_bid.price}"
-                          f"  |  {best_ask.size} @ {best_ask.price}")
+            # A book with no levels is not an entitled book, whatever else came
+            # back. Only actual depth counts as working.
+            if bids or asks:
+                print(f"{tag} OK -- {len(bids)} bid / {len(asks)} ask levels")
+                if bids and asks:
+                    print(f"{'':<16}top: {bids[0].size} @ {bids[0].price}"
+                          f"  |  {asks[0].size} @ {asks[0].price}")
                 depth_ok = True
             else:
                 reason = "no rows and no error (market closed, or not entitled)"

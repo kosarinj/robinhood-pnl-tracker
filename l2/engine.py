@@ -62,6 +62,12 @@ class Thresholds:
     min_absorption_ratio: float = 3.0    # consumed / max displayed at once
     min_flush_size: float = 5_000        # ignore the emptying of tiny levels
     dominance: float = 0.7               # share of the flush one cause must own
+    # Size a level must reach once before its adds and cancels are counted.
+    # Without this the inside of the book buries the signal: the touch flickers
+    # between 100 and 200 shares hundreds of times a minute, and each flicker
+    # books as a cancel and a refill. On one NVDA run that produced 1.5M
+    # "pulled" at a level that never showed more than 100 shares.
+    min_track_size: float = 2_000
 
     @classmethod
     def from_profile(cls, avg_trade_size: float, multiple: float = 40.0) -> "Thresholds":
@@ -75,6 +81,7 @@ class Thresholds:
             min_wall_size=wall,
             min_absorbed_volume=wall * 2.5,
             min_flush_size=wall * 0.5,
+            min_track_size=wall * 0.2,
         )
 
 
@@ -226,14 +233,19 @@ class AbsorptionEngine:
         lv.unaccounted = 0.0
 
         expected = old - traded
+        # A level only counts once it has been big enough to mean something.
+        # Consumption is always real -- those shares printed -- but attributing
+        # adds and cancels on a level that has never held size is measuring the
+        # spread flickering, not anyone's intent.
+        material = max(lv.max_displayed, size) >= self.t.min_track_size
         if size > expected:
-            # More size than the trades left behind: someone added to the level.
-            # Consumption is capped at what was actually sitting there.
             lv.consumed += min(traded, old)
-            lv.refreshed += size - max(expected, 0.0)
+            if material:
+                lv.refreshed += size - max(expected, 0.0)
         else:
             lv.consumed += traded
-            lv.pulled += expected - size
+            if material:
+                lv.pulled += expected - size
 
         lv.displayed = size
         lv.max_displayed = max(lv.max_displayed, size)
