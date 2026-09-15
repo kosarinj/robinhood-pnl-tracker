@@ -747,6 +747,14 @@ export default function OrderFlowPanel() {
                 : <span>{watch.max} max — remove one to watch {ticker}</span>
             )}
             {watchErr && <span style={{ color: '#ef4444' }}>{watchErr}</span>}
+            {watch.changed && (
+              // One list for everyone, so say who last touched it -- a symbol
+              // that vanished was usually someone else making room.
+              <span title="Everyone signed in shares this watch list">
+                shared · changed by {watch.changed.byYou ? 'you' : watch.changed.by}{' '}
+                {new Date(watch.changed.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </span>
+            )}
             <span style={{ marginLeft: 'auto', color: alive ? '#22c55e' : '#ef4444' }}>
               {alive ? '● recorder live' : rec ? `recorder last seen ${rec.lastSeenSec}s ago` : 'recorder offline'}
             </span>
@@ -798,10 +806,10 @@ export default function OrderFlowPanel() {
                 : diag.storedBy.map((r, i) => (
                     <div key={i} style={{
                       paddingLeft: 10,
-                      color: r.user_id === diag.youAre ? (isDark ? '#e2e8f0' : '#0f172a') : muted,
+                      color: r.user_id === diag.recorderWritesAs ? (isDark ? '#e2e8f0' : '#0f172a') : muted,
                     }}>
                       user {r.user_id} · {r.ticker} · {r.session} · {r.levels} levels
-                      {r.user_id !== diag.youAre && ' (not yours)'}
+                      {r.user_id !== diag.recorderWritesAs && ' (not the recorder’s — not shown)'}
                     </div>
                   ))}
             </div>

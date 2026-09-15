@@ -7601,7 +7601,7 @@ app.get('/api/orderflow', requireAuth, (req, res) => {
     const session = String(req.query.session || todayStrLocal()).slice(0, 10)
     if (!ticker) return res.status(400).json({ error: 'Pass a ticker' })
 
-    const { levels, events } = databaseService.getOrderFlow(req.user.userId, ticker, session)
+    const { levels, events } = databaseService.getOrderFlow(orderFlowOwner(), ticker, session)
     // Ranked separately from the ladder: the top of a price-ordered list is
     // just whatever is highest, not what mattered.
     const ranked = [...levels].sort((a, b) => b.consumed - a.consumed).slice(0, 8)
@@ -7637,7 +7637,7 @@ app.get('/api/orderflow/debug', requireAuth, (req, res) => {
       instanceId: INSTANCE_ID,
       tokenConfigured: Boolean(process.env.ORDERFLOW_TOKEN),
       storedBy: rows,
-      matches: rows.some(r => r.user_id === req.user.userId),
+      matches: rows.some(r => r.user_id === orderFlowOwner()),
     })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -7647,7 +7647,7 @@ app.get('/api/orderflow/debug', requireAuth, (req, res) => {
 /** GET /api/orderflow/sessions — what the recorder has captured, newest first. */
 app.get('/api/orderflow/sessions', requireAuth, (req, res) => {
   try {
-    res.json(databaseService.getOrderFlowSessions(req.user.userId))
+    res.json(databaseService.getOrderFlowSessions(orderFlowOwner()))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -7667,6 +7667,21 @@ app.get('/api/orderflow/sessions', requireAuth, (req, res) => {
 // IBKR allows three depth subscriptions at this account's market-data lines.
 // A fourth is refused here rather than failing quietly at the gateway.
 const LIVE_BOOK_MAX_SYMBOLS = 3
+
+/**
+ * Whose order flow everyone sees.
+ *
+ * There is one recorder, on one IBKR account, and it writes as a configured
+ * user. Every signed-in user reads that user's book, history and watch list,
+ * and edits the same list of three -- keyed per viewer, a second user would
+ * see an offline recorder and an empty panel while the data sat under user 1.
+ */
+function orderFlowOwner() {
+  return Number(process.env.ORDERFLOW_USER_ID || 1)
+}
+// Who last changed the shared list, so two people editing one set of three
+// can see why a symbol they were watching has gone.
+const watchMeta = new Map()       // ownerId -> { at, by, byUserId }
 const liveBooks = new Map()       // `${userId}:${ticker}` -> latest snapshot
 const watchLists = new Map()      // userId -> ['MRVL', 'NVDA']
 const recorderStatus = new Map()  // userId -> { at, active, errors }
@@ -7694,11 +7709,16 @@ function ladderRows(rows) {
     .filter(r => Number.isFinite(r.price) && r.size > 0)
 }
 
-function watchState(userId) {
+function watchState(userId, viewerId = null) {
   const st = recorderStatus.get(userId)
+  const meta = watchMeta.get(userId)
   return {
     symbols: watchLists.get(userId) || [],
     max: LIVE_BOOK_MAX_SYMBOLS,
+    shared: true,
+    changed: meta
+      ? { at: meta.at, by: meta.by, byYou: viewerId != null && meta.byUserId === viewerId }
+      : null,
     recorder: st
       ? { lastSeenSec: Math.round((Date.now() - st.at) / 1000), active: st.active, errors: st.errors }
       : null,
@@ -7753,7 +7773,7 @@ app.post('/api/orderflow/book', (req, res) => {
 
 /** GET /api/orderflow/watch — what the recorder is asked to watch, and whether it is alive. */
 app.get('/api/orderflow/watch', requireAuth, (req, res) => {
-  res.json(watchState(req.user.userId))
+  res.json(watchState(orderFlowOwner(), req.user.userId))
 })
 
 /** PUT /api/orderflow/watch — { symbols: [...] }, from the panel or the recorder starting up. */
@@ -7766,26 +7786,33 @@ app.put('/api/orderflow/watch', (req, res) => {
       error: `IBKR allows ${LIVE_BOOK_MAX_SYMBOLS} symbols at once — remove one first`,
     })
   }
-  watchLists.set(user.userId, symbols)
+  const owner = orderFlowOwner()
+  watchLists.set(owner, symbols)
+  // A browser session carries a username; the recorder's token does not.
+  watchMeta.set(owner, {
+    at: Date.now(),
+    by: user.username || 'recorder',
+    byUserId: user.username ? user.userId : null,
+  })
   for (const key of liveBooks.keys()) {
     const [uid, ticker] = key.split(':')
-    if (Number(uid) === user.userId && !symbols.includes(ticker)) {
+    if (Number(uid) === owner && !symbols.includes(ticker)) {
       liveBooks.delete(key)
       liveAges.delete(key)
     }
   }
-  res.json(watchState(user.userId))
+  res.json(watchState(owner, user.username ? user.userId : null))
 })
 
 /** GET /api/orderflow/book?ticker=MRVL — the latest ladder the recorder sent. */
 app.get('/api/orderflow/book', requireAuth, (req, res) => {
   const ticker = String(req.query.ticker || '').toUpperCase()
   if (!ticker) return res.status(400).json({ error: 'Pass a ticker' })
-  const book = liveBooks.get(`${req.user.userId}:${ticker}`)
+  const book = liveBooks.get(`${orderFlowOwner()}:${ticker}`)
   res.json({
     ticker,
     book: book ? { ...book, ageSec: (Date.now() - book.receivedAt) / 1000 } : null,
-    watch: watchState(req.user.userId),
+    watch: watchState(orderFlowOwner(), req.user.userId),
   })
 })
 
