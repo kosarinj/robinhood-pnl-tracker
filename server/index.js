@@ -7805,14 +7805,19 @@ app.put('/api/orderflow/watch', (req, res) => {
 })
 
 /** GET /api/orderflow/book?ticker=MRVL — the latest ladder the recorder sent. */
-app.get('/api/orderflow/book', requireAuth, (req, res) => {
+// Readable with the recorder's token as well as a browser session, so the
+// machine that runs the recorder can check what the panel is being shown --
+// it is the same shared book either way.
+app.get('/api/orderflow/book', (req, res) => {
+  const viewer = orderFlowUser(req)
+  if (!viewer) return res.status(401).json({ error: 'Not authorised' })
   const ticker = String(req.query.ticker || '').toUpperCase()
   if (!ticker) return res.status(400).json({ error: 'Pass a ticker' })
   const book = liveBooks.get(`${orderFlowOwner()}:${ticker}`)
   res.json({
     ticker,
     book: book ? { ...book, ageSec: (Date.now() - book.receivedAt) / 1000 } : null,
-    watch: watchState(orderFlowOwner(), req.user.userId),
+    watch: watchState(orderFlowOwner(), viewer.username ? viewer.userId : null),
   })
 })
 
