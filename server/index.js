@@ -7650,6 +7650,121 @@ app.get('/api/orderflow/sessions', requireAuth, (req, res) => {
   }
 })
 
+// ── Live book ────────────────────────────────────────────────────────────────
+// Everything above is a record of what happened. This is what is resting right
+// now: the recorder pushes each watched symbol's ladder every couple of seconds,
+// and only the latest is kept, in memory. A snapshot is worthless a minute
+// later, so there is nothing to gain from writing it to the volume.
+//
+// The watch list lives here too, so the panel can change what the recorder
+// subscribes to. The recorder learns the list from the reply to its own book
+// push -- the server cannot reach a desktop behind a home router, so the
+// desktop does the asking.
+
+// IBKR allows three depth subscriptions at this account's market-data lines.
+// A fourth is refused here rather than failing quietly at the gateway.
+const LIVE_BOOK_MAX_SYMBOLS = 3
+const liveBooks = new Map()       // `${userId}:${ticker}` -> latest snapshot
+const watchLists = new Map()      // userId -> ['MRVL', 'NVDA']
+const recorderStatus = new Map()  // userId -> { at, active, errors }
+
+function cleanSymbols(list) {
+  const out = []
+  for (const s of Array.isArray(list) ? list : []) {
+    const t = String(s || '').trim().toUpperCase()
+    if (/^[A-Z][A-Z0-9.]{0,9}$/.test(t) && !out.includes(t)) out.push(t)
+  }
+  return out
+}
+
+function ladderRows(rows) {
+  return (Array.isArray(rows) ? rows : []).slice(0, 60)
+    .map(r => ({
+      price: Number(r?.price),
+      size: Number(r?.size) || 0,
+      venues: Array.isArray(r?.venues) ? r.venues.slice(0, 12).map(String) : [],
+    }))
+    .filter(r => Number.isFinite(r.price) && r.size > 0)
+}
+
+function watchState(userId) {
+  const st = recorderStatus.get(userId)
+  return {
+    symbols: watchLists.get(userId) || [],
+    max: LIVE_BOOK_MAX_SYMBOLS,
+    recorder: st
+      ? { lastSeenSec: Math.round((Date.now() - st.at) / 1000), active: st.active, errors: st.errors }
+      : null,
+  }
+}
+
+const finiteOrNull = (x) => (Number.isFinite(x) ? x : null)
+
+/**
+ * POST /api/orderflow/book
+ *
+ * The recorder's ladders: { books: [{ ticker, bids, asks, bid, ask, last }],
+ * status: { active, errors } }. The reply carries the watch list.
+ */
+app.post('/api/orderflow/book', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const now = Date.now()
+  for (const b of Array.isArray(req.body?.books) ? req.body.books : []) {
+    const ticker = String(b?.ticker || '').toUpperCase()
+    if (!ticker) continue
+    liveBooks.set(`${user.userId}:${ticker}`, {
+      ticker, receivedAt: now,
+      bids: ladderRows(b.bids), asks: ladderRows(b.asks),
+      bid: finiteOrNull(b.bid), ask: finiteOrNull(b.ask), last: finiteOrNull(b.last),
+    })
+  }
+  const status = req.body?.status || {}
+  const errors = {}
+  for (const [k, v] of Object.entries(status.errors && typeof status.errors === 'object' ? status.errors : {})) {
+    errors[String(k).toUpperCase().slice(0, 10)] = String(v).slice(0, 200)
+  }
+  recorderStatus.set(user.userId, { at: now, active: cleanSymbols(status.active), errors })
+  // null rather than [] when nothing has been set: after a redeploy the server
+  // has forgotten the list, and the recorder, which still knows it, puts it back.
+  res.json({ symbols: watchLists.has(user.userId) ? watchLists.get(user.userId) : null })
+})
+
+/** GET /api/orderflow/watch — what the recorder is asked to watch, and whether it is alive. */
+app.get('/api/orderflow/watch', requireAuth, (req, res) => {
+  res.json(watchState(req.user.userId))
+})
+
+/** PUT /api/orderflow/watch — { symbols: [...] }, from the panel or the recorder starting up. */
+app.put('/api/orderflow/watch', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const symbols = cleanSymbols(req.body?.symbols)
+  if (symbols.length > LIVE_BOOK_MAX_SYMBOLS) {
+    return res.status(400).json({
+      error: `IBKR allows ${LIVE_BOOK_MAX_SYMBOLS} symbols at once — remove one first`,
+    })
+  }
+  watchLists.set(user.userId, symbols)
+  for (const key of liveBooks.keys()) {
+    const [uid, ticker] = key.split(':')
+    if (Number(uid) === user.userId && !symbols.includes(ticker)) liveBooks.delete(key)
+  }
+  res.json(watchState(user.userId))
+})
+
+/** GET /api/orderflow/book?ticker=MRVL — the latest ladder the recorder sent. */
+app.get('/api/orderflow/book', requireAuth, (req, res) => {
+  const ticker = String(req.query.ticker || '').toUpperCase()
+  if (!ticker) return res.status(400).json({ error: 'Pass a ticker' })
+  const book = liveBooks.get(`${req.user.userId}:${ticker}`)
+  res.json({
+    ticker,
+    book: book ? { ...book, ageSec: (Date.now() - book.receivedAt) / 1000 } : null,
+    watch: watchState(req.user.userId),
+  })
+})
+
 app.get('/api/level2/config', requireAuth, (req, res) => {
   try {
     res.json({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 
 const num = (n) => {
@@ -19,6 +19,149 @@ const KIND_LABEL = {
   absorbed: 'Absorbed',
   consumed: 'Eaten',
   pulled: 'Pulled',
+}
+
+/**
+ * What is resting in the book right now — the recorder's latest snapshot.
+ *
+ * Laid out like the Both sides view, one row per price with bids left and
+ * offers right, but the figures are plain resting size rather than what a
+ * level did over the session.
+ */
+function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
+  const book = live?.book
+  const boxRef = useRef(null)
+  const spreadRef = useRef(null)
+  const centeredFor = useRef('')
+
+  const rows = useMemo(() => {
+    if (!book) return []
+    const m = new Map()
+    for (const r of book.asks) m.set(r.price, { price: r.price, ask: r })
+    for (const r of book.bids) {
+      const row = m.get(r.price) || { price: r.price }
+      row.bid = r
+      m.set(r.price, row)
+    }
+    return [...m.values()].sort((a, b) => b.price - a.price)
+  }, [book])
+
+  // Open on the spread, once per ticker. After that, leave the scroll where
+  // the reader put it -- a ladder that jumps every two seconds cannot be read.
+  useEffect(() => {
+    if (!book || centeredFor.current === ticker) return
+    const box = boxRef.current, mark = spreadRef.current
+    if (box && mark) {
+      box.scrollTop = mark.offsetTop - box.clientHeight / 2
+      centeredFor.current = ticker
+    }
+  }, [book, ticker])
+
+  const watching = watch?.symbols?.includes(ticker)
+  if (error) return <div style={{ color: '#ef4444', fontSize: 13 }}>{error}</div>
+  if (!watching) {
+    return (
+      <div style={{ color: muted, fontSize: 13 }}>
+        {ticker} isn't being watched, so there's no live book for it. Use
+        “+ watch {ticker}” above and the recorder picks it up within a few
+        seconds. IBKR allows {watch?.max || 3} at once.
+      </div>
+    )
+  }
+  if (!book) {
+    return <div style={{ color: muted, fontSize: 13 }}>Waiting for the recorder's first snapshot of {ticker}…</div>
+  }
+
+  const maxSize = Math.max(1, ...rows.map(r => Math.max(r.bid?.size || 0, r.ask?.size || 0)))
+  const bestBid = book.bids[0]?.price
+  const bestAsk = book.asks[0]?.price
+  const splitAt = bestBid == null ? rows.length : rows.findIndex(r => r.price <= bestBid)
+  const stale = book.ageSec > 10
+  const venueCell = { ...td, fontSize: 10, color: muted, whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }
+
+  const spreadRow = (
+    <tr key="spread" ref={spreadRef}>
+      <td colSpan={5} style={{
+        ...td, textAlign: 'center', fontSize: 11, color: muted, padding: '5px 8px',
+        background: isDark ? '#0f172a' : '#f8fafc',
+        borderTop: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+        borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+      }}>
+        {bestBid != null && bestAsk != null ? `spread $${(bestAsk - bestBid).toFixed(2)}` : 'one side empty'}
+        {book.last != null && ` · last $${book.last.toFixed(2)}`}
+      </td>
+    </tr>
+  )
+
+  return (
+    <>
+      <div style={{ fontSize: 11, marginBottom: 6, color: stale ? '#ef4444' : muted }}>
+        {stale
+          ? `Stale — the recorder hasn't sent ${ticker} for ${Math.round(book.ageSec)}s`
+          : `${ticker} · updated ${Math.max(0, Math.round(book.ageSec))}s ago · ${book.bids.length} bid / ${book.asks.length} offer prices`}
+      </div>
+      <div ref={boxRef} style={{ overflowX: 'auto', maxHeight: 520, overflowY: 'auto', marginBottom: 10, position: 'relative' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: 'right' }}>Venues</th>
+              <th style={{ ...th, textAlign: 'right' }}>Bid size</th>
+              <th style={{ ...th, textAlign: 'center', width: 86 }}>Price</th>
+              <th style={{ ...th, textAlign: 'left' }}>Offer size</th>
+              <th style={{ ...th, textAlign: 'left' }}>Venues</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => {
+              // Half the biggest size on the ladder is worth the eye.
+              const big = (l) => l && l.size >= maxSize * 0.5
+              const out = []
+              if (i === splitAt) out.push(spreadRow)
+              out.push(
+                <tr key={row.price}
+                  style={big(row.bid) || big(row.ask) ? { background: isDark ? '#292524' : '#fffbeb' } : undefined}>
+                  <td style={{ ...venueCell, textAlign: 'right' }} title={row.bid?.venues.join(', ')}>
+                    {row.bid?.venues.join(' ')}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', width: 150 }}>
+                    {row.bid && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontWeight: big(row.bid) ? 700 : 500 }}>{num(row.bid.size)}</span>
+                        <span style={{
+                          display: 'inline-block', height: 10, borderRadius: 2, background: '#22c55e',
+                          width: `${(row.bid.size / maxSize) * 90}px`,
+                        }} />
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center', fontWeight: 500 }}>${row.price.toFixed(2)}</td>
+                  <td style={{ ...td, textAlign: 'left', width: 150 }}>
+                    {row.ask && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{
+                          display: 'inline-block', height: 10, borderRadius: 2, background: '#ef4444',
+                          width: `${(row.ask.size / maxSize) * 90}px`,
+                        }} />
+                        <span style={{ fontWeight: big(row.ask) ? 700 : 500 }}>{num(row.ask.size)}</span>
+                      </span>
+                    )}
+                  </td>
+                  <td style={venueCell} title={row.ask?.venues.join(', ')}>{row.ask?.venues.join(' ')}</td>
+                </tr>
+              )
+              return out
+            })}
+            {splitAt === rows.length && spreadRow}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 11, color: muted, lineHeight: 1.5 }}>
+        Shares resting at each price right now, refreshed every 2 seconds. Covers only
+        the venues this account's depth subscription includes, and hidden or
+        off-exchange size never shows on any book.
+      </div>
+    </>
+  )
 }
 
 /**
@@ -62,6 +205,54 @@ export default function OrderFlowPanel() {
     setView(v)
     try { localStorage.setItem('orderflow-view', v) } catch { /* private window */ }
   }
+  // What the recorder is asked to watch, and the latest ladder for the ticker
+  // on screen. Both come from the server; the recorder picks up list changes
+  // on its next book push.
+  const [watch, setWatch] = useState(null)
+  const [watchErr, setWatchErr] = useState('')
+  const [live, setLive] = useState(null)
+  const [liveErr, setLiveErr] = useState('')
+
+  useEffect(() => {
+    fetch('/api/orderflow/watch', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d.symbols)) setWatch(d) })
+      .catch(() => {})
+  }, [])
+
+  const saveWatch = (symbols) => {
+    setWatchErr('')
+    fetch('/api/orderflow/watch', {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols }),
+    })
+      .then(r => r.json())
+      .then(d => { if (d.error) throw new Error(d.error); setWatch(d) })
+      .catch(e => setWatchErr(e.message))
+  }
+
+  // Poll only while the live view is open and the tab is visible -- a ladder
+  // nobody is looking at is two requests a second spent on nothing.
+  useEffect(() => {
+    if (view !== 'live' || !ticker) return
+    let stopped = false
+    setLive(null); setLiveErr('')
+    const tick = () => {
+      if (document.hidden) return
+      fetch(`/api/orderflow/book?ticker=${encodeURIComponent(ticker)}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(d => {
+          if (stopped) return
+          if (d.error) throw new Error(d.error)
+          setLive(d); setWatch(d.watch); setLiveErr('')
+        })
+        .catch(e => { if (!stopped) setLiveErr(e.message) })
+    }
+    tick()
+    const id = setInterval(tick, 2000)
+    return () => { stopped = true; clearInterval(id) }
+  }, [view, ticker])
 
   useEffect(() => {
     fetch('/api/orderflow/sessions', { credentials: 'include' })
@@ -171,7 +362,7 @@ export default function OrderFlowPanel() {
         </form>
 
         <div style={{ display: 'flex', gap: 2 }}>
-          {[['price', 'Both sides'], ['list', 'Flat list']].map(([k, label]) => (
+          {[['live', 'Live now'], ['price', 'Both sides'], ['list', 'Flat list']].map(([k, label]) => (
             <button key={k} onClick={() => setViewSaved(k)} style={{
               ...input_, cursor: 'pointer', padding: '5px 9px',
               background: view === k ? (isDark ? '#334155' : '#e2e8f0')
@@ -198,8 +389,50 @@ export default function OrderFlowPanel() {
         </div>
       )}
 
-      {error && <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 10 }}>{error}</div>}
-      {loading && <div style={{ color: muted, fontSize: 13 }}>Loading…</div>}
+      {watch && (() => {
+        const rec = watch.recorder
+        const alive = rec && rec.lastSeenSec < 15
+        const link = {
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          fontSize: 11, color: isDark ? '#60a5fa' : '#2563eb',
+        }
+        return (
+          <div style={{ fontSize: 11, color: muted, marginBottom: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span>Watching:</span>
+            {watch.symbols.length === 0 && <span>nothing</span>}
+            {watch.symbols.map(s => (
+              <span key={s} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 6px', borderRadius: 10,
+                border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+              }}>
+                <button onClick={() => { setInput(s); setTicker(s) }} style={link}>{s}</button>
+                {rec?.errors?.[s] && (
+                  <span title={rec.errors[s]} style={{ color: '#ef4444', fontWeight: 700, cursor: 'help' }}>!</span>
+                )}
+                <button onClick={() => saveWatch(watch.symbols.filter(x => x !== s))}
+                  title={`Stop watching ${s}`} style={{ ...link, color: muted }}>×</button>
+              </span>
+            ))}
+            {ticker && !watch.symbols.includes(ticker) && (
+              watch.symbols.length < watch.max
+                ? <button onClick={() => saveWatch([...watch.symbols, ticker])} style={link}>+ watch {ticker}</button>
+                : <span>{watch.max} max — remove one to watch {ticker}</span>
+            )}
+            {watchErr && <span style={{ color: '#ef4444' }}>{watchErr}</span>}
+            <span style={{ marginLeft: 'auto', color: alive ? '#22c55e' : '#ef4444' }}>
+              {alive ? '● recorder live' : rec ? `recorder last seen ${rec.lastSeenSec}s ago` : 'recorder offline'}
+            </span>
+          </div>
+        )
+      })()}
+
+      {error && view !== 'live' && <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 10 }}>{error}</div>}
+      {loading && view !== 'live' && <div style={{ color: muted, fontSize: 13 }}>Loading…</div>}
+
+      {view === 'live' && ticker && (
+        <LiveBook ticker={ticker} live={live} error={liveErr} watch={watch}
+          isDark={isDark} muted={muted} th={th} td={td} />
+      )}
 
       {!ticker && !loading && (
         <div style={{ color: muted, fontSize: 13 }}>
@@ -208,7 +441,7 @@ export default function OrderFlowPanel() {
         </div>
       )}
 
-      {ticker && !loading && !error && !hasData && (
+      {ticker && view !== 'live' && !loading && !error && !hasData && (
         <div style={{ color: muted, fontSize: 13 }}>
           <div style={{ marginBottom: 8 }}>
             Nothing recorded for {ticker} on {session}. The recorder has to have been
@@ -248,7 +481,7 @@ export default function OrderFlowPanel() {
         </div>
       )}
 
-      {hasData && (
+      {hasData && view !== 'live' && (
         <>
           {data.ranked?.length > 0 && (
             <div style={{
