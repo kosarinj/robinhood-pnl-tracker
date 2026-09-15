@@ -100,6 +100,51 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
           ? `Stale — the recorder hasn't sent ${ticker} for ${Math.round(book.ageSec)}s`
           : `${ticker} · updated ${Math.max(0, Math.round(book.ageSec))}s ago · ${book.bids.length} bid / ${book.asks.length} offer prices`}
       </div>
+      {(() => {
+        // Resting size, not absorption: a snapshot has nothing eaten in it,
+        // only what each side is showing right now. A heavy side is displayed
+        // intent, and displayed intent can be pulled -- which is what the
+        // session views are for.
+        const bidTotal = book.bids.reduce((n, r) => n + r.size, 0)
+        const askTotal = book.asks.reduce((n, r) => n + r.size, 0)
+        const total = bidTotal + askTotal
+        if (!total) return null
+        const bidPct = (bidTotal / total) * 100
+        const askPct = 100 - bidPct
+        const lead = Math.max(bidPct, askPct)
+        const verdict = lead < 58
+          ? 'Balanced — similar size resting on both sides'
+          : bidPct > askPct
+            ? 'More size resting on the bid — buyers showing more than sellers'
+            : 'More size resting on the offer — sellers showing more than buyers'
+        return (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+              <span style={{ color: '#22c55e', fontWeight: 700 }}>
+                BIDS {num(bidTotal)} ({bidPct.toFixed(0)}%)
+              </span>
+              <span style={{ color: '#ef4444', fontWeight: 700 }}>
+                ({askPct.toFixed(0)}%) OFFERS {num(askTotal)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', height: 18, borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{
+                width: `${bidPct}%`, background: '#22c55e', display: 'flex', alignItems: 'center',
+                paddingLeft: 6, fontSize: 10, fontWeight: 700, color: '#052e16', transition: 'width 0.4s',
+              }}>{bidPct >= 18 ? 'resting to buy' : ''}</div>
+              <div style={{
+                width: `${askPct}%`, background: '#ef4444', display: 'flex', alignItems: 'center',
+                justifyContent: 'flex-end', paddingRight: 6, fontSize: 10, fontWeight: 700,
+                color: '#450a0a', transition: 'width 0.4s',
+              }}>{askPct >= 18 ? 'resting to sell' : ''}</div>
+            </div>
+            <div style={{
+              fontSize: 12, marginTop: 5, fontWeight: 600,
+              color: lead < 58 ? muted : (bidPct > askPct ? '#22c55e' : '#ef4444'),
+            }}>{verdict}</div>
+          </div>
+        )
+      })()}
       <div ref={boxRef} style={{ overflowX: 'auto', maxHeight: 520, overflowY: 'auto', marginBottom: 10, position: 'relative' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -407,7 +452,11 @@ export default function OrderFlowPanel() {
               }}>
                 <button onClick={() => { setInput(s); setTicker(s) }} style={link}>{s}</button>
                 {rec?.errors?.[s] && (
-                  <span title={rec.errors[s]} style={{ color: '#ef4444', fontWeight: 700, cursor: 'help' }}>!</span>
+                  // 2152 is IBKR listing which books this account can see --
+                  // a notice worth reading, not a failure to watch the symbol.
+                  rec.errors[s].startsWith('[2152]')
+                    ? <span title={rec.errors[s]} style={{ color: '#f59e0b', fontWeight: 700, cursor: 'help' }}>i</span>
+                    : <span title={rec.errors[s]} style={{ color: '#ef4444', fontWeight: 700, cursor: 'help' }}>!</span>
                 )}
                 <button onClick={() => saveWatch(watch.symbols.filter(x => x !== s))}
                   title={`Stop watching ${s}`} style={{ ...link, color: muted }}>×</button>
