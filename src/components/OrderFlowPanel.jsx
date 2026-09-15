@@ -299,6 +299,33 @@ export default function OrderFlowPanel() {
     return () => { stopped = true; clearInterval(id) }
   }, [view, ticker])
 
+  // The stock's price and day change, for any ticker in any view -- the ladder
+  // means little without knowing where the stock is trading. The live view's
+  // last print is fresher and takes over there; this covers everything else,
+  // including names the recorder is not watching.
+  const [quote, setQuote] = useState(null)
+  useEffect(() => {
+    if (!ticker) { setQuote(null); return }
+    let stopped = false
+    setQuote(null)
+    const tick = () => {
+      if (document.hidden) return
+      fetch(`/api/current-prices?symbols=${encodeURIComponent(ticker)}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(d => {
+          if (stopped || !d.success) return
+          const pick = (v) => (typeof v === 'number' ? v : Number(v?.previousClose ?? v?.price ?? v) || null)
+          const price = pick(d.prices?.[ticker])
+          const prev = pick(d.previousClose?.[ticker])
+          setQuote(price > 0 ? { price, prev: prev > 0 ? prev : null } : null)
+        })
+        .catch(() => {})
+    }
+    tick()
+    const id = setInterval(tick, 15000)
+    return () => { stopped = true; clearInterval(id) }
+  }, [ticker])
+
   useEffect(() => {
     fetch('/api/orderflow/sessions', { credentials: 'include' })
       .then(r => r.json())
@@ -396,6 +423,32 @@ export default function OrderFlowPanel() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: isDark ? '#fff' : '#0f172a' }}>Order Flow</h3>
         <span style={{ fontSize: 12, color: muted }}>what got eaten, and what was only ever shown</span>
+
+        {ticker && (() => {
+          const lb = view === 'live' ? live?.book : null
+          const price = lb?.last ?? quote?.price
+          if (!(price > 0)) return null
+          const prev = quote?.prev
+          const chg = prev ? price - prev : null
+          const up = chg != null && chg >= 0
+          return (
+            <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, fontVariantNumeric: 'tabular-nums' }}>
+              <strong style={{ fontSize: 15, color: isDark ? '#fff' : '#0f172a' }}>
+                {ticker} ${price.toFixed(2)}
+              </strong>
+              {chg != null && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: up ? '#22c55e' : '#ef4444' }}>
+                  {up ? '+' : ''}{chg.toFixed(2)} ({up ? '+' : ''}{((chg / prev) * 100).toFixed(2)}%)
+                </span>
+              )}
+              {lb?.bid != null && lb?.ask != null && (
+                <span style={{ fontSize: 12, color: muted }}>
+                  bid ${lb.bid.toFixed(2)} × ask ${lb.ask.toFixed(2)}
+                </span>
+              )}
+            </span>
+          )
+        })()}
 
         <form onSubmit={submit} style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           <input value={input} onChange={e => setInput(e.target.value)} placeholder="Ticker…"
