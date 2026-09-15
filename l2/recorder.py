@@ -295,11 +295,37 @@ def main():
         errors.pop(sym, None)
         print(f"  - stopped {sym}")
 
+    def reconnect():
+        # The gateway drops its API clients whenever the same login is used
+        # somewhere else -- Client Portal, the phone app -- and comes back once
+        # that session ends. Quitting there cost a whole morning's totals, so
+        # the engines are kept, and the subscriptions come back with the gateway.
+        for sym in list(recorders):
+            r = recorders.pop(sym)
+            dormant[sym] = r.engine
+        refused.clear()
+        print(f"  {datetime.now():%H:%M:%S} gateway disconnected -- is IBKR open "
+              f"somewhere else? Retrying every 10s")
+        while True:
+            try:
+                ib.disconnect()
+            except Exception:
+                pass
+            time.sleep(10)
+            try:
+                ib.connect("127.0.0.1", args.port, clientId=args.client_id,
+                           timeout=8, readonly=True)
+                print(f"  {datetime.now():%H:%M:%S} reconnected to the gateway")
+                return
+            except Exception as e:
+                print(f"  {datetime.now():%H:%M:%S} still no gateway ({type(e).__name__})")
+
     wanted = list(dict.fromkeys(s.upper() for s in args.symbols))[:MAX_SYMBOLS]
     for s in wanted:
         start(s)
     # The command line sets the morning's list; the panel edits it from here.
     up.put_watch(wanted)
+    listed_last = wanted
 
     if "805d" in args.url:
         print("WARNING: pushing to the -805d spare. Nothing reads that instance; "
@@ -310,34 +336,48 @@ def main():
     last_flush = time.monotonic()
     try:
         while True:
-            ib.sleep(args.book)
-            reply = up.push_books([r.book() for r in recorders.values()],
-                                  {"active": list(recorders), "errors": errors})
-            if reply is not None:
-                listed = reply.get("symbols")
-                if listed is None:
-                    # The server redeployed and forgot the list. This process
-                    # still knows it, so it puts it back.
-                    up.put_watch(list(recorders))
-                else:
-                    listed = [str(s).upper() for s in listed][:MAX_SYMBOLS]
-                    for s in [s for s in recorders if s not in listed]:
-                        stop(s)
-                    refused.intersection_update(listed)
-                    for s in listed:
-                        if s not in refused:
-                            start(s)
+            try:
+                if not ib.isConnected():
+                    reconnect()
+                    for s in listed_last:
+                        start(s)
+                ib.sleep(args.book)
+                reply = up.push_books([r.book() for r in recorders.values()],
+                                      {"active": list(recorders), "errors": errors})
+                if reply is not None:
+                    listed = reply.get("symbols")
+                    if listed is None:
+                        # The server redeployed and forgot the list. This process
+                        # still knows it, so it puts it back.
+                        up.put_watch(listed_last)
+                    else:
+                        listed = [str(s).upper() for s in listed][:MAX_SYMBOLS]
+                        listed_last = listed
+                        for s in [s for s in recorders if s not in listed]:
+                            stop(s)
+                        refused.intersection_update(listed)
+                        for s in listed:
+                            if s not in refused:
+                                start(s)
 
-            if time.monotonic() - last_flush < args.flush:
-                continue
-            last_flush = time.monotonic()
-            for r in recorders.values():
-                ok = up.flush(r.symbol, session, r.level_rows())
-                state = "ok" if ok else f"FAILED ({up.last_error})"
-                note = f"  {errors[r.symbol]}" if r.symbol in errors else ""
-                print(f"  {datetime.now():%H:%M:%S} {r.symbol:<6} "
-                      f"{r.trades:>7} trades  {len(r.engine.events):>4} events  "
-                      f"{len(r.level_rows()):>4} levels  {state}{note}")
+                if time.monotonic() - last_flush < args.flush:
+                    continue
+                last_flush = time.monotonic()
+                for r in recorders.values():
+                    ok = up.flush(r.symbol, session, r.level_rows())
+                    state = "ok" if ok else f"FAILED ({up.last_error})"
+                    note = f"  {errors[r.symbol]}" if r.symbol in errors else ""
+                    print(f"  {datetime.now():%H:%M:%S} {r.symbol:<6} "
+                          f"{r.trades:>7} trades  {len(r.engine.events):>4} events  "
+                          f"{len(r.level_rows()):>4} levels  {state}{note}")
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                # One bad tick or a dropped socket must not end the session.
+                # A lost gateway is caught at the top of the next pass.
+                print(f"  {datetime.now():%H:%M:%S} recovered from "
+                      f"{type(e).__name__}: {e}")
+                ib.sleep(2) if ib.isConnected() else time.sleep(2)
     except KeyboardInterrupt:
         pass
     finally:
