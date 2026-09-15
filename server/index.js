@@ -550,7 +550,10 @@ app.use('/api', (req, res, next) => {
   next()
 })
 
-app.use(express.json())
+// The default 100kb refused the order flow recorder by mid-afternoon, once a
+// busy name had touched 900 price levels. The recorder now sends only what
+// changed, but a reconnect resends a whole day, so leave real headroom.
+app.use(express.json({ limit: '5mb' }))
 app.use(cookieParser())
 
 // Serve static files from the React app (after building with vite build)

@@ -141,6 +141,10 @@ class Recorder:
         self.ask = None
         self.last = None
         self.trades = 0
+        # The level rows the server already holds, as last sent. Resending all
+        # of them every flush grew past 900 rows a push on a busy name and got
+        # refused as too large; only what moved needs to travel.
+        self._sent: dict[tuple, dict] = {}
 
         # A symbol dropped from the watch list and added back the same day keeps
         # its engine. The server replaces a level's row on every push, so a
@@ -194,6 +198,17 @@ class Recorder:
         # Only levels that did something. Sending every price the book has
         # touched would be mostly zeroes.
         return [r for r in self.engine.summary() if r["consumed"] >= min_consumed]
+
+    def changed_levels(self, limit: int = 400) -> list[dict]:
+        # Capped so a reconnect, which starts with nothing marked sent, spreads
+        # a whole day's levels over a few pushes instead of one huge one.
+        rows = [r for r in self.level_rows()
+                if self._sent.get((r["side"], r["price"])) != r]
+        return rows[:limit]
+
+    def mark_sent(self, rows: list[dict]) -> None:
+        for r in rows:
+            self._sent[(r["side"], r["price"])] = r
 
     def book(self) -> dict:
         """
@@ -287,9 +302,16 @@ def main():
             refused.add(sym)
             print(f"  ! could not watch {sym}: {errors[sym]}")
 
+    def push_levels(r: Recorder) -> bool:
+        rows = r.changed_levels()
+        ok = up.flush(r.symbol, session, rows)
+        if ok:
+            r.mark_sent(rows)
+        return ok
+
     def stop(sym: str):
         r = recorders.pop(sym)
-        up.flush(sym, session, r.level_rows())
+        push_levels(r)
         r.stop()
         dormant[sym] = r.engine
         errors.pop(sym, None)
@@ -364,7 +386,7 @@ def main():
                     continue
                 last_flush = time.monotonic()
                 for r in recorders.values():
-                    ok = up.flush(r.symbol, session, r.level_rows())
+                    ok = push_levels(r)
                     state = "ok" if ok else f"FAILED ({up.last_error})"
                     note = f"  {errors[r.symbol]}" if r.symbol in errors else ""
                     print(f"  {datetime.now():%H:%M:%S} {r.symbol:<6} "
@@ -383,7 +405,7 @@ def main():
     finally:
         print("\nFinal flush...")
         for r in recorders.values():
-            up.flush(r.symbol, session, r.level_rows())
+            push_levels(r)
             r.stop()
         ib.disconnect()
         print(f"Sent {up.sent} events" + (f", {up.failed} failed" if up.failed else ""))
