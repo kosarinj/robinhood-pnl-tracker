@@ -7670,6 +7670,10 @@ const LIVE_BOOK_MAX_SYMBOLS = 3
 const liveBooks = new Map()       // `${userId}:${ticker}` -> latest snapshot
 const watchLists = new Map()      // userId -> ['MRVL', 'NVDA']
 const recorderStatus = new Map()  // userId -> { at, active, errors }
+// When each resting price first appeared, and the most it has shown since.
+// A big order that has sat for ten minutes means something a two-second
+// flash does not, and one that used to be twice the size is being pulled.
+const liveAges = new Map()        // `${userId}:${ticker}` -> Map(`${side}:${price}` -> { since, peak })
 
 function cleanSymbols(list) {
   const out = []
@@ -7716,9 +7720,23 @@ app.post('/api/orderflow/book', (req, res) => {
   for (const b of Array.isArray(req.body?.books) ? req.body.books : []) {
     const ticker = String(b?.ticker || '').toUpperCase()
     if (!ticker) continue
-    liveBooks.set(`${user.userId}:${ticker}`, {
+    const key = `${user.userId}:${ticker}`
+    const prevAges = liveAges.get(key) || new Map()
+    const ages = new Map()
+    // A price that drops out of the book and comes back starts a fresh age.
+    const stamp = (side, rows) => rows.map(r => {
+      const k = `${side}:${r.price}`
+      const p = prevAges.get(k)
+      const a = { since: p ? p.since : now, peak: Math.max(p ? p.peak : 0, r.size) }
+      ages.set(k, a)
+      return { ...r, since: a.since, peak: a.peak }
+    })
+    const bids = stamp('bid', ladderRows(b.bids))
+    const asks = stamp('ask', ladderRows(b.asks))
+    liveAges.set(key, ages)
+    liveBooks.set(key, {
       ticker, receivedAt: now,
-      bids: ladderRows(b.bids), asks: ladderRows(b.asks),
+      bids, asks,
       bid: finiteOrNull(b.bid), ask: finiteOrNull(b.ask), last: finiteOrNull(b.last),
     })
   }
@@ -7751,7 +7769,10 @@ app.put('/api/orderflow/watch', (req, res) => {
   watchLists.set(user.userId, symbols)
   for (const key of liveBooks.keys()) {
     const [uid, ticker] = key.split(':')
-    if (Number(uid) === user.userId && !symbols.includes(ticker)) liveBooks.delete(key)
+    if (Number(uid) === user.userId && !symbols.includes(ticker)) {
+      liveBooks.delete(key)
+      liveAges.delete(key)
+    }
   }
   res.json(watchState(user.userId))
 })

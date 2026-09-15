@@ -1,4 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
+import {
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine, LabelList,
+} from 'recharts'
 import { useTheme } from '../contexts/ThemeContext'
 
 const num = (n) => {
@@ -33,6 +37,16 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
   const boxRef = useRef(null)
   const spreadRef = useRef(null)
   const centeredFor = useRef('')
+  // What counts as a big order, as a multiple of the typical row. Relative
+  // rather than a share count, so 20k on NVDA and 2k on a small cap both read
+  // as the size worth watching on their own ladders.
+  const [bigMult, setBigMult] = useState(() => {
+    try { return Number(localStorage.getItem('orderflow-bigmult')) || 3 } catch { return 3 }
+  })
+  const setBigMultSaved = (m) => {
+    setBigMult(m)
+    try { localStorage.setItem('orderflow-bigmult', String(m)) } catch { /* private window */ }
+  }
 
   const rows = useMemo(() => {
     if (!book) return []
@@ -77,6 +91,33 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
   const bestAsk = book.asks[0]?.price
   const splitAt = bestBid == null ? rows.length : rows.findIndex(r => r.price <= bestBid)
   const stale = book.ageSec > 10
+
+  // Big orders on each side, and the biggest of each matched against the
+  // other. This is the read: a large offer above says where price may be
+  // drawn or stopped, and the question is whether anything on the bid side is
+  // big enough to compete with it.
+  const sizes = [...book.bids, ...book.asks].map(r => r.size).sort((a, b) => a - b)
+  const median = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0
+  const bigMin = Math.max(1, median * bigMult)
+  const ref = book.last ?? (bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : null)
+  const bidWalls = book.bids.filter(r => r.size >= bigMin).sort((a, b) => b.size - a.size).slice(0, 3)
+  const askWalls = book.asks.filter(r => r.size >= bigMin).sort((a, b) => b.size - a.size).slice(0, 3)
+  const topBid = bidWalls[0] || null
+  const topAsk = askWalls[0] || null
+  const ageOf = (r) => (r.since ? Math.max(0, (book.receivedAt - r.since) / 1000 + (book.ageSec || 0)) : null)
+  const fmtAge = (s) => (s < 60 ? `${Math.round(s)}s`
+    : s < 3600 ? `${Math.floor(s / 60)}m`
+    : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`)
+  const moveOf = (r) => {
+    if (ref == null) return ''
+    const d = r.price - ref
+    return `${d >= 0 ? '+' : '−'}$${Math.abs(d).toFixed(2)} (${Math.abs((d / ref) * 100).toFixed(2)}%)`
+  }
+  // Chart marks only. One step darker than the text-and-bar greens used
+  // elsewhere in the panel: the lighter pair sits too close together for
+  // red-green colour blindness and too light against a dark background.
+  const BID = '#15803d'
+  const ASK = '#dc2626'
   const venueCell = { ...td, fontSize: 10, color: muted, whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }
 
   const spreadRow = (
@@ -145,6 +186,188 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
           </div>
         )
       })()}
+      {(() => {
+        // The whole book at a glance: resting size by price, with the price
+        // line between the sides. Solid bars are big orders, faded ones are
+        // the ordinary book, and the matched pair from the card below carries
+        // the only labels -- so the eye lands on the walls without reading
+        // the ladder.
+        const chartRows = [
+          ...book.bids.map(r => ({ price: r.price, bid: r.size, ask: null, row: r, side: 'bid' })),
+          ...book.asks.map(r => ({ price: r.price, bid: null, ask: r.size, row: r, side: 'ask' })),
+        ].sort((a, b) => a.price - b.price)
+        if (!chartRows.length) return null
+        const ink = isDark ? '#e2e8f0' : '#0f172a'
+        const grid = isDark ? '#334155' : '#e2e8f0'
+        const barSize = Math.max(2, Math.min(24, Math.floor((640 / chartRows.length) * 0.6)))
+        const pairLabel = (side) => (props) => {
+          const { x, y, width, index } = props
+          const d = chartRows[index]
+          if (!d || d.side !== side || d.row !== (side === 'bid' ? topBid : topAsk)) return null
+          const anchor = index < 4 ? 'start' : index > chartRows.length - 5 ? 'end' : 'middle'
+          const tx = anchor === 'start' ? x : anchor === 'end' ? x + width : x + width / 2
+          return (
+            <text x={tx} y={y - 6} textAnchor={anchor} fontSize={11} fontWeight={700} fill={ink}>
+              {num(d.row.size)} @ {d.row.price.toFixed(2)}
+            </text>
+          )
+        }
+        const key = (color, label, faded) => (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: color, opacity: faded ? 0.35 : 1 }} />
+            {label}
+          </span>
+        )
+        return (
+          <div style={{ marginBottom: 12, opacity: stale ? 0.5 : 1 }}>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 11, color: muted, marginBottom: 4 }}>
+              <span style={{ color: ink, fontWeight: 600 }}>Resting size by price</span>
+              {key(BID, 'Bids')}
+              {key(ASK, 'Offers')}
+              {key(muted, `under ${num(bigMin)} (not big)`, true)}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 2, height: 12, background: ink }} /> {ref != null ? `price $${ref.toFixed(2)}` : 'price'}
+              </span>
+            </div>
+            <div style={{ width: '100%', height: 240 }}>
+              <ResponsiveContainer>
+                <BarChart data={chartRows} margin={{ top: 22, right: 12, bottom: 4, left: 0 }}>
+                  <CartesianGrid vertical={false} stroke={grid} strokeWidth={1} />
+                  <XAxis type="number" dataKey="price" domain={['dataMin - 0.02', 'dataMax + 0.02']}
+                    tickFormatter={v => `$${v.toFixed(2)}`} tickCount={7}
+                    tick={{ fontSize: 10, fill: muted }} stroke={grid} />
+                  <YAxis tickFormatter={v => num(v)} width={44} tick={{ fontSize: 10, fill: muted }}
+                    stroke={grid} domain={[0, max => Math.ceil(max * 1.15)]} />
+                  <Tooltip
+                    cursor={{ fill: isDark ? 'rgba(148,163,184,0.08)' : 'rgba(15,23,42,0.05)' }}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null
+                      const d = payload[0].payload
+                      const r = d.row
+                      const age = ageOf(r)
+                      return (
+                        <div style={{
+                          background: isDark ? '#0f172a' : '#fff', border: `1px solid ${grid}`,
+                          borderRadius: 6, padding: '6px 8px', fontSize: 12, color: muted,
+                        }}>
+                          <div style={{ fontWeight: 700, color: ink }}>{num(r.size)} shares</div>
+                          <div>
+                            <span style={{ display: 'inline-block', width: 10, height: 2, background: d.side === 'bid' ? BID : ASK, verticalAlign: 'middle', marginRight: 4 }} />
+                            {d.side === 'bid' ? 'Bid' : 'Offer'} at ${r.price.toFixed(2)}{ref != null && ` · ${moveOf(r)}`}
+                          </div>
+                          {age != null && (
+                            <div>resting {fmtAge(age)}{r.peak > r.size * 1.5 ? ` · was ${num(r.peak)}` : ''}</div>
+                          )}
+                          {r.venues?.length > 0 && <div>{r.venues.join(', ')}</div>}
+                        </div>
+                      )
+                    }}
+                  />
+                  <ReferenceLine y={bigMin} stroke={muted} strokeWidth={1} ifOverflow="extendDomain"
+                    label={{ value: `big ${bigMult}×`, position: 'insideTopLeft', fontSize: 10, fill: muted }} />
+                  {ref != null && (
+                    <ReferenceLine x={ref} stroke={ink} strokeWidth={1} ifOverflow="extendDomain" />
+                  )}
+                  <Bar dataKey="bid" stackId="s" fill={BID} radius={[4, 4, 0, 0]} barSize={barSize} isAnimationActive={false}>
+                    {chartRows.map((d, i) => (
+                      <Cell key={i} fillOpacity={d.bid != null && d.bid >= bigMin ? 1 : 0.35} />
+                    ))}
+                    <LabelList content={pairLabel('bid')} />
+                  </Bar>
+                  <Bar dataKey="ask" stackId="s" fill={ASK} radius={[4, 4, 0, 0]} barSize={barSize} isAnimationActive={false}>
+                    {chartRows.map((d, i) => (
+                      <Cell key={i} fillOpacity={d.ask != null && d.ask >= bigMin ? 1 : 0.35} />
+                    ))}
+                    <LabelList content={pairLabel('ask')} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )
+      })()}
+      {(() => {
+        const move = (r) => {
+          if (ref == null) return ''
+          const d = r.price - ref
+          return `${d >= 0 ? '+' : '−'}$${Math.abs(d).toFixed(2)} (${Math.abs((d / ref) * 100).toFixed(2)}%)`
+        }
+        const wallLine = (r, i, color) => {
+          const age = ageOf(r)
+          return (
+            <div key={r.price} style={{
+              fontSize: 12, fontVariantNumeric: 'tabular-nums', lineHeight: 1.6,
+              color: i === 0 ? (isDark ? '#e2e8f0' : '#0f172a') : muted, fontWeight: i === 0 ? 700 : 400,
+            }}>
+              <span style={{ color }}>${r.price.toFixed(2)}</span> {num(r.size)}
+              <span style={{ color: muted, fontWeight: 400 }}>
+                {' · '}{move(r)}
+                {age != null && ` · resting ${fmtAge(age)}`}
+                {r.peak > r.size * 1.5 && <span style={{ color: '#f59e0b' }}> · was {num(r.peak)}</span>}
+              </span>
+            </div>
+          )
+        }
+        const at = (r) => `${num(r.size)} @ $${r.price.toFixed(2)}`
+        let verdict, vColor = muted
+        if (!topAsk && !topBid) {
+          verdict = `No big orders — nothing stands out from the typical ${num(median)} shares`
+        } else if (!topBid) {
+          verdict = `Only the offer side has size: ${at(topAsk)}, and no bid of ${num(bigMin)}+ is there to compete`
+          vColor = '#ef4444'
+        } else if (!topAsk) {
+          verdict = `Only the bid side has size: ${at(topBid)}, and no offer of ${num(bigMin)}+ is there to compete`
+          vColor = '#22c55e'
+        } else {
+          const ratio = Math.max(topAsk.size, topBid.size) / Math.min(topAsk.size, topBid.size)
+          const pair = `offer ${at(topAsk)} vs bid ${at(topBid)}`
+          if (ratio < 1.5) {
+            verdict = `Evenly matched — ${pair}`
+          } else if (topAsk.size > topBid.size) {
+            verdict = `Offers outweigh bids ${ratio.toFixed(1)}× — ${pair}. A bid would need about ${num(topAsk.size / 1.5)} to compete`
+            vColor = '#ef4444'
+          } else {
+            verdict = `Bids outweigh offers ${ratio.toFixed(1)}× — ${pair}. An offer would need about ${num(topBid.size / 1.5)} to compete`
+            vColor = '#22c55e'
+          }
+        }
+        return (
+          <div style={{
+            padding: '10px 12px', borderRadius: 6, marginBottom: 12,
+            background: isDark ? '#0f172a' : '#f8fafc',
+            border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, color: muted }}>
+                Big orders — {bigMult}× the typical {num(median)} shares ({num(bigMin)}+)
+              </span>
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+                {[3, 5, 10].map(m => (
+                  <button key={m} onClick={() => setBigMultSaved(m)} style={{
+                    fontSize: 11, padding: '2px 7px', borderRadius: 4, cursor: 'pointer',
+                    border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                    background: bigMult === m ? (isDark ? '#334155' : '#e2e8f0') : 'transparent',
+                    color: isDark ? '#e2e8f0' : '#0f172a', fontWeight: bigMult === m ? 700 : 400,
+                  }}>{m}×</button>
+                ))}
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 8 }}>
+              <div style={{ flex: '1 1 220px' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#22c55e', marginBottom: 2 }}>BIG BIDS (below)</div>
+                {bidWalls.length ? bidWalls.map((r, i) => wallLine(r, i, '#22c55e'))
+                  : <div style={{ fontSize: 12, color: muted }}>none</div>}
+              </div>
+              <div style={{ flex: '1 1 220px' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#ef4444', marginBottom: 2 }}>BIG OFFERS (above)</div>
+                {askWalls.length ? askWalls.map((r, i) => wallLine(r, i, '#ef4444'))
+                  : <div style={{ fontSize: 12, color: muted }}>none</div>}
+              </div>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: vColor }}>{verdict}</div>
+          </div>
+        )
+      })()}
       <div ref={boxRef} style={{ overflowX: 'auto', maxHeight: 520, overflowY: 'auto', marginBottom: 10, position: 'relative' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -158,13 +381,16 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
           </thead>
           <tbody>
             {rows.map((row, i) => {
-              // Half the biggest size on the ladder is worth the eye.
-              const big = (l) => l && l.size >= maxSize * 0.5
+              // Same definition of big as the card above, and the two orders
+              // being matched against each other marked more strongly.
+              const big = (l) => l && l.size >= bigMin
+              const matched = (row.bid && row.bid === topBid) || (row.ask && row.ask === topAsk)
               const out = []
               if (i === splitAt) out.push(spreadRow)
               out.push(
                 <tr key={row.price}
-                  style={big(row.bid) || big(row.ask) ? { background: isDark ? '#292524' : '#fffbeb' } : undefined}>
+                  style={matched ? { background: isDark ? '#422006' : '#fde68a' }
+                    : big(row.bid) || big(row.ask) ? { background: isDark ? '#292524' : '#fffbeb' } : undefined}>
                   <td style={{ ...venueCell, textAlign: 'right' }} title={row.bid?.venues.join(', ')}>
                     {row.bid?.venues.join(' ')}
                   </td>
