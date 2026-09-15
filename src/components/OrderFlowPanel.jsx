@@ -118,6 +118,20 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
   // red-green colour blindness and too light against a dark background.
   const BID = '#15803d'
   const ASK = '#dc2626'
+
+  // Each big order against the largest on the other side -- big or not, since
+  // what matters is whether anything over there could absorb it. Pairing only
+  // the two biggest missed an offer with nothing to meet it whenever the
+  // largest bid happened to be bigger than that offer.
+  const biggest = (rows) => rows.reduce((m, r) => (!m || r.size > m.size ? r : m), null)
+  const maxBid = biggest(book.bids)
+  const maxAsk = biggest(book.asks)
+  const standing = (r, side) => {
+    const opp = side === 'bid' ? maxAsk : maxBid
+    if (!opp || r.size >= opp.size * 1.5) return { kind: 'unopposed', opp }
+    if (opp.size >= r.size * 1.5) return { kind: 'outweighed', opp }
+    return { kind: 'matched', opp }
+  }
   const venueCell = { ...td, fontSize: 10, color: muted, whiteSpace: 'nowrap', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }
 
   const spreadRow = (
@@ -292,8 +306,10 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
           const d = r.price - ref
           return `${d >= 0 ? '+' : '−'}$${Math.abs(d).toFixed(2)} (${Math.abs((d / ref) * 100).toFixed(2)}%)`
         }
-        const wallLine = (r, i, color) => {
+        const wallLine = (r, i, color, side) => {
           const age = ageOf(r)
+          const st = standing(r, side)
+          const oppAt = st.opp ? `${num(st.opp.size)} @ $${st.opp.price.toFixed(2)}` : ''
           return (
             <div key={r.price} style={{
               fontSize: 12, fontVariantNumeric: 'tabular-nums', lineHeight: 1.6,
@@ -304,6 +320,9 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
                 {' · '}{move(r)}
                 {age != null && ` · resting ${fmtAge(age)}`}
                 {r.peak > r.size * 1.5 && <span style={{ color: '#f59e0b' }}> · was {num(r.peak)}</span>}
+                {st.kind === 'unopposed'
+                  ? <strong style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}> · unopposed</strong>
+                  : ` · ${st.kind === 'matched' ? 'matched' : 'outweighed'} by ${oppAt}`}
               </span>
             </div>
           )
@@ -331,6 +350,19 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
             vColor = '#22c55e'
           }
         }
+        // An unopposed order is the read that matters most, so it takes the
+        // headline over the top-pair comparison.
+        const unAsk = askWalls.find(r => standing(r, 'ask').kind === 'unopposed')
+        const unBid = bidWalls.find(r => standing(r, 'bid').kind === 'unopposed')
+        if (unAsk || unBid) {
+          const say = (r, side) => {
+            const opp = standing(r, side).opp
+            const other = side === 'bid' ? 'offer' : 'bid'
+            return `${at(r)} ${side === 'bid' ? 'bid' : 'offer'} is unopposed — ${opp ? `the biggest ${other} is ${at(opp)}` : `there are no ${other}s`}`
+          }
+          verdict = unAsk ? say(unAsk, 'ask') : say(unBid, 'bid')
+          vColor = unAsk ? '#ef4444' : '#22c55e'
+        }
         return (
           <div style={{
             padding: '10px 12px', borderRadius: 6, marginBottom: 12,
@@ -355,12 +387,12 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 8 }}>
               <div style={{ flex: '1 1 220px' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#22c55e', marginBottom: 2 }}>BIG BIDS (below)</div>
-                {bidWalls.length ? bidWalls.map((r, i) => wallLine(r, i, '#22c55e'))
+                {bidWalls.length ? bidWalls.map((r, i) => wallLine(r, i, '#22c55e', 'bid'))
                   : <div style={{ fontSize: 12, color: muted }}>none</div>}
               </div>
               <div style={{ flex: '1 1 220px' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: '#ef4444', marginBottom: 2 }}>BIG OFFERS (above)</div>
-                {askWalls.length ? askWalls.map((r, i) => wallLine(r, i, '#ef4444'))
+                {askWalls.length ? askWalls.map((r, i) => wallLine(r, i, '#ef4444', 'ask'))
                   : <div style={{ fontSize: 12, color: muted }}>none</div>}
               </div>
             </div>
