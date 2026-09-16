@@ -130,13 +130,20 @@ class Uploader:
     def put_watch(self, symbols: list[str]):
         return self._send("PUT", "/api/orderflow/watch", {"symbols": symbols})
 
+    def push_scan(self, results: list[dict]):
+        return self._send("POST", "/api/orderflow/scan/result", {"results": results})
+
 
 class Recorder:
-    def __init__(self, ib: IB, symbol: str, uploader: Uploader, rows: int,
-                 engine: AbsorptionEngine | None = None):
+    def __init__(self, ib: IB, symbol: str, uploader: Uploader | None, rows: int,
+                 engine: AbsorptionEngine | None = None, quiet: bool = False):
         self.ib = ib
         self.symbol = symbol
         self.up = uploader
+        # A screener pass watches a name for half a minute and throws the book
+        # away. Its events are not the day's record of that ticker and must not
+        # join it, so quiet subscriptions feed the engine and push nothing.
+        self.quiet = quiet
         self.bid = None
         self.ask = None
         self.last = None
@@ -192,6 +199,8 @@ class Recorder:
                 self.engine.on_book(side, row.price, float(row.size), now)
 
     def _on_event(self, ev):
+        if self.quiet:
+            return
         row = ev.as_row()
         # Where the stock was trading when this fired. The event knows its own
         # price level; without the underlying beside it, nothing later can ask
@@ -252,6 +261,101 @@ class Recorder:
             pass
 
 
+class Scan:
+    """
+    One short look at a ticker for the screener.
+
+    IBKR allows three books at once. The watch list gets first claim on them;
+    whatever is spare rotates through the scan list, half a minute a name, and
+    reports four things that mean different things:
+
+      lean       — resting size near the price, one side against the other.
+                   Cheap, and the first thing to be pulled.
+      wall       — the largest order on either side with nothing comparable on
+                   the other. A price, not a mood.
+      absorption — size that actually traded through a level while watching.
+                   The strongest of the four, and the one half a minute may be
+                   too short to catch.
+      tape       — who was hitting: buy-initiated against sell-initiated volume.
+
+    They are reported separately, and the score keeps its parts visible, because
+    a single number nobody can take apart is a number nobody should trade on.
+    """
+
+    def __init__(self, ib: IB, symbol: str, rows: int):
+        self.symbol = symbol
+        self.started = time.monotonic()
+        self.rec = Recorder(ib, symbol, None, rows, quiet=True)
+
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started
+
+    def stop(self):
+        self.rec.stop()
+
+    def result(self, cfg: dict) -> dict:
+        r = self.rec
+        book = r.book()
+        bids, asks = book["bids"], book["asks"]
+        px = book["last"]
+        if px is None and bids and asks:
+            px = (bids[0]["price"] + asks[0]["price"]) / 2
+
+        near_bid = near_ask = 0.0
+        if px:
+            window = px * cfg["nearPct"] / 100.0
+            near_bid = sum(b["size"] for b in bids if px - b["price"] <= window)
+            near_ask = sum(a["size"] for a in asks if a["price"] - px <= window)
+        near_total = near_bid + near_ask
+        lean = (near_bid / near_total) if near_total else None
+
+        biggest = lambda rows: max(rows, key=lambda x: x["size"], default=None)
+        top_bid, top_ask = biggest(bids), biggest(asks)
+        wall = opp = None
+        if top_bid or top_ask:
+            wall, opp = ((top_bid, top_ask) if (top_bid["size"] if top_bid else 0)
+                         >= (top_ask["size"] if top_ask else 0) else (top_ask, top_bid))
+        wall_ratio = (wall["size"] / opp["size"]) if (wall and opp and opp["size"]) else None
+        unopposed = bool(wall and (not opp or wall["size"] >= opp["size"] * 1.5))
+
+        # Absorption: what a level ate against the most it ever showed, over the
+        # window only -- this engine was born when the scan started.
+        levels = r.engine.summary()
+        # Half a minute is short: any level that actually traded counts.
+        eaten = [l for l in levels if l["consumed"] > 0]
+        best = max(eaten, key=lambda l: l["ratio"], default=None)
+
+        buy_vol = sum(l["buy_volume"] for l in levels)
+        sell_vol = sum(l["sell_volume"] for l in levels)
+        flow = buy_vol + sell_vol
+        buy_pct = (buy_vol / flow) if flow else None
+
+        # Parts kept, not just the total.
+        p_lean = abs(lean - 0.5) * 2 * 40 if lean is not None else 0.0
+        p_wall = 30 * min(1.0, (wall_ratio or 3) / 3) if unopposed else 0.0
+        p_abs = 20 * min(1.0, (best["ratio"] if best else 0) / 5)
+        p_tape = abs(buy_pct - 0.5) * 2 * 10 if buy_pct is not None else 0.0
+
+        return {
+            "ticker": self.symbol, "ts": time.time(), "seconds": round(self.elapsed(), 1),
+            "price": _num(px), "bid": book["bid"], "ask": book["ask"],
+            "restingBid": near_bid, "restingAsk": near_ask, "lean": lean,
+            "wallSide": ("bid" if wall and top_bid is wall else "ask") if wall else None,
+            "wallPrice": wall["price"] if wall else None,
+            "wallSize": wall["size"] if wall else None,
+            "wallDistPct": (abs(wall["price"] - px) / px * 100) if (wall and px) else None,
+            "oppSize": opp["size"] if opp else 0,
+            "wallRatio": wall_ratio, "unopposed": unopposed,
+            "absPrice": best["price"] if best else None,
+            "absRatio": best["ratio"] if best else None,
+            "absConsumed": best["consumed"] if best else None,
+            "trades": r.trades, "buyVol": buy_vol, "sellVol": sell_vol, "buyPct": buy_pct,
+            "score": round(p_lean + p_wall + p_abs + p_tape, 1),
+            "parts": {"lean": round(p_lean, 1), "wall": round(p_wall, 1),
+                      "absorption": round(p_abs, 1), "tape": round(p_tape, 1)},
+        }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("symbols", nargs="+")
@@ -288,6 +392,10 @@ def main():
     # Symbols that failed to start. Retried only once they leave the watch list
     # and come back, or every book push would ask IBKR the same doomed question.
     refused: set[str] = set()
+    # Screener state: what is being sampled now, and where the rotation is up to.
+    scans: dict[str, Scan] = {}
+    scan_at = 0
+    SCAN_DEFAULTS = {"seconds": 30, "nearPct": 1.0, "bigMult": 3}
 
     def on_error(reqId, code, msg, contract):
         sym = getattr(contract, "symbol", "") if contract else ""
@@ -386,6 +494,47 @@ def main():
                         for s in listed:
                             if s not in refused:
                                 start(s)
+
+                    # The screener lives on whatever books the watch list is not
+                    # using. Watch three names and it simply stops; that is the
+                    # right trade, since the panel is what is being looked at.
+                    scan_cfg = dict(SCAN_DEFAULTS)
+                    scan_cfg.update((reply.get("scan") or {}).get("config") or {})
+                    scan_list = [str(s).upper() for s in ((reply.get("scan") or {}).get("list") or [])]
+
+                    finished = []
+                    for sym in list(scans):
+                        if sym not in scan_list:
+                            scans.pop(sym).stop()
+                            continue
+                        if scans[sym].elapsed() >= float(scan_cfg["seconds"]):
+                            try:
+                                finished.append(scans[sym].result(scan_cfg))
+                            except Exception as e:
+                                print(f"  ! scan {sym} failed: {type(e).__name__}: {e}")
+                            scans.pop(sym).stop()
+                    if finished:
+                        up.push_scan(finished)
+                        for f in finished:
+                            print(f"  {datetime.now():%H:%M:%S} scanned {f['ticker']:<6} "
+                                  f"score {f['score']:>5}  lean "
+                                  f"{(f['lean'] * 100 if f['lean'] is not None else 0):.0f}%"
+                                  f"{'  unopposed wall' if f['unopposed'] else ''}")
+
+                    # Round-robin, skipping anything already subscribed.
+                    free = MAX_SYMBOLS - len(recorders) - len(scans)
+                    tries = 0
+                    while free > 0 and scan_list and tries < len(scan_list):
+                        sym = scan_list[scan_at % len(scan_list)]
+                        scan_at += 1
+                        tries += 1
+                        if sym in scans or sym in recorders:
+                            continue
+                        try:
+                            scans[sym] = Scan(ib, sym, args.rows)
+                            free -= 1
+                        except Exception as e:
+                            print(f"  ! cannot scan {sym}: {type(e).__name__}: {e}")
 
                 if time.monotonic() - last_flush < args.flush:
                     continue

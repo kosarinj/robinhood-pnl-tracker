@@ -557,6 +557,34 @@ export default function OrderFlowPanel() {
     return () => { stopped = true; clearInterval(id) }
   }, [view, ticker])
 
+  // The screener: a list the recorder rotates through on whatever depth
+  // subscriptions the watch list leaves spare, and the latest reading of each.
+  const [scan, setScan] = useState(null)
+  const [scanInput, setScanInput] = useState('')
+  const [scanErr, setScanErr] = useState('')
+  const loadScan = () => fetch('/api/orderflow/scan', { credentials: 'include' })
+    .then(r => r.json())
+    .then(d => { if (Array.isArray(d.list)) setScan(d) })
+    .catch(() => {})
+  useEffect(() => {
+    if (view !== 'screener') return
+    loadScan()
+    // A pass is half a minute a name; ten seconds is often enough to be new.
+    const id = setInterval(() => { if (!document.hidden) loadScan() }, 10000)
+    return () => clearInterval(id)
+  }, [view])
+  const saveScan = (body) => {
+    setScanErr('')
+    fetch('/api/orderflow/scan', {
+      method: 'PUT', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(r => r.json())
+      .then(d => { if (d.error) throw new Error(d.error); setScan(d) })
+      .catch(e => setScanErr(e.message))
+  }
+
   // The stock's price and day change, for any ticker in any view -- the ladder
   // means little without knowing where the stock is trading. The live view's
   // last print is fresher and takes over there; this covers everything else,
@@ -718,7 +746,7 @@ export default function OrderFlowPanel() {
         </form>
 
         <div style={{ display: 'flex', gap: 2 }}>
-          {[['live', 'Live now'], ['price', 'Both sides'], ['list', 'Flat list']].map(([k, label]) => (
+          {[['live', 'Live now'], ['price', 'Both sides'], ['list', 'Flat list'], ['screener', 'Screener']].map(([k, label]) => (
             <button key={k} onClick={() => setViewSaved(k)} style={{
               ...input_, cursor: 'pointer', padding: '5px 9px',
               background: view === k ? (isDark ? '#334155' : '#e2e8f0')
@@ -802,14 +830,159 @@ export default function OrderFlowPanel() {
           isDark={isDark} muted={muted} th={th} td={td} />
       )}
 
-      {!ticker && !loading && (
+      {view === 'screener' && (() => {
+        const cfg = scan?.config || {}
+        const results = scan?.results || []
+        const chip = {
+          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 6px',
+          borderRadius: 10, border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, fontSize: 11,
+        }
+        const link = {
+          background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+          fontSize: 11, color: isDark ? '#60a5fa' : '#2563eb',
+        }
+        const setBtn = (on) => ({
+          ...input_, cursor: 'pointer', padding: '2px 8px', fontSize: 11,
+          background: on ? (isDark ? '#334155' : '#e2e8f0') : 'transparent',
+          fontWeight: on ? 700 : 400,
+        })
+        const add = (e) => {
+          e.preventDefault()
+          const t = scanInput.trim().toUpperCase()
+          if (!t) return
+          saveScan({ list: [...(scan?.list || []), t] })
+          setScanInput('')
+        }
+        const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`)
+        return (
+          <div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, color: muted }}>Scanning:</span>
+              {(scan?.list || []).length === 0 && <span style={{ fontSize: 11, color: muted }}>nothing yet</span>}
+              {(scan?.list || []).map(s => (
+                <span key={s} style={chip}>
+                  <button onClick={() => { setInput(s); setTicker(s); setViewSaved('live') }} style={link}>{s}</button>
+                  <button onClick={() => saveScan({ list: scan.list.filter(x => x !== s) })}
+                    title={`Remove ${s}`} style={{ ...link, color: muted }}>×</button>
+                </span>
+              ))}
+              <form onSubmit={add} style={{ display: 'flex', gap: 4 }}>
+                <input value={scanInput} onChange={e => setScanInput(e.target.value)} placeholder="Add ticker…"
+                  style={{ ...input_, width: 100, textTransform: 'uppercase' }} />
+                <button type="submit" style={{ ...input_, cursor: 'pointer', background: isDark ? '#334155' : '#e2e8f0' }}>Add</button>
+              </form>
+              {scanErr && <span style={{ fontSize: 11, color: '#ef4444' }}>{scanErr}</span>}
+            </div>
+
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 11, color: muted, marginBottom: 10 }}>
+              <span>Seconds each:</span>
+              {[15, 30, 60].map(s => (
+                <button key={s} onClick={() => saveScan({ config: { ...cfg, seconds: s } })} style={setBtn(cfg.seconds === s)}>{s}s</button>
+              ))}
+              <span>Near price:</span>
+              {[0.5, 1, 2].map(p => (
+                <button key={p} onClick={() => saveScan({ config: { ...cfg, nearPct: p } })} style={setBtn(cfg.nearPct === p)}>{p}%</button>
+              ))}
+              <span>Big:</span>
+              {[3, 5, 10].map(m => (
+                <button key={m} onClick={() => saveScan({ config: { ...cfg, bigMult: m } })} style={setBtn(cfg.bigMult === m)}>{m}×</button>
+              ))}
+              <span style={{ marginLeft: 'auto' }}>
+                {results.length} of {(scan?.list || []).length} scanned
+                {(scan?.list || []).length > 0 && ` · a full pass takes about ${Math.ceil(((scan.list.length / 2) * ((cfg.seconds || 30) + 3)) / 60)} min`}
+              </span>
+            </div>
+
+            {results.length === 0 ? (
+              <div style={{ fontSize: 13, color: muted }}>
+                {(scan?.list || []).length === 0
+                  ? 'Add tickers above. The recorder scans them on whatever depth subscriptions the watch list leaves spare — watch one name and two are free.'
+                  : 'Waiting for the first readings. Each name is sampled for half a minute before it reports.'}
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto', maxHeight: 520, overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...th, textAlign: 'left' }}>Ticker</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Score</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Resting lean</th>
+                      <th style={{ ...th, textAlign: 'left' }}>Biggest wall</th>
+                      <th style={{ ...th, textAlign: 'left' }}>Absorption</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Tape</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Price</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Scanned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {results.map(r => (
+                      <tr key={r.ticker}>
+                        <td style={{ ...td, textAlign: 'left' }}>
+                          <button onClick={() => { setInput(r.ticker); setTicker(r.ticker); setViewSaved('live') }}
+                            style={{ ...link, fontSize: 13, fontWeight: 600 }}>{r.ticker}</button>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right', fontWeight: 700 }}
+                          title={r.parts ? `lean ${r.parts.lean} · wall ${r.parts.wall} · absorption ${r.parts.absorption} · tape ${r.parts.tape}` : ''}>
+                          {r.score != null ? r.score.toFixed(0) : '—'}
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          {r.lean == null ? '—' : (
+                            <span style={{ color: r.lean > 0.5 ? '#22c55e' : '#ef4444' }}>
+                              {pct(r.lean)} {r.lean > 0.5 ? 'bid' : 'offer'}
+                            </span>
+                          )}
+                          <span style={{ display: 'block', fontSize: 10, color: muted }}>
+                            {num(r.restingBid)} / {num(r.restingAsk)}
+                          </span>
+                        </td>
+                        <td style={{ ...td, fontSize: 12 }}>
+                          {r.wallSize ? <>
+                            <span style={{ color: r.wallSide === 'bid' ? '#22c55e' : '#ef4444' }}>{num(r.wallSize)}</span>
+                            {' @ '}${r.wallPrice?.toFixed(2)}
+                            {r.wallDistPct != null && <span style={{ color: muted }}> · {r.wallDistPct.toFixed(2)}% away</span>}
+                            {r.unopposed && <strong> · unopposed</strong>}
+                          </> : '—'}
+                        </td>
+                        <td style={{ ...td, fontSize: 12 }}>
+                          {r.absRatio ? <>
+                            <strong>{r.absRatio.toFixed(1)}×</strong> @ ${r.absPrice?.toFixed(2)}
+                            <span style={{ color: muted }}> · {num(r.absConsumed)}</span>
+                          </> : <span style={{ color: muted }}>—</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          {r.buyPct == null ? '—' : (
+                            <span style={{ color: r.buyPct > 0.5 ? '#22c55e' : '#ef4444' }}>{pct(r.buyPct)} buy</span>
+                          )}
+                          <span style={{ display: 'block', fontSize: 10, color: muted }}>{num(r.trades)} trades</span>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>{r.price ? `$${r.price.toFixed(2)}` : '—'}</td>
+                        <td style={{ ...td, textAlign: 'right', fontSize: 11, color: r.ageSec > 900 ? '#ef4444' : muted }}>
+                          {r.ageSec < 60 ? `${r.ageSec}s ago` : `${Math.floor(r.ageSec / 60)}m ago`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: muted, lineHeight: 1.5, marginTop: 10 }}>
+              Each name is watched for {cfg.seconds || 30} seconds, so this is a sample, not a vigil — a wall can
+              appear or vanish between passes. Score adds four parts, shown on hover: how lopsided the resting size
+              is near the price, whether the biggest order has anything to meet it, how much traded through a level
+              while watching, and which side was hitting.
+            </div>
+          </div>
+        )
+      })()}
+
+      {!ticker && !loading && view !== 'screener' && (
         <div style={{ color: muted, fontSize: 13 }}>
           Enter a ticker to see where size actually changed hands. Data comes from the
           local recorder — it only covers sessions it was running for.
         </div>
       )}
 
-      {ticker && view !== 'live' && !loading && !error && !hasData && (
+      {ticker && view !== 'live' && view !== 'screener' && !loading && !error && !hasData && (
         <div style={{ color: muted, fontSize: 13 }}>
           <div style={{ marginBottom: 8 }}>
             Nothing recorded for {ticker} on {session}. The recorder has to have been
@@ -849,7 +1022,7 @@ export default function OrderFlowPanel() {
         </div>
       )}
 
-      {hasData && view !== 'live' && (
+      {hasData && view !== 'live' && view !== 'screener' && (
         <>
           {data.ranked?.length > 0 && (
             <div style={{

@@ -7831,6 +7831,34 @@ function orderFlowOwner() {
 // Who last changed the shared list, so two people editing one set of three
 // can see why a symbol they were watching has gone.
 const watchMeta = new Map()       // ownerId -> { at, by, byUserId }
+
+// The screener. The recorder rotates through this list on whatever depth
+// subscriptions the watch list leaves spare, half a minute a name, and reports
+// what it saw. Held in memory like the live book: a reading of what the book
+// looked like for thirty seconds is worthless tomorrow.
+const SCAN_DEFAULT_CONFIG = { seconds: 30, nearPct: 1, bigMult: 3 }
+const scanState = new Map()       // ownerId -> { list, config, results: Map(ticker -> result) }
+
+function scanFor(ownerId) {
+  let s = scanState.get(ownerId)
+  if (!s) {
+    s = { list: [], config: { ...SCAN_DEFAULT_CONFIG }, results: new Map() }
+    scanState.set(ownerId, s)
+  }
+  return s
+}
+
+function scanView(ownerId) {
+  const s = scanFor(ownerId)
+  const now = Date.now()
+  return {
+    list: s.list,
+    config: s.config,
+    results: [...s.results.values()]
+      .map(r => ({ ...r, ageSec: Math.round((now - r.receivedAt) / 1000) }))
+      .sort((a, b) => (b.score || 0) - (a.score || 0)),
+  }
+}
 const liveBooks = new Map()       // `${userId}:${ticker}` -> latest snapshot
 const watchLists = new Map()      // userId -> ['MRVL', 'NVDA']
 const recorderStatus = new Map()  // userId -> { at, active, errors }
@@ -7917,7 +7945,12 @@ app.post('/api/orderflow/book', (req, res) => {
   recorderStatus.set(user.userId, { at: now, active: cleanSymbols(status.active), errors })
   // null rather than [] when nothing has been set: after a redeploy the server
   // has forgotten the list, and the recorder, which still knows it, puts it back.
-  res.json({ symbols: watchLists.has(user.userId) ? watchLists.get(user.userId) : null })
+  const scan = scanFor(user.userId)
+  res.json({
+    symbols: watchLists.has(user.userId) ? watchLists.get(user.userId) : null,
+    // Carried on the same reply so the screener needs no second request.
+    scan: { list: scan.list, config: scan.config },
+  })
 })
 
 /** GET /api/orderflow/watch — what the recorder is asked to watch, and whether it is alive. */
@@ -7951,6 +7984,50 @@ app.put('/api/orderflow/watch', (req, res) => {
     }
   }
   res.json(watchState(owner, user.username ? user.userId : null))
+})
+
+/** GET /api/orderflow/scan — the scan list, its settings, and the latest reading per ticker. */
+app.get('/api/orderflow/scan', requireAuth, (req, res) => {
+  res.json(scanView(orderFlowOwner()))
+})
+
+/** PUT /api/orderflow/scan — { list?, config? }, from the panel. */
+app.put('/api/orderflow/scan', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const s = scanFor(orderFlowOwner())
+  if (req.body?.list !== undefined) {
+    // No cap: the list is a rotation, not a set of subscriptions. Only two or
+    // three are ever live at once however long it gets.
+    s.list = cleanSymbols(req.body.list).slice(0, 200)
+    for (const t of [...s.results.keys()]) if (!s.list.includes(t)) s.results.delete(t)
+  }
+  if (req.body?.config) {
+    const c = req.body.config
+    const num = (v, lo, hi, dflt) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Number(v))) : dflt)
+    s.config = {
+      seconds: num(c.seconds, 5, 300, s.config.seconds),
+      nearPct: num(c.nearPct, 0.1, 10, s.config.nearPct),
+      bigMult: num(c.bigMult, 1.5, 20, s.config.bigMult),
+    }
+  }
+  res.json(scanView(orderFlowOwner()))
+})
+
+/** POST /api/orderflow/scan/result — { results: [...] }, pushed by the recorder. */
+app.post('/api/orderflow/scan/result', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const s = scanFor(orderFlowOwner())
+  const rows = Array.isArray(req.body?.results) ? req.body.results : []
+  const now = Date.now()
+  for (const r of rows) {
+    const ticker = String(r?.ticker || '').toUpperCase()
+    if (!ticker) continue
+    // Only the latest reading per ticker is kept — the rotation will be back.
+    s.results.set(ticker, { ...r, ticker, receivedAt: now })
+  }
+  res.json({ success: true, stored: rows.length })
 })
 
 /** GET /api/orderflow/book?ticker=MRVL — the latest ladder the recorder sent. */
