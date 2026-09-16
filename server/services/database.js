@@ -154,6 +154,27 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_orderflow_levels_lookup
     ON orderflow_levels(user_id, ticker, session, consumed DESC);
 
+  -- Real option marks, pushed up from the trading machine.
+  --
+  -- The Polygon plan here carries no option quotes -- /v3/quotes answers
+  -- NOT_AUTHORIZED -- so every option is marked by Black-Scholes off a vol
+  -- guess. IBKR's bundle includes OPRA, but only through a gateway that runs
+  -- locally, so the marks have to travel rather than be fetched.
+  --
+  -- One row per contract, replaced on each push. No history: this answers
+  -- "what is it worth now", and a stale row is worse than none, which is what
+  -- as_of is for.
+  CREATE TABLE IF NOT EXISTS option_marks (
+    user_id    INTEGER NOT NULL,
+    symbol     TEXT NOT NULL,
+    bid        REAL,
+    ask        REAL,
+    mark       REAL,
+    source     TEXT,                -- ibkr | ibkr-delayed
+    as_of      INTEGER NOT NULL,    -- epoch seconds, when the quote was taken
+    PRIMARY KEY (user_id, symbol)
+  );
+
   CREATE TABLE IF NOT EXISTS short_call_pnl_history (
     user_id      INTEGER NOT NULL,
     snap_date    TEXT NOT NULL,
@@ -645,6 +666,22 @@ console.log(`Database initialized at: ${dbPath}`)
 // Migration: add earnings_date to an existing vol_scan_cache (older DBs created before it)
 try { db.exec(`ALTER TABLE vol_scan_cache ADD COLUMN earnings_date TEXT`) } catch (e) { /* column already exists */ }
 
+// Migration: what the stock was trading at when an order flow event fired.
+//
+// Without it the event log says a wall appeared at 176.98 but not where price
+// was at the time, so "did price move toward the wall" -- the question the
+// whole panel exists to answer -- could not be asked of the recording. Rows
+// written before this stay null and are reported as unknown rather than guessed.
+try {
+  const ofeInfo = db.pragma('table_info(orderflow_events)')
+  if (!ofeInfo.some(c => c.name === 'under_px')) {
+    db.exec(`ALTER TABLE orderflow_events ADD COLUMN under_px REAL`)
+    console.log('✅ Added under_px column to orderflow_events')
+  }
+} catch (e) {
+  console.error('orderflow_events under_px migration error:', e.message)
+}
+
 // Migration: Drop the trades dedup unique index that incorrectly prevents identical legitimate trades
 try {
   db.exec('DROP INDEX IF EXISTS idx_trades_dedup')
@@ -666,22 +703,6 @@ try {
     db.exec(`
       UPDATE trades
       SET is_option = 1
-// Migration: what the stock was trading at when an order flow event fired.
-//
-// Without it the event log says a wall appeared at 176.98 but not where price
-// was at the time, so "did price move toward the wall" -- the question the
-// whole panel exists to answer -- could not be asked of the recording. Rows
-// written before this stay null and are reported as unknown rather than guessed.
-try {
-  const ofeInfo = db.pragma('table_info(orderflow_events)')
-  if (!ofeInfo.some(c => c.name === 'under_px')) {
-    db.exec(`ALTER TABLE orderflow_events ADD COLUMN under_px REAL`)
-    console.log('✅ Added under_px column to orderflow_events')
-  }
-} catch (e) {
-  console.error('orderflow_events under_px migration error:', e.message)
-}
-
       WHERE description LIKE '%Call%' OR description LIKE '%Put%'
     `)
     console.log('✅ Added is_option column and updated existing trades')
@@ -2299,6 +2320,54 @@ export class DatabaseService {
    * moment and never changes, where a level is a running total that only the
    * latest reading is worth keeping.
    */
+  /** Replace the stored marks for a batch of contracts. */
+  recordOptionMarks(userId, marks = []) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO option_marks (user_id, symbol, bid, ask, mark, source, as_of)
+        VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(user_id, symbol) DO UPDATE SET
+          bid = excluded.bid, ask = excluded.ask, mark = excluded.mark,
+          source = excluded.source, as_of = excluded.as_of
+      `)
+      const run = db.transaction(list => {
+        for (const m of list) {
+          if (!m?.symbol || !(m.mark > 0)) continue
+          stmt.run(userId, m.symbol, m.bid ?? null, m.ask ?? null, m.mark,
+            m.source || 'ibkr', m.as_of || Math.floor(Date.now() / 1000))
+        }
+      })
+      run(marks)
+      return marks.length
+    } catch (e) {
+      console.error('Error recording option marks:', e)
+      return 0
+    }
+  }
+
+  /**
+   * Stored marks no older than `maxAgeSec`, keyed by symbol.
+   *
+   * Age-filtered in the query rather than by the caller: a mark from last
+   * Thursday priced as though it were current is the failure this table could
+   * otherwise introduce, and it would look like real data.
+   */
+  getFreshOptionMarks(userId, maxAgeSec = 3600) {
+    try {
+      const cutoff = Math.floor(Date.now() / 1000) - maxAgeSec
+      const rows = db.prepare(`
+        SELECT symbol, bid, ask, mark, source, as_of FROM option_marks
+        WHERE user_id = ? AND as_of >= ?
+      `).all(userId, cutoff)
+      const out = {}
+      rows.forEach(r => { out[r.symbol] = r })
+      return out
+    } catch (e) {
+      console.error('Error reading option marks:', e)
+      return {}
+    }
+  }
+
   recordOrderFlow(userId, ticker, session, events = [], levels = []) {
     try {
       const evStmt = db.prepare(`
