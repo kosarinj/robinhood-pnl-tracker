@@ -503,9 +503,19 @@ def main():
                     scan_list = [str(s).upper() for s in ((reply.get("scan") or {}).get("list") or [])]
 
                     finished = []
+                    released = False
                     for sym in list(scans):
+                        # 309 is the gateway refusing a fourth book. The request
+                        # never took, so this scan is holding a slot it does not
+                        # have -- drop it and let the rotation come back to it.
+                        if errors.get(sym, "").startswith("[309]"):
+                            scans.pop(sym).stop()
+                            errors.pop(sym, None)
+                            released = True
+                            continue
                         if sym not in scan_list:
                             scans.pop(sym).stop()
+                            released = True
                             continue
                         if scans[sym].elapsed() >= float(scan_cfg["seconds"]):
                             try:
@@ -513,6 +523,7 @@ def main():
                             except Exception as e:
                                 print(f"  ! scan {sym} failed: {type(e).__name__}: {e}")
                             scans.pop(sym).stop()
+                            released = True
                     if finished:
                         up.push_scan(finished)
                         for f in finished:
@@ -521,20 +532,25 @@ def main():
                                   f"{(f['lean'] * 100 if f['lean'] is not None else 0):.0f}%"
                                   f"{'  unopposed wall' if f['unopposed'] else ''}")
 
-                    # Round-robin, skipping anything already subscribed.
-                    free = MAX_SYMBOLS - len(recorders) - len(scans)
-                    tries = 0
-                    while free > 0 and scan_list and tries < len(scan_list):
-                        sym = scan_list[scan_at % len(scan_list)]
-                        scan_at += 1
-                        tries += 1
-                        if sym in scans or sym in recorders:
-                            continue
-                        try:
-                            scans[sym] = Scan(ib, sym, args.rows)
-                            free -= 1
-                        except Exception as e:
-                            print(f"  ! cannot scan {sym}: {type(e).__name__}: {e}")
+                    # IBKR releases a cancelled depth subscription on its own
+                    # clock, so asking for the next book in the same breath as
+                    # dropping one got error 309 -- max (3) reached -- and left
+                    # a scan holding a slot that was never granted. A tick that
+                    # released a slot therefore starts nothing, and no tick
+                    # starts more than one.
+                    if not released and (MAX_SYMBOLS - len(recorders) - len(scans)) > 0:
+                        tries = 0
+                        while scan_list and tries < len(scan_list):
+                            sym = scan_list[scan_at % len(scan_list)]
+                            scan_at += 1
+                            tries += 1
+                            if sym in scans or sym in recorders:
+                                continue
+                            try:
+                                scans[sym] = Scan(ib, sym, args.rows)
+                            except Exception as e:
+                                print(f"  ! cannot scan {sym}: {type(e).__name__}: {e}")
+                            break
 
                 if time.monotonic() - last_flush < args.flush:
                     continue
