@@ -192,7 +192,12 @@ class Recorder:
                 self.engine.on_book(side, row.price, float(row.size), now)
 
     def _on_event(self, ev):
-        self.up.queue(self.symbol, ev.as_row())
+        row = ev.as_row()
+        # Where the stock was trading when this fired. The event knows its own
+        # price level; without the underlying beside it, nothing later can ask
+        # whether price then moved toward that level or away from it.
+        row["under_px"] = _num(self.last)
+        self.up.queue(self.symbol, row)
 
     def level_rows(self, min_consumed: float = 1.0) -> list[dict]:
         # Only levels that did something. Sending every price the book has

@@ -666,6 +666,22 @@ try {
     db.exec(`
       UPDATE trades
       SET is_option = 1
+// Migration: what the stock was trading at when an order flow event fired.
+//
+// Without it the event log says a wall appeared at 176.98 but not where price
+// was at the time, so "did price move toward the wall" -- the question the
+// whole panel exists to answer -- could not be asked of the recording. Rows
+// written before this stay null and are reported as unknown rather than guessed.
+try {
+  const ofeInfo = db.pragma('table_info(orderflow_events)')
+  if (!ofeInfo.some(c => c.name === 'under_px')) {
+    db.exec(`ALTER TABLE orderflow_events ADD COLUMN under_px REAL`)
+    console.log('✅ Added under_px column to orderflow_events')
+  }
+} catch (e) {
+  console.error('orderflow_events under_px migration error:', e.message)
+}
+
       WHERE description LIKE '%Call%' OR description LIKE '%Put%'
     `)
     console.log('✅ Added is_option column and updated existing trades')
@@ -2289,8 +2305,8 @@ export class DatabaseService {
         INSERT INTO orderflow_events
           (user_id, ticker, session, kind, side, price, ts, displayed,
            max_displayed, consumed, pulled, refreshed, volume, buy_volume,
-           sell_volume, ratio)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           sell_volume, ratio, under_px)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `)
       const lvStmt = db.prepare(`
         INSERT INTO orderflow_levels
@@ -2309,7 +2325,7 @@ export class DatabaseService {
           evStmt.run(userId, ticker, session, e.kind, e.side, e.price, e.ts,
             e.displayed || 0, e.max_displayed || 0, e.consumed || 0, e.pulled || 0,
             e.refreshed || 0, e.volume || 0, e.buy_volume || 0, e.sell_volume || 0,
-            e.ratio || 0)
+            e.ratio || 0, e.under_px != null ? e.under_px : null)
         }
         for (const l of levels) {
           lvStmt.run(userId, ticker, session, l.side, l.price,
@@ -2335,7 +2351,7 @@ export class DatabaseService {
     `).all(userId, ticker, session)
     const events = db.prepare(`
       SELECT kind, side, price, ts, displayed, max_displayed, consumed, pulled,
-             refreshed, volume, buy_volume, sell_volume, ratio
+             refreshed, volume, buy_volume, sell_volume, ratio, under_px
       FROM orderflow_events
       WHERE user_id = ? AND ticker = ? AND session = ?
       ORDER BY ts DESC LIMIT ?

@@ -7698,8 +7698,64 @@ app.get('/api/orderflow', requireAuth, (req, res) => {
     // Ranked separately from the ladder: the top of a price-ordered list is
     // just whatever is highest, not what mattered.
     const ranked = [...levels].sort((a, b) => b.consumed - a.consumed).slice(0, 8)
+
+    // What happened AFTER each big order appeared.
+    //
+    // The instinct under test: heavy offers above often precede a move up
+    // rather than down. Each wall event carries the price the stock was
+    // trading at when it fired, so the recording can answer it directly --
+    // how far price then travelled toward that level, and whether the level
+    // ended up eaten (trades took it) or pulled (it walked away).
+    //
+    // Only events recorded since under_px existed can be measured; older rows
+    // are counted as unmeasurable rather than assumed.
+    const asc = [...events].filter(e => e.ts != null).sort((a, b) => a.ts - b.ts)
+    const wallRows = []
+    let toward = 0, away = 0, unmeasurable = 0
+    for (const w of asc) {
+      if (w.kind !== 'wall') continue
+      if (!(w.under_px > 0)) { unmeasurable++; continue }
+      const up = w.side === 'ask'          // an offer sits above price, a bid below
+      const later = asc.filter(e => e.ts > w.ts && e.under_px > 0)
+      const pxEnd = later.length
+        ? (up ? Math.max(...later.map(e => e.under_px)) : Math.min(...later.map(e => e.under_px)))
+        : null
+      // Signed so positive always means "toward the wall", whichever side it is.
+      const movePct = pxEnd != null
+        ? ((up ? pxEnd - w.under_px : w.under_px - pxEnd) / w.under_px) * 100
+        : null
+      const closer = asc.find(e => e.ts > w.ts && e.side === w.side && e.price === w.price
+        && (e.kind === 'consumed' || e.kind === 'pulled'))
+      if (movePct != null) {
+        // A tenth of a percent of drift is not a move toward anything.
+        if (movePct > 0.1) toward++
+        else if (movePct < -0.1) away++
+      }
+      wallRows.push({
+        side: w.side, price: w.price, ts: w.ts, size: w.max_displayed || w.displayed || 0,
+        ended: closer ? (closer.kind === 'consumed' ? 'eaten' : 'pulled') : 'open',
+        pxAt: w.under_px, pxEnd,
+        movePct: movePct != null ? Math.round(movePct * 100) / 100 : null,
+        reached: pxEnd != null ? (up ? pxEnd >= w.price : pxEnd <= w.price) : null,
+      })
+    }
+    const avgMove = (rows) => {
+      const vals = rows.map(r => r.movePct).filter(v => v != null)
+      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100 : null
+    }
+    const outcomes = {
+      total: wallRows.length + unmeasurable,
+      measured: wallRows.filter(r => r.movePct != null).length,
+      unmeasurable,
+      toward, away,
+      eaten: (() => { const r = wallRows.filter(x => x.ended === 'eaten'); return { n: r.length, avgMove: avgMove(r), reached: r.filter(x => x.reached).length } })(),
+      pulled: (() => { const r = wallRows.filter(x => x.ended === 'pulled'); return { n: r.length, avgMove: avgMove(r), reached: r.filter(x => x.reached).length } })(),
+      // Biggest first: the walls worth having an opinion about.
+      walls: [...wallRows].sort((a, b) => b.size - a.size).slice(0, 12),
+    }
+
     res.json({
-      ticker, session, levels, events, ranked,
+      ticker, session, levels, events, ranked, outcomes,
       totals: {
         consumed: levels.reduce((n, l) => n + l.consumed, 0),
         pulled: levels.reduce((n, l) => n + l.pulled, 0),

@@ -1028,6 +1028,77 @@ export default function OrderFlowPanel() {
             )}
           </div>
 
+          {data.outcomes?.total > 0 && (() => {
+            // The instinct this answers: heavy offers above often come before a
+            // move up. Eaten against pulled is the split that matters -- a wall
+            // that trades away was real supply meeting real demand, one that
+            // walks away was never there -- so the two averages are shown side
+            // by side rather than rolled into one number.
+            const o = data.outcomes
+            const pct = (v) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`)
+            const sideWord = (s) => (s === 'ask' ? 'offer' : 'bid')
+            return (
+              <div style={{
+                padding: '10px 12px', borderRadius: 6, marginBottom: 14,
+                background: isDark ? '#0f172a' : '#f8fafc',
+                border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+              }}>
+                <div style={{ fontSize: 11, color: muted, marginBottom: 6 }}>
+                  What happened after each big order — “toward” means price travelled to the side the order was on
+                </div>
+                <div style={{ fontSize: 13, color: isDark ? '#e2e8f0' : '#0f172a', marginBottom: 6 }}>
+                  {o.measured > 0
+                    ? <>Price moved <strong>toward {o.toward}</strong> of them and away from <strong>{o.away}</strong>
+                        {o.unmeasurable > 0 && <span style={{ color: muted }}> · {o.unmeasurable} recorded before prices were kept</span>}</>
+                    : <span style={{ color: muted }}>Recorded before prices were kept alongside events — re-record a session to measure this.</span>}
+                </div>
+                {o.measured > 0 && (
+                  <div style={{ fontSize: 12, color: muted, marginBottom: 8 }}>
+                    Eaten walls: <strong style={{ color: '#22c55e' }}>{pct(o.eaten.avgMove)}</strong> average move toward them
+                    {' '}({o.eaten.n}{o.eaten.n ? `, ${o.eaten.reached} reached` : ''})
+                    {' · '}Pulled walls: <strong style={{ color: '#ef4444' }}>{pct(o.pulled.avgMove)}</strong>
+                    {' '}({o.pulled.n}{o.pulled.n ? `, ${o.pulled.reached} reached` : ''})
+                  </div>
+                )}
+                <div style={{ maxHeight: 190, overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...th, textAlign: 'left' }}>Appeared</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Size</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Level</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Price then</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Moved</th>
+                        <th style={{ ...th, textAlign: 'left' }}>Ended</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {o.walls.map((w, i) => (
+                        <tr key={i}>
+                          <td style={{ ...td, fontSize: 11, color: muted }}>
+                            {fmtTime(w.ts)} <span style={{ color: w.side === 'ask' ? '#ef4444' : '#22c55e' }}>{sideWord(w.side)}</span>
+                          </td>
+                          <td style={{ ...td, textAlign: 'right' }}>{num(w.size)}</td>
+                          <td style={{ ...td, textAlign: 'right' }}>${w.price.toFixed(2)}</td>
+                          <td style={{ ...td, textAlign: 'right', color: muted }}>{w.pxAt ? `$${w.pxAt.toFixed(2)}` : '—'}</td>
+                          <td style={{
+                            ...td, textAlign: 'right', fontWeight: 600,
+                            color: w.movePct == null ? muted : w.movePct > 0.1 ? '#22c55e' : w.movePct < -0.1 ? '#ef4444' : muted,
+                          }}>
+                            {pct(w.movePct)}{w.reached ? <span style={{ fontSize: 10, color: muted }}> · reached</span> : null}
+                          </td>
+                          <td style={{ ...td, fontSize: 11, color: w.ended === 'eaten' ? '#22c55e' : w.ended === 'pulled' ? '#ef4444' : muted }}>
+                            {w.ended}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })()}
+
           {data.events?.length > 0 && (
             <div style={{ maxHeight: 220, overflowY: 'auto', marginBottom: 10 }}>
               <div style={{ fontSize: 11, color: muted, marginBottom: 4 }}>Events, newest first</div>
