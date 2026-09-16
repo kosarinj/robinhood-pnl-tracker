@@ -12,7 +12,10 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $here
 $Host.UI.RawUI.WindowTitle = 'Order flow recorder'
 
-$symbols = if ($args.Count) { $args } else { @('MRVL', 'NVDA') }
+# @() matters: PowerShell unrolls a one-element $args to a bare string, and
+# splatting a string spreads its CHARACTERS -- one ticker became P, L, T, R,
+# and the recorder spent an afternoon watching AT&T.
+$symbols = if ($args.Count) { @($args) } else { @('MRVL', 'NVDA') }
 
 $tokenFile = Join-Path $here '.orderflow_token'
 if (-not (Test-Path $tokenFile)) {
