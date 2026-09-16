@@ -479,6 +479,11 @@ def main():
                 ib.sleep(args.book)
                 reply = up.push_books([r.book() for r in recorders.values()],
                                       {"active": list(recorders), "errors": errors})
+                # Set when a book is handed back this pass -- by a finished scan
+                # or by one dropped for the watch list. The gateway frees a
+                # cancelled subscription on its own clock, so nothing new is
+                # requested on a pass that released one.
+                released = False
                 if reply is not None:
                     listed = reply.get("symbols")
                     if listed is None:
@@ -491,8 +496,23 @@ def main():
                         for s in [s for s in recorders if s not in listed]:
                             stop(s)
                         refused.intersection_update(listed)
-                        for s in listed:
-                            if s not in refused:
+                        # The watch list has first claim on the three books.
+                        # Adding a ticker in the panel while the screener held
+                        # every spare slot simply answered 309 and the ticker
+                        # never appeared; now a scan gives way instead, and the
+                        # new subscription starts on the next pass.
+                        pending = [s for s in listed if s not in recorders and s not in refused]
+                        short = (len(recorders) + len(scans) + len(pending)) - MAX_SYMBOLS
+                        while short > 0 and scans:
+                            victim = next(iter(scans))
+                            scans.pop(victim).stop()
+                            errors.pop(victim, None)
+                            released = True
+                            short -= 1
+                            print(f"  - scan {victim} dropped so the watch list can "
+                                  f"have {', '.join(pending)}")
+                        if not released:
+                            for s in pending:
                                 start(s)
 
                     # The screener lives on whatever books the watch list is not
@@ -503,7 +523,6 @@ def main():
                     scan_list = [str(s).upper() for s in ((reply.get("scan") or {}).get("list") or [])]
 
                     finished = []
-                    released = False
                     for sym in list(scans):
                         # 309 is the gateway refusing a fourth book. The request
                         # never took, so this scan is holding a slot it does not
