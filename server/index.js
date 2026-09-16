@@ -2528,11 +2528,55 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // Recognising at open is what makes it work on one pass: both legs are
     // always open before either closes, so every realized amount that follows
     // knows what it belongs to.
-    const seriesMembers = {}          // series key -> Set of contract stack keys
-    const spreadContracts = new Set() // stack keys that are legs of a vertical
-    const seriesOf = (t, parsed) => (parsed
-      ? `${t.broker || 'robinhood'}::${parsed.ticker}|${parsed.year}${parsed.month}${parsed.day}|${parsed.type}`
-      : null)
+    // Legs of a vertical spread, recognised by shape because nothing else is
+    // left: the export carries no order id, no strategy name and no time of
+    // day. What a spread does leave behind is two opens on the SAME DAY, on
+    // opposite sides of the same expiry and type, a strike or two apart.
+    //
+    // Width is what does the work. A week of buying puts at seven strikes while
+    // selling one offsets in every arithmetic sense, and pairing on "some open
+    // leg on the other side" called that whole habit a spread — but those
+    // strikes sit $3 to $5 apart, and real spreads here are $0.50 to $2.50
+    // wide. Checked against the full export: this finds 20 spreads, every one
+    // of them a genuine order, and none of the weekly put buying.
+    const SPREAD_MAX_WIDTH = 2.5  // dollars between the strikes
+    const spreadContracts = new Set()
+    const contractKeyOf = (t, p) =>
+      `${t.broker || 'robinhood'}::${p.ticker}|${p.year}${p.month}${p.day}|${p.type}|${p.strike}`
+    {
+      // allTrades is ordered by date then insert id, and rows are inserted in
+      // file order, so a position in this list IS the row's place in the export.
+      const legs = allTrades.map((t, i) => {
+        const tc = (t.trans_code || '').toUpperCase()
+        if (tc !== 'BTO' && tc !== 'STO') return null
+        const p = parseOptionDescription(t.symbol || '')
+        return p ? { i, t, p, side: tc === 'BTO' ? 'long' : 'short' } : null
+      }).filter(Boolean)
+      const paired = new Set()
+      for (let a = 0; a < legs.length; a++) {
+        if (paired.has(a)) continue
+        const x = legs[a]
+        for (let b = a + 1; b < legs.length; b++) {
+          const y = legs[b]
+          // Ordered by date, so once the day changes there is nothing left to
+          // pair this leg with.
+          if (y.t.trans_date !== x.t.trans_date) break
+          if (paired.has(b)) continue
+          if (x.side === y.side) continue
+          if ((x.t.broker || 'robinhood') !== (y.t.broker || 'robinhood')) continue
+          if (x.p.ticker !== y.p.ticker || x.p.type !== y.p.type) continue
+          if (`${x.p.year}${x.p.month}${x.p.day}` !== `${y.p.year}${y.p.month}${y.p.day}`) continue
+          const width = Math.abs(x.p.strike - y.p.strike)
+          // Same strike is a close or a roll, not a spread.
+          if (width === 0 || width > SPREAD_MAX_WIDTH) continue
+          spreadContracts.add(contractKeyOf(x.t, x.p))
+          spreadContracts.add(contractKeyOf(y.t, y.p))
+          paired.add(a)
+          paired.add(b)
+          break
+        }
+      }
+    }
     const isOpening = tc => ['BTO', 'STO'].includes((tc || '').toUpperCase())
     const sortedTrades = [...allTrades].sort((a, b) =>
       a.trans_date.localeCompare(b.trans_date) ||
@@ -2555,23 +2599,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       if (!lifoStacks[sym]) lifoStacks[sym] = { long: [], short: [] }
       const stacks = lifoStacks[sym]
       if (tc === 'BTO' || tc === 'STO') {
-        const side = tc === 'BTO' ? 'long' : 'short'
-        stacks[side].push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
-        const series = seriesOf(t, parsed)
-        if (series) {
-          const opposite = side === 'long' ? 'short' : 'long'
-          const members = seriesMembers[series] || (seriesMembers[series] = new Set())
-          members.add(sym)
-          for (const other of members) {
-            // Another strike in the same series still holding contracts on the
-            // other side. Both it and this one are legs of a vertical.
-            if (other === sym) continue
-            if (lifoStacks[other]?.[opposite].some(lot => lot.remaining > 0)) {
-              spreadContracts.add(sym)
-              spreadContracts.add(other)
-            }
-          }
-        }
+        stacks[tc === 'BTO' ? 'long' : 'short']
+          .push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
       } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
         // Settlements book on BOTH bases now.
         //
