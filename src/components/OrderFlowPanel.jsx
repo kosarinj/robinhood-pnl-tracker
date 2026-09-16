@@ -786,10 +786,12 @@ export default function OrderFlowPanel() {
             {watch.symbols.length === 0 && <span>nothing</span>}
             {watch.symbols.map(s => (
               <span key={s} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 6px', borderRadius: 10,
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 12,
                 border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+                background: isDark ? '#1e293b' : '#fff',
               }}>
-                <button onClick={() => { setInput(s); setTicker(s) }} style={link}>{s}</button>
+                <button onClick={() => { setInput(s); setTicker(s) }}
+                  style={{ ...link, fontSize: 13, fontWeight: 600 }}>{s}</button>
                 {rec?.errors?.[s] && (
                   // 2152 is IBKR listing which books this account can see --
                   // a notice worth reading, not a failure to watch the symbol.

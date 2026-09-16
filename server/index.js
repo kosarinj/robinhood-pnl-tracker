@@ -7839,10 +7839,23 @@ const watchMeta = new Map()       // ownerId -> { at, by, byUserId }
 const SCAN_DEFAULT_CONFIG = { seconds: 30, nearPct: 1, bigMult: 3 }
 const scanState = new Map()       // ownerId -> { list, config, results: Map(ticker -> result) }
 
+// The readings are memory-only -- a thirty-second look at a book is worthless
+// tomorrow -- but the LIST is a decision someone made, and losing it on every
+// redeploy made the screener feel broken. That part is kept in app_settings.
+const SCAN_LIST_KEY = 'orderflow_scan_list'
+const SCAN_CONFIG_KEY = 'orderflow_scan_config'
+
 function scanFor(ownerId) {
   let s = scanState.get(ownerId)
   if (!s) {
     s = { list: [], config: { ...SCAN_DEFAULT_CONFIG }, results: new Map() }
+    try {
+      const saved = databaseService.getAppSettings() || {}
+      if (saved[SCAN_LIST_KEY]) s.list = cleanSymbols(JSON.parse(saved[SCAN_LIST_KEY]))
+      if (saved[SCAN_CONFIG_KEY]) s.config = { ...s.config, ...JSON.parse(saved[SCAN_CONFIG_KEY]) }
+    } catch (e) {
+      console.error('scan settings load:', e.message)
+    }
     scanState.set(ownerId, s)
   }
   return s
@@ -8001,6 +8014,7 @@ app.put('/api/orderflow/scan', (req, res) => {
     // three are ever live at once however long it gets.
     s.list = cleanSymbols(req.body.list).slice(0, 200)
     for (const t of [...s.results.keys()]) if (!s.list.includes(t)) s.results.delete(t)
+    databaseService.setAppSetting(SCAN_LIST_KEY, JSON.stringify(s.list))
   }
   if (req.body?.config) {
     const c = req.body.config
@@ -8010,6 +8024,7 @@ app.put('/api/orderflow/scan', (req, res) => {
       nearPct: num(c.nearPct, 0.1, 10, s.config.nearPct),
       bigMult: num(c.bigMult, 1.5, 20, s.config.bigMult),
     }
+    databaseService.setAppSetting(SCAN_CONFIG_KEY, JSON.stringify(s.config))
   }
   res.json(scanView(orderFlowOwner()))
 })

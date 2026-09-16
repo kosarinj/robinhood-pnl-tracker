@@ -12,10 +12,13 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $here
 $Host.UI.RawUI.WindowTitle = 'Order flow recorder'
 
-# @() matters: PowerShell unrolls a one-element $args to a bare string, and
-# splatting a string spreads its CHARACTERS -- one ticker became P, L, T, R,
-# and the recorder spent an afternoon watching AT&T.
-$symbols = if ($args.Count) { @($args) } else { @('MRVL', 'NVDA') }
+# Assigned in separate statements on purpose. `$symbols = if (...) { @($args) }`
+# looks equivalent but is not: the if block's output goes through the pipeline,
+# which unrolls a one-element array back to a bare string -- and splatting a
+# string spreads its CHARACTERS, so one ticker became P, L, T, R and the
+# recorder spent an afternoon watching AT&T.
+$symbols = @('MRVL', 'NVDA')
+if ($args.Count) { $symbols = @($args) }
 
 $tokenFile = Join-Path $here '.orderflow_token'
 if (-not (Test-Path $tokenFile)) {
