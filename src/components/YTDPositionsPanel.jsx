@@ -554,6 +554,9 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       shortCallsLastWeekChange: acc.shortCallsLastWeekChange + (r.shortCallsLastWeekChange || 0),
       realizedExpiredCalls: acc.realizedExpiredCalls + (r.realizedExpiredCalls || 0),
       realizedExpiredPuts: acc.realizedExpiredPuts + (r.realizedExpiredPuts || 0),
+      realizedSpreads: acc.realizedSpreads + (r.realizedSpreads || 0),
+      realizedSpreadCalls: acc.realizedSpreadCalls + (r.realizedSpreadCalls || 0),
+      realizedSpreadPuts: acc.realizedSpreadPuts + (r.realizedSpreadPuts || 0),
       taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
@@ -572,7 +575,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -721,6 +724,37 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             <span style={{ color: pnlColor(t.realizedExpiredCalls, isDark) }}>C {fmt(t.realizedExpiredCalls)}</span>
             <span style={{ color: textMid }}> · </span>
             <span style={{ color: pnlColor(t.realizedExpiredPuts, isDark) }}>P {fmt(t.realizedExpiredPuts)}</span>
+          </span>
+        </span> },
+
+    // Another SUBSET of Options Total, on the same terms as Expired above.
+    //
+    // Both legs of every vertical, so the number is what the spread made rather
+    // than what the short leg collected: the credit kept LESS what the long leg
+    // cost. A leg counts from the moment it was opened against an existing
+    // position on the other side of the same expiry and type — which is why a
+    // short call covered by stock is not here, and one covered by a further-out
+    // call is. Muted and parenthesised so it cannot read as a term of Net.
+    { key: 'realizedSpreads', label: 'of which Spreads', sort: 'realizedSpreads',
+      title: 'The part of Options Total that came from vertical spreads — a short leg and a long leg in the same underlying, expiry and contract type at different strikes. Both legs are counted, so this is the net of the credit kept and the long leg\'s cost. C and P split it by contract type. Already included in Options Total, so it is NOT a separate term of Net.',
+      cell: (r) => r.realizedSpreads
+        ? <span style={{ color: pnlColor(r.realizedSpreads, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500 }}>
+            ({fmt(r.realizedSpreads)})
+            {(r.realizedSpreadCalls || r.realizedSpreadPuts) ? (
+              <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
+                {r.realizedSpreadCalls ? <span style={{ color: pnlColor(r.realizedSpreadCalls, isDark) }}>C {fmt(r.realizedSpreadCalls)}</span> : null}
+                {r.realizedSpreadCalls && r.realizedSpreadPuts ? <span style={{ color: textMid }}> · </span> : null}
+                {r.realizedSpreadPuts ? <span style={{ color: pnlColor(r.realizedSpreadPuts, isDark) }}>P {fmt(r.realizedSpreadPuts)}</span> : null}
+              </span>
+            ) : null}
+          </span>
+        : <span style={{ color: textMid, opacity: 0.5 }}>—</span>,
+      foot: (t) => <span style={{ color: pnlColor(t.realizedSpreads, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 600 }}>
+          ({fmt(t.realizedSpreads)})
+          <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
+            <span style={{ color: pnlColor(t.realizedSpreadCalls, isDark) }}>C {fmt(t.realizedSpreadCalls)}</span>
+            <span style={{ color: textMid }}> · </span>
+            <span style={{ color: pnlColor(t.realizedSpreadPuts, isDark) }}>P {fmt(t.realizedSpreadPuts)}</span>
           </span>
         </span> },
 

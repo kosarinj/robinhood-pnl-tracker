@@ -2518,6 +2518,21 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
 
     // LIFO pass over ALL trades
     const lifoStacks = {}
+    // Legs of a vertical spread, so the panel can report what spreads made
+    // without changing what anything else means.
+    //
+    // A leg is recognised at the moment it opens: if the same underlying,
+    // expiry and type already has an open position on the other side at a
+    // DIFFERENT strike, both contracts are legs. Same strike is not a spread —
+    // that is a position being closed or rolled, and it shares a stack key.
+    // Recognising at open is what makes it work on one pass: both legs are
+    // always open before either closes, so every realized amount that follows
+    // knows what it belongs to.
+    const seriesMembers = {}          // series key -> Set of contract stack keys
+    const spreadContracts = new Set() // stack keys that are legs of a vertical
+    const seriesOf = (t, parsed) => (parsed
+      ? `${t.broker || 'robinhood'}::${parsed.ticker}|${parsed.year}${parsed.month}${parsed.day}|${parsed.type}`
+      : null)
     const isOpening = tc => ['BTO', 'STO'].includes((tc || '').toUpperCase())
     const sortedTrades = [...allTrades].sort((a, b) =>
       a.trans_date.localeCompare(b.trans_date) ||
@@ -2539,10 +2554,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       const ppc = contracts > 0 ? amount / contracts : amount
       if (!lifoStacks[sym]) lifoStacks[sym] = { long: [], short: [] }
       const stacks = lifoStacks[sym]
-      if (tc === 'BTO') {
-        stacks.long.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
-      } else if (tc === 'STO') {
-        stacks.short.push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
+      if (tc === 'BTO' || tc === 'STO') {
+        const side = tc === 'BTO' ? 'long' : 'short'
+        stacks[side].push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
+        const series = seriesOf(t, parsed)
+        if (series) {
+          const opposite = side === 'long' ? 'short' : 'long'
+          const members = seriesMembers[series] || (seriesMembers[series] = new Set())
+          members.add(sym)
+          for (const other of members) {
+            // Another strike in the same series still holding contracts on the
+            // other side. Both it and this one are legs of a vertical.
+            if (other === sym) continue
+            if (lifoStacks[other]?.[opposite].some(lot => lot.remaining > 0)) {
+              spreadContracts.add(sym)
+              spreadContracts.add(other)
+            }
+          }
+        }
       } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
         // Settlements book on BOTH bases now.
         //
@@ -2574,6 +2603,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
           t._realizedPnl = Math.round((closingShort ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
           t._closingShort = closingShort
+          t._spreadLeg = spreadContracts.has(sym)
         }
       }
     })
@@ -3273,6 +3303,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // by date, never a term of Net.
           shortCallsThisWeek: 0, shortCallsLastWeek: 0,
           realizedExpiredCalls: 0, realizedExpiredPuts: 0,
+          // The vertical-spread slice of totalRealized: both legs of every
+          // spread, so the figure is what the spread actually made — the credit
+          // kept less what the protective leg cost. A subset like the two
+          // above, never an addend.
+          realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0,
           totalRealized: 0, tradeCount: 0
         }
       }
@@ -3292,6 +3327,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // different things about the same year.
           if (optionType === 'call') entry.realizedExpiredCalls += t._realizedPnl
           else if (optionType === 'put') entry.realizedExpiredPuts += t._realizedPnl
+        }
+        if (t._spreadLeg) {
+          entry.realizedSpreads += t._realizedPnl
+          if (optionType === 'call') entry.realizedSpreadCalls += t._realizedPnl
+          else if (optionType === 'put') entry.realizedSpreadPuts += t._realizedPnl
         }
         if (optionType === 'call' && t._closingShort) {
           const d = String(t.trans_date || '')
@@ -3507,6 +3547,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           shortCallsLastWeekChange: lastWeekChangeByTicker[e.ticker] ?? null,
           realizedExpiredCalls: r2(e.realizedExpiredCalls),
           realizedExpiredPuts: r2(e.realizedExpiredPuts),
+          // Also a SUBSET of totalRealized — both legs of each vertical.
+          realizedSpreads: r2(e.realizedSpreads),
+          realizedSpreadCalls: r2(e.realizedSpreadCalls),
+          realizedSpreadPuts: r2(e.realizedSpreadPuts),
           openPremium: r2(openPremiumByTicker[e.ticker] || 0),
           openUnrealizedPnL: openUnrealizedByTicker[e.ticker] != null ? r2(openUnrealizedByTicker[e.ticker]) : null,
           // Open P&L projected forward on theta alone (underlying held flat).
