@@ -385,6 +385,26 @@ def main():
                 if time.monotonic() - last_flush < args.flush:
                     continue
                 last_flush = time.monotonic()
+
+                # Midnight. The session was stamped once at startup, so a
+                # recorder left running overnight -- which is the normal case
+                # now that the overnight venue trades -- filed a whole new day
+                # under yesterday's date, on top of yesterday's totals.
+                today = datetime.now().strftime("%Y-%m-%d")
+                if today != session:
+                    for r in recorders.values():
+                        push_levels(r)
+                    print(f"  {datetime.now():%H:%M:%S} new session {today} "
+                          f"(was {session}) -- totals start again")
+                    session = today
+                    for sym, r in recorders.items():
+                        r.engine = AbsorptionEngine(
+                            sym, thresholds=Thresholds(), on_event=r._on_event)
+                        r._sent.clear()
+                        r.trades = 0
+                    # Yesterday's parked engines belong to yesterday.
+                    dormant.clear()
+
                 for r in recorders.values():
                     ok = push_levels(r)
                     state = "ok" if ok else f"FAILED ({up.last_error})"
