@@ -3308,6 +3308,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // kept less what the protective leg cost. A subset like the two
           // above, never an addend.
           realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0,
+          // Which contracts were counted as spread legs, for ?ticker= to show.
+          // "I don't remember trading a spread there" is the right question to
+          // ask of a number like this, and it deserves an answer more specific
+          // than the total.
+          spreadLegDetail: [],
           totalRealized: 0, tradeCount: 0
         }
       }
@@ -3332,6 +3337,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           entry.realizedSpreads += t._realizedPnl
           if (optionType === 'call') entry.realizedSpreadCalls += t._realizedPnl
           else if (optionType === 'put') entry.realizedSpreadPuts += t._realizedPnl
+          if (entry.spreadLegDetail.length < 100) {
+            entry.spreadLegDetail.push({
+              contract: t.symbol, closed: t.trans_date, code: tc,
+              side: t._closingShort ? 'short' : 'long',
+              pnl: Math.round(t._realizedPnl * 100) / 100,
+            })
+          }
         }
         if (optionType === 'call' && t._closingShort) {
           const d = String(t.trans_date || '')
@@ -3676,6 +3688,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           realizedLongCalls: row.realizedLongCalls,
           realizedShortPuts: row.realizedShortPuts,
           realizedLongPuts: row.realizedLongPuts,
+        },
+        // The spread slice, named contract by contract. Both legs of each
+        // vertical appear, and they are already inside optionsRealized above.
+        spreads: {
+          total: row.realizedSpreads,
+          calls: row.realizedSpreadCalls,
+          puts: row.realizedSpreadPuts,
+          legs: (byUnderlying[t]?.spreadLegDetail || []).filter(l => l.closed >= (perSymbolDates[t] || globalStart)),
         },
         row,
       })
