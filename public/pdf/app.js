@@ -36,7 +36,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf/vendor/pdfjs/pdf.worker.min.mjs'
 
 // Bumped whenever this file changes, and shown in the toolbar. "Still broken"
 // and "still running yesterday's code" look identical otherwise.
-const BUILD = 'b22'
+const BUILD = 'b24'
 
 const $ = (id) => document.getElementById(id)
 const state = {
@@ -98,6 +98,7 @@ async function openFile(file) {
     state.marks = Array.isArray(made.marks) ? made.marks : []
     state.seq = made.seq || state.marks.reduce((n, m) => Math.max(n, Number(m.id) || 0), 0)
   }
+  state.reopened = !!made          // decides what name a save should suggest
   const restored = made ? state.marks.length : restoreMarks()
   $('docName').textContent = state.name
   $('empty').hidden = true
@@ -417,9 +418,25 @@ function restoreMarks() {
   }
 }
 
+/**
+ * What paints on top of what.
+ *
+ * Marks used to be painted in the order they were placed -- on screen and into
+ * the saved file alike -- so a white-out added after a text box sat above it,
+ * swallowing the clicks meant for the text and, worse, covering that text with
+ * a white rectangle in the saved PDF. A white-out is a cover: it belongs
+ * underneath. Signatures go above it, and text above everything.
+ */
+const paintOrder = (m) => (m.type === 'white' ? 0 : m.type === 'image' ? 1 : 2)
+
+/** Placement order is preserved within each layer -- Array.sort is stable. */
+function paintedMarks(marks = state.marks) {
+  return [...marks].sort((a, b) => paintOrder(a) - paintOrder(b))
+}
+
 function drawMarks() {
   document.querySelectorAll('.layer').forEach(l => { l.textContent = '' })
-  for (const m of state.marks) {
+  for (const m of paintedMarks()) {
     const wrap = document.querySelector(`.page[data-page="${m.page}"]`)
     if (!wrap) continue
     const layer = wrap.querySelector('.layer')
@@ -427,6 +444,7 @@ function drawMarks() {
     const el = document.createElement('div')
     el.className = `mark ${m.type}${state.selected === m.id ? ' sel' : ''}`
     el.dataset.id = m.id       // so selection can find its element without a redraw
+    el.style.zIndex = String(paintOrder(m) + 1)   // text catches the click, not the cover under it
     el.style.left = `${m.xf * w}px`
     el.style.top = `${m.yf * h}px`
 
@@ -879,7 +897,13 @@ async function canWrite(handle) {
  */
 /** The name a save defaults to. */
 function defaultSaveName() {
-  return state.name.replace(/\.pdf$/i, '') + '-filled.pdf'
+  // Reopened from something this app saved? Then the obvious intent is to save
+  // it again under the same name, not to invent a third one. And -filled is
+  // never added twice: a few rounds of editing used to produce names like
+  // form-filled-filled-filled.pdf.
+  if (state.reopened) return state.name
+  const stem = state.name.replace(/\.pdf$/i, '').replace(/-filled$/i, '')
+  return stem + '-filled.pdf'
 }
 
 /**
@@ -1004,7 +1028,7 @@ async function saveByRerender() {
     const jpg = await out.embedJpg(canvas.toDataURL('image/jpeg', 0.85))
     page.drawImage(jpg, { x: 0, y: 0, width: W, height: H })
 
-    for (const m of state.marks.filter(z => z.page === n)) {
+    for (const m of paintedMarks(state.marks.filter(z => z.page === n))) {
       const x = m.xf * W, yTop = H - m.yf * H
       if (m.type === 'text') {
         const size = m.sizeF * H
@@ -1073,7 +1097,7 @@ async function save(chosenName) {
       toast(`Form fields skipped (${e.message.slice(0, 60)}) — your text and signature were still saved`, 6000)
     }
 
-    for (const m of state.marks) {
+    for (const m of paintedMarks()) {
       const page = pages[m.page - 1]
       if (!page) continue
       const { width, height } = page.getSize()
@@ -1155,7 +1179,10 @@ $('toolText').addEventListener('click', () => setTool('text'))
 $('toolSign').addEventListener('click', () => setTool('sign'))
 $('toolWhite').addEventListener('click', () => setTool('white'))
 $('toolCheck').addEventListener('click', () => setTool('check'))
-$('save').addEventListener('click', save)
+// Wrapped, not passed directly: addEventListener hands the listener a
+// PointerEvent, which save() would take as the chosen file name -- and did,
+// downloading a file called "[object PointerEvent]".
+$('save').addEventListener('click', () => save())
 // Forget where the last save went, so the picker asks for a new file.
 $('saveAs').addEventListener('click', () => {
   // Where a save dialog exists, forget the last file so the dialog asks again.
