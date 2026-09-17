@@ -3212,6 +3212,75 @@ export class DatabaseService {
   }
 
   /**
+   * Every duplicate group, with the rows that would be removed.
+   *
+   * "Duplicate" means identical in date, code, symbol, quantity, price, amount
+   * and broker. Repeated fills are legitimate -- the same option can genuinely
+   * fill twice for the same amount in a day -- so this is a preview to read,
+   * never something to run blind. The keeper is the lowest id in each group.
+   */
+  duplicateTradesPreview(userId = 1, limit = 200) {
+    try {
+      const groups = db.prepare(`
+        SELECT trans_date, trans_code, symbol, quantity, price, amount,
+               COALESCE(broker,'robinhood') AS broker, is_option AS isOption,
+               COUNT(*) AS copies, MIN(id) AS keepId,
+               GROUP_CONCAT(id) AS ids
+        FROM trades WHERE user_id = ?
+        GROUP BY trans_date, trans_code, symbol, quantity, price, amount, COALESCE(broker,'robinhood')
+        HAVING copies > 1
+        ORDER BY (copies - 1) * amount DESC
+        LIMIT ?
+      `).all(userId, limit)
+      const totals = db.prepare(`
+        SELECT COUNT(*) AS groups, SUM(copies - 1) AS excessRows,
+               ROUND(SUM((copies - 1) * amount), 2) AS excessAmount
+        FROM (
+          SELECT amount, COUNT(*) AS copies FROM trades WHERE user_id = ?
+          GROUP BY trans_date, trans_code, symbol, quantity, price, amount, COALESCE(broker,'robinhood')
+          HAVING copies > 1
+        )
+      `).get(userId)
+      return { totals, groups }
+    } catch (e) {
+      console.error('duplicateTradesPreview:', e.message)
+      return { error: e.message }
+    }
+  }
+
+  /**
+   * Back the database up, then delete the excess copies.
+   *
+   * The backup is not optional and not a flag: this deletes rows from the only
+   * copy of a trading history, and the volume holds one file. VACUUM INTO writes
+   * a complete, consistent database beside it first.
+   */
+  removeDuplicateTrades(userId = 1) {
+    try {
+      const main = db.pragma('database_list').find(d => d.name === 'main')
+      const file = main?.file
+      if (!file) return { error: 'could not determine the database path' }
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      const backup = file.replace(/\.db$/, '') + `.dupes-backup-${stamp}.db`
+      db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`)
+
+      const before = db.prepare('SELECT COUNT(*) AS n FROM trades WHERE user_id = ?').get(userId).n
+      const result = db.prepare(`
+        DELETE FROM trades WHERE user_id = ? AND id NOT IN (
+          SELECT MIN(id) FROM trades WHERE user_id = ?
+          GROUP BY trans_date, trans_code, symbol, quantity, price, amount, COALESCE(broker,'robinhood')
+        )
+      `).run(userId, userId)
+      const after = db.prepare('SELECT COUNT(*) AS n FROM trades WHERE user_id = ?').get(userId).n
+      console.log(`✅ Removed ${result.changes} duplicate trades (backup at ${backup})`)
+      return { backup, deleted: result.changes, rowsBefore: before, rowsAfter: after }
+    } catch (e) {
+      console.error('removeDuplicateTrades:', e.message)
+      return { error: e.message }
+    }
+  }
+
+  /**
    * What is actually in the trades table, by broker and by upload.
    *
    * A figure computed from these rows can only be checked against the rows,

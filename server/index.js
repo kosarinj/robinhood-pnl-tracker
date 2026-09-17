@@ -7245,6 +7245,31 @@ app.get('/api/debug-tax-check', async (req, res) => {
   }
 })
 
+/** GET /api/debug-dupes — the duplicate groups, and what removing them would delete. */
+app.get('/api/debug-dupes', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const owner = user.username ? user.userId : orderFlowOwner()
+  res.json(databaseService.duplicateTradesPreview(owner, Number(req.query.limit) || 200))
+})
+
+/**
+ * POST /api/debug-dupes/clean — remove the excess copies, after backing up.
+ *
+ * Deliberately awkward: it deletes rows from the only copy of a trading
+ * history, on a volume that holds one file. The body must say so explicitly,
+ * and the database is backed up beside itself before a row is touched.
+ */
+app.post('/api/debug-dupes/clean', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  if (req.body?.confirm !== 'DELETE DUPLICATES') {
+    return res.status(400).json({ error: 'Send { "confirm": "DELETE DUPLICATES" } to proceed' })
+  }
+  const owner = user.username ? user.userId : orderFlowOwner()
+  res.json(databaseService.removeDuplicateTrades(owner))
+})
+
 /**
  * GET /api/debug-trade-sources — what the trades table actually holds.
  *
