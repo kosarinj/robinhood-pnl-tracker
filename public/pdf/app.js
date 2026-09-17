@@ -36,7 +36,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf/vendor/pdfjs/pdf.worker.min.mjs'
 
 // Bumped whenever this file changes, and shown in the toolbar. "Still broken"
 // and "still running yesterday's code" look identical otherwise.
-const BUILD = 'b24'
+const BUILD = 'b25'
 
 const $ = (id) => document.getElementById(id)
 const state = {
@@ -390,7 +390,20 @@ async function rememberSave(savedName, savedSize) {
 async function recall(name, size) {
   try {
     const key = madeKey(name, size)
-    const rec = await dbDo('readonly', s => s.get(key))
+    let rec = await dbDo('readonly', s => s.get(key))
+    if (!rec) {
+      // Safari will not overwrite a download: asked for form.pdf it writes
+      // form-1.pdf. So the name half of the key never matches a file this app
+      // itself produced, no record is found, and everything placed before that
+      // save stops being editable -- the chain breaks at every single save.
+      // The byte length still matches exactly, and an exact length is a strong
+      // enough match to go on.
+      const bySize = Object.keys(madeIndex()).find(k => k.endsWith(`:${size}`))
+      if (bySize) {
+        rec = await dbDo('readonly', s => s.get(bySize))
+        if (rec) console.info(`[pdf-editor] "${key}" not found; matched "${bySize}" on size instead`)
+      }
+    }
     console.info(`[pdf-editor] opened "${key}" — ${rec ? `FOUND, ${rec.marks?.length ?? 0} boxes` : 'no record; known keys: ' + (Object.keys(madeIndex()).join(' | ') || '(none)')}`)
     if (!rec || !rec.source) return null
     // Structured clone hands back an ArrayBuffer or a typed array; normalise.
@@ -1203,8 +1216,22 @@ stage.addEventListener('dragover', (e) => { e.preventDefault(); stage.classList.
 stage.addEventListener('dragleave', () => stage.classList.remove('drag'))
 stage.addEventListener('drop', (e) => {
   e.preventDefault()
+  e.stopPropagation()               // the window handler below must not also fire
   stage.classList.remove('drag')
   openFile(e.dataTransfer.files[0])
+})
+
+// A drop that misses the page area was left to the browser, which navigates
+// away to the file: the editor vanishes and it looks as though the document
+// was swallowed. Nothing is ever lost -- the file is untouched on disk, the
+// app cannot write to it -- but the work in progress went with the navigation.
+// So drops anywhere in the window are caught and opened.
+window.addEventListener('dragover', (e) => e.preventDefault())
+window.addEventListener('drop', (e) => {
+  e.preventDefault()
+  stage.classList.remove('drag')
+  const file = e.dataTransfer?.files?.[0]
+  if (file) openFile(file)
 })
 
 document.addEventListener('keydown', (e) => {
