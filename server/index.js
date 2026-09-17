@@ -2862,6 +2862,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             missing.forEach(t => { if (fetched[t] > 0) stockByTicker[t] = fetched[t] })
           } catch (e) { /* leave missing */ }
         }
+        // An IBKR mark from the recorder outranks both sources when it is
+        // fresh. Polygon and Yahoo stop at the 16:00 close, so between sessions
+        // every option here would be modelled off a price hours old while the
+        // overnight venue moved the stock -- which is exactly the move worth
+        // seeing. Fresh means within fifteen minutes, so a stopped recorder
+        // falls back rather than freezing the panel at whatever it last said.
+        for (const t of openTickers) {
+          const m = overnightMark(req.user.userId, t) || overnightMark(orderFlowOwner(), t)
+          if (m) stockByTicker[t] = m.last
+        }
       }
 
       // Yesterday's underlying close for the open names, so the daily option move can be
@@ -3473,6 +3483,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     if (!asOf) {
       const cachedPrices = priceService.getCurrentPrices()
       allTickers.forEach(t => { if (!stockPrices[t] && cachedPrices[t] > 0) stockPrices[t] = cachedPrices[t] })
+      // And let a fresh overnight mark win outright: it is a live print from
+      // IBKR, where the others are a cache that stopped at the close. An as-of
+      // request is asking about a past date and must never see tonight's price.
+      let marked = 0
+      allTickers.forEach(t => {
+        const m = overnightMark(req.user.userId, t) || overnightMark(orderFlowOwner(), t)
+        if (m) { stockPrices[t] = m.last; marked++ }
+      })
+      if (marked > 0) console.log(`YTD: ${marked} ticker(s) priced from overnight marks`)
     }
     const pricesFetched = Object.keys(stockPrices).filter(t => stockPrices[t] > 0).length
     console.log(`YTD${asOf ? ` (as of ${asOf})` : ''}: ${Object.keys(stockPositions).length} stock positions, ${allTickers.length} tickers, ${pricesFetched} prices`)
