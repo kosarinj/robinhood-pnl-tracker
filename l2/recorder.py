@@ -133,6 +133,9 @@ class Uploader:
     def push_scan(self, results: list[dict]):
         return self._send("POST", "/api/orderflow/scan/result", {"results": results})
 
+    def push_marks(self, marks: list[dict]):
+        return self._send("POST", "/api/orderflow/marks", {"marks": marks})
+
 
 class Recorder:
     def __init__(self, ib: IB, symbol: str, uploader: Uploader | None, rows: int,
@@ -393,6 +396,10 @@ def main():
     # Symbols that failed to start. Retried only once they leave the watch list
     # and come back, or every book push would ask IBKR the same doomed question.
     refused: set[str] = set()
+    # Level 1 quotes for the positions in the panel. These cost no depth
+    # subscription, so marking fifty names overnight leaves all three books
+    # free for the watch list and the screener.
+    marks: dict[str, object] = {}
     # Screener state: what is being sampled now, and where the rotation is up to.
     scans: dict[str, Scan] = {}
     scan_at = 0
@@ -585,9 +592,43 @@ def main():
                                 print(f"  ! cannot scan {sym}: {type(e).__name__}: {e}")
                             break
 
+                    # Level 1 marks for whatever the panel is holding. The
+                    # server decides the list; this only keeps subscriptions in
+                    # step with it.
+                    wanted_marks = [str(s).upper() for s in (reply.get("marks") or [])][:60]
+                    for sym in [s for s in marks if s not in wanted_marks]:
+                        tkr = marks.pop(sym)
+                        try:
+                            ib.cancelMktData(tkr.contract)
+                        except Exception:
+                            pass
+                    for sym in wanted_marks:
+                        if sym in marks:
+                            continue
+                        try:
+                            found = [c for c in ib.qualifyContracts(Stock(sym, "SMART", "USD")) if c]
+                            if found:
+                                marks[sym] = ib.reqMktData(found[0], "", False, False)
+                        except Exception as e:
+                            print(f"  ! cannot mark {sym}: {type(e).__name__}: {e}")
+
                 if time.monotonic() - last_flush < args.flush:
                     continue
                 last_flush = time.monotonic()
+
+                # A mark is the last print where there is one, and the close
+                # otherwise -- a name that has not traded overnight is still
+                # worth pricing at its close rather than dropping out.
+                mark_rows = []
+                for sym, tkr in marks.items():
+                    last = _num(getattr(tkr, "last", None)) or _num(getattr(tkr, "close", None))
+                    if last is None:
+                        continue
+                    mark_rows.append({"ticker": sym, "last": last,
+                                      "bid": _num(getattr(tkr, "bid", None)),
+                                      "ask": _num(getattr(tkr, "ask", None))})
+                if mark_rows:
+                    up.push_marks(mark_rows)
 
                 # Midnight. The session was stamped once at startup, so a
                 # recorder left running overnight -- which is the normal case

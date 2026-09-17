@@ -7853,6 +7853,41 @@ function orderFlowOwner() {
 // can see why a symbol they were watching has gone.
 const watchMeta = new Map()       // ownerId -> { at, by, byUserId }
 
+// Overnight stock marks, pushed by the recorder from IBKR.
+//
+// The overnight venue trades from 20:00 and the options move with it, but the
+// app's price service only knows the 16:00 close -- so an account could swing
+// thousands between sessions and the panel would show yesterday all night.
+// These are Level 1 quotes only: they cost no depth subscription, so the
+// screener keeps its books.
+const stockMarks = new Map()      // `${ownerId}:${TICKER}` -> { last, bid, ask, at }
+const MARK_FRESH_MS = 15 * 60 * 1000
+
+/** The tickers worth marking: everything the Options YTD panel would show. */
+function marksWanted(ownerId) {
+  const out = new Set()
+  try {
+    for (const sym of Object.keys(databaseService.getStockPositionsWithCost(ownerId) || {})) {
+      if (/^[A-Z.]{1,6}$/.test(sym)) out.add(sym)
+    }
+    for (const p of databaseService.getOpenOptionPositions(ownerId) || []) {
+      const parsed = parseOptionDescription(p.symbol || '')
+      if (parsed?.ticker) out.add(parsed.ticker.toUpperCase())
+    }
+  } catch (e) {
+    console.error('marksWanted:', e.message)
+  }
+  // Level 1 lines are plentiful, but there is no point marking a hundred names.
+  return [...out].slice(0, 60)
+}
+
+/** A recent overnight mark for one ticker, or null when it is stale or absent. */
+function overnightMark(ownerId, ticker) {
+  const m = stockMarks.get(`${ownerId}:${String(ticker).toUpperCase()}`)
+  if (!m || !(m.last > 0)) return null
+  return (Date.now() - m.at) <= MARK_FRESH_MS ? m : null
+}
+
 // The screener. The recorder rotates through this list on whatever depth
 // subscriptions the watch list leaves spare, half a minute a name, and reports
 // what it saw. Held in memory like the live book: a reading of what the book
@@ -7984,6 +8019,8 @@ app.post('/api/orderflow/book', (req, res) => {
     symbols: watchLists.has(user.userId) ? watchLists.get(user.userId) : null,
     // Carried on the same reply so the screener needs no second request.
     scan: { list: scan.list, config: scan.config },
+    // Level 1 only, for pricing positions while the main session is shut.
+    marks: marksWanted(user.userId),
   })
 })
 
@@ -8018,6 +8055,40 @@ app.put('/api/orderflow/watch', (req, res) => {
     }
   }
   res.json(watchState(owner, user.username ? user.userId : null))
+})
+
+/** POST /api/orderflow/marks — { marks: [{ ticker, last, bid, ask }] } from the recorder. */
+app.post('/api/orderflow/marks', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const now = Date.now()
+  let stored = 0
+  for (const m of Array.isArray(req.body?.marks) ? req.body.marks : []) {
+    const ticker = String(m?.ticker || '').toUpperCase()
+    const last = Number(m?.last)
+    if (!ticker || !(last > 0)) continue
+    stockMarks.set(`${user.userId}:${ticker}`, {
+      last, bid: Number(m.bid) > 0 ? Number(m.bid) : null,
+      ask: Number(m.ask) > 0 ? Number(m.ask) : null, at: now,
+    })
+    stored++
+  }
+  res.json({ success: true, stored })
+})
+
+/** GET /api/orderflow/marks — what the recorder has marked, and how fresh. */
+app.get('/api/orderflow/marks', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const owner = orderFlowOwner()
+  const now = Date.now()
+  const out = []
+  for (const [key, m] of stockMarks) {
+    const [uid, ticker] = key.split(':')
+    if (Number(uid) !== owner) continue
+    out.push({ ticker, ...m, ageSec: Math.round((now - m.at) / 1000) })
+  }
+  res.json({ marks: out.sort((a, b) => a.ticker.localeCompare(b.ticker)), wanted: marksWanted(owner) })
 })
 
 /** GET /api/orderflow/scan — the scan list, its settings, and the latest reading per ticker. */
