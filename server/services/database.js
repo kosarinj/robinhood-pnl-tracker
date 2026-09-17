@@ -3259,8 +3259,36 @@ export class DatabaseService {
       } catch (e) {
         splits = [{ error: e.message }]
       }
+      // The whole duplicate inventory, grouped by underlying and by what the
+      // extra copies are worth. A duplicated sale leg adds its full proceeds to
+      // a contract's net, and on a name whose legs run thousands that is the
+      // difference between a loss and a gain -- so the count alone understates
+      // it badly. `excessAmount` is what the extra copies contribute.
+      let dupeByTicker = []
+      try {
+        dupeByTicker = db.prepare(`
+          SELECT CASE WHEN is_option = 1
+                      THEN UPPER(SUBSTR(symbol, 1, INSTR(symbol, ' ') - 1))
+                      ELSE UPPER(symbol) END AS ticker,
+                 is_option AS isOption,
+                 SUM(copies - 1) AS excessRows,
+                 ROUND(SUM((copies - 1) * amount), 2) AS excessAmount,
+                 COUNT(*) AS affectedTrades
+          FROM (
+            SELECT symbol, is_option, amount, COUNT(*) AS copies
+            FROM trades WHERE user_id = ?
+            GROUP BY trans_date, trans_code, symbol, quantity, price, amount, COALESCE(broker,'robinhood')
+            HAVING copies > 1
+          )
+          GROUP BY ticker, is_option
+          ORDER BY excessAmount DESC LIMIT 30
+        `).all(userId)
+      } catch (e) {
+        dupeByTicker = [{ error: e.message }]
+      }
       return {
-        byBroker, byUpload, dupes, duplicateRowExcess: dupeExcess?.excess || 0,
+        byBroker, byUpload, dupes, dupeByTicker,
+        duplicateRowExcess: dupeExcess?.excess || 0,
         splits, splitAdjustment: this.splitAdjustmentEnabled?.() ?? null,
       }
     } catch (e) {
