@@ -92,13 +92,27 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
   const week = useMemo(() => {
     const list = (openPos || []).filter(p => p.expiry >= today && p.expiry <= weekEnd)
     let longVal = 0, shortVal = 0, priced = 0, unpriced = 0, contracts = 0
+    // Split by moneyness, because market value alone answers the wrong
+    // question. A deep in-the-money call carries its intrinsic value right to
+    // expiry and gets sold or exercised — it is not heading for zero, and
+    // counting it under "expiring worthless" made a single contract look like
+    // thousands of dollars at risk. What actually expires worthless is the
+    // out-of-the-money side.
+    let longOtm = 0, shortOtm = 0, longItm = 0, shortItm = 0, unknown = 0
     for (const p of list) {
       contracts += Math.abs(p.openContracts || 0)
       if (p.markSource) priced += 1; else unpriced += 1
-      if (p.isLong) longVal += p.currentValue || 0
-      else shortVal += p.currentValue || 0
+      const v = p.currentValue || 0
+      if (p.isLong) longVal += v; else shortVal += v
+
+      const S = p.stockPrice
+      if (!(S > 0) || !(p.strike > 0)) { unknown += 1; continue }
+      const itm = p.optionType === 'put' ? S < p.strike : S > p.strike
+      if (p.isLong) { if (itm) longItm += v; else longOtm += v }
+      else { if (itm) shortItm += v; else shortOtm += v }
     }
-    return { list, longVal, shortVal, priced, unpriced, contracts }
+    return { list, longVal, shortVal, priced, unpriced, contracts,
+             longOtm, shortOtm, longItm, shortItm, unknown }
   }, [openPos, today, weekEnd])
 
   // Space-separated terms, all of which must match somewhere on the row — so
@@ -200,21 +214,33 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
           </span>
 
           <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}
-                title="What the bought contracts are worth now. If they expire worthless, this is what is lost.">
-            Longs worth{' '}
-            <strong style={{ fontSize: 14, color: isDark ? '#f1f5f9' : '#0f172a' }}>
-              {week.longVal.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+                title="Bought contracts currently OUT of the money. These are the ones actually heading for zero — this is what is lost if they finish there.">
+            Longs likely worthless{' '}
+            <strong style={{ fontSize: 14, color: '#ef4444' }}>
+              {week.longOtm.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
             </strong>
           </span>
 
           <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}
-                title="What it would cost to buy the sold contracts back now. If they expire worthless, this is what you stop owing and keep.">
-            Shorts cost{' '}
-            <strong style={{ fontSize: 14, color: isDark ? '#f1f5f9' : '#0f172a' }}>
-              {week.shortVal.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+                title="Sold contracts currently OUT of the money. If they finish there you stop owing this and keep the premium.">
+            Shorts likely kept{' '}
+            <strong style={{ fontSize: 14, color: '#22c55e' }}>
+              {week.shortOtm.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
             </strong>
-            {' '}to close
           </span>
+
+          <span style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8' }}
+                title="Contracts currently IN the money. They carry intrinsic value to expiry and get sold, exercised or assigned — they are not heading for zero, so they are kept out of the figures on the left.">
+            in the money: longs {week.longItm.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+            {' · '}shorts {week.shortItm.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+          </span>
+
+          {week.unknown > 0 && (
+            <span style={{ fontSize: 11, color: '#f59e0b' }}
+                  title="No underlying price for these, so they could not be classified either way.">
+              {week.unknown} unclassified
+            </span>
+          )}
 
           {week.unpriced > 0 && (
             <span style={{ fontSize: 11, color: '#f59e0b' }}
