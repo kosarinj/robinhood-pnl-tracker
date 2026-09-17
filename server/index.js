@@ -8022,8 +8022,15 @@ const watchMeta = new Map()       // ownerId -> { at, by, byUserId }
 // thousands between sessions and the panel would show yesterday all night.
 // These are Level 1 quotes only: they cost no depth subscription, so the
 // screener keeps its books.
-const stockMarks = new Map()      // `${ownerId}:${TICKER}` -> { last, bid, ask, at }
+const stockMarks = new Map()      // `${ownerId}:${TICKER}` -> { last, bid, ask, at, printedAt }
 const MARK_FRESH_MS = 15 * 60 * 1000
+// How old the PRINT itself may be. A recent push only proves the recorder is
+// alive: once the overnight session shuts, IBKR keeps returning the same last
+// price, and a mark that goes stale at 04:00 would still read as current at
+// 05:00. Beyond this the panel falls back to the price service on its own --
+// no session calendar, no holidays to maintain, and it covers a recorder left
+// running at home just as well as one that stopped.
+const MARK_PRINT_FRESH_MS = 20 * 60 * 1000
 
 /** The tickers worth marking: everything the Options YTD panel would show. */
 function marksWanted(ownerId) {
@@ -8043,11 +8050,33 @@ function marksWanted(ownerId) {
   return [...out].slice(0, 60)
 }
 
-/** A recent overnight mark for one ticker, or null when it is stale or absent. */
+/**
+ * Is the regular market shut? Marks are for the overnight session only.
+ *
+ * Pre-market opens at 04:00 New York and the after-hours session runs to 20:00,
+ * and through all of that the ordinary price service is live and authoritative.
+ * The recorder is one desktop that can be asleep, rebooted, or left at home --
+ * so outside 20:00–04:00 the panel uses what it always used, and a stopped
+ * recorder changes nothing anyone would notice.
+ */
+function inOvernightWindow(now = new Date()) {
+  const hour = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour: 'numeric', hour12: false,
+  }).format(now))
+  return hour >= 20 || hour < 4
+}
+
+/** A recent overnight mark for one ticker, or null when it should not be used. */
 function overnightMark(ownerId, ticker) {
+  if (!inOvernightWindow()) return null
   const m = stockMarks.get(`${ownerId}:${String(ticker).toUpperCase()}`)
   if (!m || !(m.last > 0)) return null
-  return (Date.now() - m.at) <= MARK_FRESH_MS ? m : null
+  // The push must be recent (the recorder is alive) AND the print must be
+  // recent (something actually traded). Without the second test a mark stays
+  // "fresh" all night on a name whose last trade was hours ago.
+  if (Date.now() - m.at > MARK_FRESH_MS) return null
+  if (m.printedAt > 0 && Date.now() - m.printedAt * 1000 > MARK_PRINT_FRESH_MS) return null
+  return m
 }
 
 // The screener. The recorder rotates through this list on whatever depth

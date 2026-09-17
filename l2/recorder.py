@@ -621,12 +621,29 @@ def main():
                 # worth pricing at its close rather than dropping out.
                 mark_rows = []
                 for sym, tkr in marks.items():
-                    last = _num(getattr(tkr, "last", None)) or _num(getattr(tkr, "close", None))
+                    last = _num(getattr(tkr, "last", None))
+                    # When the print's own clock is available, send it. A push
+                    # being recent says only that this process is alive: once
+                    # the overnight session shuts, IBKR keeps handing back the
+                    # same last price and it would read as current at 5am.
+                    printed = getattr(tkr, "time", None)
+                    printed_at = None
+                    try:
+                        if printed is not None:
+                            printed_at = _num(printed.timestamp())
+                    except Exception:
+                        printed_at = None
+                    if last is None:
+                        # Nothing has printed at all; the close is a fallback
+                        # price, never a fresh one, so it goes without a stamp.
+                        last = _num(getattr(tkr, "close", None))
+                        printed_at = None
                     if last is None:
                         continue
                     mark_rows.append({"ticker": sym, "last": last,
                                       "bid": _num(getattr(tkr, "bid", None)),
-                                      "ask": _num(getattr(tkr, "ask", None))})
+                                      "ask": _num(getattr(tkr, "ask", None)),
+                                      "printedAt": printed_at})
                 if mark_rows:
                     up.push_marks(mark_rows)
 
