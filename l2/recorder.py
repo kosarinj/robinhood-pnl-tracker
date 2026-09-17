@@ -514,8 +514,25 @@ def main():
                     else:
                         listed = [str(s).upper() for s in listed][:MAX_SYMBOLS]
                         listed_last = listed
-                        for s in [s for s in recorders if s not in listed]:
+                        dropped = [s for s in recorders if s not in listed]
+                        for s in dropped:
                             stop(s)
+                        # Handing a book back does not make it free. Swapping
+                        # the watch list for one name cancelled the old book and
+                        # asked for the new one in the same pass, and the
+                        # gateway answered 309 -- the same race the screener was
+                        # fixed for, left in the path that matters most.
+                        if dropped:
+                            released = True
+                        # And a watch symbol the gateway refused is sitting on a
+                        # subscription it never got: it reports nothing and
+                        # nothing retries it. Drop it so the next pass can ask
+                        # again, now that a slot has actually come free.
+                        for s in [s for s in recorders if errors.get(s, "").startswith("[309]")]:
+                            stop(s)
+                            errors.pop(s, None)
+                            released = True
+                            print(f"  ! {s} was refused a book; will ask again")
                         refused.intersection_update(listed)
                         # The watch list has first claim on the three books.
                         # Adding a ticker in the panel while the screener held

@@ -8210,8 +8210,13 @@ app.post('/api/orderflow/book', (req, res) => {
     symbols: watchLists.has(user.userId) ? watchLists.get(user.userId) : null,
     // Carried on the same reply so the screener needs no second request.
     scan: { list: scan.list, config: scan.config },
-    // Level 1 only, for pricing positions while the main session is shut.
-    marks: marksWanted(user.userId),
+    // Level 1 only, and only while the panel would actually use them.
+    //
+    // These are streaming subscriptions and they spend the same market-data
+    // lines as depth and tick-by-tick. Holding fifty of them through the
+    // trading day to feed a price nothing reads until 20:00 is how the watch
+    // list and the screener ended up being refused their books.
+    marks: inOvernightWindow() ? marksWanted(user.userId) : [],
   })
 })
 
