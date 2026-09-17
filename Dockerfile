@@ -10,10 +10,13 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies. The flag matches railway.toml's buildCommand: without
-# it the real build fails on peer-dependency conflicts, so a plain install here
-# would have been a Dockerfile that could not even finish building.
-RUN npm install --legacy-peer-deps
+# Install dependencies. Plain, and it must stay plain: --legacy-peer-deps stops
+# npm installing peer dependencies automatically, and react-is arrives only that
+# way -- recharts imports it, so the vite build dies with "Rollup failed to
+# resolve import react-is". railway.toml's buildCommand carries that flag, but
+# that command never runs: this Dockerfile is what Railway builds with, and
+# matching the two broke every deploy until it was put back.
+RUN npm install
 
 # Copy application code
 COPY . .
