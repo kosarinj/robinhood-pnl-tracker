@@ -386,6 +386,72 @@ export function summarizeTaxYear(base, year) {
 }
 
 // ---------------------------------------------------------------------------
+// The year's realized gains, per underlying.
+//
+// A single short-term total is impossible to sanity-check: $19k of gains on a
+// book that barely moved reads as wrong until you can see that it is forty
+// round trips in one name. Options are filed under the stock they are written
+// on -- an option's symbol IS its description, so the ticker is its first word
+// -- and kept in their own columns, because premium and share gains answer
+// different questions about the same ticker.
+//
+// The rows sum to shortTermGain and longTermGain exactly, which is the point:
+// the table has to add up to the headline or one of them is wrong.
+// ---------------------------------------------------------------------------
+export function summarizeBySymbol(summary) {
+  if (!summary) return []
+  const rows = new Map()
+  const rowFor = (ticker) => {
+    if (!rows.has(ticker)) {
+      rows.set(ticker, {
+        ticker, stockShort: 0, stockLong: 0, optionShort: 0, optionLong: 0,
+        short: 0, long: 0, stockLots: 0, optionLots: 0, washCount: 0,
+        proceeds: 0, costBasis: 0,
+      })
+    }
+    return rows.get(ticker)
+  }
+  const underlying = (sym) => {
+    const m = /^([A-Z.]+)\b/.exec(String(sym || '').toUpperCase())
+    return m ? m[1] : String(sym || '?')
+  }
+
+  const add = (list, kind) => {
+    for (const r of list || []) {
+      const x = rowFor(underlying(r.symbol))
+      x.proceeds += r.proceeds || 0
+      x.costBasis += r.costBasis || 0
+      if (kind === 'stock') x.stockLots++
+      else x.optionLots++
+      if (r.term === 'long') {
+        x.long += r.gain || 0
+        if (kind === 'stock') x.stockLong += r.gain || 0
+        else x.optionLong += r.gain || 0
+      } else {
+        x.short += r.gain || 0
+        if (kind === 'stock') x.stockShort += r.gain || 0
+        else x.optionShort += r.gain || 0
+      }
+      if (r.washSale) x.washCount++
+    }
+  }
+  add(summary.stockRealized, 'stock')
+  add(summary.optionsRealized, 'option')
+
+  return [...rows.values()]
+    .map(r => ({
+      ...r,
+      stockShort: round2(r.stockShort), stockLong: round2(r.stockLong),
+      optionShort: round2(r.optionShort), optionLong: round2(r.optionLong),
+      short: round2(r.short), long: round2(r.long),
+      proceeds: round2(r.proceeds), costBasis: round2(r.costBasis),
+    }))
+    // Biggest mover first, whichever way it moved -- a large loss is as much
+    // worth looking at as a large gain when a number looks wrong.
+    .sort((a, b) => Math.abs(b.short) - Math.abs(a.short))
+}
+
+// ---------------------------------------------------------------------------
 // Aggregate everything for a given tax year into a single summary object.
 // Convenience wrapper: does the heavy base pass then the per-year slice.
 // ---------------------------------------------------------------------------

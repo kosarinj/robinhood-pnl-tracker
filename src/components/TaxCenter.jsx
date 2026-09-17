@@ -1,8 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react'
+import {
+  BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine, LabelList,
+} from 'recharts'
 import { useTheme } from '../contexts/ThemeContext'
 import {
   buildTaxBase,
   summarizeTaxYear,
+  summarizeBySymbol,
   buildSummaryFromPnl,
   estimateTax,
   relevantForms,
@@ -695,6 +700,188 @@ export default function TaxCenter({ trades = [], dividendsAndInterest = [], pnlD
               <div style={{ fontSize: '11px', color: textMid, marginTop: '2px' }}>after {fmt(totalWithholding)} withheld</div>
             </div>
           </div>
+
+          {/* Where the realized total actually came from */}
+          {!fromPositions && (() => {
+            // A single short-term number cannot be sanity-checked. Per ticker it
+            // can: a figure that looks impossible is usually one name traded
+            // round and round, and that shows up here immediately.
+            const rows = summarizeBySymbol(summary)
+            if (rows.length === 0) return null
+            const tot = rows.reduce((a, r) => ({
+              short: a.short + r.short, long: a.long + r.long,
+              stockShort: a.stockShort + r.stockShort, optionShort: a.optionShort + r.optionShort,
+              proceeds: a.proceeds + r.proceeds,
+              lots: a.lots + r.stockLots + r.optionLots, wash: a.wash + r.washCount,
+            }), { short: 0, long: 0, stockShort: 0, optionShort: 0, proceeds: 0, lots: 0, wash: 0 })
+            const thc = {
+              padding: '6px 10px', fontSize: '11px', fontWeight: 600, color: textMid,
+              textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap',
+              borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+            }
+            const tdc = { padding: '5px 10px', fontSize: '13px', color: text, fontVariantNumeric: 'tabular-nums' }
+            const foot = { ...tdc, fontWeight: 700, borderTop: `2px solid ${isDark ? '#334155' : '#e2e8f0'}` }
+            return (
+              <div style={box}>
+                <h2 style={sectionTitle}>🧾 Realized by Ticker ({activeYear})</h2>
+                <div style={{ fontSize: '12px', color: textMid, marginBottom: '10px' }}>
+                  Options are filed under the stock they are written on. These rows add up to the
+                  short-term and long-term figures above — if a total looks wrong, the ticker
+                  responsible is in this table.
+                </div>
+                {(() => {
+                  // Gains right, losses left, off a single zero line. A pie was
+                  // the instinct, but a pie cannot draw a loss and would read
+                  // $19k as a whole rather than a net of both directions.
+                  const GAIN = '#15803d'
+                  const LOSS = '#dc2626'
+                  const ink = isDark ? '#e2e8f0' : '#0f172a'
+                  const grid = isDark ? '#334155' : '#e2e8f0'
+                  const top = rows.slice(0, 12)
+                  const rest = rows.slice(12)
+                  const data = [
+                    ...top.map((r) => ({ ticker: r.ticker, value: r.short, row: r })),
+                    ...(rest.length
+                      ? [{
+                          ticker: `Other (${rest.length})`,
+                          value: Math.round(rest.reduce((s, r) => s + r.short, 0) * 100) / 100,
+                          row: null,
+                        }]
+                      : []),
+                  ].reverse() // Recharts draws the first row at the bottom
+                  if (data.every((d) => !d.value)) return null
+                  const tip = (props) => {
+                    const { x, y, width, height, value } = props
+                    const neg = value < 0
+                    return (
+                      <text
+                        x={neg ? x - 6 : x + width + 6}
+                        y={y + height / 2}
+                        textAnchor={neg ? 'end' : 'start'}
+                        dominantBaseline="central"
+                        fontSize={11}
+                        fill={ink}
+                      >
+                        {fmt(value)}
+                      </text>
+                    )
+                  }
+                  return (
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', gap: '14px', alignItems: 'center', fontSize: '11px', color: textMid, marginBottom: '6px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 2, background: GAIN }} /> gain
+                        </span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 2, background: LOSS }} /> loss
+                        </span>
+                        <span>short-term realized, by ticker</span>
+                      </div>
+                      <div style={{ width: '100%', height: `${Math.max(160, data.length * 28 + 40)}px` }}>
+                        <ResponsiveContainer>
+                          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 64, bottom: 4, left: 8 }}>
+                            <CartesianGrid horizontal={false} stroke={grid} strokeWidth={1} />
+                            <XAxis type="number" tickFormatter={(v) => fmt(v)} tick={{ fontSize: 10, fill: textMid }} stroke={grid} />
+                            <YAxis type="category" dataKey="ticker" width={62} tick={{ fontSize: 11, fill: ink }} stroke={grid} />
+                            <Tooltip
+                              cursor={{ fill: isDark ? 'rgba(148,163,184,0.08)' : 'rgba(15,23,42,0.05)' }}
+                              content={({ active, payload }) => {
+                                if (!active || !payload?.length) return null
+                                const d = payload[0].payload
+                                const r = d.row
+                                return (
+                                  <div style={{
+                                    background: isDark ? '#0f172a' : '#fff', border: `1px solid ${grid}`,
+                                    borderRadius: '6px', padding: '6px 8px', fontSize: '12px', color: textMid,
+                                  }}>
+                                    <div style={{ fontWeight: 700, color: ink }}>{d.ticker} {fmt(d.value)}</div>
+                                    {r && (
+                                      <>
+                                        <div>shares {fmt(r.stockShort)} · options {fmt(r.optionShort)}</div>
+                                        <div>{r.stockLots + r.optionLots} lots · proceeds {fmt(r.proceeds)}</div>
+                                        {r.long !== 0 && <div>long-term {fmt(r.long)}</div>}
+                                        {r.washCount > 0 && <div style={{ color: '#f59e0b' }}>{r.washCount} wash-sale flagged</div>}
+                                      </>
+                                    )}
+                                  </div>
+                                )
+                              }}
+                            />
+                            <ReferenceLine x={0} stroke={ink} strokeWidth={1} />
+                            <Bar dataKey="value" barSize={16} radius={[4, 4, 4, 4]} isAnimationActive={false}>
+                              {data.map((d, i) => (
+                                <Cell key={i} fill={d.value >= 0 ? GAIN : LOSS} />
+                              ))}
+                              <LabelList dataKey="value" content={tip} />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                <div style={{ overflowX: 'auto', maxHeight: '460px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...thc, textAlign: 'left' }}>Ticker</th>
+                        <th style={{ ...thc, textAlign: 'right' }}>Short-term</th>
+                        <th style={{ ...thc, textAlign: 'right' }}>— shares</th>
+                        <th style={{ ...thc, textAlign: 'right' }}>— options</th>
+                        <th style={{ ...thc, textAlign: 'right' }}>Long-term</th>
+                        <th style={{ ...thc, textAlign: 'right' }}>Lots</th>
+                        <th style={{ ...thc, textAlign: 'right' }}>Proceeds</th>
+                        <th style={{ ...thc, textAlign: 'right' }}>Wash</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r) => (
+                        <tr key={r.ticker}>
+                          <td style={{ ...tdc, fontWeight: 600 }}>{r.ticker}</td>
+                          <td style={{ ...tdc, textAlign: 'right', fontWeight: 700, color: gain(r.short) }}>{fmt(r.short)}</td>
+                          <td style={{ ...tdc, textAlign: 'right', color: r.stockShort ? gain(r.stockShort) : textMid }}>
+                            {r.stockShort ? fmt(r.stockShort) : '—'}
+                          </td>
+                          <td style={{ ...tdc, textAlign: 'right', color: r.optionShort ? gain(r.optionShort) : textMid }}>
+                            {r.optionShort ? fmt(r.optionShort) : '—'}
+                          </td>
+                          <td style={{ ...tdc, textAlign: 'right', color: r.long ? gain(r.long) : textMid }}>
+                            {r.long ? fmt(r.long) : '—'}
+                          </td>
+                          <td style={{ ...tdc, textAlign: 'right', color: textMid, fontSize: '12px' }}>
+                            {r.stockLots + r.optionLots}
+                            {r.optionLots > 0 && <span style={{ fontSize: '10px' }}> ({r.optionLots} opt)</span>}
+                          </td>
+                          <td style={{ ...tdc, textAlign: 'right', color: textMid }}>{fmt(r.proceeds)}</td>
+                          <td style={{ ...tdc, textAlign: 'right', color: r.washCount ? '#f59e0b' : textMid, fontSize: '12px' }}>
+                            {r.washCount || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td style={foot}>Total</td>
+                        <td style={{ ...foot, textAlign: 'right', color: gain(tot.short) }}>{fmt(tot.short)}</td>
+                        <td style={{ ...foot, textAlign: 'right', color: gain(tot.stockShort) }}>{fmt(tot.stockShort)}</td>
+                        <td style={{ ...foot, textAlign: 'right', color: gain(tot.optionShort) }}>{fmt(tot.optionShort)}</td>
+                        <td style={{ ...foot, textAlign: 'right', color: gain(tot.long) }}>{fmt(tot.long)}</td>
+                        <td style={{ ...foot, textAlign: 'right', color: textMid }}>{tot.lots}</td>
+                        <td style={{ ...foot, textAlign: 'right', color: textMid }}>{fmt(tot.proceeds)}</td>
+                        <td style={{ ...foot, textAlign: 'right', color: textMid }}>{tot.wash || '—'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                {summary.unreconciled?.length > 0 && (
+                  <div style={{ fontSize: '12px', color: '#f59e0b', marginTop: '10px' }}>
+                    {summary.unreconciled.length} sale{summary.unreconciled.length === 1 ? '' : 's'} with no
+                    matching buy at the same broker ({fmt(summary.unreconciledProceeds)} of proceeds) are NOT in
+                    these totals — usually shares transferred in, whose cost basis lives in the other broker's history.
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Tax planning + estimate */}
           <div style={box}>
