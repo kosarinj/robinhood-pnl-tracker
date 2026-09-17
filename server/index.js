@@ -8091,6 +8091,27 @@ const scanState = new Map()       // ownerId -> { list, config, results: Map(tic
 // redeploy made the screener feel broken. That part is kept in app_settings.
 const SCAN_LIST_KEY = 'orderflow_scan_list'
 const SCAN_CONFIG_KEY = 'orderflow_scan_config'
+// The watch list deserves the same treatment as the scan list. It lived in
+// memory only, so every redeploy dropped it -- the recorder then found nothing
+// on startup and fell back to its hardcoded pair, silently replacing whatever
+// was being watched. Deploys are frequent enough that this happened twice in a
+// day.
+const WATCH_LIST_KEY = 'orderflow_watch_list'
+let watchListsLoaded = false
+
+function loadWatchLists() {
+  if (watchListsLoaded) return
+  watchListsLoaded = true
+  try {
+    const saved = databaseService.getAppSettings()?.[WATCH_LIST_KEY]
+    if (saved) {
+      const { owner, symbols } = JSON.parse(saved)
+      if (Array.isArray(symbols) && symbols.length) watchLists.set(Number(owner) || 1, cleanSymbols(symbols))
+    }
+  } catch (e) {
+    console.error('watch list load:', e.message)
+  }
+}
 
 function scanFor(ownerId) {
   let s = scanState.get(ownerId)
@@ -8147,6 +8168,7 @@ function ladderRows(rows) {
 }
 
 function watchState(userId, viewerId = null) {
+  loadWatchLists()
   const st = recorderStatus.get(userId)
   const meta = watchMeta.get(userId)
   return {
@@ -8205,6 +8227,7 @@ app.post('/api/orderflow/book', (req, res) => {
   recorderStatus.set(user.userId, { at: now, active: cleanSymbols(status.active), errors })
   // null rather than [] when nothing has been set: after a redeploy the server
   // has forgotten the list, and the recorder, which still knows it, puts it back.
+  loadWatchLists()
   const scan = scanFor(user.userId)
   res.json({
     symbols: watchLists.has(user.userId) ? watchLists.get(user.userId) : null,
@@ -8237,6 +8260,8 @@ app.put('/api/orderflow/watch', (req, res) => {
   }
   const owner = orderFlowOwner()
   watchLists.set(owner, symbols)
+  loadWatchLists()   // mark as loaded so a later hydration cannot overwrite this
+  databaseService.setAppSetting(WATCH_LIST_KEY, JSON.stringify({ owner, symbols }))
   // A browser session carries a username; the recorder's token does not.
   watchMeta.set(owner, {
     at: Date.now(),
