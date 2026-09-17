@@ -7125,6 +7125,46 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
 
 // Debug: show raw stock trades from DB so we can diagnose position query issues
 /**
+ * GET /api/debug-tax-check?year=2026 — the Tax tab's own arithmetic, server-side.
+ *
+ * The panel computes this in the browser from the trades it was handed, so when
+ * it disagrees with a fresh CSV of the same account by twenty thousand dollars,
+ * there is no way to tell whether the math differs or the rows do. This runs the
+ * SAME functions the panel uses over the rows the database actually holds, so
+ * the two can be compared ticker by ticker instead of argued about.
+ */
+app.get('/api/debug-tax-check', async (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  try {
+    const { buildTaxBase, summarizeTaxYear, summarizeBySymbol } =
+      await import('../src/utils/taxCalculator.js')
+    const year = Number(req.query.year) || new Date().getFullYear()
+    const owner = user.username ? user.userId : orderFlowOwner()
+    const trades = databaseService.getAllTradesForUser(owner)
+    const summary = summarizeTaxYear(buildTaxBase(trades, []), year)
+    const sum = (rows) => Math.round(rows.reduce((a, r) => a + (r.gain || 0), 0) * 100) / 100
+    res.json({
+      year,
+      tradesFed: trades.length,
+      stockRows: trades.filter(t => !t.isOption).length,
+      optionRows: trades.filter(t => t.isOption).length,
+      shortTermGain: summary.shortTermGain,
+      longTermGain: summary.longTermGain,
+      stockRealized: sum(summary.stockRealized),
+      optionsRealized: sum(summary.optionsRealized),
+      shortTermCount: summary.shortTermCount,
+      unreconciled: summary.unreconciled.length,
+      unreconciledProceeds: summary.unreconciledProceeds,
+      washSaleDisallowed: summary.washSaleDisallowed,
+      byTicker: summarizeBySymbol(summary).slice(0, 25),
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/debug-trade-sources — what the trades table actually holds.
  *
  * Counts per broker and per upload, plus identical rows. A tax figure computed
