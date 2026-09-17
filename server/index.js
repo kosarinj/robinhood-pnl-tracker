@@ -7132,9 +7132,14 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
  * panel and a fresh CSV export disagree by twenty thousand dollars, the first
  * question is whether the table holds trades the export does not.
  */
-app.get('/api/debug-trade-sources', requireAuth, (req, res) => {
+// Readable with the recorder's token as well as a browser session: it returns
+// counts, and the diagnosis stalls badly when every question about what the
+// table holds has to be relayed by hand.
+app.get('/api/debug-trade-sources', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
   try {
-    res.json(databaseService.tradeSources(req.user.userId))
+    res.json(databaseService.tradeSources(user.username ? user.userId : orderFlowOwner()))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
