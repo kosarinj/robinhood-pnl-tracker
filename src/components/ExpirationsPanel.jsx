@@ -49,6 +49,7 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
   const [openKey, setOpenKey] = useState(null)
   const [hideExercised, setHideExercised] = useState(true)
   const [query, setQuery] = useState('')
+  const [openPos, setOpenPos] = useState(null)   // open contracts, for the week block
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -60,6 +61,45 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
       .then(d => { if (d.error) throw new Error(d.error); setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [broker, startDate])
+
+  // Open contracts expiring this week, from the open-positions endpoint rather
+  // than this panel's own: /api/expirations is settled history, and the
+  // question here is about contracts that have not settled yet.
+  useEffect(() => {
+    const qs = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+    fetch(`/api/options-pnl/open-positions${qs}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setOpenPos(d?.positions || []))
+      .catch(() => setOpenPos([]))      // the week block just stays hidden
+  }, [broker])
+
+  const today = new Date().toLocaleDateString('en-CA')
+  // Through the coming Friday. On a Saturday that means next week's, not
+  // yesterday's — an expiry window that has already passed is no window at all.
+  const weekEnd = useMemo(() => {
+    const d = new Date()
+    const day = d.getDay()
+    d.setDate(d.getDate() + (day === 6 ? 6 : day === 0 ? 5 : 5 - day))
+    return d.toLocaleDateString('en-CA')
+  }, [])
+
+  /**
+   * Longs and shorts are kept apart because expiring worthless means opposite
+   * things for them: a long's current value is what you LOSE if it dies, a
+   * short's is what you stop owing and therefore KEEP. One combined number
+   * would net those against each other and mean nothing.
+   */
+  const week = useMemo(() => {
+    const list = (openPos || []).filter(p => p.expiry >= today && p.expiry <= weekEnd)
+    let longVal = 0, shortVal = 0, priced = 0, unpriced = 0, contracts = 0
+    for (const p of list) {
+      contracts += Math.abs(p.openContracts || 0)
+      if (p.markSource) priced += 1; else unpriced += 1
+      if (p.isLong) longVal += p.currentValue || 0
+      else shortVal += p.currentValue || 0
+    }
+    return { list, longVal, shortVal, priced, unpriced, contracts }
+  }, [openPos, today, weekEnd])
 
   // Space-separated terms, all of which must match somewhere on the row — so
   // "pltr put" narrows to PLTR puts rather than everything mentioning either.
@@ -145,6 +185,46 @@ export default function ExpirationsPanel({ broker = 'all', startDate = '' }) {
 
   return (
     <div style={card}>
+      {week.list.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap',
+          padding: '10px 12px', marginBottom: 12, borderRadius: 8,
+          background: isDark ? '#0f172a' : '#f8fafc',
+          border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: isDark ? '#f1f5f9' : '#0f172a' }}>
+            Expiring by {fmtDate(weekEnd)}
+          </span>
+          <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
+            {week.list.length} position{week.list.length === 1 ? '' : 's'} · {week.contracts} contract{week.contracts === 1 ? '' : 's'}
+          </span>
+
+          <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}
+                title="What the bought contracts are worth now. If they expire worthless, this is what is lost.">
+            Longs worth{' '}
+            <strong style={{ fontSize: 14, color: isDark ? '#f1f5f9' : '#0f172a' }}>
+              {week.longVal.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+            </strong>
+          </span>
+
+          <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}
+                title="What it would cost to buy the sold contracts back now. If they expire worthless, this is what you stop owing and keep.">
+            Shorts cost{' '}
+            <strong style={{ fontSize: 14, color: isDark ? '#f1f5f9' : '#0f172a' }}>
+              {week.shortVal.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
+            </strong>
+            {' '}to close
+          </span>
+
+          {week.unpriced > 0 && (
+            <span style={{ fontSize: 11, color: '#f59e0b' }}
+                  title="These contracts had no usable price, so they contribute nothing to the figures beside them — the totals are a part, not the whole.">
+              {week.unpriced} of {week.priced + week.unpriced} unpriced
+            </span>
+          )}
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <h3 style={{ margin: 0, fontSize: 15, color: isDark ? '#f1f5f9' : '#0f172a' }}>Expirations</h3>
         <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
