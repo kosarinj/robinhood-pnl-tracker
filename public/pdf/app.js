@@ -36,7 +36,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf/vendor/pdfjs/pdf.worker.min.mjs'
 
 // Bumped whenever this file changes, and shown in the toolbar. "Still broken"
 // and "still running yesterday's code" look identical otherwise.
-const BUILD = 'b21'
+const BUILD = 'b22'
 
 const $ = (id) => document.getElementById(id)
 const state = {
@@ -877,13 +877,36 @@ async function canWrite(handle) {
  *
  * Returns the file name written, or null if the person cancelled.
  */
-async function download(bytes) {
+/** The name a save defaults to. */
+function defaultSaveName() {
+  return state.name.replace(/\.pdf$/i, '') + '-filled.pdf'
+}
+
+/**
+ * Keep a typed name a file name, and keep it a PDF.
+ *
+ * Safari has no save dialog, so the folder is not ours to choose -- but the
+ * name is, and being able to name the file is most of what "Save as" means.
+ */
+function ensurePdf(name) {
+  const clean = String(name).trim().replace(/[\\/:*?"<>|]/g, '-').replace(/^\.+/, '')
+  if (!clean) return defaultSaveName()
+  return /\.pdf$/i.test(clean) ? clean : clean + '.pdf'
+}
+
+/** Where the last save went, so the toast can say so rather than imply a choice. */
+function savedWhere() {
+  return state.lastSaveVia === 'download' ? ' to your Downloads folder' : ''
+}
+
+async function download(bytes, preferredName) {
   if (state.saveHandle) {
     try {
       if (await canWrite(state.saveHandle)) {
         const w = await state.saveHandle.createWritable()
         await w.write(bytes)
         await w.close()
+        state.lastSaveVia = 'handle'
         return state.saveHandle.name
       }
     } catch (e) {
@@ -899,6 +922,7 @@ async function download(bytes) {
       const w = await handle.createWritable()
       await w.write(bytes)
       await w.close()
+      state.lastSaveVia = 'handle'
       return handle.name
     } catch (e) {
       if (e.name === 'AbortError') return null
@@ -914,7 +938,7 @@ async function download(bytes) {
   const a = document.createElement('a')
   const href = URL.createObjectURL(blob)
   a.href = href
-  a.download = state.name.replace(/\.pdf$/i, '') + '-filled.pdf'
+  a.download = preferredName || defaultSaveName()
   // Put it IN the document before clicking. A detached anchor is ignored
   // outright by Firefox and cancelled by Chrome in some contexts -- and this is
   // the path every browser without a save dialog takes, Safari included, so it
@@ -923,6 +947,7 @@ async function download(bytes) {
   document.body.appendChild(a)
   a.click()
   setTimeout(() => { a.remove(); URL.revokeObjectURL(href) }, 4000)
+  state.lastSaveVia = 'download'
   return a.download
 }
 
@@ -1000,7 +1025,7 @@ async function saveByRerender() {
   return out.save()
 }
 
-async function save() {
+async function save(chosenName) {
   if (!state.bytes) return
   $('save').disabled = true
 
@@ -1090,9 +1115,9 @@ async function save() {
     }
 
     const outBytes = await doc.save()
-    const saved = await download(outBytes)
+    const saved = await download(outBytes, chosenName)
     if (saved) await rememberSave(saved, outBytes.length)
-    toast(saved ? `Saved ${saved}` : 'Save cancelled')
+    toast(saved ? `Saved ${saved}${savedWhere()}` : 'Save cancelled')
   } catch (e) {
     // The direct rewrite failed. Rather than hand back nothing, rebuild the
     // document from the pages pdf.js has already rendered -- see saveByRerender().
@@ -1100,15 +1125,15 @@ async function save() {
     try {
       toast('This PDF cannot be rewritten directly — saving a flattened copy…', 5000)
       const outBytes = await saveByRerender()
-      const saved = await download(outBytes)
+      const saved = await download(outBytes, chosenName)
       if (!saved) { toast('Save cancelled'); return }
       // The source kept here is the untouched original, so a later edit
       // re-flattens from it rather than flattening an already-flat page again.
       await rememberSave(saved, outBytes.length)
       const lostFields = state.fields.some(f => f.value)
       toast(lostFields
-        ? `Saved ${saved}, flattened. Values typed in the Form fields panel are not in it — type those on the page instead.`
-        : `Saved ${saved} as a flattened copy (this PDF could not be edited in place).`, 8000)
+        ? `Saved ${saved}${savedWhere()}, flattened. Values typed in the Form fields panel are not in it — type those on the page instead.`
+        : `Saved ${saved}${savedWhere()} as a flattened copy (this PDF could not be edited in place).`, 8000)
     } catch (e2) {
       // Both routes failed. Say so on screen, with BOTH reasons: the second one
       // is the useful one, and it was previously only in the console. Mention
@@ -1132,7 +1157,16 @@ $('toolWhite').addEventListener('click', () => setTool('white'))
 $('toolCheck').addEventListener('click', () => setTool('check'))
 $('save').addEventListener('click', save)
 // Forget where the last save went, so the picker asks for a new file.
-$('saveAs').addEventListener('click', () => { state.saveHandle = null; save() })
+$('saveAs').addEventListener('click', () => {
+  // Where a save dialog exists, forget the last file so the dialog asks again.
+  if (window.showSaveFilePicker) { state.saveHandle = null; return save() }
+  // Where one does not -- Safari, Firefox -- the folder is fixed and only the
+  // name is ours. Asking for it is the honest remainder of "Save as", and it
+  // also sidesteps the browser's -1, -2 numbering of repeated downloads.
+  const name = prompt('Save as (this browser always saves to your Downloads folder):', defaultSaveName())
+  if (name === null) return toast('Save cancelled')
+  save(ensurePdf(name))
+})
 $('sideToggle').addEventListener('click', () => $('side').classList.toggle('hidden'))
 $('zoomIn').addEventListener('click', async () => { state.zoom = Math.min(3, state.zoom + 0.15); if (state.doc) await renderAll() })
 $('zoomOut').addEventListener('click', async () => { state.zoom = Math.max(0.4, state.zoom - 0.15); if (state.doc) await renderAll() })
@@ -1209,6 +1243,13 @@ window.pdfEditorRecover = async (key) => {
   renderItems()
   toast(`Recovered ${state.marks.length} box${state.marks.length === 1 ? '' : 'es'} — save this to a NEW file`, 9000)
   return `recovered ${state.marks.length} boxes onto ${state.name}`
+}
+
+// Say what the button can actually do here, rather than promising a dialog
+// this browser has no way to show.
+if (!window.showSaveFilePicker) {
+  $('saveAs').title = 'This browser has no save dialog — you choose the name, and it goes to your Downloads folder'
+  $('save').title = 'Saves to your Downloads folder'
 }
 
 $('build').textContent = BUILD
