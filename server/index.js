@@ -7158,6 +7158,34 @@ app.get('/api/debug-tax-check', async (req, res) => {
       unreconciledProceeds: summary.unreconciledProceeds,
       washSaleDisallowed: summary.washSaleDisallowed,
       byTicker: summarizeBySymbol(summary).slice(0, 25),
+      // ?ticker=RDDT adds the records behind one name. A per-ticker total that
+      // disagrees with a broker's own figure is only arguable contract by
+      // contract: which legs were counted, what they netted, and when the
+      // engine decided the contract closed.
+      detail: (() => {
+        const tk = String(req.query.ticker || '').toUpperCase()
+        if (!tk) return null
+        const under = (s) => (/^([A-Z.]+)\b/.exec(String(s).toUpperCase()) || [, ''])[1]
+        const opts = summary.optionsRealized
+          .filter(r => under(r.symbol) === tk)
+          .sort((a, b) => Math.abs(b.gain) - Math.abs(a.gain))
+          .slice(0, 60)
+          .map(r => ({
+            contract: r.symbol, gain: r.gain, proceeds: r.proceeds, costBasis: r.costBasis,
+            opened: r.buyDate?.toISOString?.().slice(0, 10), closed: r.sellDate?.toISOString?.().slice(0, 10),
+            holdingDays: r.holdingDays,
+          }))
+        const legs = trades
+          .filter(t => t.isOption && under(t.symbol) === tk)
+          .map(t => ({ d: String(t.date).slice(0, 10), code: t.transCode, contract: t.symbol, amount: t.amount, contracts: t.contracts }))
+        return {
+          ticker: tk,
+          optionContracts: opts,
+          optionLegRows: legs.length,
+          optionLegCodes: legs.reduce((a, l) => { a[l.code] = (a[l.code] || 0) + 1; return a }, {}),
+          stockLots: summary.stockRealized.filter(r => r.symbol === tk).length,
+        }
+      })(),
     })
   } catch (e) {
     res.status(500).json({ error: e.message })
