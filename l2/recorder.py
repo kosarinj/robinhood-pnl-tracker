@@ -358,7 +358,8 @@ class Scan:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("symbols", nargs="+")
+    # Optional: with none given the recorder resumes the panel's watch list.
+    ap.add_argument("symbols", nargs="*")
     ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--port", type=int, default=4001)
     ap.add_argument("--client-id", type=int, default=79)
@@ -456,9 +457,22 @@ def main():
                 print(f"  {datetime.now():%H:%M:%S} still no gateway ({type(e).__name__})")
 
     wanted = list(dict.fromkeys(s.upper() for s in args.symbols))[:MAX_SYMBOLS]
+    if not wanted:
+        # Nothing asked for: resume whatever the panel is watching. Starting
+        # from a hardcoded pair meant the shortcut silently replaced a list
+        # someone had chosen -- and a symbol vanishing from the panel because
+        # the recorder restarted is indistinguishable from a bug.
+        first = up.push_books([], {"active": [], "errors": {}})
+        wanted = [str(s).upper() for s in ((first or {}).get("symbols") or [])][:MAX_SYMBOLS]
+        if wanted:
+            print(f"Resuming the panel's watch list: {', '.join(wanted)}")
+    if not wanted:
+        # Nothing given and nothing stored -- a first run.
+        wanted = ["MRVL", "NVDA"]
     for s in wanted:
         start(s)
-    # The command line sets the morning's list; the panel edits it from here.
+    # Explicit symbols replace the stored list; an adopted one is put back
+    # unchanged, which also re-seeds a server that has forgotten it.
     up.put_watch(wanted)
     listed_last = wanted
 

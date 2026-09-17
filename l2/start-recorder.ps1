@@ -4,8 +4,8 @@
 # match ORDERFLOW_TOKEN on the main Railway service, or every push is a 401.
 #
 # Usage:
-#   start-recorder.ps1                 # MRVL NVDA
-#   start-recorder.ps1 AMD TSLA        # other names (IBKR allows 3 at once)
+#   start-recorder.ps1                 # resume whatever the panel is watching
+#   start-recorder.ps1 AMD TSLA        # watch these instead (IBKR allows 3 at once)
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -17,7 +17,10 @@ $Host.UI.RawUI.WindowTitle = 'Order flow recorder'
 # which unrolls a one-element array back to a bare string -- and splatting a
 # string spreads its CHARACTERS, so one ticker became P, L, T, R and the
 # recorder spent an afternoon watching AT&T.
-$symbols = @('MRVL', 'NVDA')
+# Empty means "resume the panel's list": the recorder asks the server what is
+# being watched and adopts it, so double-clicking the shortcut after lunch no
+# longer replaces the watch list with a hardcoded pair.
+$symbols = @()
 if ($args.Count) { $symbols = @($args) }
 
 $tokenFile = Join-Path $here '.orderflow_token'
