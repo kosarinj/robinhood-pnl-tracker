@@ -1684,6 +1684,14 @@ export class DatabaseService {
           description: row.description,
           isBuy: row.is_buy === 1,
           isOption: row.is_option === 1,
+          // Absent until now, and expensive for it. The tax engine counts an
+          // option contract as closed when it has both sides OR an expiry; with
+          // this undefined, every contract that ended by expiring was skipped.
+          // Those are overwhelmingly bought options that expired worthless --
+          // pure losses -- so 446 contracts vanished and the survivors skewed
+          // positive: the Tax tab read +18.7k where the same code over the same
+          // account's CSV reads -6.9k.
+          isExpiry: ['OEXP', 'OASGN', 'OEXC'].includes(row.trans_code),
           contracts: row.contracts || 1,
           broker: row.broker || 'robinhood',
           splitAdjusted: f !== 1 ? f : undefined,
