@@ -7197,8 +7197,24 @@ app.get('/api/debug-tax-check', async (req, res) => {
         const legs = trades
           .filter(t => t.isOption && under(t.symbol) === tk)
           .map(t => ({ d: String(t.date).slice(0, 10), code: t.transCode, contract: t.symbol, amount: t.amount, contracts: t.contracts }))
+        // Contracts counted with only one side. computeOptionsRealized books a
+        // contract the moment it has an expiry, so one whose opening buy is not
+        // in the table -- the data starts 2025-06-23, the trading did not --
+        // reads as pure profit. Stock guards against exactly this with
+        // `unreconciled`; options have no such guard, and this is where that
+        // shows up.
+        const all = summary.optionsRealized.filter(r => under(r.symbol) === tk)
+        const noCost = all.filter(r => !(r.costBasis > 0))
+        const noProceeds = all.filter(r => !(r.proceeds > 0))
+        const sum = (rows) => Math.round(rows.reduce((a, r) => a + r.gain, 0) * 100) / 100
         return {
           ticker: tk,
+          optionTotal: sum(all),
+          contractsCounted: all.length,
+          oneSided: {
+            proceedsOnly: { n: noCost.length, gain: sum(noCost) },
+            costOnly: { n: noProceeds.length, gain: sum(noProceeds) },
+          },
           optionContracts: opts,
           optionLegRows: legs.length,
           optionLegCodes: legs.reduce((a, l) => { a[l.code] = (a[l.code] || 0) + 1; return a }, {}),
