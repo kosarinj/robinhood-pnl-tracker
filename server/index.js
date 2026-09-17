@@ -5778,7 +5778,16 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
 
     // Use priceService.fetchPrices — handles Polygon grouped (if key set) or Yahoo Finance
     const prices = await priceService.fetchPrices(symbols)
-    console.log(`  prices: ${Object.values(prices).filter(p => p > 0).length}/${symbols.length} non-zero`)
+    // A fresh IBKR mark outranks the price service, which stops at the 16:00
+    // close. This endpoint is the FIRST source the positions panel consults --
+    // ahead of the YTD row's own price -- so wiring the marks in there alone
+    // left them permanently outvoted.
+    let overnight = 0
+    for (const sym of symbols) {
+      const m = overnightMark(userId, sym) || overnightMark(orderFlowOwner(), sym)
+      if (m) { prices[sym] = m.last; overnight++ }
+    }
+    console.log(`  prices: ${Object.values(prices).filter(p => p > 0).length}/${symbols.length} non-zero${overnight ? `, ${overnight} from overnight marks` : ''}`)
 
     const holdings = symbols.map(sym => {
       const d = stockData[sym]
@@ -7359,6 +7368,13 @@ app.get('/api/current-prices', requireAuth, async (req, res) => {
 
     // Force fresh fetch from Yahoo Finance bulk quote endpoint (bypasses 4-min cache)
     const prices = await priceService.fetchPrices(symbols)
+    // Same override as the positions endpoint: the recorder's IBKR mark is a
+    // live print, the service's number is a cache that stopped at the close.
+    // The previous close is left alone -- it is the comparison, not the price.
+    for (const sym of symbols) {
+      const m = overnightMark(req.user.userId, sym) || overnightMark(orderFlowOwner(), sym)
+      if (m) prices[sym] = m.last
+    }
     const previousClose = priceService.getPreviousClose(symbols)
     const nonZero = Object.values(prices).filter(p => p > 0).length
     console.log(`/api/current-prices: fetched ${nonZero}/${symbols.length} prices`)
