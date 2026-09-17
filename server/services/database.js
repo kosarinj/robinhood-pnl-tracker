@@ -407,6 +407,41 @@ try {
   console.error('daily_price_snapshots migration error:', e.message)
 }
 
+// What the Net + Open figure actually said, when it said it.
+//
+// The number moves when legs drop in and out of being priceable, not only when
+// the market moves — so "it was 3,800 this morning and 200 this afternoon" had
+// no way of being checked. This records the figure the panel displayed, its
+// parts, and how many option legs could not be priced at the time, because a
+// total is only as meaningful as the share of the book behind it.
+//
+// Rows are append-only: the point is the history, so nothing is overwritten.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS net_open_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      captured_at INTEGER NOT NULL,
+      asof_date TEXT NOT NULL,
+      broker TEXT NOT NULL DEFAULT 'all',
+      period_start TEXT,
+      net REAL,
+      open_unrealized REAL,
+      net_plus_open REAL,
+      total_realized REAL,
+      stock_pnl REAL,
+      day_pnl REAL,
+      legs_priced INTEGER,
+      legs_unpriced INTEGER,
+      tickers INTEGER
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_net_open_snapshots_user_time
+    ON net_open_snapshots(user_id, captured_at DESC)`)
+} catch (e) {
+  console.error('net_open_snapshots migration error:', e.message)
+}
+
 // Migration: short_call_entries — tracks underlying close price when a short call was sold
 try {
   db.exec(`
@@ -3539,6 +3574,34 @@ export class DatabaseService {
   // Returns list of dates (desc) that have daily price snapshots for a given user
   getDailySnapshotDates(userId, limit = 30) {
     return db.prepare(`SELECT DISTINCT price_date FROM daily_price_snapshots WHERE user_id = ? ORDER BY price_date DESC LIMIT ?`).all(userId, limit).map(r => r.price_date)
+  }
+
+  // Record what Net + Open said at a moment, with the completeness that went
+  // with it. Append-only — see the table's comment.
+  saveNetOpenSnapshot(userId, s) {
+    db.prepare(`
+      INSERT INTO net_open_snapshots
+        (user_id, captured_at, asof_date, broker, period_start,
+         net, open_unrealized, net_plus_open, total_realized, stock_pnl, day_pnl,
+         legs_priced, legs_unpriced, tickers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      userId, Math.floor(Date.now() / 1000), s.asofDate, s.broker || 'all', s.periodStart || null,
+      s.net ?? null, s.openUnrealized ?? null, s.netPlusOpen ?? null,
+      s.totalRealized ?? null, s.stockPnl ?? null, s.dayPnl ?? null,
+      s.legsPriced ?? null, s.legsUnpriced ?? null, s.tickers ?? null,
+    )
+  }
+
+  // Newest first. `sinceDays` bounds the window so the history stays readable.
+  getNetOpenSnapshots(userId, { broker = null, sinceDays = 30, limit = 500 } = {}) {
+    const cutoff = Math.floor(Date.now() / 1000) - sinceDays * 86400
+    const params = [userId, cutoff]
+    let sql = `SELECT * FROM net_open_snapshots WHERE user_id = ? AND captured_at >= ?`
+    if (broker && broker !== 'all') { sql += ` AND broker = ?`; params.push(broker) }
+    sql += ` ORDER BY captured_at DESC LIMIT ?`
+    params.push(limit)
+    return db.prepare(sql).all(...params)
   }
 
   /**

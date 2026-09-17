@@ -7726,6 +7726,44 @@ app.get('/api/dca-schedule', requireAuth, (req, res) => {
   }
 })
 
+// What Net + Open said, recorded by the panel that displayed it.
+//
+// Deliberately client-fed rather than recomputed here: the figure is assembled
+// in the panel from the endpoint's rows plus live prices and cost overrides, so
+// a server-side recomputation would drift from what was actually on screen —
+// and a history that disagrees with the thing it is a history of is worse than
+// none. The client refuses to send as-of or what-if views; see the panel.
+app.post('/api/net-open-snapshot', requireAuth, (req, res) => {
+  try {
+    const b = req.body || {}
+    if (!Number.isFinite(b.netPlusOpen)) {
+      return res.status(400).json({ success: false, error: 'netPlusOpen required' })
+    }
+    databaseService.saveNetOpenSnapshot(req.user.userId, {
+      asofDate: new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }),
+      broker: b.broker, periodStart: b.periodStart,
+      net: b.net, openUnrealized: b.openUnrealized, netPlusOpen: b.netPlusOpen,
+      totalRealized: b.totalRealized, stockPnl: b.stockPnl, dayPnl: b.dayPnl,
+      legsPriced: b.legsPriced, legsUnpriced: b.legsUnpriced, tickers: b.tickers,
+    })
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+app.get('/api/net-open-snapshots', requireAuth, (req, res) => {
+  try {
+    const rows = databaseService.getNetOpenSnapshots(req.user.userId, {
+      broker: req.query.broker,
+      sinceDays: Math.min(365, Math.max(1, parseInt(req.query.days) || 30)),
+    })
+    res.json({ success: true, rows })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
 app.post('/api/dca-schedule', requireAuth, (req, res) => {
   try {
     const userId = req.user.userId

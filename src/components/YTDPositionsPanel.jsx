@@ -573,9 +573,59 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       stockRealizedAll: acc.stockRealizedAll + (r.stockRealizedAll || 0),
       dayStockPnl: acc.dayStockPnl + (r.dayStockPnl || 0),
       dayOptionPnl: acc.dayOptionPnl + (r.dayOptionPnl || 0),
+      // How much of the book is behind these totals. A figure built from half
+      // the legs is a different number, not a slightly wrong one.
+      openLegsPriced: acc.openLegsPriced + (r.openLegsPriced || 0),
+      openLegsUnpriced: acc.openLegsUnpriced + (r.openLegsUnpriced || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0 })
+
+  /**
+   * Record what this panel displayed, so "what did it say this morning" has an
+   * answer. The figure is assembled here from the endpoint's rows plus live
+   * prices and cost overrides, so it is recorded from here rather than
+   * recomputed on the server — a history that disagrees with the thing it is a
+   * history of would be worse than none.
+   *
+   * Fires once per fetch: setData() hands back a fresh object each time, so its
+   * identity is the honest trigger. `totals` is rebuilt every render, so
+   * depending on it would record on every keystroke.
+   *
+   * As-of and what-if views are never sent. One reconstructs a past day, the
+   * other prices a hypothesis; filing either as "what it said" would poison the
+   * record. The completeness counts go with the number, because a total built
+   * from half the legs is a different number, not a slightly wrong one.
+   */
+  const lastRecorded = useRef(null)
+  useEffect(() => {
+    if (!data || rows.length === 0) return
+    if (asOf || scenarioMove !== 0) return
+    if (lastRecorded.current === data) return
+    lastRecorded.current = data
+
+    const r2 = v => Math.round((Number(v) || 0) * 100) / 100
+    const netPlusOpen = r2(totals.net + totals.openUnrealizedPnL)
+    if (!Number.isFinite(netPlusOpen)) return
+
+    fetch('/api/net-open-snapshot', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        broker, periodStart: globalStart,
+        net: r2(totals.net),
+        openUnrealized: r2(totals.openUnrealizedPnL),
+        netPlusOpen,
+        totalRealized: r2(totals.totalRealized),
+        stockPnl: r2(totals.stockUnrealizedPnL),
+        dayPnl: r2(totals.dayPnl),
+        legsPriced: totals.openLegsPriced,
+        legsUnpriced: totals.openLegsUnpriced,
+        tickers: rows.length,
+      }),
+    }).catch(() => {})     // recording must never disturb the view
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, broker, globalStart, asOf, scenarioMove])
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
