@@ -36,7 +36,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf/vendor/pdfjs/pdf.worker.min.mjs'
 
 // Bumped whenever this file changes, and shown in the toolbar. "Still broken"
 // and "still running yesterday's code" look identical otherwise.
-const BUILD = 'b25'
+const BUILD = 'b26'
 
 const $ = (id) => document.getElementById(id)
 const state = {
@@ -463,6 +463,7 @@ function drawMarks() {
 
     if (m.type === 'text') {
       el.style.fontSize = `${m.sizeF * h}px`
+      el.style.letterSpacing = `${(m.spacing || 0) * w}px`   // matches the saved file
       el.textContent = m.text
       // Edited where it sits. Typing into a sidebar box to change words that
       // are visibly on the page is a strange way round, and the focus needed to
@@ -639,6 +640,15 @@ function renderInspector() {
     size.value = String(Math.round(m.sizeF * 792))     // points on a letter page
     size.addEventListener('input', () => { m.sizeF = Number(size.value) / 792; live() })
     box.appendChild(field(`Size (${Math.round(m.sizeF * 792)}pt)`, size))
+
+    // For the boxed fields on official forms: widen the gaps until each
+    // character sits in its own cell, rather than placing a box per character.
+    const gap = document.createElement('input')
+    gap.type = 'range'
+    gap.min = '0'; gap.max = '30'; gap.step = '0.5'
+    gap.value = String(Math.round((m.spacing || 0) * 612))   // points across a letter page
+    gap.addEventListener('input', () => { m.spacing = Number(gap.value) / 612; live() })
+    box.appendChild(field(`Letter spacing (${Math.round((m.spacing || 0) * 612)}pt)`, gap))
   } else {
     const two = document.createElement('div')
     two.className = 'two'
@@ -993,6 +1003,31 @@ async function download(bytes, preferredName) {
  * will not encode. Anything outside it is swapped for the nearest thing that
  * will, rather than failing the whole save.
  */
+/**
+ * Text with an optional gap after every character.
+ *
+ * Official forms put a separate cell under each character -- nine of them for a
+ * social security number -- and one ordinary text box cannot line up with that.
+ * Spreading a single string across them keeps it one box you can retype later,
+ * where nine separate boxes would be miserable to place and worse to correct.
+ *
+ * pdf-lib has no letter-spacing option, so a spaced string is drawn a glyph at
+ * a time along the baseline. With no spacing it stays a single drawText call --
+ * byte for byte what it did before, rotation included.
+ */
+function drawSpacedText(page, text, { x, y, size, font, color, rotate, spacing = 0 }) {
+  if (!spacing) return page.drawText(text, { x, y, size, font, color, rotate })
+  const rad = ((rotate && rotate.angle) || 0) * Math.PI / 180
+  const dx = Math.cos(rad), dy = Math.sin(rad)
+  let along = 0
+  for (const ch of text) {
+    page.drawText(ch, { x: x + dx * along, y: y + dy * along, size, font, color, rotate })
+    // The gap follows every character, including the last -- the same rule CSS
+    // letter-spacing uses, so the page and the screen agree.
+    along += font.widthOfTextAtSize(ch, size) + spacing
+  }
+}
+
 function winAnsi(s) {
   return String(s)
     .replace(/[✓✔]/g, 'X')
@@ -1045,8 +1080,9 @@ async function saveByRerender() {
       const x = m.xf * W, yTop = H - m.yf * H
       if (m.type === 'text') {
         const size = m.sizeF * H
-        page.drawText(winAnsi(m.text), {
+        drawSpacedText(page, winAnsi(m.text), {
           x, y: yTop - size, size, font: helv, color: rgb(0.07, 0.07, 0.07),
+          spacing: (m.spacing || 0) * W,
         })
       } else if (m.type === 'white') {
         page.drawRectangle({
@@ -1132,9 +1168,11 @@ async function save(chosenName) {
         step = `drawing text "${String(m.text).slice(0, 20)}" on page ${m.page}`
         const size = m.sizeF * ((rot === 90 || rot === 270) ? width : height)
         const p = put(m.xf, m.yf)
-        page.drawText(winAnsi(m.text), {
+        drawSpacedText(page, winAnsi(m.text), {
           x: p.x, y: p.y - size, size, font: helv, color: rgb(0.07, 0.07, 0.07),
           rotate: degrees(rot === 0 ? 0 : 360 - rot),
+          // Across the page as it is displayed, which is what the fraction means.
+          spacing: (m.spacing || 0) * ((rot === 90 || rot === 270) ? height : width),
         })
       } else if (m.type === 'white') {
         const p = put(m.xf, m.yf, m.wf, m.hf)
