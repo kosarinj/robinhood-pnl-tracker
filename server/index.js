@@ -7124,6 +7124,22 @@ app.get('/api/debug-open-pnl', requireAuth, async (req, res) => {
 })
 
 // Debug: show raw stock trades from DB so we can diagnose position query issues
+/**
+ * GET /api/debug-trade-sources — what the trades table actually holds.
+ *
+ * Counts per broker and per upload, plus identical rows. A tax figure computed
+ * from these rows can only be checked against the rows themselves: when the
+ * panel and a fresh CSV export disagree by twenty thousand dollars, the first
+ * question is whether the table holds trades the export does not.
+ */
+app.get('/api/debug-trade-sources', requireAuth, (req, res) => {
+  try {
+    res.json(databaseService.tradeSources(req.user.userId))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/debug-stock-trades', requireAuth, (req, res) => {
   try {
     const userId = req.user.userId

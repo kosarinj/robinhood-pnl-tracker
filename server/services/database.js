@@ -3203,6 +3203,57 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * What is actually in the trades table, by broker and by upload.
+   *
+   * A figure computed from these rows can only be checked against the rows,
+   * and "the Tax tab says 18k but my export says -7k" is unanswerable without
+   * knowing whether the table holds more than the export does. Counts only —
+   * no trade detail leaves here.
+   */
+  tradeSources(userId = 1) {
+    try {
+      const byBroker = db.prepare(`
+        SELECT COALESCE(broker,'robinhood') AS broker,
+               COUNT(*) AS rows,
+               SUM(CASE WHEN is_option = 1 THEN 1 ELSE 0 END) AS optionRows,
+               SUM(CASE WHEN is_option = 1 THEN 0 ELSE 1 END) AS stockRows,
+               COUNT(DISTINCT upload_date) AS uploads,
+               MIN(trans_date) AS firstTrade, MAX(trans_date) AS lastTrade
+        FROM trades WHERE user_id = ?
+        GROUP BY 1 ORDER BY rows DESC
+      `).all(userId)
+      const byUpload = db.prepare(`
+        SELECT upload_date, COALESCE(broker,'robinhood') AS broker, COUNT(*) AS rows,
+               MIN(trans_date) AS firstTrade, MAX(trans_date) AS lastTrade
+        FROM trades WHERE user_id = ?
+        GROUP BY upload_date, COALESCE(broker,'robinhood')
+        ORDER BY upload_date DESC LIMIT 40
+      `).all(userId)
+      // Identical rows within one broker. Legitimate fills repeat, so this is a
+      // signal to read, not a verdict -- but a trade sitting there four times is
+      // worth seeing when a total looks too large.
+      const dupes = db.prepare(`
+        SELECT trans_date, trans_code, symbol, quantity, price, amount,
+               COALESCE(broker,'robinhood') AS broker, COUNT(*) AS copies
+        FROM trades WHERE user_id = ?
+        GROUP BY trans_date, trans_code, symbol, quantity, price, amount, COALESCE(broker,'robinhood')
+        HAVING copies > 1 ORDER BY copies DESC, trans_date DESC LIMIT 20
+      `).all(userId)
+      const dupeExcess = db.prepare(`
+        SELECT COALESCE(SUM(copies - 1), 0) AS excess FROM (
+          SELECT COUNT(*) AS copies FROM trades WHERE user_id = ?
+          GROUP BY trans_date, trans_code, symbol, quantity, price, amount, COALESCE(broker,'robinhood')
+          HAVING copies > 1
+        )
+      `).get(userId)
+      return { byBroker, byUpload, dupes, duplicateRowExcess: dupeExcess?.excess || 0 }
+    } catch (e) {
+      console.error('tradeSources:', e.message)
+      return { error: e.message }
+    }
+  }
+
   // Record (upsert) a day's IV/HV snapshot for a ticker so IV Rank can build over time
   // App settings (key-value) — synced UI preferences (theme, background image, …)
   getAppSettings() {
