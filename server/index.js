@@ -7207,10 +7207,28 @@ app.get('/api/debug-tax-check', async (req, res) => {
         const noCost = all.filter(r => !(r.costBasis > 0))
         const noProceeds = all.filter(r => !(r.proceeds > 0))
         const sum = (rows) => Math.round(rows.reduce((a, r) => a + r.gain, 0) * 100) / 100
+        // ?contract=<exact symbol> returns the raw legs behind one contract.
+        // Two runs of the same code over the same account disagreeing on a
+        // single contract's gain can only be settled by the rows themselves:
+        // which legs the table holds, and what each one is worth.
+        const wanted = String(req.query.contract || '')
+        const contractLegs = wanted
+          ? trades.filter(t => t.isOption && t.symbol === wanted)
+              .map(t => ({ date: String(t.date).slice(0, 10), code: t.transCode,
+                           amount: t.amount, contracts: t.contracts, isBuy: t.isBuy }))
+          : null
+        // Every distinct option symbol string for this ticker. Legs grouping
+        // wrongly show up here as a count that disagrees with the contracts.
+        const distinct = [...new Set(trades.filter(t => t.isOption && under(t.symbol) === tk).map(t => t.symbol))]
         return {
           ticker: tk,
           optionTotal: sum(all),
           contractsCounted: all.length,
+          distinctSymbols: distinct.length,
+          contractLegs,
+          // Symbols the engine never counted: they have one side and no expiry,
+          // or their last trade falls in another year.
+          uncounted: distinct.filter(sym => !all.some(r => r.symbol === sym)).slice(0, 40),
           oneSided: {
             proceedsOnly: { n: noCost.length, gain: sum(noCost) },
             costOnly: { n: noProceeds.length, gain: sum(noProceeds) },
