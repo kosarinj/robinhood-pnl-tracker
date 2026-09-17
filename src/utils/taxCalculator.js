@@ -53,12 +53,55 @@ export function computeStockRealized(trades) {
     const sorted = [...list].sort((a, b) => toDate(a.date) - toDate(b.date))
     const lots = [] // open buy lots: { date, qty, costPerShare }
 
+    // Short lots, kept apart from long ones. A short sale is not a disposal of
+    // shares you own and a cover is not a purchase of new ones: treating SS as
+    // an ordinary sale ate the oldest cheap lots, and treating BC as a buy
+    // pushed a lot onto the queue that no purchase ever created. On AMD that
+    // left 35 phantom shares against a real position of 1, and every later sale
+    // matched September basis it should never have seen. Across 2026 it
+    // overstated stock gains by ~$880.
+    const shorts = []
+
     for (const t of sorted) {
       const qty = Math.abs(t.quantity)
       const pricePerShare = t.price // per-share for stocks
       if (qty <= 0) continue
 
-      if (t.isBuy) {
+      // Direction comes from the code where there is one. Older rows carry no
+      // trans code, so those keep the long-only behaviour they were built on.
+      const code = String(t.transCode || t.trans_code || '').toUpperCase()
+
+      if (code === 'SS') {
+        shorts.push({ date: toDate(t.date), qty, proceedsPerShare: pricePerShare })
+      } else if (code === 'BC') {
+        // Cover: close short lots oldest first. The gain is what you sold it
+        // for less what it cost to buy back, realised on the cover date.
+        let remaining = qty
+        while (remaining > 0.0000001 && shorts.length > 0) {
+          const s = shorts[0]
+          const take = Math.min(remaining, s.qty)
+          const proceeds = take * s.proceedsPerShare
+          const cost = take * pricePerShare
+          const holdingDays = Math.floor((toDate(t.date) - s.date) / MS_PER_DAY)
+          realized.push({
+            symbol, broker, type: 'stock', quantity: round2(take),
+            buyDate: toDate(t.date),     // bought to close
+            sellDate: toDate(t.date),    // realised when covered
+            openDate: s.date,
+            proceeds: round2(proceeds), costBasis: round2(cost),
+            gain: round2(proceeds - cost), holdingDays,
+            term: holdingDays > LONG_TERM_DAYS ? 'long' : 'short',
+            washSale: false, shortSale: true
+          })
+          s.qty -= take
+          remaining -= take
+          if (s.qty <= 0.0000001) shorts.shift()
+        }
+        // Covered more than was ever shorted: the excess really is a purchase.
+        if (remaining > 0.0000001) {
+          lots.push({ date: toDate(t.date), qty: remaining, costPerShare: pricePerShare })
+        }
+      } else if (t.isBuy) {
         lots.push({ date: toDate(t.date), qty, costPerShare: pricePerShare })
       } else {
         // Sell: consume lots FIFO
@@ -229,10 +272,30 @@ export function computeOpenLots(trades) {
     const broker = brokerOf(list[0])
     const sorted = [...list].sort((a, b) => toDate(a.date) - toDate(b.date))
     const lots = []
+    // Shorts are tracked so they cannot be mistaken for holdings: a cover that
+    // counts as a purchase leaves shares here that were never bought, which is
+    // what put 35 phantom AMD shares in front of a position of 1.
+    const shorts = []
     for (const t of sorted) {
       const qty = Math.abs(t.quantity)
       if (qty <= 0) continue
-      if (t.isBuy) {
+      const code = String(t.transCode || t.trans_code || '').toUpperCase()
+      if (code === 'SS') {
+        shorts.push({ qty })
+      } else if (code === 'BC') {
+        let remaining = qty
+        while (remaining > 0.0000001 && shorts.length > 0) {
+          const s = shorts[0]
+          const take = Math.min(remaining, s.qty)
+          s.qty -= take
+          remaining -= take
+          if (s.qty <= 0.0000001) shorts.shift()
+        }
+        // Only what exceeds the short is actually owned.
+        if (remaining > 0.0000001) {
+          lots.push({ date: toDate(t.date), qty: remaining, costPerShare: t.price })
+        }
+      } else if (t.isBuy) {
         lots.push({ date: toDate(t.date), qty, costPerShare: t.price })
       } else {
         let remaining = qty

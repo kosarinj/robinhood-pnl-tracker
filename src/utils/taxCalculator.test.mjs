@@ -103,4 +103,52 @@ test('trades with no broker behave exactly as before', () => {
   assert.equal(summarizeTaxYear(buildTaxBase(trades, []), 2026).unreconciled.length, 0)
 })
 
+console.log('\nShort sales (SS opens, BC covers)')
+
+test('a short round trip books sale price less cover price', () => {
+  // Short 10 @ 250, cover 10 @ 200 = +500. Nothing else is held.
+  const trades = [
+    t({ transCode: 'SS', isBuy: false, price: 250, amount: 2500, date: '2026-03-02' }),
+    t({ transCode: 'BC', isBuy: true, price: 200, amount: -2000, date: '2026-03-05' }),
+  ]
+  assert.equal(realizedFor(trades), 500)
+})
+
+test('a short does not eat the long lots, and a cover does not create one', () => {
+  // The AMD shape: 5 shares held at 100, a 10-share short round trip, then the
+  // 5 are sold at 300. Correct: 500 on the short + 1000 on the shares = 1500.
+  // Treating SS as a sale and BC as a purchase gave 1250 and invented a lot.
+  const trades = [
+    t({ quantity: 5, price: 100, amount: -500, isBuy: true, date: '2026-03-01' }),
+    t({ transCode: 'SS', isBuy: false, quantity: 10, price: 250, amount: 2500, date: '2026-03-02' }),
+    t({ transCode: 'BC', isBuy: true, quantity: 10, price: 200, amount: -2000, date: '2026-03-05' }),
+    t({ quantity: 5, price: 300, amount: 1500, isBuy: false, date: '2026-03-10' }),
+  ]
+  assert.equal(realizedFor(trades), 1500)
+  assert.equal(summarizeTaxYear(buildTaxBase(trades, []), 2026).unreconciled.length, 0)
+})
+
+test('covering more than was shorted leaves the excess as a real purchase', () => {
+  // Short 5 @ 250, cover 8 @ 200: +250 on the short, 3 shares held at 200.
+  const trades = [
+    t({ transCode: 'SS', isBuy: false, quantity: 5, price: 250, amount: 1250, date: '2026-03-02' }),
+    t({ transCode: 'BC', isBuy: true, quantity: 8, price: 200, amount: -1600, date: '2026-03-05' }),
+  ]
+  const base = buildTaxBase(trades, [])
+  assert.equal(summarizeTaxYear(base, 2026).totalRealizedGain, 250)
+  const lots = base.openLots.filter(l => l.symbol === 'AAPL')
+  assert.equal(lots.length, 1)
+  assert.equal(lots[0].quantity, 3)
+})
+
+test('the cover date is when it is realised', () => {
+  // Shorted in 2025, covered in 2026 — the gain belongs to 2026.
+  const trades = [
+    t({ transCode: 'SS', isBuy: false, price: 250, amount: 2500, date: '2025-12-20' }),
+    t({ transCode: 'BC', isBuy: true, price: 200, amount: -2000, date: '2026-01-06' }),
+  ]
+  assert.equal(realizedFor(trades, 2025), 0)
+  assert.equal(realizedFor(trades, 2026), 500)
+})
+
 console.log(`\n${passed} passed\n`)
