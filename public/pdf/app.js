@@ -36,7 +36,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf/vendor/pdfjs/pdf.worker.min.mjs'
 
 // Bumped whenever this file changes, and shown in the toolbar. "Still broken"
 // and "still running yesterday's code" look identical otherwise.
-const BUILD = 'b26'
+const BUILD = 'b27'
 
 const $ = (id) => document.getElementById(id)
 const state = {
@@ -65,7 +65,7 @@ function toast(msg, ms = 2600) {
 
 function setTool(tool) {
   state.tool = state.tool === tool ? null : tool
-  for (const [id, name] of [['toolText', 'text'], ['toolSign', 'sign'], ['toolWhite', 'white'], ['toolCheck', 'check']]) {
+  for (const [id, name] of [['toolText', 'text'], ['toolSign', 'sign'], ['toolWhite', 'white'], ['toolCheck', 'check'], ['toolCross', 'cross']]) {
     $(id).classList.toggle('on', state.tool === name)
   }
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('placing', !!state.tool))
@@ -264,6 +264,8 @@ function onLayerDown(e, pageNo, layer) {
     addMark({ type: 'white', page: pageNo, xf, yf, wf: 0.16, hf: 0.022 })
   } else if (state.tool === 'check') {
     addMark({ type: 'text', page: pageNo, xf, yf, text: '✓', sizeF: 0.018 })
+  } else if (state.tool === 'cross') {
+    addMark({ type: 'text', page: pageNo, xf, yf, text: '✗', sizeF: 0.018 })
   } else {
     // Placed with the caret already in it and the placeholder selected, so the
     // first keystroke replaces it. A prompt() asked for the words before
@@ -649,6 +651,21 @@ function renderInspector() {
     gap.value = String(Math.round((m.spacing || 0) * 612))   // points across a letter page
     gap.addEventListener('input', () => { m.spacing = Number(gap.value) / 612; live() })
     box.appendChild(field(`Letter spacing (${Math.round((m.spacing || 0) * 612)}pt)`, gap))
+
+    // Neither character is on a keyboard, so switching between them belongs here
+    // rather than in the box itself.
+    if (isDingbat(m.text)) {
+      const row = document.createElement('div')
+      row.className = 'two'
+      for (const [glyph, name] of [['✓', 'Tick'], ['✗', 'Cross']]) {
+        const b = document.createElement('button')
+        b.className = 'btn tiny' + (String(m.text).trim() === glyph ? ' on' : '')
+        b.textContent = `${glyph} ${name}`
+        b.addEventListener('click', () => { m.text = glyph; live(); renderInspector(); renderItems() })
+        row.appendChild(b)
+      }
+      box.appendChild(field('Mark', row))
+    }
   } else {
     const two = document.createElement('div')
     two.className = 'two'
@@ -1028,9 +1045,24 @@ function drawSpacedText(page, text, { x, y, size, font, color, rotate, spacing =
   }
 }
 
+/**
+ * A tick or a cross on its own is drawn with ZapfDingbats, a standard PDF font
+ * that has the real glyphs. Helvetica has neither: it refuses U+2713 outright,
+ * which is why every tick used to be rewritten as an X -- the screen showed a
+ * tick and the saved file had an X, and nobody was told.
+ *
+ * Detected from the text rather than stored on the mark, so ticks placed before
+ * this existed come back correct too.
+ */
+const DINGBATS = /^[✓✔✕✖✗✘]+$/
+const isDingbat = (t) => DINGBATS.test(String(t).trim())
+
 function winAnsi(s) {
   return String(s)
+    // Only reached by MIXED text such as "✓ yes", which has to be drawn in
+    // Helvetica and so genuinely cannot carry these glyphs.
     .replace(/[✓✔]/g, 'X')
+    .replace(/[✗✘✕✖]/g, 'X')
     .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
     .replace(/[–—]/g, '-').replace(/…/g, '...')
     .replace(/[^\x20-\xFF\n]/g, '?')
@@ -1053,6 +1085,7 @@ function winAnsi(s) {
 async function saveByRerender() {
   const out = await PDFDocument.create()
   const helv = await out.embedFont(StandardFonts.Helvetica)
+  let ding = null            // embedded only if a tick or cross is actually used
   const SCALE = 2                     // ~144dpi: sharp in print without being enormous
 
   for (let n = 1; n <= state.doc.numPages; n++) {
@@ -1080,8 +1113,10 @@ async function saveByRerender() {
       const x = m.xf * W, yTop = H - m.yf * H
       if (m.type === 'text') {
         const size = m.sizeF * H
-        drawSpacedText(page, winAnsi(m.text), {
-          x, y: yTop - size, size, font: helv, color: rgb(0.07, 0.07, 0.07),
+        const tick = isDingbat(m.text)
+        if (tick && !ding) ding = await out.embedFont(StandardFonts.ZapfDingbats)
+        drawSpacedText(page, tick ? String(m.text).trim() : winAnsi(m.text), {
+          x, y: yTop - size, size, font: tick ? ding : helv, color: rgb(0.07, 0.07, 0.07),
           spacing: (m.spacing || 0) * W,
         })
       } else if (m.type === 'white') {
@@ -1112,6 +1147,7 @@ async function save(chosenName) {
     const doc = await PDFDocument.load(state.bytes, { ignoreEncryption: true })
     step = 'embedding the font'
     const helv = await doc.embedFont(StandardFonts.Helvetica)
+    let ding = null          // embedded only if a tick or cross is actually used
     step = 'reading the pages'
     const pages = doc.getPages()
 
@@ -1168,8 +1204,10 @@ async function save(chosenName) {
         step = `drawing text "${String(m.text).slice(0, 20)}" on page ${m.page}`
         const size = m.sizeF * ((rot === 90 || rot === 270) ? width : height)
         const p = put(m.xf, m.yf)
-        drawSpacedText(page, winAnsi(m.text), {
-          x: p.x, y: p.y - size, size, font: helv, color: rgb(0.07, 0.07, 0.07),
+        const tick = isDingbat(m.text)
+        if (tick && !ding) ding = await doc.embedFont(StandardFonts.ZapfDingbats)
+        drawSpacedText(page, tick ? String(m.text).trim() : winAnsi(m.text), {
+          x: p.x, y: p.y - size, size, font: tick ? ding : helv, color: rgb(0.07, 0.07, 0.07),
           rotate: degrees(rot === 0 ? 0 : 360 - rot),
           // Across the page as it is displayed, which is what the fraction means.
           spacing: (m.spacing || 0) * ((rot === 90 || rot === 270) ? height : width),
@@ -1230,6 +1268,7 @@ $('toolText').addEventListener('click', () => setTool('text'))
 $('toolSign').addEventListener('click', () => setTool('sign'))
 $('toolWhite').addEventListener('click', () => setTool('white'))
 $('toolCheck').addEventListener('click', () => setTool('check'))
+$('toolCross').addEventListener('click', () => setTool('cross'))
 // Wrapped, not passed directly: addEventListener hands the listener a
 // PointerEvent, which save() would take as the chosen file name -- and did,
 // downloading a file called "[object PointerEvent]".
