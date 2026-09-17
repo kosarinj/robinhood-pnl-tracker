@@ -2657,6 +2657,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const dayGapTickers = new Set()
     // ticker -> 'market' | 'model' | 'mixed', from how each leg's mark was got.
     const openBasisByTicker = {}
+    // Legs that could not be priced at all. A leg with no mark used to be
+    // skipped in silence, so Open P&L reported part of a position as though it
+    // were the whole of it — a confident number that is simply wrong, and one
+    // that changes shape whenever a quote batch succeeds or fails. Counting
+    // them lets the figure admit it is a part, exactly as dayPartial already
+    // does for the day. Nothing here changes a number; it only makes the
+    // missing ones visible.
+    const openLegGaps = {}   // ticker -> { priced, unpriced }
+    const countLeg = (ticker, priced) => {
+      if (!ticker) return
+      const g = openLegGaps[ticker] || (openLegGaps[ticker] = { priced: 0, unpriced: 0 })
+      if (priced) g.priced += 1
+      else g.unpriced += 1
+    }
     // What it would really cost to get out: shorts bought back at the ASK,
     // longs sold at the BID. Always worse than the mid-based figure, which is
     // the point — the mid is a valuation convention, not a fill.
@@ -2985,6 +2999,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           if (model > 0) { currentOptionPrice = model; markBasis = 'model' }
           else { currentOptionPrice = optClose[entry.symbol]; markBasis = 'close' }
         }
+        // optClose is empty whenever the option snapshot failed, so this is
+        // undefined far more often than it looks — and undefined != null is
+        // false, which dropped the leg without a word.
+        countLeg(ticker, currentOptionPrice != null)
         if (currentOptionPrice != null) {
           // Short: buying it back costs the ask. Without a two-sided quote there
           // is nothing honest to say, so it contributes nothing rather than
@@ -3141,7 +3159,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const ticker = leg.ticker
         if (!ticker) return
         const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
-        if (!(nowMark > 0)) { dayGapTickers.add(ticker); return }
+        // This return skips the OPEN figure as well as the day one, which is
+        // why the two disagreed with nothing on screen to explain it.
+        if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
+        countLeg(ticker, true)
         const shares = leg.contracts * 100
         openUnrealizedByTicker[ticker] =
           (openUnrealizedByTicker[ticker] || 0) + (leg.premiumPerShare - nowMark) * shares
@@ -3173,7 +3194,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         if (!ticker) return
         const shares = leg.contracts * 100
         const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
-        if (!(nowMark > 0)) { dayGapTickers.add(ticker); return }
+        // Long legs have no model fallback — modelOptionMark is built from
+        // short_call_entries — so when the option snapshot fails, every one of
+        // them lands here. With far more bought contracts than sold, that is
+        // most of the book leaving Open P&L at once.
+        if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
+        countLeg(ticker, true)
 
         const S = stockByTicker[ticker]
         const expiry = `${leg.parsed.year}-${leg.parsed.month}-${leg.parsed.day}`
@@ -3685,6 +3711,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // mark, or a model estimate. Reported so an estimate reads as one
           // rather than as a measurement.
           openMarkBasis: openBasisByTicker[e.ticker] || null,
+          // The Open P&L twin of dayPartial. Legs that could not be priced were
+          // dropped, so the figure beside this is a part of the position rather
+          // than the whole of it.
+          openLegsPriced: openLegGaps[e.ticker]?.priced || 0,
+          openLegsUnpriced: openLegGaps[e.ticker]?.unpriced || 0,
+          openIncomplete: (openLegGaps[e.ticker]?.unpriced || 0) > 0,
           // Null when no two-sided quote was available for any leg — an absent
           // figure is honest, a mid dressed up as an exit price is not.
           openExitPnL: openExitByTicker[e.ticker] != null ? r2(openExitByTicker[e.ticker]) : null,

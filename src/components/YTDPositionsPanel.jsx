@@ -820,7 +820,9 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         style={{ fontWeight: 700, color: pnlColor(r.openUnrealizedPnL, isDark) }}>
         {r.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(r.openUnrealizedPnL)}` : '—'}
         {r.openMarkBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~est</span>}
-        {r.openMarkBasis === 'mixed' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}</span>,
+        {r.openMarkBasis === 'mixed' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
+        {r.openIncomplete > 0 && <span style={{ fontSize: 10, color: '#f59e0b' }}
+          title={`${r.openLegsUnpriced} of ${r.openLegsPriced + r.openLegsUnpriced} option legs could not be priced, so this is part of the position, not all of it.`}> {r.openLegsUnpriced} unpriced</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.openUnrealizedPnL, isDark), fontWeight: 700 }}>{fmt(t.openUnrealizedPnL)}</span> },
 
     { key: 'theta', label: 'Theta',
@@ -936,6 +938,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                    cursor: c.price > 0 ? 'pointer' : 'default',
                    borderBottom: c.price > 0 ? `1px dotted ${border}` : 'none' }}>
           {fmt(c.netPlusOpen)}
+          {r.openIncomplete && <span style={{ fontSize: 10, color: '#f59e0b' }}
+            title={`Incomplete: ${r.openLegsUnpriced} option leg(s) had no price, so they contribute nothing to this total.`}> partial</span>}
         </span>
       ),
       foot: (t) => <span style={{ color: pnlColor(t.net + t.openUnrealizedPnL, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net + t.openUnrealizedPnL)}</span> },
