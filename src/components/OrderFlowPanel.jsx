@@ -562,6 +562,26 @@ export default function OrderFlowPanel() {
   const [scan, setScan] = useState(null)
   const [scanInput, setScanInput] = useState('')
   const [scanErr, setScanErr] = useState('')
+  // Newest scan first by default: the rotation is the point, and what just
+  // came back is what has not been looked at yet. Remembered per browser like
+  // the view choice, so a sort someone picked survives the next visit.
+  const [scanSort, setScanSort] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('orderflow-scan-sort') || 'null')
+      return saved?.key ? saved : { key: 'ageSec', dir: 'asc' }
+    } catch { return { key: 'ageSec', dir: 'asc' } }
+  })
+  const sortScanBy = (key) => {
+    setScanSort(prev => {
+      // Clicking the same column flips it; a new column starts the way that
+      // column is usually read -- tickers A-Z, everything else biggest first.
+      const next = prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: (key === 'ticker' || key === 'ageSec') ? 'asc' : 'desc' }
+      try { localStorage.setItem('orderflow-scan-sort', JSON.stringify(next)) } catch { /* private window */ }
+      return next
+    })
+  }
   const loadScan = () => fetch('/api/orderflow/scan', { credentials: 'include' })
     .then(r => r.json())
     .then(d => { if (Array.isArray(d.list)) setScan(d) })
@@ -835,6 +855,29 @@ export default function OrderFlowPanel() {
       {view === 'screener' && (() => {
         const cfg = scan?.config || {}
         const results = scan?.results || []
+        // A missing reading sorts last whichever way the column is pointing:
+        // a name the rotation has not reached yet is not "the smallest".
+        const valueFor = (r, key) => {
+          switch (key) {
+            case 'ticker': return r.ticker
+            case 'lean': return r.lean
+            case 'wall': return r.wallSize
+            case 'absorption': return r.absRatio
+            case 'tape': return r.buyPct
+            case 'price': return r.price
+            case 'ageSec': return r.ageSec
+            default: return r.score
+          }
+        }
+        const sorted = [...results].sort((a, b) => {
+          const av = valueFor(a, scanSort.key), bv = valueFor(b, scanSort.key)
+          const an = av == null, bn = bv == null
+          if (an && bn) return 0
+          if (an) return 1
+          if (bn) return -1
+          const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv
+          return scanSort.dir === 'asc' ? cmp : -cmp
+        })
         const chip = {
           display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 6px',
           borderRadius: 10, border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, fontSize: 11,
@@ -906,18 +949,29 @@ export default function OrderFlowPanel() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      <th style={{ ...th, textAlign: 'left' }}>Ticker</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Score</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Resting lean</th>
-                      <th style={{ ...th, textAlign: 'left' }}>Biggest wall</th>
-                      <th style={{ ...th, textAlign: 'left' }}>Absorption</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Tape</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Price</th>
-                      <th style={{ ...th, textAlign: 'right' }}>Scanned</th>
+                      {[
+                        ['ticker', 'Ticker', 'left'],
+                        ['score', 'Score', 'right'],
+                        ['lean', 'Resting lean', 'right'],
+                        ['wall', 'Biggest wall', 'left'],
+                        ['absorption', 'Absorption', 'left'],
+                        ['tape', 'Tape', 'right'],
+                        ['price', 'Price', 'right'],
+                        ['ageSec', 'Scanned', 'right'],
+                      ].map(([key, label, align]) => (
+                        <th key={key} onClick={() => sortScanBy(key)}
+                          title={`Sort by ${label.toLowerCase()}`}
+                          style={{ ...th, textAlign: align, cursor: 'pointer', userSelect: 'none' }}>
+                          {label}
+                          <span style={{ opacity: scanSort.key === key ? 1 : 0.25, fontSize: 10 }}>
+                            {' '}{scanSort.key === key ? (scanSort.dir === 'asc' ? '↑' : '↓') : '↕'}
+                          </span>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map(r => (
+                    {sorted.map(r => (
                       <tr key={r.ticker}>
                         <td style={{ ...td, textAlign: 'left' }}>
                           <button onClick={() => { setInput(r.ticker); setTicker(r.ticker); setViewSaved('live') }}
