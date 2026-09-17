@@ -3247,7 +3247,22 @@ export class DatabaseService {
           HAVING copies > 1
         )
       `).get(userId)
-      return { byBroker, byUpload, dupes, duplicateRowExcess: dupeExcess?.excess || 0 }
+      // Splits rewrite share counts and per-share prices before the tax engine
+      // ever sees a trade, so a wrong one silently manufactures gains. Shown
+      // here because that is invisible everywhere else.
+      let splits = []
+      try {
+        splits = db.prepare(`
+          SELECT symbol, split_date, ratio, source FROM stock_splits
+          ORDER BY split_date DESC LIMIT 60
+        `).all()
+      } catch (e) {
+        splits = [{ error: e.message }]
+      }
+      return {
+        byBroker, byUpload, dupes, duplicateRowExcess: dupeExcess?.excess || 0,
+        splits, splitAdjustment: this.splitAdjustmentEnabled?.() ?? null,
+      }
     } catch (e) {
       console.error('tradeSources:', e.message)
       return { error: e.message }
