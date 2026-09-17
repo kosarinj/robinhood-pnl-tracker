@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PDF Fill &amp; Sign</title>
+<link rel="stylesheet" href="style.css?v=b21">
+</head>
+<body>
+
+<header class="bar">
+  <strong class="brand">PDF Fill &amp; Sign</strong>
+  <span class="muted small" id="build" title="Which build this tab is running"></span>
+  <span class="muted" id="docName">no file open</span>
+
+  <label class="btn primary">
+    Open PDF<input type="file" id="fileInput" accept="application/pdf" hidden>
+  </label>
+
+  <span class="sep"></span>
+
+  <button class="btn" id="toolText" title="Click the page to place text">Add text</button>
+  <button class="btn" id="toolSign" title="Place your signature">Signature</button>
+  <button class="btn" id="toolWhite" title="Cover something up">White-out</button>
+  <button class="btn" id="toolCheck" title="Place a tick">✓ Tick</button>
+
+  <span class="sep"></span>
+
+  <button class="btn" id="zoomOut" title="Zoom out">−</button>
+  <span class="muted" id="zoomLabel">100%</span>
+  <button class="btn" id="zoomIn" title="Zoom in">+</button>
+
+  <span class="grow"></span>
+
+  <label class="check" title="Make filled fields permanent so they cannot be edited later">
+    <input type="checkbox" id="flatten" checked> Flatten on save
+  </label>
+  <button class="btn primary" id="save" disabled>Save PDF</button>
+  <button class="btn" id="saveAs" disabled title="Choose a different file to save into">Save as…</button>
+</header>
+
+<div class="body">
+  <aside class="side" id="side">
+    <div class="side-head">
+      <span id="fieldsTitle">Form fields</span>
+      <button class="btn tiny" id="sideToggle" title="Hide this panel">‹</button>
+    </div>
+    <div id="fields" class="fields">
+      <p class="muted pad">Open a PDF to begin.</p>
+    </div>
+
+    <div class="side-head">Selected item</div>
+    <div id="inspector" class="inspector">
+      <p class="muted pad small">Click anything you have placed to edit it.</p>
+    </div>
+
+    <div class="side-head">Placed items</div>
+    <div id="items" class="items"></div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <div class="empty" id="empty">
+      <h1>Fill in and sign a PDF</h1>
+      <p>Drop a file here, or use <strong>Open PDF</strong>.</p>
+      <p class="muted small">
+        The file is opened, edited and saved by your browser. It is never uploaded,
+        which is also why it works with no internet.
+      </p>
+    </div>
+    <div id="pages" class="pages"></div>
+  </main>
+</div>
+
+<!-- Signature capture -->
+<div class="modal" id="signModal" hidden>
+  <div class="sheet">
+    <h2>Your signature</h2>
+    <div class="tabs">
+      <button class="tab on" data-tab="draw">Draw</button>
+      <button class="tab" data-tab="type">Type</button>
+      <button class="tab" data-tab="image">Image</button>
+    </div>
+
+    <div class="tabpane on" data-pane="draw">
+      <canvas id="sigPad" width="640" height="200"></canvas>
+      <p class="muted small">Draw with a trackpad, mouse or finger.</p>
+      <button class="btn tiny" id="sigClear">Clear</button>
+    </div>
+
+    <div class="tabpane" data-pane="type">
+      <input id="sigText" class="input wide" placeholder="Type your name">
+      <div id="sigPreview" class="sig-preview">Preview</div>
+    </div>
+
+    <div class="tabpane" data-pane="image">
+      <label class="btn">Choose image<input type="file" id="sigFile" accept="image/*" hidden></label>
+      <p class="muted small">A PNG with a transparent background looks best.</p>
+      <img id="sigImg" class="sig-img" alt="" hidden>
+    </div>
+
+    <div class="row end">
+      <label class="check"><input type="checkbox" id="sigRemember" checked> Remember it</label>
+      <span class="grow"></span>
+      <button class="btn" id="sigCancel">Cancel</button>
+      <button class="btn primary" id="sigUse">Use signature</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="app.js?v=b21"></script>
+</body>
+</html>

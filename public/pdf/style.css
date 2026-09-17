@@ -1,0 +1,175 @@
+:root {
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1220;
+    --surface: #111a2b;
+    --ink: #e2e8f0;
+    --muted: #94a3b8;
+    --line: #243247;
+    --accent: #3b82f6;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* ── toolbar ─────────────────────────────────────────────────────────── */
+.bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--surface);
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20;
+}
+.brand { font-size: 15px; }
+.sep { width: 1px; height: 22px; background: var(--line); }
+.grow { flex: 1; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.pad { padding: 10px 12px; }
+
+.btn {
+  font: inherit; padding: 5px 11px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.primary:disabled { opacity: .45; cursor: not-allowed; }
+.btn.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.tiny { padding: 2px 7px; font-size: 12px; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.input {
+  font: inherit; padding: 5px 8px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.input.wide { width: 100%; }
+
+/* ── layout ──────────────────────────────────────────────────────────── */
+.body { display: flex; align-items: stretch; min-height: calc(100vh - 49px); }
+.side {
+  width: 280px; flex: 0 0 280px; background: var(--surface);
+  border-right: 1px solid var(--line); overflow-y: auto; max-height: calc(100vh - 49px);
+  position: sticky; top: 49px;
+}
+.side.hidden { width: 0; flex-basis: 0; overflow: hidden; border-right: none; }
+.side-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; font-size: 11px; font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--line); background: var(--surface);
+  position: sticky; top: 0;
+}
+.fields, .items, .inspector { padding: 6px 0 10px; }
+.inspector .field { gap: 5px; }
+.inspector .two { display: flex; gap: 8px; }
+.inspector .two > label { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.inspector textarea {
+  font: inherit; padding: 5px 8px; border-radius: 7px; resize: vertical; min-height: 54px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); width: 100%;
+}
+.inspector .actions { display: flex; gap: 6px; padding: 4px 12px 0; }
+.danger { color: #dc2626; border-color: #fecaca; }
+.field { padding: 6px 12px; display: flex; flex-direction: column; gap: 3px; }
+.field label { font-size: 12px; color: var(--muted); }
+.item {
+  display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 13px;
+  cursor: pointer;
+}
+.item:hover { background: rgba(127, 127, 127, .12); }
+.item .kind { color: var(--muted); font-size: 11px; min-width: 52px; }
+.item .x { margin-left: auto; color: var(--muted); }
+
+.stage { flex: 1; padding: 18px; overflow-x: auto; }
+.pages { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.empty { max-width: 460px; margin: 12vh auto; text-align: center; }
+.empty h1 { font-size: 20px; margin: 0 0 6px; }
+.stage.drag { outline: 2px dashed var(--accent); outline-offset: -10px; }
+
+/* ── pages ───────────────────────────────────────────────────────────── */
+.page {
+  position: relative; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, .18);
+  line-height: 0;
+}
+.page canvas { display: block; }
+.layer { position: absolute; inset: 0; }
+.page.placing .layer { cursor: crosshair; }
+
+.mark {
+  position: absolute; line-height: 1.2; cursor: move; user-select: none;
+  border: 1px dashed transparent; white-space: pre; transform-origin: top left;
+  /* Dragging by touch without the drag handler calling preventDefault() on
+     pointerdown -- which would suppress the compatibility mouse events and with
+     them dblclick, the only way into an existing text box. */
+  touch-action: none;
+}
+/* While a box is being typed in it is a text field, not something to drag. */
+.mark.text[contenteditable="true"] { cursor: text; user-select: text; }
+.mark:hover, .mark.sel { border-color: var(--accent); }
+.mark.text { color: #111; padding: 0 1px; }
+.mark.white { background: #fff; border-color: rgba(148, 163, 184, .7); }
+.mark.image img { width: 100%; height: 100%; display: block; pointer-events: none; }
+.mark .grip {
+  position: absolute; right: -5px; bottom: -5px; width: 11px; height: 11px;
+  background: var(--accent); border-radius: 2px; cursor: nwse-resize;
+}
+.mark.sel .grip, .mark:hover .grip { display: block; }
+.mark .grip { display: none; }
+
+/* ── signature modal ─────────────────────────────────────────────────── */
+/* `display` here must never beat the hidden attribute: a class sets flex, the
+   UA sheet sets none for [hidden], both are specificity 0-1-0, and the author
+   sheet wins -- so the signature sheet sat over the whole app permanently. */
+.modal { display: none; }
+.modal:not([hidden]) {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, .55);
+  display: flex; align-items: center; justify-content: center; z-index: 40; padding: 16px;
+}
+.sheet {
+  background: var(--surface); border-radius: 12px; padding: 16px;
+  width: min(680px, 100%); max-height: 90vh; overflow-y: auto;
+}
+.sheet h2 { margin: 0 0 10px; font-size: 16px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+.tab {
+  font: inherit; padding: 5px 12px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+}
+.tab.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.tabpane { display: none; }
+.tabpane.on { display: block; }
+#sigPad {
+  width: 100%; height: 200px; background: #fff; border: 1px solid var(--line);
+  border-radius: 8px; touch-action: none; cursor: crosshair;
+}
+.sig-preview {
+  margin-top: 10px; padding: 14px; min-height: 76px; background: #fff; color: #111;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: "Segoe Script", "Bradley Hand", "Snell Roundhand", cursive; font-size: 34px;
+}
+.sig-img { max-width: 100%; margin-top: 10px; background: #fff; border-radius: 8px; }
+.row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.row.end { justify-content: flex-end; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  background: var(--ink); color: var(--bg); padding: 9px 15px; border-radius: 8px;
+  font-size: 13px; z-index: 50; box-shadow: 0 2px 10px rgba(0, 0, 0, .25);
+}
+
+@media (max-width: 760px) {
+  .side { position: static; width: 100%; flex-basis: auto; max-height: 220px; border-right: none; border-bottom: 1px solid var(--line); }
+  .body { flex-direction: column; }
+}
