@@ -221,6 +221,15 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             net: Math.round(net * 100) / 100,
             openPnl: row.openUnrealizedPnL ?? null,
             shares: row.stockPosition ?? null,
+            // The four terms Net + Open is made of, kept so the change since
+            // this date can be explained rather than just measured. They were
+            // fetched and thrown away before.
+            parts: {
+              optionsRealized: Math.round((row.totalRealized || 0) * 100) / 100,
+              stockRealized: Math.round((row.stockRealizedPnL || 0) * 100) / 100,
+              stockUnrealized: Math.round((row.stockUnrealizedPnL || 0) * 100) / 100,
+              openOptions: Math.round((row.openUnrealizedPnL || 0) * 100) / 100,
+            },
           }
         } catch {
           return { ...d, netPlusOpen: null }
@@ -981,7 +990,16 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       // only reliable fix is to leave the table.
       cell: (r, c) => (
         <span
-          onClick={e => togglePriceHistory(r.ticker, c.price, e.currentTarget, c.netPlusOpen)}
+          onClick={e => togglePriceHistory(r.ticker, c.price, e.currentTarget, {
+            total: c.netPlusOpen,
+            // Today's four terms, so the popover can difference each one against
+            // the same term at a past visit instead of only the total.
+            optionsRealized: Math.round((r.totalRealized || 0) * 100) / 100,
+            stockRealized: Math.round((c.stockRealized || 0) * 100) / 100,
+            stockUnrealized: Math.round((c.stockUnrealized || 0) * 100) / 100,
+            openOptions: Math.round((r.openUnrealizedPnL || 0) * 100) / 100,
+            shares: c.pos ?? null,
+          })}
           title={`Net (${fmt(c.net)}) + Open P&L (${r.openUnrealizedPnL != null ? fmt(r.openUnrealizedPnL) : '—'})`
             + (c.price > 0 ? ' · click for previous visits to this price' : '')}
           style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.netPlusOpen, isDark),
@@ -1625,6 +1643,10 @@ function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClos
   const text = isDark ? '#e2e8f0' : '#1e293b'
   const textMid = isDark ? '#94a3b8' : '#64748b'
 
+  // Which visit's breakdown is open. One at a time: the popover is small, and
+  // the question is "what made up THIS change", not all of them at once.
+  const [expanded, setExpanded] = useState(null)
+
   // A fixed popover doesn't move with the row it belongs to, so on scroll it
   // would sit over an unrelated one. Closing is honest; tracking the row would
   // be nicer but needs the anchor recomputed every frame.
@@ -1675,7 +1697,14 @@ function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClos
       )}
 
       {state.visits.map(v => {
-        const delta = (nowValue != null && v.netPlusOpen != null) ? nowValue - v.netPlusOpen : null
+        // nowValue used to be a bare number and is now the four terms. Tolerate
+        // both, so a stale value in state can never crash the popover.
+        const nowTotal = (nowValue && typeof nowValue === 'object') ? nowValue.total : nowValue
+        const delta = (nowTotal != null && v.netPlusOpen != null) ? nowTotal - v.netPlusOpen : null
+        const isOpen = expanded === v.date
+        // Only whether a breakdown is available — the amounts are worked out
+        // once, below, rather than kept in two places that can drift apart.
+        const parts = !!(nowValue && typeof nowValue === 'object' && v.parts)
         return (
           <div key={v.date} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '4px 0', fontSize: 12.5, borderTop: `1px solid ${border}` }}>
             <span style={{ color: textMid, whiteSpace: 'nowrap' }}
@@ -1690,13 +1719,53 @@ function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClos
                 {v.netPlusOpen != null ? fmt(v.netPlusOpen) : '—'}
               </span>
               {delta != null && (
-                <span style={{ color: pnlColor(delta, isDark), fontWeight: 700 }}>
-                  {delta >= 0 ? '+' : ''}{fmt(delta)}
+                <span
+                  onClick={() => parts && setExpanded(isOpen ? null : v.date)}
+                  title={parts ? 'Click to see what made up this change' : undefined}
+                  style={{ color: pnlColor(delta, isDark), fontWeight: 700,
+                           cursor: parts ? 'pointer' : 'default',
+                           borderBottom: parts ? `1px dotted ${border}` : 'none' }}>
+                  {delta >= 0 ? '+' : ''}{fmt(delta)}{parts ? (isOpen ? ' ▾' : ' ▸') : ''}
                 </span>
               )}
             </span>
           </div>
         )
+      }).flatMap((node, i) => {
+        // The breakdown is rendered as a sibling of its row rather than inside
+        // it, so the row stays a two-column flex line.
+        const v = state.visits[i]
+        const nowObj = (nowValue && typeof nowValue === 'object') ? nowValue : null
+        if (expanded !== v.date || !nowObj || !v.parts) return [node]
+        const rows = [
+          ['Options realized', nowObj.optionsRealized - v.parts.optionsRealized, false],
+          ['Stock realized', nowObj.stockRealized - v.parts.stockRealized, false],
+          ['Open options', nowObj.openOptions - v.parts.openOptions, true],
+          ['Stock unrealized', nowObj.stockUnrealized - v.parts.stockUnrealized, false],
+        ]
+        const shareNote = (v.shares != null && nowObj.shares != null
+          && Math.round(v.shares) !== Math.round(nowObj.shares))
+          ? `${Math.round(v.shares)} shares then, ${Math.round(nowObj.shares)} now`
+          : null
+        return [node, (
+          <div key={`${v.date}-parts`} style={{ padding: '2px 0 6px 10px', fontSize: 11.5 }}>
+            {rows.map(([label, amount, estimated]) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '1px 0' }}>
+                <span style={{ color: textMid }}>
+                  {label}{estimated ? <span style={{ opacity: 0.7 }}> ~est</span> : ''}
+                </span>
+                <span style={{ color: pnlColor(amount, isDark), fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+                  {amount >= 0 ? '+' : ''}{fmt(amount)}
+                </span>
+              </div>
+            ))}
+            <div style={{ color: textMid, opacity: 0.8, marginTop: 3, lineHeight: 1.4 }}>
+              {shareNote
+                ? `Stock moves because the position changed — ${shareNote}.`
+                : 'At the same price the stock term is near zero, so the change is premium and closed trades.'}
+            </div>
+          </div>
+        )]
       })}
 
       {state.visits.length > 0 && (
