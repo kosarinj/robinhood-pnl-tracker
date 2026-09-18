@@ -49,6 +49,18 @@ export default function DashboardCharts({ broker = 'all' }) {
     setStart(getPref(LS_GLOBAL_KEY, DEFAULT_GLOBAL_START))
   }), [])
 
+  // Refetch on the same cadence as the Positions panel (120s). These bars used
+  // to load once on mount and never move: on a day when HOOD ran 9%, the panel
+  // showed 4,900 against 2,973 here, and the whole gap was the chart still
+  // holding the price from whenever the tab was opened. Same formula, same
+  // basis, different moment -- and nothing on screen said so.
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 120 * 1000)
+    return () => clearInterval(iv)
+  }, [])
+  const [fetchedAt, setFetchedAt] = useState(null)
+
   useEffect(() => {
     const params = new URLSearchParams()
     if (broker && broker !== 'all') params.set('broker', broker)
@@ -65,9 +77,12 @@ export default function DashboardCharts({ broker = 'all' }) {
     if (sd && Object.keys(sd).length > 0) params.set('symbolDates', JSON.stringify(sd))
     fetch(`/api/options-pnl/ytd?${params}`, { credentials: 'include' })
       .then(r => r.json())
-      .then(d => setRows(d?.success && Array.isArray(d.byUnderlying) ? d.byUnderlying : []))
+      .then(d => {
+        setRows(d?.success && Array.isArray(d.byUnderlying) ? d.byUnderlying : [])
+        setFetchedAt(Date.now())
+      })
       .catch(() => setRows([]))
-  }, [broker, start])
+  }, [broker, start, tick])
 
   // Open positions only. A name fully exited earlier in the year still carries
   // realized P&L and would otherwise sit near the top of "biggest movers" — but
@@ -177,6 +192,7 @@ export default function DashboardCharts({ broker = 'all' }) {
           <span>
             Since {start} · realized + unrealized stock + open options — the Options YTD panel's Net + Open
             {closedCount > 0 && ` · ${closedCount} closed hidden`}
+            {fetchedAt && ` · priced ${new Date(fetchedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`}
           </span>
 
         </div>
