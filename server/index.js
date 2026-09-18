@@ -288,6 +288,25 @@ function modelOptionMark(entry, parsed, underlyingNow, asOfDate = null) {
   } catch { return 0 }
 }
 
+/**
+ * What a contract is worth if exercised right now, per share.
+ *
+ * The last resort when neither a market price nor a model is available. The
+ * open-positions endpoint has always fallen back this way; the Net + Open path
+ * did not, and dropped the leg instead — so three in-the-money puts expiring
+ * today contributed nothing at all rather than the money they are plainly
+ * worth. Returns 0 when the underlying is unknown, and callers use it only when
+ * it is positive: zero is the honest mark for a deep out-of-the-money contract
+ * about to expire, but a badly wrong one for a long-dated option that still
+ * carries time value.
+ */
+function intrinsicMark(parsed, underlying) {
+  if (!parsed || !(underlying > 0) || !(parsed.strike > 0)) return 0
+  return parsed.type === 'put'
+    ? Math.max(0, parsed.strike - underlying)
+    : Math.max(0, underlying - parsed.strike)
+}
+
 // ── Volatility scanner helpers ──
 // Annualized historical (realized) volatility from the last `window` daily closes.
 function annualizedHV(closes, window) {
@@ -2997,7 +3016,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         if (currentOptionPrice == null) {
           const model = modelOptionMark(entry, parsed, stockByTicker[entry.ticker])
           if (model > 0) { currentOptionPrice = model; markBasis = 'model' }
-          else { currentOptionPrice = optClose[entry.symbol]; markBasis = 'close' }
+          else {
+            currentOptionPrice = optClose[entry.symbol]
+            markBasis = 'close'
+            // optClose is empty whenever the snapshot failed, so fall back to
+            // exercise value rather than losing the leg entirely.
+            if (currentOptionPrice == null) {
+              const iv = intrinsicMark(parsed, stockByTicker[entry.ticker])
+              if (iv > 0) { currentOptionPrice = iv; markBasis = 'intrinsic' }
+            }
+          }
         }
         // optClose is empty whenever the option snapshot failed, so this is
         // undefined far more often than it looks — and undefined != null is
@@ -3158,7 +3186,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       uncoveredShorts.forEach(leg => {
         const ticker = leg.ticker
         if (!ticker) return
-        const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        let nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        // No market price: fall back to what it is worth exercised now.
+        if (!(nowMark > 0)) {
+          const iv = intrinsicMark(leg.parsed, stockByTicker[ticker])
+          if (iv > 0) nowMark = iv
+        }
         // This return skips the OPEN figure as well as the day one, which is
         // why the two disagreed with nothing on screen to explain it.
         if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
@@ -3193,11 +3226,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const ticker = leg.ticker
         if (!ticker) return
         const shares = leg.contracts * 100
-        const nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        let nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
         // Long legs have no model fallback — modelOptionMark is built from
         // short_call_entries — so when the option snapshot fails, every one of
         // them lands here. With far more bought contracts than sold, that is
-        // most of the book leaving Open P&L at once.
+        // most of the book leaving Open P&L at once. Exercise value is a poor
+        // mark but an honest floor, and far better than nothing: a 74 put with
+        // the stock at 72.40 is worth 1.60 whatever the data feed says.
+        if (!(nowMark > 0)) {
+          const iv = intrinsicMark(leg.parsed, stockByTicker[ticker])
+          if (iv > 0) nowMark = iv
+        }
         if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
         countLeg(ticker, true)
 
