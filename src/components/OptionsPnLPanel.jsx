@@ -437,15 +437,52 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
   const preMarketPrices = data?.preMarketPrices || {}
   // Use live positions from dedicated endpoint (with Polygon prices), fall back to history data
   const openPositions = livePositions?.positions || data?.openOptionPositions || []
-  // Short puts are a trading mistake (should always be long) — flag them prominently
-  const shortPutsByTicker = openPositions.reduce((m, p) => {
-    if (!p.isLong && p.optionType === 'put') {
-      if (!m[p.ticker]) m[p.ticker] = []
-      m[p.ticker].push({ strike: p.strike, expiry: p.expiry })
-    }
-    return m
-  }, {})
-  const hasShortPuts = Object.keys(shortPutsByTicker).length > 0
+  /**
+   * Short puts that are actually naked, as opposed to one leg of a spread.
+   *
+   * Every sold put used to be flagged as a trading mistake. That is wrong for
+   * defined-risk trading: a short 78 put with a long 77 put beneath it in the
+   * same expiry is half a position, and the long leg caps the loss. Only a
+   * short put with nothing under it is genuinely naked, and only that is worth
+   * a warning — crying wolf on every spread trains you to ignore the banner.
+   *
+   * Coverage is consumed contract by contract, highest strike first, so two
+   * short 78s against one long 77 still leaves one flagged.
+   */
+  const nakedShortPutsByTicker = (() => {
+    const byExpiry = {}
+    openPositions.forEach(p => {
+      if (p.optionType !== 'put') return
+      const n = Math.abs(p.openContracts || 0)
+      if (!n) return
+      const key = `${p.ticker}|${p.expiry}`
+      const g = byExpiry[key] || (byExpiry[key] = { shorts: [], longs: [] })
+      ;(p.isLong ? g.longs : g.shorts).push({ strike: p.strike, expiry: p.expiry, contracts: n })
+    })
+    const out = {}
+    Object.entries(byExpiry).forEach(([key, g]) => {
+      const ticker = key.split('|')[0]
+      const shorts = g.shorts.slice().sort((a, b) => b.strike - a.strike)
+      const longs = g.longs.map(l => ({ ...l })).sort((a, b) => b.strike - a.strike)
+      shorts.forEach(s => {
+        let uncovered = s.contracts
+        for (const l of longs) {
+          if (uncovered <= 0) break
+          // The long must sit at or below the short to define the risk.
+          if (l.contracts <= 0 || l.strike > s.strike) continue
+          const take = Math.min(uncovered, l.contracts)
+          l.contracts -= take
+          uncovered -= take
+        }
+        if (uncovered > 0) {
+          if (!out[ticker]) out[ticker] = []
+          out[ticker].push({ strike: s.strike, expiry: s.expiry, contracts: uncovered })
+        }
+      })
+    })
+    return out
+  })()
+  const hasShortPuts = Object.keys(nakedShortPutsByTicker).length > 0
   const hasPrices = openPositions.some(p => p.unrealizedPnl != null)
   const totalUnrealizedPnl = openPositions.reduce((s, p) => s + (p.unrealizedPnl ?? 0), 0)
   // When viewing a past week (asOfDate set), unrealized P&L uses today's Polygon prices — not meaningful
@@ -831,11 +868,14 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
         <div style={{ marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', background: isDark ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.1)', border: '1.5px solid #ef4444', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
           <span style={{ fontSize: '18px', lineHeight: 1 }}>⚠️</span>
           <div>
-            <div style={{ fontWeight: '700', color: '#ef4444', fontSize: '13px', marginBottom: '2px' }}>SHORT PUT DETECTED — trading mistake?</div>
+            <div style={{ fontWeight: '700', color: '#ef4444', fontSize: '13px', marginBottom: '2px' }}>NAKED SHORT PUT — no long put beneath it</div>
             <div style={{ fontSize: '12px', color: isDark ? '#fca5a5' : '#b91c1c' }}>
-              {Object.entries(shortPutsByTicker).map(([ticker, puts]) =>
-                `${ticker}: ${puts.map(p => `$${p.strike} exp ${p.expiry}`).join(', ')}`
+              {Object.entries(nakedShortPutsByTicker).map(([ticker, puts]) =>
+                `${ticker}: ${puts.map(p => `$${p.strike} exp ${p.expiry}${p.contracts > 1 ? ` ×${p.contracts}` : ''}`).join(', ')}`
               ).join(' · ')}
+            </div>
+            <div style={{ fontSize: '11px', color: isDark ? '#fca5a5' : '#b91c1c', marginTop: '3px', opacity: 0.85 }}>
+              Spread legs are not flagged — a short put with a long put at or below its strike in the same expiry has its risk defined.
             </div>
           </div>
         </div>
@@ -1171,7 +1211,7 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                           <span style={{ fontWeight: '700', color: text }}>
                             {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
-                            {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
+                            {nakedShortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>NAKED PUT ⚠</span>}
                           </span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                             <button onClick={(e) => { e.stopPropagation(); setEditingOverride(isEditingNW ? null : ticker) }}
@@ -1525,7 +1565,7 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                         <span style={{ fontWeight: '700', color: text }}>
                           {ticker}{sp ? <span style={{ fontWeight: '400', color: textMid, marginLeft: '6px' }}>{fmt(sp)}</span> : null}
-                          {shortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>SHORT PUT ⚠</span>}
+                          {nakedShortPutsByTicker[ticker] && <span style={{ marginLeft: '6px', fontSize: '10px', background: '#ef4444', color: '#fff', borderRadius: '4px', padding: '1px 5px', fontWeight: '700' }}>NAKED PUT ⚠</span>}
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                           <button onClick={(e) => { e.stopPropagation(); setEditingOverride(isEditing1w ? null : ticker) }}
