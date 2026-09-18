@@ -2425,6 +2425,15 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
           markSource = 'intrinsic'
         }
       }
+      // An option cannot be worth less than exercise value — that is arbitrage,
+      // not a price. A stale or one-sided quote can still sit below it: a NFLX
+      // 74 put quoted at 0.11 with the stock at 72.15 is 1.85 in the money, and
+      // three of them showed $33 against $555. So the quote is floored rather
+      // than trusted. It cuts both ways, raising a long's value and a short's
+      // liability alike.
+      const intrinsicFloor = intrinsicMark(parsed, underlyingNow)
+      if (intrinsicFloor > mark) { mark = intrinsicFloor; markSource = 'intrinsic' }
+
       const currentValue = mark * 100 * openContracts
       const unrealizedPnl = isLong
         ? currentValue - (avgCostPerContract * openContracts)
@@ -3030,6 +3039,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // optClose is empty whenever the option snapshot failed, so this is
         // undefined far more often than it looks — and undefined != null is
         // false, which dropped the leg without a word.
+        // Same floor as the positions endpoint: a mark below exercise value is
+        // not a price. Applied after every source has had its say, so a good
+        // quote is never overridden — only one that is impossibly low.
+        {
+          const iv = intrinsicMark(parsed, stockByTicker[entry.ticker])
+          if (iv > (currentOptionPrice || 0)) { currentOptionPrice = iv; markBasis = 'intrinsic' }
+        }
         countLeg(ticker, currentOptionPrice != null)
         if (currentOptionPrice != null) {
           // Short: buying it back costs the ask. Without a two-sided quote there
@@ -3187,10 +3203,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const ticker = leg.ticker
         if (!ticker) return
         let nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
-        // No market price: fall back to what it is worth exercised now.
-        if (!(nowMark > 0)) {
+        // Floored at exercise value, not merely defaulted to it when missing: a
+        // stale quote can sit BELOW intrinsic, which is arbitrage, not a price.
+        {
           const iv = intrinsicMark(leg.parsed, stockByTicker[ticker])
-          if (iv > 0) nowMark = iv
+          if (iv > (nowMark || 0)) nowMark = iv
         }
         // This return skips the OPEN figure as well as the day one, which is
         // why the two disagreed with nothing on screen to explain it.
@@ -3232,10 +3249,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // them lands here. With far more bought contracts than sold, that is
         // most of the book leaving Open P&L at once. Exercise value is a poor
         // mark but an honest floor, and far better than nothing: a 74 put with
-        // the stock at 72.40 is worth 1.60 whatever the data feed says.
-        if (!(nowMark > 0)) {
+        // the stock at 72.15 is worth 1.85 whatever the data feed says — and it
+        // is a floor, not just a default, because the feed's own quote came back
+        // at 0.11 for exactly that contract.
+        {
           const iv = intrinsicMark(leg.parsed, stockByTicker[ticker])
-          if (iv > 0) nowMark = iv
+          if (iv > (nowMark || 0)) nowMark = iv
         }
         if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
         countLeg(ticker, true)
