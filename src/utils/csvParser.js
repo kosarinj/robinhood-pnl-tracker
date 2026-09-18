@@ -55,14 +55,19 @@ export const parseTrades = (file) => {
 
             // Determine if buy or sell
             // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
-            // OEXP = Option Expiration (expires worthless), OASGN = Assignment, OEXC = Exercise
+            // OEXP = Option Expiration (expires worthless), OASGN = Assignment,
+            // OEXC / OEXCS = Exercise (Robinhood emits OEXCS)
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
             // BC (Buy to Cover) closes a short. Kept in step with the server
             // parser — it spells none of the letters below, so it used to count
             // as a sale and a covered short subtracted its size twice.
             const isBuy = transCode.includes('BUY') ||
               transCode === 'BTO' || transCode === 'BTC' || transCode === 'BC'
-            const isExpiry = transCode === 'OEXP' || transCode === 'OASGN' || transCode === 'OEXC'
+            // OEXCS is the exercise code Robinhood actually emits; see the
+            // server parser, which is the live upload path. Kept in step so the
+            // two copies cannot drift apart.
+            const isExpiry = transCode === 'OEXP' || transCode === 'OASGN'
+              || transCode === 'OEXC' || transCode === 'OEXCS'
 
             // Parse date
             const dateStr = row['Process Date'] || row['Activity Date'] || row['Date'] || row['Trade Date']

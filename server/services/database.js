@@ -1726,7 +1726,7 @@ export class DatabaseService {
           // pure losses -- so 446 contracts vanished and the survivors skewed
           // positive: the Tax tab read +18.7k where the same code over the same
           // account's CSV reads -6.9k.
-          isExpiry: ['OEXP', 'OASGN', 'OEXC'].includes(row.trans_code),
+          isExpiry: ['OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(row.trans_code),
           contracts: row.contracts || 1,
           broker: row.broker || 'robinhood',
           splitAdjusted: f !== 1 ? f : undefined,
@@ -2208,7 +2208,7 @@ export class DatabaseService {
         SELECT trans_date, trans_code, quantity, amount, is_buy
         FROM trades
         WHERE is_option = 1 AND user_id = ? AND symbol = ?
-          AND trans_code IN ('OEXP', 'OASGN', 'OEXC')
+          AND trans_code IN ('OEXP', 'OASGN', 'OEXC', 'OEXCS')
         ORDER BY trans_date ASC LIMIT 1
       `).get(userId, symbol)
     } catch (error) {
@@ -2595,7 +2595,7 @@ export class DatabaseService {
           SUM(CASE WHEN trans_code = 'STC' THEN COALESCE(contracts, 1) ELSE 0 END) AS stc,
           SUM(CASE WHEN trans_code = 'STO' THEN COALESCE(contracts, 1) ELSE 0 END) AS sto,
           SUM(CASE WHEN trans_code = 'BTC' THEN COALESCE(contracts, 1) ELSE 0 END) AS btc,
-          SUM(CASE WHEN trans_code IN ('OEXP','OASGN','OEXC') THEN COALESCE(contracts, 1) ELSE 0 END) AS settled
+          SUM(CASE WHEN trans_code IN ('OEXP','OASGN','OEXC','OEXCS') THEN COALESCE(contracts, 1) ELSE 0 END) AS settled
         FROM trades
         WHERE is_option = 1 AND user_id = ? ${brokerClause} AND trans_date < ?
         GROUP BY symbol
@@ -2654,7 +2654,7 @@ export class DatabaseService {
         -- Settlements are kept apart from STC because they can close EITHER side.
         -- Counting them as long closes only, as before, left an expired short
         -- open for good.
-        SUM(CASE WHEN trans_code IN ('OEXP', 'OASGN', 'OEXC') THEN COALESCE(contracts, 1) ELSE 0 END) as settled_contracts,
+        SUM(CASE WHEN trans_code IN ('OEXP', 'OASGN', 'OEXC', 'OEXCS') THEN COALESCE(contracts, 1) ELSE 0 END) as settled_contracts,
         SUM(CASE WHEN trans_code = 'BTO' THEN amount ELSE 0 END) as total_paid,
         SUM(CASE WHEN trans_code = 'STO' THEN amount ELSE 0 END) as total_received,
         MAX(trans_date) as last_trade_date
@@ -3920,7 +3920,7 @@ export class DatabaseService {
 
         if (tc === 'BTO') st.long.push({ ppc, left: n })
         else if (tc === 'STO') st.short.push({ ppc, left: n })
-        else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+        else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)) {
           const closingShort = tc === 'BTC'
           const stack = closingShort ? st.short : st.long
           let remaining = n

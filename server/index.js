@@ -2208,11 +2208,11 @@ app.get('/api/whatif', requireAuth, async (req, res) => {
     const contractMap = {}
     weekTrades.forEach(t => {
       const tc = (t.trans_code || '').toUpperCase()
-      if (!['BTO', 'STO', 'BTC', 'STC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) return
+      if (!['BTO', 'STO', 'BTC', 'STC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)) return
       const symbol = t.symbol
       if (!symbol) return
-      const isClosing = ['BTC', 'STC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
-      const isExpiry = ['OEXP', 'OASGN', 'OEXC'].includes(tc)
+      const isClosing = ['BTC', 'STC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)
+      const isExpiry = ['OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)
       const cashFlow = t.is_buy ? -(t.amount || 0) : (t.amount || 0)
       const contracts = Math.abs(t.quantity || 1)
 
@@ -2250,11 +2250,11 @@ app.get('/api/whatif', requireAuth, async (req, res) => {
       let outcomeCode = null
       if (!isExpired) {
         if (isHistorical) {
-          // For historical weeks: look up the eventual OEXP/OASGN/OEXC outcome in the DB
+          // For historical weeks: look up the eventual OEXP/OASGN/OEXC/OEXCS outcome in the DB
           const outcome = databaseService.getContractOutcome(userId, cm.symbol)
           if (outcome) {
             outcomeCode = (outcome.trans_code || '').toUpperCase()
-            if (['OASGN', 'OEXC'].includes(outcomeCode) && cm.parsed.strike) {
+            if (['OASGN', 'OEXC', 'OEXCS'].includes(outcomeCode) && cm.parsed.strike) {
               // Assigned/exercised: compute intrinsic value from stock price on that date
               try {
                 const stockPrice = await priceService.getPriceForDate(cm.parsed.ticker, outcome.trans_date)
@@ -2629,7 +2629,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       if (tc === 'BTO' || tc === 'STO') {
         stacks[tc === 'BTO' ? 'long' : 'short']
           .push({ ppc, remaining: contracts, symbol: t.symbol, parsed })
-      } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+      } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)) {
         // Settlements book on BOTH bases now.
         //
         // The legacy basis used to skip them. That was a faithful reproduction of
@@ -2646,7 +2646,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // basis, booked them correctly all along.
         let closingShort, stack
         if (tc === 'BTC') { stack = stacks.short; closingShort = true }
-        else if (tc === 'STC' || tc === 'OEXC') { stack = stacks.long; closingShort = false }
+        else if (tc === 'STC' || tc === 'OEXC' || tc === 'OEXCS') { stack = stacks.long; closingShort = false }
         else { closingShort = stacks.short.length > 0; stack = closingShort ? stacks.short : stacks.long }
         let left = contracts; let costBasis = 0
         while (left > 0 && stack.length > 0) {
@@ -3443,12 +3443,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       entry.startDate = perSymbolDates[ticker] || globalStart
       if (t.trans_date < effectiveStart) return
       const tc = (t.trans_code || '').toUpperCase()
-      const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
+      const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)
       const optionType = parsed?.type || null
       entry.tradeCount++
       if (isClosing && t._realizedPnl != null) {
         entry.totalRealized += t._realizedPnl
-        if (['OEXP', 'OASGN', 'OEXC'].includes(tc)) {
+        if (['OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)) {
           entry.realizedExpired += t._realizedPnl
           // Split by contract type: puts and calls expire for opposite reasons,
           // and on a book that buys puts and sells calls the two halves say
@@ -6344,10 +6344,10 @@ function realizedWalk(trades) {
     const stacks = stacksBySym[key] || (stacksBySym[key] = { long: [], short: [] })
     if (tc === 'BTO') { stacks.long.push({ ppc, remaining: contracts }); return }
     if (tc === 'STO') { stacks.short.push({ ppc, remaining: contracts }); return }
-    if (!['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) return
+    if (!['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)) return
     let closingShort, stack
     if (tc === 'BTC') { stack = stacks.short; closingShort = true }
-    else if (tc === 'STC' || tc === 'OEXC') { stack = stacks.long; closingShort = false }
+    else if (tc === 'STC' || tc === 'OEXC' || tc === 'OEXCS') { stack = stacks.long; closingShort = false }
     else { closingShort = stacks.short.length > 0; stack = closingShort ? stacks.short : stacks.long }
     let left = contracts, costBasis = 0
     while (left > 0 && stack.length > 0) {
@@ -6404,7 +6404,7 @@ app.get('/api/debug-reconcile', requireAuth, async (req, res) => {
     const start = (req.query.start || '2000-01-01').slice(0, 10)
 
     // Signed cash: money out is negative, money in positive.
-    const SIGN = { BTO: -1, BTC: -1, STO: +1, STC: +1, OEXP: 0, OASGN: 0, OEXC: +1 }
+    const SIGN = { BTO: -1, BTC: -1, STO: +1, STC: +1, OEXP: 0, OASGN: 0, OEXC: +1, OEXCS: 0 }
     const trades = databaseService.getRawOptionTrades(userId, brokerFilter)
       .filter(t => (parseOptionDescription(t.symbol)?.ticker || '') === ticker)
       .filter(t => String(t.trans_date || '') >= start)
@@ -6548,9 +6548,12 @@ app.get('/api/options-cash', requireAuth, async (req, res) => {
     // describe different periods — the exact mismatch that made an afternoon of
     // hand-reconciliation disagree for no real reason.
     const start = (req.query.start || '2000-01-01').slice(0, 10)
-    // Money out negative, money in positive. OEXC is an exercise, which carries
-    // a real amount; OEXP/OASGN settle at zero.
-    const SIGN = { BTO: -1, BTC: -1, STO: +1, STC: +1, OEXC: +1, OEXP: 0, OASGN: 0 }
+    // Money out negative, money in positive. OEXP/OASGN settle at zero.
+    // OEXC carries a real amount, but OEXCS — the code Robinhood actually
+    // emits — does not: its proceeds arrive as a separate stock row (the
+    // exercised put's shares sold at the strike), so counting it here as well
+    // would book the same money twice.
+    const SIGN = { BTO: -1, BTC: -1, STO: +1, STC: +1, OEXC: +1, OEXCS: 0, OEXP: 0, OASGN: 0 }
 
     const byTicker = {}
     const row = t => (byTicker[t] = byTicker[t] || {
@@ -6759,7 +6762,7 @@ app.get('/api/long-options', requireAuth, async (req, res) => {
     const bySym = {}
     databaseService.getRawOptionTrades(userId, brokerFilter).forEach(t => {
       const tc = (t.trans_code || '').toUpperCase()
-      if (!['BTO', 'STC', 'OEXP', 'OEXC', 'OASGN'].includes(tc)) return
+      if (!['BTO', 'STC', 'OEXP', 'OEXC', 'OEXCS', 'OASGN'].includes(tc)) return
       if (String(t.trans_date || '') < start) return
       const parsed = parseOptionDescription(t.symbol)
       if (!parsed) return
@@ -6874,7 +6877,7 @@ app.get('/api/expirations', requireAuth, async (req, res) => {
     const bySym = {}
     databaseService.getRawOptionTrades(userId, brokerFilter).forEach(t => {
       const tc = (t.trans_code || '').toUpperCase()
-      if (!['BTO','STO','STC','BTC','OEXP','OASGN','OEXC'].includes(tc)) return
+      if (!['BTO','STO','STC','BTC','OEXP','OASGN','OEXC','OEXCS'].includes(tc)) return
       const b = bySym[t.symbol] || (bySym[t.symbol] = {
         symbol: t.symbol, bto: 0, sto: 0, stc: 0, btc: 0,
         paid: 0, received: 0, settlements: [],
@@ -6913,7 +6916,7 @@ app.get('/api/expirations', requireAuth, async (req, res) => {
           strike: parsed?.strike ?? null,
           expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : null,
           settledOn: st.date,
-          outcome: worthless ? 'expired worthless' : (st.code === 'OEXC' ? 'exercised' : 'assigned'),
+          outcome: worthless ? 'expired worthless' : ((st.code === 'OEXC' || st.code === 'OEXCS') ? 'exercised' : 'assigned'),
           side: longC >= shortC ? 'long' : 'short',
           contracts: Math.round((longC + shortC) * 100) / 100,
           premium: Math.round(((longC * perLong) + (shortC * perShort)) * 100) / 100,
@@ -6992,7 +6995,7 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
       const bySym = {}
       rows.forEach(t => {
         const tc = (t.trans_code || '').toUpperCase()
-        if (!['BTO','STO','STC','BTC','OEXP','OASGN','OEXC'].includes(tc)) return
+        if (!['BTO','STO','STC','BTC','OEXP','OASGN','OEXC','OEXCS'].includes(tc)) return
         if (String(t.trans_date || '').slice(0, 4) > year) return
         const b = bySym[t.symbol] || (bySym[t.symbol] = {
           symbol: t.symbol, bto: 0, sto: 0, stc: 0, btc: 0, settled: 0,
@@ -7009,7 +7012,7 @@ app.get('/api/debug-expiry-losses', requireAuth, async (req, res) => {
           if (String(t.trans_date || '') < start) return
           b.settled += n; b.settleRows += 1
           b.settledYear = String(t.trans_date || '').slice(0, 4)
-          // Only OEXP is a worthless expiry. OEXC is an EXERCISE — the long turned
+          // Only OEXP is a worthless expiry. OEXC/OEXCS is an EXERCISE — the long turned
           // into stock, so its premium is not a loss — and OASGN is assignment.
           // Lumping all three together overstates what the settlement change can
           // possibly have cost.
@@ -8693,15 +8696,15 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
         stacks.long.push({ pricePerContract, remainingContracts: contracts, date: t.trans_date })
       } else if (tc === 'STO') {
         stacks.short.push({ pricePerContract, remainingContracts: contracts, date: t.trans_date })
-      } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)) {
-        // BTC closes a short (STO'd) position; STC/OEXC closes a long (BTO'd) position.
+      } else if (['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)) {
+        // BTC closes a short (STO'd) position; STC/OEXC/OEXCS closes a long (BTO'd) position.
         // OEXP/OASGN can close either: check which stack holds the contract.
         // Covered calls and short puts (STO) live in stacks.short; long options (BTO) in stacks.long.
         let closingShort
         let stack
         if (tc === 'BTC') {
           stack = stacks.short; closingShort = true
-        } else if (tc === 'STC' || tc === 'OEXC') {
+        } else if (tc === 'STC' || tc === 'OEXC' || tc === 'OEXCS') {
           stack = stacks.long; closingShort = false
         } else {
           // OEXP / OASGN: the expiring/assigned side is whichever stack has the open position
@@ -8742,7 +8745,7 @@ app.get('/api/options-pnl/history', requireAuth, async (req, res) => {
       // Skip trades where the symbol doesn't look like a real ticker (e.g. "Option Exercise")
       if (!underlying || underlying.length > 6 || !/^[A-Z]+$/.test(underlying)) return
       const tc = (t.trans_code || '').toUpperCase()
-      const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC'].includes(tc)
+      const isClosing = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)
       const expiryDateStr = parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : t.trans_date
       const weekKey = getWeekStart(expiryDateStr)
 

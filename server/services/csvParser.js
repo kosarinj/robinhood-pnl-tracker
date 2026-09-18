@@ -60,7 +60,13 @@ export const parseTrades = (file) => {
 
             // Determine if buy or sell
             // Trans codes: Buy, Sell, BTO (Buy to Open), BTC (Buy to Close), STO (Sell to Open), STC (Sell to Close)
-            // OEXP = Option Expiration (expires worthless), OASGN = Assignment, OEXC = Exercise
+            // OEXP = Option Expiration (expires worthless), OASGN = Assignment,
+            // OEXC / OEXCS = Exercise. Robinhood writes OEXCS in practice: this
+            // account's 18-month export contains one OEXCS and not a single
+            // OEXC, so the code the app checked for had never once occurred.
+            // The row carries no Amount, so without being treated as a
+            // settlement it failed the `price > 0` filter and was dropped at
+            // import — leaving the exercised long put open for good.
             const transCode = (row['Trans Code'] || row['Type'] || '').toUpperCase()
             // BC is Buy to Cover — closing a short. It buys shares back, but it
             // spells none of the letters this used to look for, so it counted as
@@ -69,7 +75,8 @@ export const parseTrades = (file) => {
             // the positions list; PLTR read 200 where 300 were held.
             const isBuy = transCode.includes('BUY') ||
               transCode === 'BTO' || transCode === 'BTC' || transCode === 'BC'
-            const isExpiry = transCode === 'OEXP' || transCode === 'OASGN' || transCode === 'OEXC'
+            const isExpiry = transCode === 'OEXP' || transCode === 'OASGN'
+              || transCode === 'OEXC' || transCode === 'OEXCS'
 
             // Parse date - use Process Date (when trade settled) instead of Activity Date
             const dateStr = row['Process Date'] || row['Activity Date'] || row['Date'] || row['Trade Date']
