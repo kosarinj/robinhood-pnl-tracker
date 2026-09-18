@@ -3660,16 +3660,6 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockPosition: sp?.position ?? null,
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
-          // The underlying price the OPTION marks were computed from. It ought
-          // to equal stockCurrentPrice, but they are built from two different
-          // maps: stockByTicker early in this request, stockPrices some six
-          // hundred lines and many network awaits later, each taking the
-          // overnight override separately with a fifteen-minute freshness
-          // cutoff in between. When they diverge, the stock half and the option
-          // half of Net + Open are priced off different numbers for the same
-          // ticker — which is invisible in any total. Reported so it can be
-          // seen rather than deduced.
-          openMarkUnderlying: stockByTicker[e.ticker] || null,
           // Manual avg-cost overrides are honoured here. They were applied only
           // in the Positions panel's own render, so every other consumer — the
           // charts especially — silently used the computed cost instead.

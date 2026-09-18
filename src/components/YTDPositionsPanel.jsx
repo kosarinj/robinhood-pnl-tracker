@@ -601,18 +601,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   useEffect(() => {
     if (!data || rows.length === 0) return
     if (asOf || scenarioMove !== 0) return
+    if (lastRecorded.current === data) return
+    lastRecorded.current = data
+
     const r2 = v => Math.round((Number(v) || 0) * 100) / 100
     const netPlusOpen = r2(totals.net + totals.openUnrealizedPnL)
     if (!Number.isFinite(netPlusOpen)) return
-
-    // Keyed on the FIGURE, not the response object. Identity looked like a
-    // clean trigger until several fetches landed in the same second and each
-    // one arrived as a new object — three identical rows, same timestamp, same
-    // values. A history is worth having only if a row means something changed.
-    const sig = `${broker}|${globalStart}|${netPlusOpen}|${r2(totals.openUnrealizedPnL)}|${r2(totals.dayPnl)}`
-    if (lastRecorded.current && lastRecorded.current.sig === sig
-        && Date.now() - lastRecorded.current.at < 60000) return
-    lastRecorded.current = { sig, at: Date.now() }
 
     fetch('/api/net-open-snapshot', {
       method: 'POST', credentials: 'include',
