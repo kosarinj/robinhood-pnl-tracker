@@ -3506,6 +3506,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const stockRealized = databaseService.getStockRealizedPnL(
       userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
 
+    // Dividends per underlying, scoped to the same window as realized stock
+    // P&L. They have been sitting in cash_activity with the ticker attached
+    // since the first import and nothing ever read them per symbol, so a name
+    // that pays real money — BAC, WFC, C — showed none of it in this panel.
+    // Note: the period start here is the global one. Per-symbol start dates are
+    // not applied to dividends yet; they are unused on this account, and doing
+    // it properly means grouping the rows by date rather than by ticker.
+    const dividendsByTicker = databaseService
+      .getDividendsByTicker(userId, brokerFilter, globalStart, asOf).byTicker
+
     // A manual cost sets the basis at the period start; shares bought after it
     // come in at what was actually paid. Without this, HOOD's 100 repurchased at
     // $110.48 were priced at the $84.31 override and showed +$2,048 when the lot
@@ -3750,6 +3760,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Kept as an alias so the Stock Realized column keeps working; it is
           // now the same figure as stockRealizedPnL, which is no longer gated.
           stockRealizedAll: stockRealized[e.ticker] != null ? r2(stockRealized[e.ticker]) : null,
+          // Reported BESIDE Net, never inside it. Net is Stock P&L + Options
+          // Total, and that identity is what every reconciliation of this table
+          // has been done against — a third term added quietly would break all
+          // of them at once.
+          dividends: dividendsByTicker[e.ticker] ?? null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null,
           dayPnl,
@@ -4530,6 +4545,9 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
     // Reported but NOT added to any total — a financing cost isn't a trading
     // result, and folding it in would make both harder to read.
     const financing = databaseService.getFinancingCosts(userId, brokerFilter)
+    // Cash that arrived without a trade behind it, so neither cash-flow figure
+    // above knows about it. Reported rather than added, like financing.
+    const dividends = databaseService.getDividendsByTicker(userId, brokerFilter)
 
     // Only the share counts matter here, so the cost-basis method is irrelevant.
     const positions = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
@@ -4579,6 +4597,7 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
       stockTotal: round2(stockCash + stockMarketValue),
       optionCashFlow: round2(optionCash),
       financing,
+      dividends,
       transferValue: round2(transferValue),
       transferCount: transfers.length,
       transferDetail,

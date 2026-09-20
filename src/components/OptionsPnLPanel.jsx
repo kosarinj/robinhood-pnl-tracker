@@ -787,29 +787,48 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                 </div>
               )}
 
-              {account.financing?.hasData && (account.financing.marginInterest !== 0 || account.financing.subscription !== 0 || account.financing.interestEarned !== 0) && (
-                <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px dashed ${border}` }}>
-                  <div style={{ fontSize: 10.5, color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                    Not included above
+              {/* Dividends sit here rather than in the total for the same reason
+                  financing does: this figure is cash flow plus market value, and
+                  folding in a third kind of money would change what the headline
+                  means. They are real income the trade tables know nothing about,
+                  so being absent entirely was the wrong answer too. */}
+              {(() => {
+                const f = account.financing
+                const divTotal = account.dividends?.total || 0
+                const hasFin = !!f?.hasData
+                  && (f.marginInterest !== 0 || f.subscription !== 0 || f.interestEarned !== 0)
+                if (!hasFin && divTotal <= 0) return null
+                return (
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px dashed ${border}` }}>
+                    <div style={{ fontSize: 10.5, color: textMid, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                      Not included above
+                    </div>
+                    {divTotal > 0 && row(
+                      `Dividends received${account.dividends?.payments ? ` (${account.dividends.payments} payments)` : ''}`,
+                      divTotal,
+                      'Cash dividends and manufactured payments. They arrive without a trade behind them, so neither cash-flow line above counts them — but the money is really in the account.'
+                    )}
+                    {hasFin && f.marginInterest !== 0 && row(
+                      `Margin interest${f.marginInterestCount ? ` (${f.marginInterestCount} charges)` : ''}`,
+                      f.marginInterest,
+                      'What borrowing has cost. Never appears in trade P&L, so a position can look profitable while the interest behind it eats the gain.'
+                    )}
+                    {hasFin && f.subscription !== 0 && row(
+                      'Gold subscription', f.subscription, 'Robinhood Gold fees.')}
+                    {hasFin && f.interestEarned !== 0 && row(
+                      'Interest earned', f.interestEarned, 'Interest paid to you on idle cash.')}
+                    {hasFin && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12,
+                                    paddingTop: 4, marginTop: 2, borderTop: `1px solid ${border}` }}>
+                        <span style={{ color: textMid, fontWeight: 600 }}>Net financing</span>
+                        <span style={{ fontWeight: 700, color: f.net >= 0 ? green : red }}>
+                          {(f.net >= 0 ? '+' : '') + fmt(f.net)}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  {account.financing.marginInterest !== 0 && row(
-                    `Margin interest${account.financing.marginInterestCount ? ` (${account.financing.marginInterestCount} charges)` : ''}`,
-                    account.financing.marginInterest,
-                    'What borrowing has cost. Never appears in trade P&L, so a position can look profitable while the interest behind it eats the gain.'
-                  )}
-                  {account.financing.subscription !== 0 && row(
-                    'Gold subscription', account.financing.subscription, 'Robinhood Gold fees.')}
-                  {account.financing.interestEarned !== 0 && row(
-                    'Interest earned', account.financing.interestEarned, 'Interest paid to you on idle cash.')}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12,
-                                paddingTop: 4, marginTop: 2, borderTop: `1px solid ${border}` }}>
-                    <span style={{ color: textMid, fontWeight: 600 }}>Net financing</span>
-                    <span style={{ fontWeight: 700, color: account.financing.net >= 0 ? green : red }}>
-                      {(account.financing.net >= 0 ? '+' : '') + fmt(account.financing.net)}
-                    </span>
-                  </div>
-                </div>
-              )}
+                )
+              })()}
 
               <div style={{ fontSize: 10, color: textMid, marginTop: 6, lineHeight: 1.4 }}>
                 Cash flow plus market value — no cost-basis method involved, so this moves only when money moves or a price does.

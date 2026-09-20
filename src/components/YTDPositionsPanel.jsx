@@ -586,9 +586,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       // the legs is a different number, not a slightly wrong one.
       openLegsPriced: acc.openLegsPriced + (r.openLegsPriced || 0),
       openLegsUnpriced: acc.openLegsUnpriced + (r.openLegsUnpriced || 0),
+      dividends: acc.dividends + (r.dividends || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0 })
 
   /**
    * Record what this panel displayed, so "what did it say this morning" has an
@@ -1152,6 +1153,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       cell: (r) => <span title={r.weeklyChange != null ? `${r.weeklyChange >= 0 ? '+' : ''}${fmt(r.weeklyChange)} over ~1 week` : ''}
         style={{ fontWeight: 700, color: pnlColor(r.weeklyChangePct, isDark) }}>
         {r.weeklyChangePct != null ? `${r.weeklyChangePct >= 0 ? '+' : ''}${r.weeklyChangePct.toFixed(2)}%` : '—'}</span> },
+
+    // Dividends. Income rather than a trading result, so it is reported BESIDE
+    // Net and never added to it — Net stays Stock P&L + Options Total, which is
+    // the identity every reconciliation of this table has been done against.
+    // The money was in the database from the first import and nothing read it.
+    { key: 'dividends', label: 'Dividends', sort: 'dividends', borderLeft: '1px',
+      title: 'Cash dividends and manufactured payments received on this stock since the period start. Income, not a trading result: reported beside Net, never added to it.',
+      cell: (r) => <span
+        title={r.dividends ? `Received since ${r.startDate || 'the period start'}` : 'No dividends recorded in this period'}
+        style={{ fontWeight: 700, color: r.dividends ? pnlColor(r.dividends, isDark) : textMid }}>
+        {r.dividends ? fmt(r.dividends) : '—'}</span>,
+      foot: (t) => <span style={{ fontWeight: 700, color: t.dividends ? pnlColor(t.dividends, isDark) : textMid }}>
+        {t.dividends ? fmt(t.dividends) : '—'}</span> },
   ]
 
   const MOVABLE_KEYS = ALL_COLUMNS.filter(c => !c.pinned).map(c => c.key)

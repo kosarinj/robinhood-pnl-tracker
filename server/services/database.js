@@ -3630,6 +3630,53 @@ export class DatabaseService {
    * and INT (interest paid TO you). Amounts are stored absolute, so the sign
    * comes from what the code means.
    */
+  /**
+   * Dividends received, per underlying.
+   *
+   * CDIV is an ordinary cash dividend; MDIV is a manufactured payment, which
+   * arrives in place of one when the shares were lent out. Both are income and
+   * both are already stored with the ticker attached — nothing read them per
+   * symbol until now, so a name like BAC paid real money into the account and
+   * appeared nowhere in the panel.
+   *
+   * Amounts are stored with the sign stripped (see saveCashActivity), so these
+   * are reported as received. That is right for a long book and would be wrong
+   * for a short one, where the dividend is paid rather than collected.
+   */
+  getDividendsByTicker(userId = 1, broker = null, startDate = null, endDate = null) {
+    try {
+      const params = [userId]
+      let sql = `
+        SELECT UPPER(COALESCE(symbol,'')) AS ticker,
+               SUM(ABS(COALESCE(amount,0))) AS total,
+               COUNT(*) AS n
+        FROM cash_activity
+        WHERE user_id = ?
+          AND UPPER(COALESCE(trans_code,'')) IN ('CDIV','MDIV')
+          AND COALESCE(symbol,'') <> ''
+      `
+      if (broker) { sql += ` AND COALESCE(broker,'robinhood') = ?`; params.push(broker) }
+      if (startDate) { sql += ` AND trans_date >= ?`; params.push(startDate) }
+      if (endDate) { sql += ` AND trans_date <= ?`; params.push(endDate) }
+      sql += ` GROUP BY UPPER(COALESCE(symbol,''))`
+
+      const rows = db.prepare(sql).all(...params)
+      const byTicker = {}
+      let total = 0, payments = 0
+      rows.forEach(r => {
+        if (!r.ticker) return
+        const v = Math.round((Number(r.total) || 0) * 100) / 100
+        byTicker[r.ticker] = v
+        total += v
+        payments += r.n || 0
+      })
+      return { byTicker, total: Math.round(total * 100) / 100, payments }
+    } catch (e) {
+      // An old database may predate cash_activity entirely.
+      return { byTicker: {}, total: 0, payments: 0 }
+    }
+  }
+
   getFinancingCosts(userId = 1, broker = null) {
     try {
       const rows = db.prepare(`
