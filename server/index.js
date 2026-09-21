@@ -2657,6 +2657,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         return p ? { t, p } : null
       }).filter(Boolean)
       const pairedCloses = new Set()
+      let spreadPairSeq = 0
       for (let a = 0; a < closes.length; a++) {
         if (pairedCloses.has(a)) continue
         const x = closes[a]
@@ -2689,8 +2690,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const width = Math.abs(x.p.strike - y.p.strike)
           // Same strike is a close or a roll, not a spread.
           if (width === 0 || width > SPREAD_MAX_WIDTH) continue
+          // Both legs carry the same id, so the panel can collapse a spread
+          // back into the one trade it was instead of listing two halves and
+          // leaving the reader to match them up.
+          const pid = ++spreadPairSeq
           x.t._spreadLeg = true
           y.t._spreadLeg = true
+          x.t._spreadPair = pid
+          y.t._spreadPair = pid
           pairedCloses.add(a)
           pairedCloses.add(b)
           break
@@ -3516,6 +3523,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
               contract: t.symbol, closed: t.trans_date, code: tc,
               side: t._closingShort ? 'short' : 'long',
               pnl: Math.round(t._realizedPnl * 100) / 100,
+              // Shared by the two legs of one spread.
+              pair: t._spreadPair ?? null,
+              strike: parsed?.strike ?? null,
+              type: optionType,
+              expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : null,
               // Present only where the broker itself tied shares to this
               // settlement. Reported as what happened rather than as P&L: the
               // disposal that follows an assignment is an ordinary sale the

@@ -115,6 +115,20 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // "Last time RDDT was at 153, where was I?" — for a covered-call book the
   // shares are worth the same at the same price, so any difference is premium
   // and decay, which is the overlay earning its keep or not.
+  // Which ticker's spreads are open, and where the popover should sit.
+  const [spreadFor, setSpreadFor] = useState(null)
+  const [spreadAnchor, setSpreadAnchor] = useState(null)
+  const [spreadLegs, setSpreadLegs] = useState([])
+  const toggleSpreads = (ticker, legs, el) => {
+    if (spreadFor === ticker) { setSpreadFor(null); setSpreadAnchor(null); return }
+    if (el) {
+      const box = el.getBoundingClientRect()
+      setSpreadAnchor({ top: box.bottom, right: window.innerWidth - box.right })
+    }
+    setSpreadLegs(Array.isArray(legs) ? legs : [])
+    setSpreadFor(ticker)
+  }
+
   const [histFor, setHistFor] = useState(null)
   const [hist, setHist] = useState({ loading: false, visits: [], band: null, error: null })
 
@@ -826,7 +840,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     { key: 'realizedSpreads', label: 'of which Spreads', sort: 'realizedSpreads',
       title: 'The part of Options Total that came from vertical spreads — a short leg and a long leg in the same underlying, expiry and contract type at different strikes. Both legs are counted, so this is the net of the credit kept and the long leg\'s cost. C and P split it by contract type. Already included in Options Total, so it is NOT a separate term of Net.',
       cell: (r) => r.realizedSpreads
-        ? <span title={spreadTip(r)} style={{ color: pnlColor(r.realizedSpreads, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500, cursor: 'help' }}>
+        ? <span
+            onClick={e => toggleSpreads(r.ticker, r.spreadLegDetail, e.currentTarget)}
+            title={spreadTip(r)}
+            style={{ color: pnlColor(r.realizedSpreads, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500,
+                     cursor: 'pointer', borderBottom: `1px dotted ${border}` }}>
             ({fmt(r.realizedSpreads)})
             {(r.realizedSpreadCalls || r.realizedSpreadPuts) ? (
               <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>
@@ -1655,6 +1673,17 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           ticker column's stacking context. Positioned from the clicked cell's
           rect in viewport coordinates, which is why it's fixed rather than
           absolute. */}
+      {spreadFor && spreadAnchor && createPortal(
+        <SpreadPopover
+          ticker={spreadFor}
+          legs={spreadLegs}
+          anchor={spreadAnchor}
+          onClose={() => { setSpreadFor(null); setSpreadAnchor(null) }}
+          isDark={isDark} fmt={fmt} pnlColor={pnlColor}
+        />,
+        document.body
+      )}
+
       {histFor && histAnchor && createPortal(
         <PriceHistoryPopover
           state={hist}
@@ -1679,6 +1708,148 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
  * price. That difference is the premium collected and decayed since, with the
  * share move held constant by construction.
  */
+/**
+ * Each spread as one row, rather than two legs to match up by eye.
+ *
+ * The figure in the table is a sum of legs, and a leg on its own says very
+ * little: -322.11 on a short put looks alarming until the +271.89 long beside
+ * it turns the pair into a -50.22 spread that behaved exactly as a $1-wide
+ * vertical should. Collapsing the pair is the difference between a list and an
+ * explanation.
+ */
+function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor }) {
+  const surface = isDark ? '#1e2130' : '#ffffff'
+  const border = isDark ? '#2a3142' : '#e2e8f0'
+  const text = isDark ? '#e2e8f0' : '#1e293b'
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+
+  // Same reasoning as the price-history popover: a fixed box does not follow
+  // the row it belongs to, so closing beats drifting over an unrelated one.
+  useEffect(() => {
+    const close = () => onClose()
+    const onKey = (ev) => { if (ev.key === 'Escape') onClose() }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  const { rows, loose, total } = (() => {
+    const byPair = new Map()
+    const loose = []
+    for (const l of legs || []) {
+      if (l.pair == null) { loose.push(l); continue }
+      byPair.set(l.pair, [...(byPair.get(l.pair) || []), l])
+    }
+    const rows = [...byPair.values()].map(g => {
+      const strikes = g.map(l => l.strike).filter(v => v != null).sort((a, b) => a - b)
+      return {
+        closed: g.map(l => l.closed).sort()[0],
+        type: g[0].type,
+        width: strikes.length === 2 ? `${strikes[0]}/${strikes[1]}` : (g[0].contract || '—'),
+        net: Math.round(g.reduce((s, l) => s + (l.pnl || 0), 0) * 100) / 100,
+        short: g.find(l => l.side === 'short'),
+        long: g.find(l => l.side === 'long'),
+        shares: g.map(l => l.shares).filter(Boolean),
+      }
+    }).sort((a, b) => (a.closed < b.closed ? 1 : -1))
+    const total = Math.round([...rows.map(r => r.net), ...loose.map(l => l.pnl || 0)]
+      .reduce((s, v) => s + v, 0) * 100) / 100
+    return { rows, loose, total }
+  })()
+
+  const th = { textAlign: 'right', padding: '3px 6px', fontSize: 10.5, color: textMid,
+               textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 600 }
+  const td = { textAlign: 'right', padding: '3px 6px', fontSize: 12, fontVariantNumeric: 'tabular-nums' }
+
+  return (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed',
+        top: Math.min(anchor.top + 6, window.innerHeight - 260),
+        right: Math.max(8, anchor.right),
+        zIndex: 9999, background: surface, border: `1px solid ${border}`, borderRadius: 8,
+        padding: '10px 12px', minWidth: 380, maxWidth: 560, maxHeight: 420, overflowY: 'auto',
+        textAlign: 'left', boxShadow: '0 6px 20px rgba(0,0,0,0.18)', fontWeight: 400,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: text }}>
+          {ticker} · {rows.length} spread{rows.length === 1 ? '' : 's'}
+        </span>
+        <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: textMid, cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
+      </div>
+
+      {rows.length === 0 && loose.length === 0 && (
+        <div style={{ fontSize: 12, color: textMid }}>No spread legs recorded for this period.</div>
+      )}
+
+      {rows.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: 'left' }}>Closed</th>
+              <th style={{ ...th, textAlign: 'left' }}>Spread</th>
+              <th style={th}>Short leg</th>
+              <th style={th}>Long leg</th>
+              <th style={th}>Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <React.Fragment key={i}>
+                <tr style={{ borderTop: `1px solid ${border}` }}>
+                  <td style={{ ...td, textAlign: 'left', color: textMid, whiteSpace: 'nowrap' }}>{r.closed}</td>
+                  <td style={{ ...td, textAlign: 'left', color: text }}>
+                    {r.type === 'call' ? 'Call' : r.type === 'put' ? 'Put' : ''} {r.width}
+                  </td>
+                  <td style={{ ...td, color: r.short ? pnlColor(r.short.pnl, isDark) : textMid }}>
+                    {r.short ? fmt(r.short.pnl) : '—'}
+                  </td>
+                  <td style={{ ...td, color: r.long ? pnlColor(r.long.pnl, isDark) : textMid }}>
+                    {r.long ? fmt(r.long.pnl) : '—'}
+                  </td>
+                  <td style={{ ...td, fontWeight: 700, color: pnlColor(r.net, isDark) }}>{fmt(r.net)}</td>
+                </tr>
+                {r.shares.map((s, j) => (
+                  <tr key={`s${j}`}>
+                    <td />
+                    <td colSpan={4} style={{ ...td, textAlign: 'left', fontSize: 11, color: '#f59e0b' }}>
+                      {s.bought ? 'bought' : 'sold'} {s.shares} shares @ {fmt(s.price)} on {s.date} ({s.via})
+                    </td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+            <tr style={{ borderTop: `2px solid ${border}` }}>
+              <td colSpan={4} style={{ ...td, textAlign: 'left', color: textMid, fontWeight: 600 }}>Total</td>
+              <td style={{ ...td, fontWeight: 800, color: pnlColor(total, isDark) }}>{fmt(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+
+      {loose.length > 0 && (
+        <div style={{ fontSize: 11, color: textMid, marginTop: 8, lineHeight: 1.45 }}>
+          {loose.length} leg{loose.length === 1 ? '' : 's'} counted without a partner — from an older
+          upload, before spreads were paired at close.
+        </div>
+      )}
+
+      <div style={{ fontSize: 10.5, color: textMid, marginTop: 8, lineHeight: 1.45, borderTop: `1px solid ${border}`, paddingTop: 6 }}>
+        A spread is counted only when both legs close together, so what you see here are whole trades
+        rather than halves. Shares in amber were created by an assignment; what happened to them
+        afterwards is an ordinary trade the export does not mark, so it sits in Stock P&amp;L instead.
+      </div>
+    </div>
+  )
+}
+
 function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClose, isDark, fmt, pnlColor }) {
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2a3142' : '#e2e8f0'
