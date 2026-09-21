@@ -657,6 +657,34 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   })
 
 
+  /**
+   * The legs behind one ticker's spread figure.
+   *
+   * The API has returned this detail all along and nothing ever showed it, so
+   * "I don't remember trading a spread there" had no answer short of reading
+   * JSON. It now includes any shares the broker created from a settlement,
+   * because a spread taken to assignment is not finished when the options
+   * settle: C's 137/138 booked +461.84 on the option legs and forced 100 shares
+   * at $138 that had to be sold the next morning.
+   */
+  const spreadTip = (r) => {
+    const legs = r.spreadLegDetail || []
+    if (!legs.length) return ''
+    const lines = legs.map(l => {
+      const head = `${l.closed}  ${String(l.code || '').padEnd(6)}${String(l.side || '').padEnd(6)}`
+        + `${fmt(l.pnl).padStart(10)}  ${l.contract}`
+      if (!l.shares) return head
+      const s = l.shares
+      return `${head}\n      ${s.bought ? 'bought' : 'sold'} ${s.shares} shares @ ${fmt(s.price)}`
+        + ` on ${s.date} (${s.via})`
+    })
+    return lines.join('\n') + (legs.some(l => l.shares)
+      ? '\n\nShares under a leg were created by that settlement. What happened to'
+        + ' them afterwards is an ordinary trade the export does not mark, so it is'
+        + ' not netted in here — that part sits in Stock P&L.'
+      : '')
+  }
+
   // ── Column model ────────────────────────────────────────────────────────
   // Header, body and footer all map over ONE array, so their cell counts can't
   // drift apart — they were three hand-maintained lists of 21, 23 and 19 cells,
@@ -798,7 +826,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     { key: 'realizedSpreads', label: 'of which Spreads', sort: 'realizedSpreads',
       title: 'The part of Options Total that came from vertical spreads — a short leg and a long leg in the same underlying, expiry and contract type at different strikes. Both legs are counted, so this is the net of the credit kept and the long leg\'s cost. C and P split it by contract type. Already included in Options Total, so it is NOT a separate term of Net.',
       cell: (r) => r.realizedSpreads
-        ? <span style={{ color: pnlColor(r.realizedSpreads, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500 }}>
+        ? <span title={spreadTip(r)} style={{ color: pnlColor(r.realizedSpreads, isDark), opacity: 0.7, fontStyle: 'italic', fontWeight: 500, cursor: 'help' }}>
             ({fmt(r.realizedSpreads)})
             {(r.realizedSpreadCalls || r.realizedSpreadPuts) ? (
               <span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, opacity: 0.85 }}>

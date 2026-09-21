@@ -3677,6 +3677,43 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * Share trades the broker created FROM an option settlement.
+   *
+   * An assigned short put books two rows: the option settling, and a separate
+   * stock purchase at the strike. Nothing ties them together except the stock
+   * row's description — "Citigroup\nCUSIP: 172967424\n1 C Option Assigned" —
+   * so that text is the only link between two halves of what was one event.
+   *
+   * Match on "Assigned" and "Exercised", which are the words the export
+   * actually uses. "Assignment" and "Exercise" appear in the OPTION row's
+   * description and matching those instead finds one row out of three.
+   */
+  getSettlementShareTrades(userId = 1, broker = null) {
+    try {
+      const rows = db.prepare(`
+        SELECT symbol, trans_date, trans_code, quantity, price, amount, is_buy, description
+        FROM trades
+        WHERE user_id = ?
+          AND COALESCE(is_option, 0) = 0
+          AND (description LIKE '%Option Assigned%' OR description LIKE '%Option Exercised%')
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC
+      `).all(...[userId, ...(broker ? [broker] : [])])
+      return rows.map(r => ({
+        ticker: String(r.symbol || '').toUpperCase(),
+        date: String(r.trans_date || '').slice(0, 10),
+        shares: Math.abs(Number(r.quantity) || 0),
+        price: Math.round((Number(r.price) || 0) * 100) / 100,
+        amount: Math.round(Math.abs(Number(r.amount) || 0) * 100) / 100,
+        bought: !!r.is_buy,
+        via: /Exercised/i.test(r.description || '') ? 'exercise' : 'assignment',
+      }))
+    } catch (e) {
+      return []
+    }
+  }
+
   getFinancingCosts(userId = 1, broker = null) {
     try {
       const rows = db.prepare(`

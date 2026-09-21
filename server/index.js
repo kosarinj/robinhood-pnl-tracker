@@ -3437,6 +3437,23 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       })
     }
 
+    // Share legs the broker created FROM an option settlement, so a spread that
+    // went to assignment can show what it actually cost. The option side alone
+    // says C's 137/138 made +461.84; the 100 shares it forced you to buy at 138
+    // are the rest of that trade, and they sit in stock P&L with nothing
+    // connecting them back to the spread they came from.
+    const settlementShares = databaseService.getSettlementShareTrades(userId, brokerFilter)
+    const shareLegFor = (ticker, date, code) => {
+      if (!['OASGN', 'OEXC', 'OEXCS'].includes(code)) return null
+      const day = (d) => new Date(`${String(d).slice(0, 10)}T00:00:00Z`).getTime()
+      const near = settlementShares.filter(s =>
+        s.ticker === ticker && Math.abs(day(s.date) - day(date)) <= 86400000)
+      if (!near.length) return null
+      // Closest date wins when more than one settlement landed in the window.
+      near.sort((a, b) => Math.abs(day(a.date) - day(date)) - Math.abs(day(b.date) - day(date)))
+      return near[0]
+    }
+
     // Group realized P&L by underlying, split by short/long x call/put, date-filtered
     const byUnderlying = {}
     allTrades.forEach(t => {
@@ -3494,10 +3511,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           if (optionType === 'call') entry.realizedSpreadCalls += t._realizedPnl
           else if (optionType === 'put') entry.realizedSpreadPuts += t._realizedPnl
           if (entry.spreadLegDetail.length < 100) {
+            const shareLeg = shareLegFor(ticker, t.trans_date, tc)
             entry.spreadLegDetail.push({
               contract: t.symbol, closed: t.trans_date, code: tc,
               side: t._closingShort ? 'short' : 'long',
               pnl: Math.round(t._realizedPnl * 100) / 100,
+              // Present only where the broker itself tied shares to this
+              // settlement. Reported as what happened rather than as P&L: the
+              // disposal that follows an assignment is an ordinary sale the
+              // export does not mark, so netting the two here would be a guess.
+              ...(shareLeg ? { shares: shareLeg } : {}),
             })
           }
         }
