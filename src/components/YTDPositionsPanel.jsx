@@ -1751,10 +1751,16 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
   // Placed under the cell where possible, but always fully on screen: clamped
   // horizontally so no sideways scroll is ever needed to see it, and flipped
   // above the cell when there is no room below.
-  const WIDTH = 440
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-  const left = Math.max(8, Math.min(vw - WIDTH - 8, (anchor.left ?? vw - WIDTH - 8) - 60))
+  // Wide enough for all five columns at once. At 440 the last two were pushed
+  // off the right edge behind an inner scrollbar, so the short legs were
+  // visible and the long legs that offset them were not -- MDT read as +85.90
+  // and +52.90 against a total of +35.60, with the -68.10 and -35.10 that
+  // reconcile them out of sight. A table you have to scroll sideways to
+  // reconcile is not a table.
+  const WIDTH = Math.min(620, vw - 24)
+  const left = Math.max(8, Math.min(vw - WIDTH - 8, (anchor.left ?? vw - WIDTH - 8) - 140))
   const top = Math.max(8, Math.min(anchor.top + 6, vh - 300))
 
   const { rows, loose, total } = (() => {
@@ -1781,9 +1787,10 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
     return { rows, loose, total }
   })()
 
-  const th = { textAlign: 'right', padding: '3px 6px', fontSize: 10.5, color: textMid,
-               textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 600 }
-  const td = { textAlign: 'right', padding: '3px 6px', fontSize: 12, fontVariantNumeric: 'tabular-nums' }
+  const th = { textAlign: 'right', padding: '3px 4px', fontSize: 10, color: textMid,
+               textTransform: 'uppercase', letterSpacing: '.03em', fontWeight: 600, whiteSpace: 'nowrap' }
+  const td = { textAlign: 'right', padding: '3px 4px', fontSize: 12, fontVariantNumeric: 'tabular-nums',
+               whiteSpace: 'nowrap' }
 
   return (
     <div
@@ -1792,8 +1799,8 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
       style={{
         position: 'fixed', top, left, width: WIDTH,
         zIndex: 9999, background: surface, border: `1px solid ${border}`, borderRadius: 8,
-        padding: '10px 12px', maxHeight: Math.min(420, vh - top - 16),
-        overflowY: 'auto', overflowX: 'auto',
+        padding: '10px 12px', maxHeight: Math.min(440, vh - top - 16),
+        overflowY: 'auto', overflowX: 'hidden',
         textAlign: 'left', boxShadow: '0 6px 20px rgba(0,0,0,0.18)', fontWeight: 400,
       }}
     >
