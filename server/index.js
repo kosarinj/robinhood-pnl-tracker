@@ -2549,17 +2549,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // Legs of a vertical spread, so the panel can report what spreads made
     // without changing what anything else means.
     //
-    // A leg is recognised at the moment it opens: if the same underlying,
-    // expiry and type already has an open position on the other side at a
-    // DIFFERENT strike, both contracts are legs. Same strike is not a spread —
-    // that is a position being closed or rolled, and it shares a stack key.
-    // Recognising at open is what makes it work on one pass: both legs are
-    // always open before either closes, so every realized amount that follows
-    // knows what it belongs to.
-    // Legs of a vertical spread, recognised by shape because nothing else is
-    // left: the export carries no order id, no strategy name and no time of
-    // day. What a spread does leave behind is two opens on the SAME DAY, on
-    // opposite sides of the same expiry and type, a strike or two apart.
+    // Recognised by shape, because nothing else is left: the export carries no
+    // order id, no strategy name and no time of day. What a vertical leaves
+    // behind is two trades on the SAME DAY, on opposite sides of the same
+    // expiry and type, a strike or two apart.
+    //
+    // The pairing is done on the CLOSES (see below the LIFO pass), so the two
+    // legs are always claimed together or not at all. Pairing the opens was
+    // tried both per contract and per lot, and neither could hold that
+    // property — the block below the LIFO pass records what each got wrong.
     //
     // Width is what does the work. A week of buying puts at seven strikes while
     // selling one offsets in every arithmetic sense, and pairing on "some open
@@ -2568,43 +2566,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // wide. Checked against the full export: this finds 20 spreads, every one
     // of them a genuine order, and none of the weekly put buying.
     const SPREAD_MAX_WIDTH = 2.5  // dollars between the strikes
-    const spreadContracts = new Set()
-    const contractKeyOf = (t, p) =>
-      `${t.broker || 'robinhood'}::${p.ticker}|${p.year}${p.month}${p.day}|${p.type}|${p.strike}`
-    {
-      // allTrades is ordered by date then insert id, and rows are inserted in
-      // file order, so a position in this list IS the row's place in the export.
-      const legs = allTrades.map((t, i) => {
-        const tc = (t.trans_code || '').toUpperCase()
-        if (tc !== 'BTO' && tc !== 'STO') return null
-        const p = parseOptionDescription(t.symbol || '')
-        return p ? { i, t, p, side: tc === 'BTO' ? 'long' : 'short' } : null
-      }).filter(Boolean)
-      const paired = new Set()
-      for (let a = 0; a < legs.length; a++) {
-        if (paired.has(a)) continue
-        const x = legs[a]
-        for (let b = a + 1; b < legs.length; b++) {
-          const y = legs[b]
-          // Ordered by date, so once the day changes there is nothing left to
-          // pair this leg with.
-          if (y.t.trans_date !== x.t.trans_date) break
-          if (paired.has(b)) continue
-          if (x.side === y.side) continue
-          if ((x.t.broker || 'robinhood') !== (y.t.broker || 'robinhood')) continue
-          if (x.p.ticker !== y.p.ticker || x.p.type !== y.p.type) continue
-          if (`${x.p.year}${x.p.month}${x.p.day}` !== `${y.p.year}${y.p.month}${y.p.day}`) continue
-          const width = Math.abs(x.p.strike - y.p.strike)
-          // Same strike is a close or a roll, not a spread.
-          if (width === 0 || width > SPREAD_MAX_WIDTH) continue
-          spreadContracts.add(contractKeyOf(x.t, x.p))
-          spreadContracts.add(contractKeyOf(y.t, y.p))
-          paired.add(a)
-          paired.add(b)
-          break
-        }
-      }
-    }
+    // The pairing itself now happens AFTER the LIFO pass, on the closes rather
+    // than the opens — see the block below it. Recognising at open could not be
+    // made symmetric: whichever way membership was recorded, a spread could end
+    // up reporting one leg without the other.
     const isOpening = tc => ['BTO', 'STO'].includes((tc || '').toUpperCase())
     const sortedTrades = [...allTrades].sort((a, b) =>
       a.trans_date.localeCompare(b.trans_date) ||
@@ -2660,10 +2625,63 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
           t._realizedPnl = Math.round((closingShort ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
           t._closingShort = closingShort
-          t._spreadLeg = spreadContracts.has(sym)
         }
       }
     })
+
+    // Which closes were legs of a vertical.
+    //
+    // Recognised at CLOSE, by the same shape rule that used to run on the opens,
+    // because that is the only way this figure can be symmetric: legs are
+    // counted in pairs or not at all, so a spread can never report half of
+    // itself.
+    //
+    // Tagging by CONTRACT at open was the first attempt. It let a later roll in
+    // the same strike inherit the label: RDDT's 9/18 $145 put was genuinely half
+    // a 145/146 vertical early in the month, and the lot bought on 9/17 to roll
+    // down from the $148 — a BTO and an STC, both long side, no spread anywhere
+    // — still put its whole expiring premium into the spread figure, taking it
+    // from -17.63 to -74.67 on a trade that was not a spread.
+    //
+    // Tagging by LOT fixed that and broke the other half. LIFO consumes the
+    // newest lot, which need not be the spread's own, so NFLX's 77/78 put spread
+    // booked its -660.10 short leg while the +637.89 long leg stayed on the
+    // stack. One leg of a spread is a worse answer than both or neither.
+    //
+    // This changes no realized P&L. It decides only which closes the spread
+    // SUBSET claims, and Net has never contained that subset.
+    {
+      const closes = sortedTrades.map(t => {
+        if (t._realizedPnl == null) return null
+        const p = parseOptionDescription(t.symbol || '')
+        return p ? { t, p } : null
+      }).filter(Boolean)
+      const pairedCloses = new Set()
+      for (let a = 0; a < closes.length; a++) {
+        if (pairedCloses.has(a)) continue
+        const x = closes[a]
+        for (let b = a + 1; b < closes.length; b++) {
+          const y = closes[b]
+          // Ordered by date, so once the day changes there is nothing left to
+          // pair this leg with.
+          if (y.t.trans_date !== x.t.trans_date) break
+          if (pairedCloses.has(b)) continue
+          // One leg closes a long and the other a short, or it is no vertical.
+          if (x.t._closingShort === y.t._closingShort) continue
+          if ((x.t.broker || 'robinhood') !== (y.t.broker || 'robinhood')) continue
+          if (x.p.ticker !== y.p.ticker || x.p.type !== y.p.type) continue
+          if (`${x.p.year}${x.p.month}${x.p.day}` !== `${y.p.year}${y.p.month}${y.p.day}`) continue
+          const width = Math.abs(x.p.strike - y.p.strike)
+          // Same strike is a close or a roll, not a spread.
+          if (width === 0 || width > SPREAD_MAX_WIDTH) continue
+          x.t._spreadLeg = true
+          y.t._spreadLeg = true
+          pairedCloses.add(a)
+          pairedCloses.add(b)
+          break
+        }
+      }
+    }
 
     // Open Premium = credit collected on OPEN SHORT calls. This is sourced from the
     // SAME data the Short Call Tracker uses (short_call_entries), NOT the LIFO trade
