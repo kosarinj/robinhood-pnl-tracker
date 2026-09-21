@@ -2584,8 +2584,13 @@ function AuthenticatedApp({ user }) {
       )}
 
       {/* Positions tab */}
-      {activeMainTab === 'positions' && (
-        <div style={{ padding: '8px 0' }}>
+      {/* Hidden rather than unmounted — the same reasoning as the Positions view
+          inside it, one level up. Switching to Order Book and back threw this
+          whole section away and rebuilt it, so returning meant waiting for the
+          YTD computation and a round of price fetches all over again to look at
+          a table that had not changed. It now simply stays, and its own
+          120-second refresh keeps it current while it is out of sight. */}
+      <div style={{ padding: '8px 0', display: activeMainTab === 'positions' ? 'block' : 'none' }}>
           {/* The roll alert stays above the tabs: it is a notification about the
               book, not a view of it, and it is useless if you have to go looking. */}
           <RollCandidatesAlert broker={brokerFilter} />
@@ -2621,14 +2626,23 @@ function AuthenticatedApp({ user }) {
             })}
           </nav>
 
-          {positionsTab === 'table'    && <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />}
+          {/* Hidden rather than unmounted.
+              The other views mount on demand, which is right for them — they are
+              cheap and visited occasionally. This one runs the whole YTD
+              computation and refetches prices on every mount, so switching to
+              Expirations and back meant waiting for all of it again to look at a
+              table that had not changed. Kept mounted, it is simply there, and
+              its own 120-second refresh keeps it current while it is out of
+              sight. */}
+          <div style={{ display: positionsTab === 'table' ? 'block' : 'none' }}>
+            <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
+          </div>
           {positionsTab === 'cash'     && <CashCheckPanel broker={brokerFilter} />}
           {positionsTab === 'shorts'   && <ShortCallTracker broker={brokerFilter} />}
           {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}
           {positionsTab === 'longs'    && <LongOptionsPanel broker={brokerFilter} />}
           {positionsTab === 'coverage' && <CallCoveragePanel broker={brokerFilter} />}
-        </div>
-      )}
+      </div>
 
       {/* Tax tab */}
       {activeMainTab === 'tax' && (
