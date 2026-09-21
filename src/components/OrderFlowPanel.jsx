@@ -968,9 +968,42 @@ export default function OrderFlowPanel() {
 
             {results.length === 0 ? (
               <div style={{ fontSize: 13, color: muted }}>
-                {(scan?.list || []).length === 0
-                  ? 'Add tickers above. The recorder scans them on whatever depth subscriptions the watch list leaves spare — watch one name and two are free.'
-                  : 'Waiting for the first readings. Each name is sampled for half a minute before it reports.'}
+                {/* An idle screener and a broken one used to read the same, so
+                    "waiting for the first readings" was the answer whether it
+                    was about to report or could not possibly. Say which. */}
+                {(() => {
+                  const rec = scan?.recorder
+                  const listed = (scan?.list || []).length
+                  const watching = scan?.watching ?? 0
+                  const maxDepth = scan?.maxDepth ?? 3
+                  const stale = !rec || rec.lastSeenSec > 90
+                  const depthErr = Object.entries(rec?.errors || {})
+                    .find(([, v]) => /\[309\]|max.*depth|market depth/i.test(String(v)))
+
+                  if (stale) return (
+                    <>
+                      <strong style={{ color: '#f59e0b' }}>The recorder isn’t running.</strong>{' '}
+                      Nothing can be scanned without it — it is the only thing with a depth
+                      subscription. Start it and this fills in on its own.
+                      {rec && ` Last heard from ${rec.lastSeenSec}s ago.`}
+                    </>
+                  )
+                  if (listed === 0) return 'Add tickers above. They are scanned on whatever depth subscriptions the watch list leaves spare — watch one name and two are free.'
+                  if (watching >= maxDepth) return (
+                    <>
+                      <strong style={{ color: '#f59e0b' }}>No spare depth subscriptions.</strong>{' '}
+                      IBKR allows {maxDepth} at once and the watch list is holding all of them.
+                      Remove a watched name and the scan starts on the freed slot.
+                    </>
+                  )
+                  if (depthErr) return (
+                    <>
+                      <strong style={{ color: '#f59e0b' }}>IBKR refused a depth request.</strong>{' '}
+                      {depthErr[0]}: {depthErr[1]}
+                    </>
+                  )
+                  return `Waiting for the first readings. Each name is sampled for ${cfg.seconds || 30} seconds before it reports, and ${maxDepth - watching} can run at once.`
+                })()}
               </div>
             ) : (
               <div style={{ overflowX: 'auto', maxHeight: 520, overflowY: 'auto' }}>

@@ -8315,9 +8315,19 @@ function scanFor(ownerId) {
 function scanView(ownerId) {
   const s = scanFor(ownerId)
   const now = Date.now()
+  const st = recorderStatus.get(ownerId)
   return {
     list: s.list,
     config: s.config,
+    // Why nothing is scanning, when nothing is scanning. An idle screener and a
+    // broken one look identical from the panel, and the reasons are all knowable
+    // here: the recorder may not be running, the list may be empty, or the watch
+    // list may be holding every depth subscription IBKR allows.
+    recorder: st
+      ? { lastSeenSec: Math.round((now - st.at) / 1000), active: st.active, errors: st.errors }
+      : null,
+    watching: (watchLists.get(ownerId) || []).length,
+    maxDepth: LIVE_BOOK_MAX_SYMBOLS,
     results: [...s.results.values()]
       .map(r => ({ ...r, ageSec: Math.round((now - r.receivedAt) / 1000) }))
       .sort((a, b) => (b.score || 0) - (a.score || 0)),
