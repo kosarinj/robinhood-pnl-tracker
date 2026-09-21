@@ -2662,9 +2662,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const x = closes[a]
         for (let b = a + 1; b < closes.length; b++) {
           const y = closes[b]
-          // Ordered by date, so once the day changes there is nothing left to
-          // pair this leg with.
-          if (y.t.trans_date !== x.t.trans_date) break
+          // Same day, with one exception: an assignment posts the day BEFORE
+          // the other leg is exercised or sold, so those two legs of a single
+          // spread legitimately close a day apart. C's 137/138 put spread was
+          // assigned on the 17th and the long sold on the 18th; CRWV's 93/94
+          // was assigned on the 17th and exercised on the 18th. Same-day-only
+          // reported neither, which is the case this book hits most often.
+          //
+          // OEXP is deliberately not in the list: both legs of an expiring
+          // vertical settle on the same day already, so widening for it would
+          // only invite spurious pairs.
+          const dayGap = Math.round(
+            (new Date(y.t.trans_date) - new Date(x.t.trans_date)) / 86400000)
+          // Sorted by date, so nothing beyond the widest window can pair.
+          if (!Number.isFinite(dayGap) || dayGap > 1) break
+          const SETTLED = ['OASGN', 'OEXC', 'OEXCS']
+          const settles = SETTLED.includes((x.t.trans_code || '').toUpperCase())
+            || SETTLED.includes((y.t.trans_code || '').toUpperCase())
+          if (dayGap > (settles ? 1 : 0)) continue
           if (pairedCloses.has(b)) continue
           // One leg closes a long and the other a short, or it is no vertical.
           if (x.t._closingShort === y.t._closingShort) continue
