@@ -1753,14 +1753,13 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
   // above the cell when there is no room below.
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-  // Wide enough for all five columns at once. At 440 the last two were pushed
-  // off the right edge behind an inner scrollbar, so the short legs were
-  // visible and the long legs that offset them were not -- MDT read as +85.90
-  // and +52.90 against a total of +35.60, with the -68.10 and -35.10 that
-  // reconcile them out of sight. A table you have to scroll sideways to
-  // reconcile is not a table.
-  const WIDTH = Math.min(620, vw - 24)
-  const left = Math.max(8, Math.min(vw - WIDTH - 8, (anchor.left ?? vw - WIDTH - 8) - 140))
+  // Narrow on purpose: the rows stack, so nothing needs horizontal room. A
+  // five-column table needed 620 and still could not be read on a phone, where
+  // there is no scrolling sideways at all — the short leg was visible and the
+  // long leg that offsets it was not, which made MDT's +85.90 and +52.90 look
+  // like they should total +35.60.
+  const WIDTH = Math.min(340, vw - 24)
+  const left = Math.max(8, Math.min(vw - WIDTH - 8, (anchor.left ?? vw - WIDTH - 8) - 100))
   const top = Math.max(8, Math.min(anchor.top + 6, vh - 300))
 
   const { rows, loose, total } = (() => {
@@ -1787,10 +1786,12 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
     return { rows, loose, total }
   })()
 
-  const th = { textAlign: 'right', padding: '3px 4px', fontSize: 10, color: textMid,
-               textTransform: 'uppercase', letterSpacing: '.03em', fontWeight: 600, whiteSpace: 'nowrap' }
-  const td = { textAlign: 'right', padding: '3px 4px', fontSize: 12, fontVariantNumeric: 'tabular-nums',
-               whiteSpace: 'nowrap' }
+  // 9/18 rather than 2026-09-18. The year is noise in a list that is all one
+  // period, and spelling it out took a quarter of the width.
+  const shortDate = (d) => {
+    const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    return m ? `${Number(m[2])}/${Number(m[3])}` : String(d || '')
+  }
 
   return (
     <div
@@ -1815,49 +1816,48 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
         <div style={{ fontSize: 12, color: textMid }}>No spread legs recorded for this period.</div>
       )}
 
+      {/* Stacked rows rather than a table, like the price-history popup beside
+          it. Five columns never fitted a phone, and a table you have to scroll
+          sideways hides the very leg that reconciles the one you can see. */}
+      {rows.map((r, i) => (
+        <div key={i} style={{ padding: '5px 0', borderTop: `1px solid ${border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+            <span style={{ fontSize: 12.5, color: text, whiteSpace: 'nowrap' }}>
+              <span style={{ color: textMid }}>{shortDate(r.closed)}</span>
+              {' · '}
+              {r.type === 'call' ? 'Call' : r.type === 'put' ? 'Put' : ''} {r.width}
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap',
+                           fontVariantNumeric: 'tabular-nums', color: pnlColor(r.net, isDark) }}>
+              {fmt(r.net)}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: textMid, marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
+            short{' '}
+            <span style={{ color: r.short ? pnlColor(r.short.pnl, isDark) : textMid }}>
+              {r.short ? fmt(r.short.pnl) : '—'}
+            </span>
+            {'  ·  '}
+            long{' '}
+            <span style={{ color: r.long ? pnlColor(r.long.pnl, isDark) : textMid }}>
+              {r.long ? fmt(r.long.pnl) : '—'}
+            </span>
+          </div>
+          {r.shares.map((s, j) => (
+            <div key={j} style={{ fontSize: 11, color: '#f59e0b', marginTop: 1 }}>
+              {s.bought ? 'bought' : 'sold'} {s.shares} shares @ {fmt(s.price)} ({s.via})
+            </div>
+          ))}
+        </div>
+      ))}
+
       {rows.length > 0 && (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <th style={{ ...th, textAlign: 'left' }}>Closed</th>
-              <th style={{ ...th, textAlign: 'left' }}>Spread</th>
-              <th style={th}>Short leg</th>
-              <th style={th}>Long leg</th>
-              <th style={th}>Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <React.Fragment key={i}>
-                <tr style={{ borderTop: `1px solid ${border}` }}>
-                  <td style={{ ...td, textAlign: 'left', color: textMid, whiteSpace: 'nowrap' }}>{r.closed}</td>
-                  <td style={{ ...td, textAlign: 'left', color: text }}>
-                    {r.type === 'call' ? 'Call' : r.type === 'put' ? 'Put' : ''} {r.width}
-                  </td>
-                  <td style={{ ...td, color: r.short ? pnlColor(r.short.pnl, isDark) : textMid }}>
-                    {r.short ? fmt(r.short.pnl) : '—'}
-                  </td>
-                  <td style={{ ...td, color: r.long ? pnlColor(r.long.pnl, isDark) : textMid }}>
-                    {r.long ? fmt(r.long.pnl) : '—'}
-                  </td>
-                  <td style={{ ...td, fontWeight: 700, color: pnlColor(r.net, isDark) }}>{fmt(r.net)}</td>
-                </tr>
-                {r.shares.map((s, j) => (
-                  <tr key={`s${j}`}>
-                    <td />
-                    <td colSpan={4} style={{ ...td, textAlign: 'left', fontSize: 11, color: '#f59e0b' }}>
-                      {s.bought ? 'bought' : 'sold'} {s.shares} shares @ {fmt(s.price)} on {s.date} ({s.via})
-                    </td>
-                  </tr>
-                ))}
-              </React.Fragment>
-            ))}
-            <tr style={{ borderTop: `2px solid ${border}` }}>
-              <td colSpan={4} style={{ ...td, textAlign: 'left', color: textMid, fontWeight: 600 }}>Total</td>
-              <td style={{ ...td, fontWeight: 800, color: pnlColor(total, isDark) }}>{fmt(total)}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline',
+                      borderTop: `2px solid ${border}`, paddingTop: 5, marginTop: 3 }}>
+          <span style={{ fontSize: 12, color: textMid, fontWeight: 600 }}>Total</span>
+          <span style={{ fontSize: 13.5, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+                         color: pnlColor(total, isDark) }}>{fmt(total)}</span>
+        </div>
       )}
 
       {loose.length > 0 && (
