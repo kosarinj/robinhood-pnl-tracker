@@ -123,7 +123,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     if (spreadFor === ticker) { setSpreadFor(null); setSpreadAnchor(null); return }
     if (el) {
       const box = el.getBoundingClientRect()
-      setSpreadAnchor({ top: box.bottom, right: window.innerWidth - box.right })
+      // Left as well as right: this column sits near the right edge of a very
+      // wide table, and anchoring only by its right edge put the popup where
+      // you had to scroll sideways to reach it.
+      setSpreadAnchor({ top: box.bottom, left: box.left, right: window.innerWidth - box.right })
     }
     setSpreadLegs(Array.isArray(legs) ? legs : [])
     setSpreadFor(ticker)
@@ -1723,20 +1726,36 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
   const text = isDark ? '#e2e8f0' : '#1e293b'
   const textMid = isDark ? '#94a3b8' : '#64748b'
 
-  // Same reasoning as the price-history popover: a fixed box does not follow
-  // the row it belongs to, so closing beats drifting over an unrelated one.
+  const boxRef = useRef(null)
+
+  // Deliberately NOT closing on scroll, unlike the price-history popover.
+  //
+  // This column sits near the right edge of a table twenty-odd columns wide, so
+  // reaching the popup meant scrolling sideways — and scrolling closed it. The
+  // two behaviours together made it unreadable. It is fixed, titled with the
+  // ticker it belongs to so it cannot be mistaken for another row's, and closes
+  // on Escape, the ×, or a click anywhere outside it.
   useEffect(() => {
-    const close = () => onClose()
     const onKey = (ev) => { if (ev.key === 'Escape') onClose() }
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
+    const onDown = (ev) => { if (!boxRef.current?.contains(ev.target)) onClose() }
     window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onClose)
+    document.addEventListener('mousedown', onDown)
     return () => {
-      window.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', close)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onClose)
+      document.removeEventListener('mousedown', onDown)
     }
   }, [onClose])
+
+  // Placed under the cell where possible, but always fully on screen: clamped
+  // horizontally so no sideways scroll is ever needed to see it, and flipped
+  // above the cell when there is no room below.
+  const WIDTH = 440
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const left = Math.max(8, Math.min(vw - WIDTH - 8, (anchor.left ?? vw - WIDTH - 8) - 60))
+  const top = Math.max(8, Math.min(anchor.top + 6, vh - 300))
 
   const { rows, loose, total } = (() => {
     const byPair = new Map()
@@ -1768,13 +1787,13 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
 
   return (
     <div
+      ref={boxRef}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed',
-        top: Math.min(anchor.top + 6, window.innerHeight - 260),
-        right: Math.max(8, anchor.right),
+        position: 'fixed', top, left, width: WIDTH,
         zIndex: 9999, background: surface, border: `1px solid ${border}`, borderRadius: 8,
-        padding: '10px 12px', minWidth: 380, maxWidth: 560, maxHeight: 420, overflowY: 'auto',
+        padding: '10px 12px', maxHeight: Math.min(420, vh - top - 16),
+        overflowY: 'auto', overflowX: 'auto',
         textAlign: 'left', boxShadow: '0 6px 20px rgba(0,0,0,0.18)', fontWeight: 400,
       }}
     >
