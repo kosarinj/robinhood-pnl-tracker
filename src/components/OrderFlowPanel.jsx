@@ -485,6 +485,34 @@ function LiveBook({ ticker, live, error, watch, isDark, muted, th, td }) {
  * cancellation as demand is how people talk themselves into levels that were
  * never there.
  */
+/**
+ * The screener's columns, and what each one actually measures.
+ *
+ * Kept in one place so the table header and the legend beneath it cannot drift
+ * apart, and so a definition has somewhere to live that is longer than a header
+ * will hold. The weights quoted here are the recorder's own arithmetic
+ * (l2/recorder.py, Scan.reading) rather than a description of it: lean is worth
+ * 40 points, an unopposed wall 30, absorption 20 and the tape 10.
+ */
+const SCAN_COLUMNS = [
+  ['ticker', 'Ticker', 'left',
+    'The symbol. Click it to open the live book for that name.'],
+  ['score', 'Score', 'right',
+    'A 0–100 composite of the four readings to its right: resting lean is worth up to 40, an unopposed wall up to 30, absorption up to 20, the tape up to 10. Hover a score to see how it split.'],
+  ['lean', 'Resting lean', 'right',
+    'Of the size resting near the current price, the share sitting on the bid. Above 50% means more size is waiting to buy than to sell. The small figures beneath are the raw bid and offer sizes it came from.'],
+  ['wall', 'Biggest wall', 'left',
+    'The largest single resting order in the book: its size, which side it is on, its price, and how far that price sits from the last trade. "unopposed" means nothing within 1.5× of it is facing it on the other side.'],
+  ['absorption', 'Absorption', 'left',
+    'The price level that absorbed the most relative to the size it ever showed, during this scan. A high reading means someone kept refilling and soaking up what hit them instead of moving away.'],
+  ['tape', 'Tape', 'right',
+    'Of the volume that actually traded during the scan, the share that was buyers lifting offers rather than sellers hitting bids.'],
+  ['price', 'Price', 'right',
+    'The last trade at the moment of the scan, or the midpoint if nothing had traded yet.'],
+  ['ageSec', 'Scanned', 'right',
+    'How long ago this reading was taken. The scanner rotates through the list, so an old reading means it has not come back to that name yet.'],
+]
+
 export default function OrderFlowPanel() {
   const { isDark } = useTheme()
   const [ticker, setTicker] = useState('')
@@ -949,18 +977,9 @@ export default function OrderFlowPanel() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {[
-                        ['ticker', 'Ticker', 'left'],
-                        ['score', 'Score', 'right'],
-                        ['lean', 'Resting lean', 'right'],
-                        ['wall', 'Biggest wall', 'left'],
-                        ['absorption', 'Absorption', 'left'],
-                        ['tape', 'Tape', 'right'],
-                        ['price', 'Price', 'right'],
-                        ['ageSec', 'Scanned', 'right'],
-                      ].map(([key, label, align]) => (
+                      {SCAN_COLUMNS.map(([key, label, align, meaning]) => (
                         <th key={key} onClick={() => sortScanBy(key)}
-                          title={`Sort by ${label.toLowerCase()}`}
+                          title={`${meaning}\n\nClick to sort by ${label.toLowerCase()}.`}
                           style={{ ...th, textAlign: align, cursor: 'pointer', userSelect: 'none' }}>
                           {label}
                           <span style={{ opacity: scanSort.key === key ? 1 : 0.25, fontSize: 10 }}>
@@ -1026,6 +1045,20 @@ export default function OrderFlowPanel() {
               appear or vanish between passes. Score adds four parts, shown on hover: how lopsided the resting size
               is near the price, whether the biggest order has anything to meet it, how much traded through a level
               while watching, and which side was hitting.
+              {/* Every column spelled out. A reading nobody can define is a
+                  reading nobody should trade on, and a tooltip is easy to miss
+                  when the question is "what is this column". */}
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: 'pointer', userSelect: 'none' }}>What each column means</summary>
+                <dl style={{ margin: '6px 0 0', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px' }}>
+                  {SCAN_COLUMNS.map(([key, label, , meaning]) => (
+                    <React.Fragment key={key}>
+                      <dt style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{label}</dt>
+                      <dd style={{ margin: 0 }}>{meaning}</dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+              </details>
             </div>
           </div>
         )
