@@ -249,12 +249,53 @@ export default function ShortCallTracker({ broker = 'all' }) {
             ? <>{entry.priceSource === 'model' ? '~' : ''}{fmt(entry.currentOptionPrice)}{entry.priceSource === 'model' ? <span style={{ fontSize: '10px', color: textMid }}> est</span> : entry.priceSource === 'close' ? <span style={{ fontSize: '10px', color: '#f59e0b' }}> stale</span> : ''}</>
             : <span style={{ fontSize: '11px', color: textMid }}>n/a</span>}
         </td>
-        <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '600', color: stockMoveColor(entry.stockMove, isDark) }}>
-          {entry.stockMove != null ? (entry.stockMove >= 0 ? '+' : '') + fmt(entry.stockMove) : '—'}
-        </td>
+        {(() => {
+          // Stock Δ is the move since you sold, which matters for a covered
+          // call because 100 shares sit behind it. On a spread there is a long
+          // call there instead, so that move says nothing about the position —
+          // it was being printed next to a Net $ it plays no part in, which is
+          // why the two numbers looked unrelated. They were.
+          //
+          // What a spread actually turns on is how far the stock still has to
+          // travel before the short strike starts costing you. That is the room
+          // the trade is daring the stock to cross, so it goes here instead.
+          const sp = entry.spread
+          const isSpread = !!sp && sp.netPnl != null
+          if (isSpread && entry.currentStock > 0 && entry.strike > 0) {
+            const room = entry.strike - entry.currentStock
+            const pct = (room / entry.currentStock) * 100
+            const past = room < 0
+            return (
+              <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '600',
+                color: past ? '#ef4444' : '#22c55e' }}
+                title={`The stock is ${fmt(Math.abs(room))} ${past ? 'ABOVE' : 'below'} your short $${entry.strike} strike`
+                  + ` (${Math.abs(pct).toFixed(1)}%).`
+                  + (past
+                      ? ` It has crossed the strike, so the spread is working against you. Most you can still lose: ${fmt(sp.maxLoss)}.`
+                      : ` It can rise ${Math.abs(pct).toFixed(1)}% before the short strike starts costing you.`)
+                  + `\n\nNot "Stock Δ": there are no shares behind a spread, so the move since you sold it is not what this position turns on.`}>
+                {past ? '' : '+'}{pct.toFixed(1)}%
+                <div style={{ fontSize: '10px', color: textMid, fontWeight: 400 }}>
+                  {past ? 'past strike' : 'room to strike'}
+                </div>
+              </td>
+            )
+          }
+          return (
+            <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '600', color: stockMoveColor(entry.stockMove, isDark) }}>
+              {entry.stockMove != null ? (entry.stockMove >= 0 ? '+' : '') + fmt(entry.stockMove) : '—'}
+            </td>
+          )
+        })()}
         <td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: '700', color: pnlColor(entry.thetaGain, isDark) }}
-          title={entry.callGainTotal != null ? `Total across ${entry.contracts} contract(s): ${(entry.callGainTotal >= 0 ? '+' : '') + fmt(entry.callGainTotal)}` : ''}>
+          title={(entry.callGainTotal != null ? `Total across ${entry.contracts} contract(s): ${(entry.callGainTotal >= 0 ? '+' : '') + fmt(entry.callGainTotal)}` : '')
+            + (entry.spread?.netPnl != null
+                ? `\n\nThis is the SHORT leg only. The long $${entry.spread.strike} moves against it, so Net $ is the one to read for the spread.`
+                : '')}>
           {entry.thetaGain != null ? (entry.thetaGain >= 0 ? '+' : '') + fmt(entry.thetaGain) : '—'}
+          {entry.spread?.netPnl != null && (
+            <div style={{ fontSize: '10px', color: textMid, fontWeight: 400 }}>short leg</div>
+          )}
         </td>
         {(() => {
           // A spread is not a covered call. The covered-call figure adds the
@@ -282,7 +323,15 @@ export default function ShortCallTracker({ broker = 'all' }) {
               color: netDollars != null ? pnlColor(netDollars, isDark) : (isDark ? '#94a3b8' : '#64748b') }}
               title={title}>
               {netDollars != null ? (netDollars >= 0 ? '+' : '') + fmt(netDollars) : '—'}
-              {isSpread && <div style={{ fontSize: '10px', color: textMid, fontWeight: 400 }}>both legs</div>}
+              {/* The credit is what the position is actually for: if the stock
+                  never reaches the short strike, this is what's kept. Showing
+                  it beside the mark-to-market says what the trade is worth if
+                  it simply runs its course, which the P&L alone doesn't. */}
+              {isSpread && (
+                <div style={{ fontSize: '10px', color: textMid, fontWeight: 400 }}>
+                  both legs{sp.netCredit != null ? ` · keep ${fmt(sp.netCredit)}` : ''}
+                </div>
+              )}
             </td>
           )
         })()}
