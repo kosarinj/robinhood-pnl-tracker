@@ -87,13 +87,36 @@ export default function SpreadsPanel({ broker = 'all' }) {
     const sigma = (s.stock > 0 && s.shortMark > 0 && T > 0)
       ? impliedVol(s.shortMark, s.stock, s.shortStrike, T, RISK_FREE, s.type)
       : null
+    // Early assignment is not random. The holder of your short leg gives up
+    // its remaining extrinsic value the moment they exercise, so they don't —
+    // until there is none left to give up. In the money with the extrinsic
+    // worn away is the state that gets assigned, and it is visible days ahead.
+    const intrinsic = s.type === 'call'
+      ? Math.max(0, (s.stock || 0) - s.shortStrike)
+      : Math.max(0, s.shortStrike - (s.stock || 0))
+    const itm = intrinsic > 0
+    const extrinsic = (s.shortMark != null && s.stock > 0) ? r2(s.shortMark - intrinsic) : null
+    const assignRisk = !itm ? 'none'
+      : extrinsic == null ? 'unknown'
+      : extrinsic <= 0.10 ? 'high'
+      : extrinsic <= 0.35 ? 'watch'
+      : 'low'
     return {
       ...s,
       captured: s.credit > 0 ? s.pnl / s.credit : null,
       prob: sigma ? probKeepCredit(s.stock, s.shortStrike, T, sigma, s.type) : null,
       iv: sigma,
+      itm, intrinsic: r2(intrinsic), extrinsic, assignRisk,
+      dte: Math.ceil(T * 365.25),
     }
   }), [rawSpreads])
+
+  // Anything in the money is worth seeing before it is assigned rather than
+  // after; assignment lands stock on you mid-move, which is the worst time.
+  const atRisk = useMemo(
+    () => spreads.filter(s => s.assignRisk === 'high' || s.assignRisk === 'watch')
+      .sort((a, b) => (a.extrinsic ?? 9) - (b.extrinsic ?? 9)),
+    [spreads])
 
   /**
    * A call spread and a put spread on the same name and expiry are one
@@ -226,6 +249,43 @@ export default function SpreadsPanel({ broker = 'all' }) {
           </span>
         </span>
       </div>
+
+      {atRisk.length > 0 && (
+        <div style={{
+          border: `1px solid ${atRisk.some(s => s.assignRisk === 'high') ? '#ef4444' : '#f59e0b'}`,
+          background: isDark ? '#2a1409' : '#fffbeb', borderRadius: 8,
+          padding: '10px 12px', marginBottom: 12,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: atRisk.some(s => s.assignRisk === 'high') ? '#ef4444' : '#b45309', marginBottom: 4 }}>
+            {atRisk.length} short leg{atRisk.length === 1 ? '' : 's'} in the money — assignment watch
+          </div>
+          {atRisk.map((s, i) => (
+            <div key={i} style={{ fontSize: 12, color: text, padding: '2px 0' }}>
+              <strong>{s.ticker} {s.type === 'put' ? 'Put' : 'Call'} ${s.shortStrike}</strong>
+              <span style={{ color: muted }}> ×{s.n} · {fmtDate(s.expiry)} ({s.dte <= 0 ? 'today' : `${s.dte}d`})</span>
+              {' — '}
+              <span style={{ color: s.assignRisk === 'high' ? '#ef4444' : '#b45309', fontWeight: 600 }}>
+                {fmt(s.extrinsic)}/sh time value left
+              </span>
+              <span style={{ color: muted }}>
+                {s.assignRisk === 'high'
+                  ? ' · almost none — assignment is rational now'
+                  : ' · thinning'}
+              </span>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: muted, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${border}`, lineHeight: 1.5 }}>
+            Whoever holds your short leg forfeits its remaining time value the moment they exercise,
+            so they wait until there is none left. That makes this predictable: the number above
+            falling toward zero is the warning, not the assignment itself.
+            <br />
+            <strong style={{ color: text }}>Rolling out costs less than being assigned</strong> — closing
+            the short and reselling a later expiry keeps the position and pays you new time value.
+            Assignment instead hands you the stock (or takes it), turns a defined-risk spread into a
+            share position mid-move, and leaves the long leg stranded on its own.
+          </div>
+        </div>
+      )}
 
       {spreads.length === 0 ? (
         <div style={{ fontSize: 13, color: muted }}>
