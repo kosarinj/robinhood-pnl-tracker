@@ -138,9 +138,12 @@ export default function SpreadsPanel({ broker = 'all' }) {
     background: isDark ? '#1e2130' : '#ffffff', border: `1px solid ${border}`,
     borderRadius: 10, padding: '14px 16px', marginBottom: 16,
   }
+  // Sentence case, not the small-caps used elsewhere: at this size the
+  // uppercase + letterspacing was what made these unreadable — capitals strip
+  // out the ascenders and descenders the eye uses to tell short words apart.
   const th = {
-    textAlign: 'right', padding: '6px 8px', fontSize: 10.5, color: muted, whiteSpace: 'nowrap',
-    textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 600, borderBottom: `1px solid ${border}`,
+    textAlign: 'right', padding: '7px 8px', fontSize: 12, color: muted, whiteSpace: 'nowrap',
+    fontWeight: 500, borderBottom: `1px solid ${border}`,
   }
   const td = { textAlign: 'right', padding: '6px 8px', fontSize: 13, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }
 
