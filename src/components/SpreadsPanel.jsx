@@ -638,7 +638,17 @@ export default function SpreadsPanel({ broker = 'all' }) {
                 <div key={i}>
                   {p.ticker} {p.optionType === 'put' ? 'Put' : 'Call'} ${p.strike} · {fmtDate(p.expiry)}
                   {' · '}{p.isLong ? 'long' : 'short'} ×{p.remaining}
-                  {!p.isLong && <strong style={{ color: '#f59e0b' }}> · uncovered by a long</strong>}
+                  {/* A short call with shares behind it is a covered call, not a
+                      loose leg. Flagging it amber said "uncovered" about the
+                      most conventional position in the book. Only a short with
+                      neither a long nor stock behind it is worth a warning. */}
+                  {!p.isLong && (() => {
+                    const sh = holdings.find(h => h.symbol === p.ticker)?.position || 0
+                    if (p.optionType === 'call' && sh >= p.remaining * 100) {
+                      return <span style={{ color: muted }}> · covered by {p.remaining * 100} shares</span>
+                    }
+                    return <strong style={{ color: '#f59e0b' }}> · no long or shares behind it</strong>
+                  })()}
                   {p.unrealizedPnl != null && (
                     <span style={{ color: pnlColor(p.unrealizedPnl, isDark) }}> · {fmt(p.unrealizedPnl)}</span>
                   )}
