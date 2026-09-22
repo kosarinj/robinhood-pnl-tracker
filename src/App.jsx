@@ -24,6 +24,7 @@ import YTDPositionsPanel from './components/YTDPositionsPanel'
 import RollCandidatesAlert from './components/RollCandidatesAlert'
 import ShortCallTracker from './components/ShortCallTracker'
 import ExpirationsPanel from './components/ExpirationsPanel'
+import SpreadsPanel from './components/SpreadsPanel'
 import CashCheckPanel from './components/CashCheckPanel'
 import LongOptionsPanel from './components/LongOptionsPanel'
 import CallCoveragePanel from './components/CallCoveragePanel'
@@ -2601,6 +2602,7 @@ function AuthenticatedApp({ user }) {
           }}>
             {[
               ['table', 'Positions'],
+              ['spreads', 'Spreads'],
               ['cash', 'Cash Check'],
               ['shorts', 'Short Calls'],
               ['expiries', 'Expirations'],
@@ -2637,6 +2639,7 @@ function AuthenticatedApp({ user }) {
           <div style={{ display: positionsTab === 'table' ? 'block' : 'none' }}>
             <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
           </div>
+          {positionsTab === 'spreads'  && <SpreadsPanel broker={brokerFilter} />}
           {positionsTab === 'cash'     && <CashCheckPanel broker={brokerFilter} />}
           {positionsTab === 'shorts'   && <ShortCallTracker broker={brokerFilter} />}
           {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}
