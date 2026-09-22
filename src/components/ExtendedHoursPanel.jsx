@@ -105,7 +105,7 @@ export default function ExtendedHoursPanel({ broker = 'all' }) {
 
   const th = {
     textAlign: 'right', padding: '7px 8px', fontSize: '11px', fontWeight: 700,
-    color: textMid, textTransform: 'uppercase', letterSpacing: '0.03em',
+    color: '#e2e8f0', textTransform: 'uppercase', letterSpacing: '0.03em',
     borderBottom: `1px solid ${border}`, whiteSpace: 'nowrap',
   }
   const td = { textAlign: 'right', padding: '8px', fontSize: '13px', borderBottom: `1px solid ${rowBorder}`, whiteSpace: 'nowrap' }

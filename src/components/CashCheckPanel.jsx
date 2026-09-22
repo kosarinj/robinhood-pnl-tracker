@@ -122,7 +122,7 @@ export default function CashCheckPanel({ broker = 'all' }) {
   const th = {
     textAlign: 'right', padding: '6px 8px', fontSize: 11, fontWeight: 600,
     textTransform: 'uppercase', letterSpacing: '0.04em',
-    color: isDark ? '#ffffff' : '#0f172a',
+    color: '#e2e8f0',
     borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, whiteSpace: 'nowrap',
   }
   const td = {

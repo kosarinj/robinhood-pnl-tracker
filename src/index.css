@@ -241,6 +241,12 @@ table {
   min-width: 1200px;
 }
 
+/* Every table header gets this purple gradient, and it does NOT change with
+   the theme. So header text must be light in both modes. A panel that styles
+   its th with a theme-dependent colour picked against the card behind it —
+   isDark ? '#fff' : '#0f172a' — renders near-black on purple in light mode and
+   is unreadable. Several panels had exactly that bug. Use a fixed light grey
+   (#e2e8f0), or leave the colour alone and inherit the white below. */
 thead {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   position: sticky;

@@ -731,7 +731,7 @@ export default function OrderFlowPanel() {
   const muted = isDark ? '#94a3b8' : '#64748b'
   const th = {
     padding: '6px 8px', fontSize: 11, fontWeight: 500, textTransform: 'uppercase',
-    letterSpacing: '0.04em', color: isDark ? '#fff' : '#0f172a',
+    letterSpacing: '0.04em', color: '#e2e8f0',
     borderBottom: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`, whiteSpace: 'nowrap',
   }
   const td = {

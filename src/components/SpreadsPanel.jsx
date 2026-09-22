@@ -74,17 +74,14 @@ export default function SpreadsPanel({ broker = 'all' }) {
     background: isDark ? '#1e2130' : '#ffffff', border: `1px solid ${border}`,
     borderRadius: 10, padding: '14px 16px', marginBottom: 16,
   }
-  // Sentence case, not the small-caps used elsewhere: at this size the
-  // uppercase + letterspacing was what made these unreadable — capitals strip
-  // out the ascenders and descenders the eye uses to tell short words apart.
-  //
-  // Full text colour rather than the muted grey the other panels use for
-  // headers. Dropping to 12px/weight-500 alone changed almost nothing, because
-  // the size was never the real problem: grey-on-card is low contrast, and in
-  // dark mode "lighter" is what more contrast looks like.
+  // Light grey, fixed rather than theme-dependent: index.css paints every
+  // <thead> with a purple gradient that is the same in both themes, so a
+  // header colour chosen against the card behind it is simply wrong. Dark text
+  // on purple was the real unreadability here — not the size, which is what
+  // the first two attempts at this chased.
   const th = {
-    textAlign: 'right', padding: '7px 8px', fontSize: 13, color: text, whiteSpace: 'nowrap',
-    fontWeight: 600, borderBottom: `2px solid ${border}`,
+    textAlign: 'right', padding: '7px 8px', fontSize: 12, color: '#e2e8f0', whiteSpace: 'nowrap',
+    fontWeight: 600, borderBottom: `1px solid ${border}`,
   }
   const td = { textAlign: 'right', padding: '6px 8px', fontSize: 13, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }
 
