@@ -43,6 +43,7 @@ export default function SpreadsPanel({ broker = 'all' }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showSingles, setShowSingles] = useState(false)
+  const [holdings, setHoldings] = useState([])
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -55,9 +56,61 @@ export default function SpreadsPanel({ broker = 'all' }) {
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
+    // Shares are fetched separately because a spread's P&L alone doesn't say
+    // whether the trade did its job. A spread that lost because the stock ran
+    // through the range only lost while the shares behind it gained.
+    fetch(`/api/stock-positions-with-prices${q}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setHoldings(d?.holdings || []))
+      .catch(() => setHoldings([]))
   }, [broker])
 
   const { spreads, singles } = useMemo(() => pairSpreads(positions), [positions])
+
+  /**
+   * Per ticker: the spread, and whatever is standing behind it.
+   *
+   * These are never put on naked — there are shares underneath or puts against
+   * the move. So a spread's own P&L is half the story: when the stock breaks
+   * through the range and the spread gives back $50, the shares or the puts
+   * made money on the same move. Reading the spread alone shows the loss and
+   * hides the reason it was acceptable.
+   *
+   * A spread with nothing behind it is called out, because by that rule it
+   * shouldn't exist — it usually means the shares were called away or the puts
+   * expired and the hedge quietly disappeared.
+   */
+  const backing = useMemo(() => {
+    const byTicker = new Map()
+    for (const s of spreads) {
+      const e = byTicker.get(s.ticker) || { ticker: s.ticker, spreadPnl: 0, n: 0, otherPnl: 0, puts: 0, calls: 0 }
+      e.spreadPnl = r2(e.spreadPnl + s.pnl); e.n += 1
+      byTicker.set(s.ticker, e)
+    }
+    // Option legs not consumed by a spread, on a ticker that has one.
+    for (const p of singles) {
+      const e = byTicker.get(p.ticker)
+      if (!e) continue
+      if (p.remainingPnl != null) e.otherPnl = r2(e.otherPnl + p.remainingPnl)
+      if (p.optionType === 'put') e.puts += p.remaining
+      else e.calls += p.remaining
+    }
+    const rows = []
+    for (const e of byTicker.values()) {
+      const h = holdings.find(x => x.symbol === e.ticker)
+      const shares = h?.position > 0 ? h.position : 0
+      const stockPnl = h?.unrealizedPnL ?? null
+      const combined = r2(e.spreadPnl + e.otherPnl + (stockPnl || 0))
+      rows.push({
+        ...e, shares, stockPnl, combined,
+        // Nothing underneath and nothing against it.
+        unbacked: shares === 0 && e.puts === 0,
+        // The case worth seeing: the spread is down, the rest is up.
+        offset: e.spreadPnl < 0 && (e.otherPnl + (stockPnl || 0)) > 0,
+      })
+    }
+    return rows.sort((a, b) => a.ticker.localeCompare(b.ticker))
+  }, [spreads, singles, holdings])
 
   const totals = useMemo(() => spreads.reduce((t, s) => ({
     credit: r2(t.credit + s.credit),
@@ -176,6 +229,71 @@ export default function SpreadsPanel({ broker = 'all' }) {
               </tr>
             </tbody>
           </table>
+        </div>
+      )}
+
+      {backing.length > 0 && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${border}`, paddingTop: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: text, marginBottom: 2 }}>
+            What's behind each spread
+          </div>
+          <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>
+            A spread that loses because the stock ran through the range only lost while the
+            shares or puts on the same name were making money. Here they are side by side.
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ ...th, textAlign: 'left' }}>Ticker</th>
+                  <th style={th}>Spread</th>
+                  <th style={{ ...th, textAlign: 'left' }}>Behind it</th>
+                  <th style={th}>Stock</th>
+                  <th style={th}>Other options</th>
+                  <th style={th}>Combined</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backing.map(b => (
+                  <tr key={b.ticker} style={{ borderBottom: `1px solid ${border}` }}>
+                    <td style={{ ...td, textAlign: 'left', fontWeight: 600, color: text }}>
+                      {b.ticker}
+                      <span style={{ color: muted, fontWeight: 400, fontSize: 11 }}> ×{b.n}</span>
+                    </td>
+                    <td style={{ ...td, fontWeight: 600, color: pnlColor(b.spreadPnl, isDark) }}>{fmt(b.spreadPnl)}</td>
+                    <td style={{ ...td, textAlign: 'left', fontSize: 12, color: muted }}>
+                      {b.unbacked ? (
+                        <span style={{ color: '#f59e0b', fontWeight: 600 }}
+                          title="No shares and no puts on this name. You don't put these on naked, so this usually means the stock was called away or the puts expired and the hedge is gone.">
+                          nothing — check this
+                        </span>
+                      ) : (
+                        [b.shares > 0 ? `${b.shares} shares` : null,
+                         b.puts > 0 ? `${b.puts} put${b.puts === 1 ? '' : 's'}` : null,
+                         b.calls > 0 ? `${b.calls} call${b.calls === 1 ? '' : 's'}` : null]
+                          .filter(Boolean).join(' · ')
+                      )}
+                    </td>
+                    <td style={{ ...td, color: b.stockPnl == null ? muted : pnlColor(b.stockPnl, isDark) }}>
+                      {b.stockPnl == null ? '—' : fmt(b.stockPnl)}
+                    </td>
+                    <td style={{ ...td, color: pnlColor(b.otherPnl, isDark) }}>
+                      {b.otherPnl === 0 ? '—' : fmt(b.otherPnl)}
+                    </td>
+                    <td style={{ ...td, fontWeight: 700, color: pnlColor(b.combined, isDark) }}>
+                      {fmt(b.combined)}
+                      {b.offset && (
+                        <div style={{ fontSize: 10, color: '#22c55e', fontWeight: 500 }}
+                          title="The spread is down but the stock and options behind it are up by more than it lost — the hedge did its job.">
+                          covered
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
