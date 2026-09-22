@@ -718,6 +718,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     const computedCost = (sh?.avgCost > 0 ? sh.avgCost : null) ?? (fb?.avgCost > 0 ? fb.avgCost : null) ?? (row.stockAvgCost > 0 ? row.stockAvgCost : null)
     const hasManualCost = !!costOverrides[row.ticker]
     const avgCost = (row.stockCostUsed > 0 ? row.stockCostUsed : null) || costOverrides[row.ticker] || computedCost
+    // What blending the override with later trades would have produced. The
+    // server no longer uses it as the basis, but an override that differs from
+    // it is worth seeing rather than guessing at.
+    const blendedCost = row.stockCostComputed > 0 ? row.stockCostComputed : null
+    const blendDiffers = hasManualCost && blendedCost != null
+      && Math.abs(blendedCost - avgCost) >= 0.005
     const effectiveCost = (pos > 0 && avgCost > 0)
       ? Math.round((avgCost - (row.totalRealized || 0) / pos) * 100) / 100
       : null
@@ -761,7 +767,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
 
     return {
       sc,
-      i, pos, hasManualCost, avgCost, effectiveCost, price,
+      i, pos, hasManualCost, avgCost, effectiveCost, price, blendedCost, blendDiffers,
       stockUnrealized, stockRealized, stockPnl, net, netPlusOpen, costBasis,
       returnPct, vsStockPct, optionsHelped: stockPnl != null && netPlusOpen >= stockPnl,
       estTax: Math.round(taxableRealized * taxRate) / 100,
@@ -987,7 +993,16 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         </span>
       ) : (
         <button onClick={() => { setEditingCost(r.ticker); setCostDraft(c.avgCost?.toFixed(2) || '') }}
-          title={c.hasManualCost ? `Manual override: ${fmt(c.avgCost)} (click to edit)` : `Computed: ${c.avgCost ? fmt(c.avgCost) : '—'} (click to override)`}
+          title={c.hasManualCost
+            ? `Your override: ${fmt(c.avgCost)} (in use)`
+              + (c.blendDiffers
+                  ? `\nComputed from trades: ${fmt(c.blendedCost)}`
+                    + `\nDifference: ${c.avgCost - c.blendedCost > 0 ? '+' : ''}${fmt(c.avgCost - c.blendedCost)}`
+                    + `\n\nYour number is used as typed. The computed figure blends it`
+                    + `\nwith trades made after the period start.`
+                  : '')
+              + `\n\nClick to edit.`
+            : `Computed: ${c.avgCost ? fmt(c.avgCost) : '—'} (click to override)`}
           style={{ background: 'transparent', border: `1px solid ${c.hasManualCost ? '#f59e0b' : 'transparent'}`, padding: '2px 6px', borderRadius: 4,
             cursor: 'pointer', color: c.hasManualCost ? '#f59e0b' : textMid, fontSize: 12, fontWeight: c.hasManualCost ? 600 : 400 }}>
           {c.avgCost ? fmt(c.avgCost) : '—'}{c.hasManualCost ? ' ✎' : ''}

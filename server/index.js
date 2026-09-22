@@ -3590,8 +3590,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // was down $569. Only names with an override are affected.
     const effectiveCost = databaseService.getStockEffectiveCost(
       userId, stockCostOverrides, asOf, brokerFilter, globalStart, perSymbolDates)
+    // A typed override is literal: 93 means 93. It used to sit BEHIND the
+    // blended figure, so an override of 93 on a name with later trades was
+    // silently rewritten (93 -> 92.50) and nothing on screen said so — the edit
+    // looked like it had been rejected. effectiveCost is still computed and
+    // returned as stockCostComputed so the panel can show what blending would
+    // have given, but it no longer overrules what was typed.
     const basisFor = (ticker, sp) =>
-      sp ? (effectiveCost[ticker] || stockCostOverrides[ticker] || sp.avgCost) : null
+      sp ? (stockCostOverrides[ticker] || effectiveCost[ticker] || sp.avgCost) : null
 
     // Rows so far come only from option activity, so a stock held without any
     // options never appeared at all. Add those as stock-only rows.
@@ -3804,8 +3810,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             : null,
           stockCostUsed: basisFor(e.ticker, sp),
           stockCostIsOverride: !!stockCostOverrides[e.ticker],
-          // True when the override was blended with buys made after the period
-          // start rather than applied flat to every share.
+          // What the override would have become if blended with the trades made
+          // after the period start. No longer used as the basis — surfaced so
+          // the panel can show the difference instead of hiding it.
+          stockCostComputed: effectiveCost[e.ticker] || null,
           stockCostIsBlended: !!effectiveCost[e.ticker]
             && effectiveCost[e.ticker] !== stockCostOverrides[e.ticker],
           // Movement over the selected period on the shares currently held —
