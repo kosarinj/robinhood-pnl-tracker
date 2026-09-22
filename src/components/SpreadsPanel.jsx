@@ -151,28 +151,46 @@ export default function SpreadsPanel({ broker = 'all' }) {
    * else picked. Same mechanism, very different bill, so they should not be
    * presented as the same warning.
    */
-  const consequence = (s) => {
-    const shares = holdings.find(h => h.symbol === s.ticker)?.position || 0
-    const basis = holdings.find(h => h.symbol === s.ticker)?.avgCost || null
-    const qty = s.n * 100
-    if (s.type === 'call') {
-      const covered = Math.min(shares, qty)
-      const gain = (basis > 0) ? r2((s.shortStrike - basis) * covered) : null
-      return {
-        severity: covered > 0 ? 'high' : 'low',
-        text: covered > 0
-          ? `would call away ${covered} share${covered === 1 ? '' : 's'} at $${s.shortStrike}`
-            + (gain != null ? ` — realising ${fmt(gain)} of gain this tax year` : '')
-          : `no shares held — the long $${s.longStrike} covers it, but you'd be short stock until you close`,
+  const consequences = useMemo(() => {
+    // Shares are a finite pool. Each call spread was sizing itself against the
+    // whole holding, so two spreads on one ticker each claimed all 200 shares
+    // and the warning added up to more stock than exists. Allocate instead,
+    // nearest expiry first, since that is the one assigned soonest.
+    const left = new Map(holdings.map(h => [h.symbol, h.position > 0 ? h.position : 0]))
+    const basisOf = (t) => holdings.find(h => h.symbol === t)?.avgCost || null
+    const out = new Map()
+    const ordered = [...atRisk].sort((a, b) => (a.expiry < b.expiry ? -1 : 1))
+    for (const s of ordered) {
+      const qty = s.n * 100
+      if (s.type === 'call') {
+        const pool = left.get(s.ticker) ?? 0
+        const covered = Math.min(pool, qty)
+        left.set(s.ticker, pool - covered)
+        const basis = basisOf(s.ticker)
+        const gain = (basis > 0 && covered > 0) ? r2((s.shortStrike - basis) * covered) : null
+        const bare = qty - covered
+        out.set(s, {
+          severity: covered > 0 ? 'high' : 'low',
+          text: covered > 0
+            ? `would call away ${covered} share${covered === 1 ? '' : 's'} at $${s.shortStrike}`
+              + (gain != null ? ` — realising ${fmt(gain)} of gain this tax year` : '')
+              + (bare > 0 ? `, and leave you short ${bare} more` : '')
+              + `. The short call is settled and gone; you keep the long $${s.longStrike} to sell.`
+            : `no shares left against it, so you'd be short the stock — not a naked call, since`
+              + ` assignment closes the short. The long $${s.longStrike} caps it: sell or exercise`
+              + ` it to flatten.`,
+        })
+      } else {
+        out.set(s, {
+          severity: 'low',
+          text: `would put ${qty} share${qty === 1 ? '' : 's'} on you at $${s.shortStrike}`
+            + ` (${fmt(s.shortStrike * qty)})`
+            + ` — stock you'd then own, not a loss beyond the spread`,
+        })
       }
     }
-    return {
-      severity: 'low',
-      text: `would put ${qty} share${qty === 1 ? '' : 's'} on you at $${s.shortStrike}`
-        + ` (${fmt(s.shortStrike * qty)})`
-        + ` — stock you'd then own, not a loss beyond the spread`,
-    }
-  }
+    return out
+  }, [atRisk, holdings])
 
   const divRisk = (s) => {
     if (s.type !== 'call' || !s.itm) return null
@@ -326,7 +344,7 @@ export default function SpreadsPanel({ broker = 'all' }) {
           </div>
           {atRisk.map((s, i) => {
             const dv = divRisk(s)
-            const cq = consequence(s)
+            const cq = consequences.get(s)
             return (
               <div key={i} style={{ fontSize: 12, color: text, padding: '3px 0' }}>
                 <strong>{s.ticker} {s.type === 'put' ? 'Put' : 'Call'} ${s.shortStrike}</strong>
@@ -340,11 +358,13 @@ export default function SpreadsPanel({ broker = 'all' }) {
                     ? ' · almost none — assignment is rational now'
                     : ' · thinning'}
                 </span>
-                <div style={{ fontSize: 11, paddingLeft: 12, marginTop: 1,
-                  color: cq.severity === 'high' ? '#ef4444' : muted,
-                  fontWeight: cq.severity === 'high' ? 600 : 400 }}>
-                  ↳ {cq.text}
-                </div>
+                {cq && (
+                  <div style={{ fontSize: 11, paddingLeft: 12, marginTop: 1,
+                    color: cq.severity === 'high' ? '#ef4444' : muted,
+                    fontWeight: cq.severity === 'high' ? 600 : 400 }}>
+                    ↳ {cq.text}
+                  </div>
+                )}
                 {dv && (
                   <div style={{ fontSize: 11, paddingLeft: 12, marginTop: 1,
                     color: dv.beats ? '#ef4444' : muted, fontWeight: dv.beats ? 600 : 400 }}
