@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '../contexts/ThemeContext'
+import { pairSpreads } from '../utils/pairSpreads'
 
 /**
  * Open option legs sitting on a gain, as a single pill on the Positions page.
@@ -101,15 +102,31 @@ export default function RollCandidatesAlert({ broker }) {
     }
   }, [open])
 
+  // Legs inside a vertical are judged as part of that spread, not on their own.
+  // A winning leg's partner is losing by construction, so listing it alone said
+  // "up $134" about a spread that was down $35 — an invitation to close the
+  // profitable half and leave the naked risk behind. Only what is genuinely
+  // standalone reaches the pill; the Spreads tab values the rest.
+  //
+  // Partly-paired legs keep their unpaired remainder at its prorated P&L, so a
+  // 3-short-against-2-long position still surfaces its one naked contract.
+  const { spreads, singles } = pairSpreads(rows)
+  const standalone = singles.map(p => ({
+    ...p,
+    openContracts: p.remaining,
+    unrealizedPnl: p.remainingPnl,
+  }))
+  const spreadLegCount = spreads.reduce((n, s) => n + 2, 0)
+
   // Legs with no usable mark can't be judged either way. They used to vanish,
   // which made "why isn't X showing?" unanswerable from the screen — so they're
   // now listed separately instead of dropped.
-  const unpriced = rows.filter(p => {
+  const unpriced = standalone.filter(p => {
     const n = Math.abs(p.openContracts || 0)
     return n > 0 && (p.unrealizedPnl == null || !(p.markPrice > 0) && p.markSource !== 'intrinsic')
   })
 
-  const winners = rows
+  const winners = standalone
     .map(p => {
       const n = Math.abs(p.openContracts || 0)
       // Intrinsic-marked legs are kept, and this matters most for the best
@@ -211,8 +228,14 @@ export default function RollCandidatesAlert({ broker }) {
           </div>
           {quiet && (
             <div style={{ fontSize: 11, color: textMid, padding: '6px 6px 8px' }}>
-              None of your {rows.length} open leg{rows.length === 1 ? '' : 's'} is up ${threshold}
-              {unit === 'share' ? ' per share' : ' in total'} right now. Try a lower threshold above.
+              {standalone.length === 0 && spreads.length > 0 ? (
+                <>All {rows.length} of your open legs are part of a spread, so none is judged on
+                its own here. See the Spreads tab to value them.</>
+              ) : (
+                <>None of your {standalone.length} standalone leg{standalone.length === 1 ? '' : 's'} is
+                up ${threshold}{unit === 'share' ? ' per share' : ' in total'} right now.
+                Try a lower threshold above.</>
+              )}
             </div>
           )}
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -275,6 +298,12 @@ export default function RollCandidatesAlert({ broker }) {
           <div style={{ fontSize: 10, color: textMid, marginTop: 6 }}>
             Gain on the contract itself, per share — what closing it at the current mark would bank.
             A long gains as the mark rises, a short as it falls.
+            {spreads.length > 0 && (
+              <> {spreadLegCount} leg{spreadLegCount === 1 ? '' : 's'} in {spreads.length}{' '}
+              spread{spreads.length === 1 ? '' : 's'} {spreadLegCount === 1 ? 'is' : 'are'} excluded —
+              closing one half alone leaves the other side naked. The Spreads tab values those as
+              whole positions.</>
+            )}
           </div>
         </div>,
         document.body
