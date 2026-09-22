@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import { pairSpreads } from '../utils/pairSpreads'
+import { impliedVol, probKeepCredit, yearsTo, RISK_FREE } from '../utils/optionMath'
 
 const fmt = (n, decimals = 2) => {
   if (n == null || isNaN(n)) return '—'
@@ -65,7 +66,71 @@ export default function SpreadsPanel({ broker = 'all' }) {
       .catch(() => setHoldings([]))
   }, [broker])
 
-  const { spreads, singles } = useMemo(() => pairSpreads(positions), [positions])
+  const { spreads: rawSpreads, singles } = useMemo(() => pairSpreads(positions), [positions])
+
+  /**
+   * Two extra readings per spread.
+   *
+   * `captured` is how much of the credit is already banked — the number that
+   * says a side has gone cheap and can be taken off, which is how these are
+   * actually closed: one leg at a time, whichever the market hands you first.
+   *
+   * `prob` is the risk-neutral chance the short strike is never breached, so
+   * the whole credit is kept. Implied vol is backed out of the short leg's own
+   * mark, so it is the market's own number rather than an assumption. It
+   * replaces counting outcomes: "up, flat or down" sounds like two chances in
+   * three, but the three are not equally likely and their real weights are
+   * knowable.
+   */
+  const spreads = useMemo(() => rawSpreads.map(s => {
+    const T = yearsTo(s.expiry)
+    const sigma = (s.stock > 0 && s.shortMark > 0 && T > 0)
+      ? impliedVol(s.shortMark, s.stock, s.shortStrike, T, RISK_FREE, s.type)
+      : null
+    return {
+      ...s,
+      captured: s.credit > 0 ? s.pnl / s.credit : null,
+      prob: sigma ? probKeepCredit(s.stock, s.shortStrike, T, sigma, s.type) : null,
+      iv: sigma,
+    }
+  }), [rawSpreads])
+
+  /**
+   * A call spread and a put spread on the same name and expiry are one
+   * position: the stock is being dared to stay between the two short strikes.
+   *
+   * Both credits are collected but only one side can lose at expiry, so each
+   * tail is that side's width less BOTH credits — which is why the tails are
+   * smaller than either spread alone suggests. The chance of keeping
+   * everything is P(call side safe) + P(put side safe) - 1, and it is
+   * materially lower than either side on its own.
+   */
+  const condors = useMemo(() => {
+    const byKey = new Map()
+    for (const s of spreads) {
+      const k = `${s.ticker}|${s.expiry}`
+      const e = byKey.get(k) || { ticker: s.ticker, expiry: s.expiry, calls: [], puts: [] }
+      ;(s.type === 'call' ? e.calls : e.puts).push(s)
+      byKey.set(k, e)
+    }
+    const out = []
+    for (const e of byKey.values()) {
+      if (!e.calls.length || !e.puts.length) continue
+      const c = e.calls[0], p = e.puts[0]
+      const credit = r2(e.calls.reduce((a, x) => a + x.credit, 0) + e.puts.reduce((a, x) => a + x.credit, 0))
+      const pnl = r2(e.calls.reduce((a, x) => a + x.pnl, 0) + e.puts.reduce((a, x) => a + x.pnl, 0))
+      const upTail = r2(c.width - credit)
+      const downTail = r2(p.width - credit)
+      const inside = (c.prob != null && p.prob != null) ? Math.max(0, c.prob + p.prob - 1) : null
+      out.push({
+        ticker: e.ticker, expiry: e.expiry, credit, pnl,
+        lo: p.shortStrike, hi: c.shortStrike, stock: c.stock ?? p.stock,
+        upTail, downTail, inside,
+        callProb: c.prob, putProb: p.prob,
+      })
+    }
+    return out.sort((a, b) => (a.expiry < b.expiry ? -1 : 1))
+  }, [spreads])
 
   /**
    * Per ticker: the spread, and whatever is standing behind it.
@@ -178,6 +243,8 @@ export default function SpreadsPanel({ broker = 'all' }) {
                 <th style={th} title="What you took in to open it, or paid if this is a debit spread.">Credit</th>
                 <th style={th} title="What it would cost to close both legs at today's marks.">To close</th>
                 <th style={th}>Open P&L</th>
+                <th style={th} title="How much of the credit is already banked. A high number means the side has gone cheap and can be taken off for little — 100% would be the whole credit kept.">Captured</th>
+                <th style={th} title="The market's own odds that the short strike is never breached, so the full credit is kept. Implied vol is backed out of this spread's own short-leg mark.">Odds kept</th>
                 <th style={th} title="The most this can still make, and the most it can still lose. Fixed by the width of the strikes.">Max win / loss</th>
                 <th style={{ ...th, textAlign: 'left' }}>Stock</th>
               </tr>
@@ -202,6 +269,23 @@ export default function SpreadsPanel({ broker = 'all' }) {
                     <td style={{ ...td, color: pnlColor(s.credit, isDark) }}>{fmt(s.credit)}</td>
                     <td style={{ ...td, color: text }}>{fmt(s.nowCost)}</td>
                     <td style={{ ...td, fontWeight: 700, color: pnlColor(s.pnl, isDark) }}>{fmt(s.pnl)}</td>
+                    <td style={{ ...td, fontSize: 12, fontWeight: s.captured >= 0.7 ? 700 : 400,
+                      color: s.captured == null ? muted : s.captured >= 0.7 ? '#22c55e' : s.captured < 0 ? '#ef4444' : text }}
+                      title={s.captured == null ? 'Debit spread — no credit to capture.'
+                        : `${fmt(s.pnl)} of the ${fmt(s.credit)} credit is banked. Closing now costs ${fmt(s.nowCost)}.`
+                          + (s.captured >= 0.7 ? '\n\nMost of the credit is already in. Little left to gain by holding.' : '')}>
+                      {s.captured == null ? '—' : `${Math.round(s.captured * 100)}%`}
+                      {s.captured >= 0.7 && (
+                        <div style={{ fontSize: 10, fontWeight: 500 }}>cheap to close</div>
+                      )}
+                    </td>
+                    <td style={{ ...td, fontSize: 12, color: s.prob == null ? muted : text }}
+                      title={s.prob == null ? 'No usable mark on the short leg, so implied vol could not be backed out.'
+                        : `${Math.round(s.prob * 100)}% chance the stock finishes on the safe side of your $${s.shortStrike} short strike`
+                          + `, at the market's implied vol of ${(s.iv * 100).toFixed(0)}%.`
+                          + `\n\nRisk-neutral: the market's odds, not a forecast.`}>
+                      {s.prob == null ? '—' : `${Math.round(s.prob * 100)}%`}
+                    </td>
                     <td style={{ ...td, fontSize: 12 }}>
                       <span style={{ color: '#22c55e' }}>{fmt(s.maxProfit)}</span>
                       <span style={{ color: muted }}> / </span>
@@ -224,11 +308,77 @@ export default function SpreadsPanel({ broker = 'all' }) {
                 <td style={{ ...td, fontWeight: 700, color: pnlColor(totals.credit, isDark) }}>{fmt(totals.credit)}</td>
                 <td style={{ ...td, fontWeight: 700, color: text }}>{fmt(totals.nowCost)}</td>
                 <td style={{ ...td, fontWeight: 800, color: pnlColor(totals.pnl, isDark) }}>{fmt(totals.pnl)}</td>
+                <td />
+                <td />
                 <td style={{ ...td, fontWeight: 700, color: '#ef4444' }}>{fmt(-totals.maxLoss)}</td>
                 <td />
               </tr>
             </tbody>
           </table>
+        </div>
+      )}
+
+      {condors.length > 0 && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${border}`, paddingTop: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: text, marginBottom: 2 }}>
+            Both sides together
+          </div>
+          <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>
+            A call spread and a put spread on the same name and expiry are one position: the stock
+            is dared to stay between the two short strikes. Both credits are collected but only one
+            side can lose, so each tail is that side's width less <em>both</em> credits.
+          </div>
+          {condors.map((c, i) => {
+            const inRange = c.stock > 0 && c.stock >= c.lo && c.stock <= c.hi
+            return (
+              <div key={i} style={{
+                border: `1px solid ${border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 8,
+              }}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline', marginBottom: 6 }}>
+                  <strong style={{ fontSize: 13, color: text }}>{c.ticker}</strong>
+                  <span style={{ fontSize: 12, color: muted }}>expires {fmtDate(c.expiry)}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 12, color: muted }}>
+                    Open P&L <strong style={{ fontSize: 14, color: pnlColor(c.pnl, isDark) }}>{fmt(c.pnl)}</strong>
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12 }}>
+                  <span style={{ color: muted }}>
+                    Safe range{' '}
+                    <strong style={{ color: inRange ? '#22c55e' : '#f59e0b' }}>
+                      ${c.lo} – ${c.hi}
+                    </strong>
+                    {c.stock > 0 && (
+                      <span style={{ color: inRange ? muted : '#f59e0b' }}>
+                        {' '}· stock ${c.stock.toFixed(2)}{inRange ? ' (inside)' : ' (outside)'}
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ color: muted }}>
+                    Total credit <strong style={{ color: '#22c55e' }}>{fmt(c.credit)}</strong>
+                  </span>
+                  <span style={{ color: muted }}
+                    title="If the stock runs up through the call side. That side's width less both credits, because the put side expires worthless and its credit is kept.">
+                    Up tail <strong style={{ color: '#ef4444' }}>{fmt(-c.upTail)}</strong>
+                  </span>
+                  <span style={{ color: muted }}
+                    title="If the stock falls through the put side. Same arithmetic on the other wing — and if you hold shares, they are falling with it.">
+                    Down tail <strong style={{ color: '#ef4444' }}>{fmt(-c.downTail)}</strong>
+                  </span>
+                </div>
+                {c.inside != null && (
+                  <div style={{ fontSize: 11, color: muted, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${border}` }}>
+                    Odds it finishes inside the range and both credits are kept:{' '}
+                    <strong style={{ color: text, fontSize: 12 }}>{Math.round(c.inside * 100)}%</strong>
+                    <span style={{ color: muted }}>
+                      {' '}— the call side alone is {Math.round(c.callProb * 100)}% and the put side{' '}
+                      {Math.round(c.putProb * 100)}%, but both must hold, so the combined figure is
+                      lower than either.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 

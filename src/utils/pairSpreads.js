@@ -50,6 +50,9 @@ export function pairSpreads(positions) {
           lo: Math.min(s.strike, l.strike), hi: Math.max(s.strike, l.strike),
           shortStrike: s.strike, longStrike: l.strike,
           shortSymbol: s.symbol, longSymbol: l.symbol,
+          // Per-share marks, kept so the caller can back out implied vol from
+          // the short leg and handicap the spread.
+          shortMark: s.markPrice || null, longMark: l.markPrice || null,
           credit, nowCost, width, isCredit,
           pnl: r2(credit - nowCost),
           maxProfit: isCredit ? credit : r2(width - Math.abs(credit)),
