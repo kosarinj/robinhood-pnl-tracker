@@ -5990,6 +5990,65 @@ app.get('/api/stock-positions-with-prices', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * Next ex-dividend date per ticker.
+ *
+ * The one early-assignment trigger nothing else here can see. A short call is
+ * exercised the day BEFORE the ex-dividend date whenever the dividend is worth
+ * more than the call's remaining time value — the holder takes the shares to
+ * collect it. That makes a specific, knowable date dangerous, rather than the
+ * gradual decay the rest of the assignment watch tracks.
+ *
+ * Reference data, not quotes, so this is a different entitlement from the
+ * /v3/quotes 403 the option marks hit. If it is refused, that is reported
+ * rather than returned as an empty result — "no dividend due" and "the API
+ * would not answer" must not look the same on screen.
+ */
+const divCache = new Map()
+const DIV_TTL_MS = 6 * 60 * 60 * 1000
+
+app.get('/api/upcoming-dividends', requireAuth, async (req, res) => {
+  const polygonKey = process.env.POLYGON_API_KEY || ''
+  const tickers = String(req.query.tickers || '')
+    .split(',').map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 25)
+  if (!polygonKey) return res.json({ success: true, dividends: {}, unavailable: 'no Polygon key configured' })
+  if (!tickers.length) return res.json({ success: true, dividends: {} })
+
+  const today = new Date().toISOString().slice(0, 10)
+  const out = {}
+  let refused = null
+  await Promise.all(tickers.map(async (t) => {
+    const hit = divCache.get(t)
+    if (hit && Date.now() - hit.at < DIV_TTL_MS) { if (hit.data) out[t] = hit.data; return }
+    try {
+      const r = await axios.get('https://api.polygon.io/v3/reference/dividends', {
+        params: {
+          apiKey: polygonKey, ticker: t, 'ex_dividend_date.gte': today,
+          limit: 1, order: 'asc', sort: 'ex_dividend_date',
+        },
+        timeout: 8000,
+      })
+      const d = r.data?.results?.[0]
+      const rec = d ? {
+        exDate: d.ex_dividend_date,
+        amount: Number(d.cash_amount) || 0,
+        payDate: d.pay_date || null,
+        frequency: d.frequency ?? null,
+      } : null
+      divCache.set(t, { at: Date.now(), data: rec })
+      if (rec) out[t] = rec
+    } catch (e) {
+      const code = e.response?.status
+      if (code === 403 || code === 401) {
+        refused = `Polygon refused dividend reference data (HTTP ${code})`
+      } else if (!refused) {
+        refused = `dividend lookup failed: ${e.message}`
+      }
+    }
+  }))
+  res.json({ success: true, dividends: out, ...(refused ? { unavailable: refused } : {}) })
+})
+
 // Debug: raw option trades for a ticker — diagnose open premium / P&L issues
 app.get('/api/debug-option-trades', requireAuth, (req, res) => {
   try {

@@ -45,6 +45,7 @@ export default function SpreadsPanel({ broker = 'all' }) {
   const [loading, setLoading] = useState(true)
   const [showSingles, setShowSingles] = useState(false)
   const [holdings, setHoldings] = useState([])
+  const [divs, setDivs] = useState({ map: {}, unavailable: null })
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -117,6 +118,37 @@ export default function SpreadsPanel({ broker = 'all' }) {
     () => spreads.filter(s => s.assignRisk === 'high' || s.assignRisk === 'watch')
       .sort((a, b) => (a.extrinsic ?? 9) - (b.extrinsic ?? 9)),
     [spreads])
+
+  // Ex-dividend dates, only for the names that could actually be assigned over
+  // one. Fetched after the spreads resolve because the ticker list comes from
+  // them, and only for short calls — a dividend gives nobody a reason to
+  // exercise a put early.
+  const divTickers = useMemo(() => [...new Set(
+    spreads.filter(s => s.type === 'call' && s.itm).map(s => s.ticker)
+  )].sort().join(','), [spreads])
+
+  useEffect(() => {
+    if (!divTickers) { setDivs({ map: {}, unavailable: null }); return }
+    fetch(`/api/upcoming-dividends?tickers=${encodeURIComponent(divTickers)}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setDivs({ map: d?.dividends || {}, unavailable: d?.unavailable || null }))
+      .catch(e => setDivs({ map: {}, unavailable: e.message }))
+  }, [divTickers])
+
+  /**
+   * A dividend worth more than the call's remaining time value makes early
+   * exercise the rational move for whoever holds it — they take the shares to
+   * collect the dividend, and the day before the ex-date is when they do it.
+   * That turns a gradual risk into a specific date.
+   */
+  const divRisk = (s) => {
+    if (s.type !== 'call' || !s.itm) return null
+    const d = divs.map[s.ticker]
+    if (!d?.exDate || !(d.amount > 0)) return null
+    if (d.exDate > s.expiry) return null       // the option is gone before it matters
+    const days = Math.ceil((new Date(`${d.exDate}T20:00:00Z`) - Date.now()) / 86400000)
+    return { ...d, days, beats: s.extrinsic != null && d.amount > s.extrinsic }
+  }
 
   /**
    * A call spread and a put spread on the same name and expiry are one
@@ -259,21 +291,44 @@ export default function SpreadsPanel({ broker = 'all' }) {
           <div style={{ fontSize: 12, fontWeight: 700, color: atRisk.some(s => s.assignRisk === 'high') ? '#ef4444' : '#b45309', marginBottom: 4 }}>
             {atRisk.length} short leg{atRisk.length === 1 ? '' : 's'} in the money — assignment watch
           </div>
-          {atRisk.map((s, i) => (
-            <div key={i} style={{ fontSize: 12, color: text, padding: '2px 0' }}>
-              <strong>{s.ticker} {s.type === 'put' ? 'Put' : 'Call'} ${s.shortStrike}</strong>
-              <span style={{ color: muted }}> ×{s.n} · {fmtDate(s.expiry)} ({s.dte <= 0 ? 'today' : `${s.dte}d`})</span>
-              {' — '}
-              <span style={{ color: s.assignRisk === 'high' ? '#ef4444' : '#b45309', fontWeight: 600 }}>
-                {fmt(s.extrinsic)}/sh time value left
-              </span>
-              <span style={{ color: muted }}>
-                {s.assignRisk === 'high'
-                  ? ' · almost none — assignment is rational now'
-                  : ' · thinning'}
-              </span>
+          {atRisk.map((s, i) => {
+            const dv = divRisk(s)
+            return (
+              <div key={i} style={{ fontSize: 12, color: text, padding: '2px 0' }}>
+                <strong>{s.ticker} {s.type === 'put' ? 'Put' : 'Call'} ${s.shortStrike}</strong>
+                <span style={{ color: muted }}> ×{s.n} · {fmtDate(s.expiry)} ({s.dte <= 0 ? 'today' : `${s.dte}d`})</span>
+                {' — '}
+                <span style={{ color: s.assignRisk === 'high' ? '#ef4444' : '#b45309', fontWeight: 600 }}>
+                  {fmt(s.extrinsic)}/sh time value left
+                </span>
+                <span style={{ color: muted }}>
+                  {s.assignRisk === 'high'
+                    ? ' · almost none — assignment is rational now'
+                    : ' · thinning'}
+                </span>
+                {dv && (
+                  <div style={{ fontSize: 11, paddingLeft: 12, marginTop: 1,
+                    color: dv.beats ? '#ef4444' : muted, fontWeight: dv.beats ? 600 : 400 }}
+                    title={dv.beats
+                      ? `The ${fmt(dv.amount)} dividend is worth more than the ${fmt(s.extrinsic)} of time value left, so exercising to collect it pays. Expect assignment the day before ${dv.exDate}.`
+                      : `The ${fmt(dv.amount)} dividend is less than the ${fmt(s.extrinsic)} of time value left, so exercising early would cost the holder more than the dividend is worth.`}>
+                    ↳ goes ex-dividend {fmtDate(dv.exDate)}
+                    {dv.days >= 0 ? ` (${dv.days === 0 ? 'today' : `${dv.days}d`})` : ''}
+                    {' · '}{fmt(dv.amount)}/sh
+                    {dv.beats
+                      ? ' — beats the time value left, so early exercise pays. Assignment likely the day before.'
+                      : ' — smaller than the time value left, so not yet a reason to exercise.'}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {divs.unavailable && atRisk.some(s => s.type === 'call') && (
+            <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
+              Ex-dividend dates unavailable ({divs.unavailable}), so the dividend trigger isn't
+              being checked — treat in-the-money short calls as riskier than they look here.
             </div>
-          ))}
+          )}
           <div style={{ fontSize: 11, color: muted, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${border}`, lineHeight: 1.5 }}>
             Whoever holds your short leg forfeits its remaining time value the moment they exercise,
             so they wait until there is none left. That makes this predictable: the number above
