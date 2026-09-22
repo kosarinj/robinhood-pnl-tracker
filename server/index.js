@@ -6049,6 +6049,68 @@ app.get('/api/upcoming-dividends', requireAuth, async (req, res) => {
   res.json({ success: true, dividends: out, ...(refused ? { unavailable: refused } : {}) })
 })
 
+/**
+ * Premium ledger: is this name still net credit, counting every roll?
+ *
+ * A roll never shows up as one event — it is a close and an open, and after
+ * three or four of them "am I collecting premium here or paying to stay in?"
+ * is not answerable from any single row. P&L per closed trade doesn't answer
+ * it either, because it says nothing about what is still open.
+ *
+ * So: every option trade on the ticker as cash in or cash out, in order, with
+ * a running total. Credits are sales (opening or closing), debits are
+ * purchases. The caller adds the cost to close whatever is still open to get
+ * the figure that actually matters — net premium if the whole name were
+ * flattened today.
+ *
+ * Expirations are deliberately included at zero: an option that expired
+ * worthless is the credit already collected being kept, and dropping the row
+ * would make the ledger skip the best outcome the strategy has.
+ */
+app.get('/api/premium-ledger', requireAuth, (req, res) => {
+  try {
+    const userId = req.user.userId
+    const ticker = String(req.query.ticker || '').toUpperCase()
+    if (!ticker) return res.status(400).json({ success: false, error: 'ticker required' })
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const startDate = req.query.startDate || null
+
+    const rows = databaseService.getOptionTradesForLedger(userId, ticker, brokerFilter, startDate)
+    let collected = 0, paid = 0
+    const events = []
+    for (const r of rows) {
+      const parsed = parseOptionDescription(r.symbol || '')
+      const amt = Math.abs(Number(r.amount) || 0)
+      const code = String(r.trans_code || '').toUpperCase()
+      // Settlement rows carry no premium — the cash moved in the share leg.
+      const settled = ['OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(code)
+      const cash = settled ? 0 : (r.is_buy === 1 ? -amt : amt)
+      if (cash > 0) collected += cash
+      if (cash < 0) paid += -cash
+      events.push({
+        date: String(r.trans_date).slice(0, 10),
+        code, symbol: r.symbol,
+        type: parsed?.type || null,
+        strike: parsed?.strike ?? null,
+        expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : null,
+        contracts: Number(r.contracts) || Number(r.quantity) || 1,
+        cash: Math.round(cash * 100) / 100,
+        running: Math.round((collected - paid) * 100) / 100,
+      })
+    }
+    res.json({
+      success: true, ticker, broker: brokerFilter || 'all',
+      collected: Math.round(collected * 100) / 100,
+      paid: Math.round(paid * 100) / 100,
+      net: Math.round((collected - paid) * 100) / 100,
+      tradeCount: events.length,
+      events,
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Debug: raw option trades for a ticker — diagnose open premium / P&L issues
 app.get('/api/debug-option-trades', requireAuth, (req, res) => {
   try {

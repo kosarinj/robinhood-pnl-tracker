@@ -3149,6 +3149,31 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * Option trades for one ticker, broker-aware, for the premium ledger.
+   *
+   * getRawOptionTradesForTicker ignores broker, which is fine for a debug dump
+   * but would silently merge two accounts in a figure meant to answer "am I
+   * still collecting premium on this name".
+   */
+  getOptionTradesForLedger(userId = 1, ticker = '', broker = null, startDate = null) {
+    try {
+      const clauses = ['is_option = 1', 'user_id = ?', 'symbol LIKE ?']
+      const params = [userId, `${ticker} %`]
+      if (broker) { clauses.push("COALESCE(broker,'robinhood') = ?"); params.push(broker) }
+      if (startDate) { clauses.push('trans_date >= ?'); params.push(startDate) }
+      return db.prepare(`
+        SELECT trans_date, trans_code, symbol, quantity, price, amount, is_buy, contracts
+        FROM trades
+        WHERE ${clauses.join(' AND ')}
+        ORDER BY trans_date ASC, id ASC
+      `).all(...params)
+    } catch (e) {
+      console.error('Error getting option trades for ledger:', e)
+      return []
+    }
+  }
+
   // Short call entry helpers
   getShortCallEntries(userId = 1, broker = null) {
     try {

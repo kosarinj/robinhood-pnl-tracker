@@ -46,6 +46,7 @@ export default function SpreadsPanel({ broker = 'all' }) {
   const [showSingles, setShowSingles] = useState(false)
   const [holdings, setHoldings] = useState([])
   const [divs, setDivs] = useState({ map: {}, unavailable: null })
+  const [ledgers, setLedgers] = useState({})
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -134,6 +135,32 @@ export default function SpreadsPanel({ broker = 'all' }) {
       .then(d => setDivs({ map: d?.dividends || {}, unavailable: d?.unavailable || null }))
       .catch(e => setDivs({ map: {}, unavailable: e.message }))
   }, [divTickers])
+
+  /**
+   * Net premium per ticker, across every roll.
+   *
+   * A roll is never one event — it is a close and an open — so after several
+   * of them no single row answers "am I still collecting premium on this name,
+   * or paying to stay in?". The ledger sums every option credit and debit on
+   * the ticker; adding the cost to close what is still open gives the number
+   * that matters: net premium if the whole name were flattened today.
+   */
+  const ledgerTickers = useMemo(
+    () => [...new Set(spreads.map(s => s.ticker))].sort().join(','),
+    [spreads])
+
+  useEffect(() => {
+    if (!ledgerTickers) return
+    const q = broker && broker !== 'all' ? `&broker=${encodeURIComponent(broker)}` : ''
+    let cancelled = false
+    Promise.all(ledgerTickers.split(',').map(t =>
+      fetch(`/api/premium-ledger?ticker=${encodeURIComponent(t)}${q}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(d => [t, d?.success ? d : null])
+        .catch(() => [t, null])
+    )).then(pairs => { if (!cancelled) setLedgers(Object.fromEntries(pairs)) })
+    return () => { cancelled = true }
+  }, [ledgerTickers, broker])
 
   /**
    * A dividend worth more than the call's remaining time value makes early
@@ -579,6 +606,7 @@ export default function SpreadsPanel({ broker = 'all' }) {
                   <th style={th}>Stock</th>
                   <th style={th}>Other options</th>
                   <th style={th}>Combined</th>
+                  <th style={th} title="Every option credit and debit on this name added up, across all rolls, less what it would cost to close what's still open. Positive means the name has paid you premium overall.">Net premium</th>
                 </tr>
               </thead>
               <tbody>
@@ -617,6 +645,28 @@ export default function SpreadsPanel({ broker = 'all' }) {
                         </div>
                       )}
                     </td>
+                    {(() => {
+                      const L = ledgers[b.ticker]
+                      if (!L) return <td style={{ ...td, color: muted }}>—</td>
+                      // Closing every open leg on this name costs the shorts'
+                      // value and returns the longs'. Netting it against the
+                      // realised premium is the "if I flattened today" figure.
+                      const openCost = (positions || [])
+                        .filter(p => p.ticker === b.ticker && p.openContracts > 0)
+                        .reduce((a, p) => a + (p.isLong ? -(p.currentValue || 0) : (p.currentValue || 0)), 0)
+                      const flat = r2(L.net - openCost)
+                      return (
+                        <td style={{ ...td, fontWeight: 700, color: pnlColor(flat, isDark) }}
+                          title={`Collected ${fmt(L.collected)} across ${L.tradeCount} option trades.`
+                            + `\nPaid back ${fmt(L.paid)}.`
+                            + `\nRealised net ${fmt(L.net)}.`
+                            + `\nClosing what's still open costs ${fmt(openCost)}.`
+                            + `\n\nFlat today: ${fmt(flat)}.`
+                            + (flat < 0 ? '\n\nNegative — this name has cost more in premium than it has paid.' : '')}>
+                          {fmt(flat)}
+                        </td>
+                      )
+                    })()}
                   </tr>
                 ))}
               </tbody>
