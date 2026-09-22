@@ -141,6 +141,39 @@ export default function SpreadsPanel({ broker = 'all' }) {
    * collect the dividend, and the day before the ex-date is when they do it.
    * That turns a gradual risk into a specific date.
    */
+  /**
+   * What assignment would actually do — which is not the same on both sides.
+   *
+   * A short put delivers shares TO you: you buy at the strike, the position
+   * grows, and if that is stock you were willing to own it costs only the
+   * difference to market. A short call takes shares FROM you at the strike,
+   * which ends the position and realises the whole gain on a date somebody
+   * else picked. Same mechanism, very different bill, so they should not be
+   * presented as the same warning.
+   */
+  const consequence = (s) => {
+    const shares = holdings.find(h => h.symbol === s.ticker)?.position || 0
+    const basis = holdings.find(h => h.symbol === s.ticker)?.avgCost || null
+    const qty = s.n * 100
+    if (s.type === 'call') {
+      const covered = Math.min(shares, qty)
+      const gain = (basis > 0) ? r2((s.shortStrike - basis) * covered) : null
+      return {
+        severity: covered > 0 ? 'high' : 'low',
+        text: covered > 0
+          ? `would call away ${covered} share${covered === 1 ? '' : 's'} at $${s.shortStrike}`
+            + (gain != null ? ` — realising ${fmt(gain)} of gain this tax year` : '')
+          : `no shares held — the long $${s.longStrike} covers it, but you'd be short stock until you close`,
+      }
+    }
+    return {
+      severity: 'low',
+      text: `would put ${qty} share${qty === 1 ? '' : 's'} on you at $${s.shortStrike}`
+        + ` (${fmt(s.shortStrike * qty)})`
+        + ` — stock you'd then own, not a loss beyond the spread`,
+    }
+  }
+
   const divRisk = (s) => {
     if (s.type !== 'call' || !s.itm) return null
     const d = divs.map[s.ticker]
@@ -293,8 +326,9 @@ export default function SpreadsPanel({ broker = 'all' }) {
           </div>
           {atRisk.map((s, i) => {
             const dv = divRisk(s)
+            const cq = consequence(s)
             return (
-              <div key={i} style={{ fontSize: 12, color: text, padding: '2px 0' }}>
+              <div key={i} style={{ fontSize: 12, color: text, padding: '3px 0' }}>
                 <strong>{s.ticker} {s.type === 'put' ? 'Put' : 'Call'} ${s.shortStrike}</strong>
                 <span style={{ color: muted }}> ×{s.n} · {fmtDate(s.expiry)} ({s.dte <= 0 ? 'today' : `${s.dte}d`})</span>
                 {' — '}
@@ -306,6 +340,11 @@ export default function SpreadsPanel({ broker = 'all' }) {
                     ? ' · almost none — assignment is rational now'
                     : ' · thinning'}
                 </span>
+                <div style={{ fontSize: 11, paddingLeft: 12, marginTop: 1,
+                  color: cq.severity === 'high' ? '#ef4444' : muted,
+                  fontWeight: cq.severity === 'high' ? 600 : 400 }}>
+                  ↳ {cq.text}
+                </div>
                 {dv && (
                   <div style={{ fontSize: 11, paddingLeft: 12, marginTop: 1,
                     color: dv.beats ? '#ef4444' : muted, fontWeight: dv.beats ? 600 : 400 }}
@@ -334,10 +373,14 @@ export default function SpreadsPanel({ broker = 'all' }) {
             so they wait until there is none left. That makes this predictable: the number above
             falling toward zero is the warning, not the assignment itself.
             <br />
-            <strong style={{ color: text }}>Rolling out costs less than being assigned</strong> — closing
-            the short and reselling a later expiry keeps the position and pays you new time value.
-            Assignment instead hands you the stock (or takes it), turns a defined-risk spread into a
-            share position mid-move, and leaves the long leg stranded on its own.
+            <strong style={{ color: text }}>The two sides cost very differently.</strong> A short put
+            delivers shares to you — stock you then own, and no loss beyond the spread itself. A short
+            call takes shares away at the strike, ending the position and realising the whole gain in
+            this tax year on a date someone else chose. The call side is the one worth rolling early.
+            <br />
+            Either way the long leg is left stranded: the clearing system doesn't know the two were a
+            spread, so assignment on the short does nothing to the long. Sell it rather than exercise
+            it — exercising throws away whatever time value it still holds.
           </div>
         </div>
       )}
