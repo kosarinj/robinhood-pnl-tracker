@@ -6537,6 +6537,26 @@ app.get('/api/health', (req, res) => {
     volumeDirs,
     mounts,
     shortCallEntries: shortCalls,
+    // Are option marks actually coming from IB Gateway right now? Without this
+    // the only way to tell was an authenticated call, so "the recorder is
+    // running" and "the recorder is running the build that pushes options"
+    // looked identical from outside. Counts and ages only — no contracts, since
+    // this endpoint is unauthenticated and the strikes are the position.
+    optionMarks: (() => {
+      const now = Date.now()
+      let total = 0, fresh = 0, newest = null
+      for (const m of optionMarks.values()) {
+        total++
+        const age = now - m.at
+        if (age <= OPTION_MARK_FRESH_MS && m.bid > 0 && m.ask > 0) fresh++
+        if (newest == null || age < newest) newest = age
+      }
+      return {
+        total, fresh,
+        newestAgeSec: newest == null ? null : Math.round(newest / 1000),
+        live: fresh > 0,
+      }
+    })(),
     uptimeSec: Math.round((Date.now() - PROCESS_STARTED) / 1000)
   })
 })
