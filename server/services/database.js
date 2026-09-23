@@ -3714,6 +3714,48 @@ export class DatabaseService {
    * actually uses. "Assignment" and "Exercise" appear in the OPTION row's
    * description and matching those instead finds one row out of three.
    */
+  /**
+   * Ordinary share trades per ticker, for matching what followed an assignment.
+   *
+   * Assignment on a short put buys you stock. Selling it again is an ordinary
+   * trade the export does not mark as "the shares I was assigned", so its P&L
+   * lands in stock P&L and the spread reads as a loss with no offset. Finding
+   * the disposal needs the plain share history, which no existing helper
+   * returns in a usable shape.
+   *
+   * Settlement rows are excluded: an assignment is the event being matched
+   * FROM, never the match.
+   */
+  getShareTradesByTicker(userId = 1, broker = null) {
+    try {
+      const rows = db.prepare(`
+        SELECT symbol, trans_date, trans_code, quantity, price, amount, is_buy
+        FROM trades
+        WHERE user_id = ?
+          AND COALESCE(is_option, 0) = 0
+          AND COALESCE(description,'') NOT LIKE '%Option Assigned%'
+          AND COALESCE(description,'') NOT LIKE '%Option Exercised%'
+          ${broker ? "AND COALESCE(broker,'robinhood') = ?" : ''}
+        ORDER BY trans_date ASC, id ASC
+      `).all(...[userId, ...(broker ? [broker] : [])])
+      const out = {}
+      for (const r of rows) {
+        const t = String(r.symbol || '').toUpperCase()
+        if (!t) continue
+        ;(out[t] ||= []).push({
+          date: String(r.trans_date || '').slice(0, 10),
+          shares: Math.abs(Number(r.quantity) || 0),
+          price: Math.round((Number(r.price) || 0) * 10000) / 10000,
+          bought: !!r.is_buy,
+        })
+      }
+      return out
+    } catch (e) {
+      console.error('Error getting share trades by ticker:', e)
+      return {}
+    }
+  }
+
   getSettlementShareTrades(userId = 1, broker = null) {
     try {
       const rows = db.prepare(`

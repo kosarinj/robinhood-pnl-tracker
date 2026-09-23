@@ -3465,6 +3465,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // are the rest of that trade, and they sit in stock P&L with nothing
     // connecting them back to the spread they came from.
     const settlementShares = databaseService.getSettlementShareTrades(userId, brokerFilter)
+    // Plain share history, for working out what became of the stock an
+    // assignment left behind. Same scope as settlementShares so the two agree.
+    const shareTradesByTicker = databaseService.getShareTradesByTicker(userId, brokerFilter)
     const shareLegFor = (ticker, date, code) => {
       if (!['OASGN', 'OEXC', 'OEXCS'].includes(code)) return null
       const day = (d) => new Date(`${String(d).slice(0, 10)}T00:00:00Z`).getTime()
@@ -3474,6 +3477,53 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // Closest date wins when more than one settlement landed in the window.
       near.sort((a, b) => Math.abs(day(a.date) - day(date)) - Math.abs(day(b.date) - day(date)))
       return near[0]
+    }
+
+    /**
+     * What happened to the shares an assignment left behind.
+     *
+     * Assignment on a short put buys you stock at the strike. Selling it again
+     * is an ordinary trade the export never marks as connected, so its P&L
+     * lands in stock P&L and the spread shows the assignment as a loss with the
+     * recovery nowhere near it. Net stays correct; the spread's own number is
+     * what misleads.
+     *
+     * So: the first opposing trade of at least the same size, on the same
+     * ticker, on or after the settlement. That is an INFERENCE, not a fact —
+     * sell 100 of 300 shares a week later and which 100 were "the assigned
+     * ones" is an assumption. It is returned flagged so the caller can show it
+     * as inferred beside the confirmed figure rather than silently folding it
+     * into a number that is trusted.
+     *
+     * Deliberately narrow: nothing within 90 days, or no opposing trade at all,
+     * returns null instead of reaching for a worse match.
+     */
+    const shareDisposalFor = (shareLeg) => {
+      if (!shareLeg?.ticker || !(shareLeg.shares > 0)) return null
+      const list = shareTradesByTicker[shareLeg.ticker]
+      if (!Array.isArray(list) || !list.length) return null
+      const settled = String(shareLeg.date).slice(0, 10)
+      const dayMs = (d) => new Date(`${d}T00:00:00Z`).getTime()
+      for (const s of list) {
+        if (s.date < settled) continue
+        if (s.bought === shareLeg.bought) continue          // same side is not a disposal
+        if (s.shares + 1e-9 < shareLeg.shares) continue     // too small to cover it
+        const gap = Math.round((dayMs(s.date) - dayMs(settled)) / 86400000)
+        if (!Number.isFinite(gap) || gap > 90) return null
+        const n = shareLeg.shares
+        // Bought at the strike then sold: gain is the rise. Sold at the strike
+        // (a call assignment) then bought back: gain is the fall.
+        const pnl = shareLeg.bought
+          ? (s.price - shareLeg.price) * n
+          : (shareLeg.price - s.price) * n
+        return {
+          date: s.date, shares: n, price: s.price, dayGap: gap,
+          pnl: Math.round(pnl * 100) / 100,
+          partial: s.shares > shareLeg.shares + 1e-9,
+          inferred: true,
+        }
+      }
+      return null
     }
 
     // Group realized P&L by underlying, split by short/long x call/put, date-filtered
@@ -3544,10 +3594,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
               type: optionType,
               expiry: parsed ? `${parsed.year}-${parsed.month}-${parsed.day}` : null,
               // Present only where the broker itself tied shares to this
-              // settlement. Reported as what happened rather than as P&L: the
-              // disposal that follows an assignment is an ordinary sale the
-              // export does not mark, so netting the two here would be a guess.
+              // settlement — a fact, straight from the export.
               ...(shareLeg ? { shares: shareLeg } : {}),
+              // What became of those shares afterwards. An INFERENCE, flagged
+              // as one: the export never marks a sale as "the shares I was
+              // assigned", so this is the first opposing trade of at least the
+              // same size within 90 days. Kept separate from `pnl` above so the
+              // confirmed figure stays confirmed and Net is untouched.
+              ...(shareLeg ? (() => {
+                const d = shareDisposalFor(shareLeg)
+                return d ? { shareDisposal: d } : {}
+              })() : {}),
             })
           }
         }

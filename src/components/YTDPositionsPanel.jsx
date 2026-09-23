@@ -1794,6 +1794,9 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
         short: g.find(l => l.side === 'short'),
         long: g.find(l => l.side === 'long'),
         shares: g.map(l => l.shares).filter(Boolean),
+        // What became of the assigned stock. Inferred, so it is kept out of
+        // `net` above — that figure stays the confirmed option P&L.
+        disposals: g.map(l => l.shareDisposal).filter(Boolean),
       }
     }).sort((a, b) => (a.closed < b.closed ? 1 : -1))
     const total = Math.round([...rows.map(r => r.net), ...loose.map(l => l.pnl || 0)]
@@ -1861,6 +1864,22 @@ function SpreadPopover({ ticker, legs, anchor, onClose, isDark, fmt, pnlColor })
           {r.shares.map((s, j) => (
             <div key={j} style={{ fontSize: 11, color: '#f59e0b', marginTop: 1 }}>
               {s.bought ? 'bought' : 'sold'} {s.shares} shares @ {fmt(s.price)} ({s.via})
+            </div>
+          ))}
+          {/* What happened to those shares next. Shown apart from the spread's
+              own P&L and labelled, because it is a match on size and date, not
+              something the export confirms. Without it an assignment reads as a
+              loss with the recovery filed somewhere else entirely. */}
+          {r.disposals.map((d, j) => (
+            <div key={`d${j}`} style={{ fontSize: 11, color: textMid, marginTop: 1 }}
+              title={`Matched to the first opposing trade of at least the same size, ${d.dayGap} day(s) later.`
+                + (d.partial ? ' That sale was larger, so only this many shares are attributed.' : '')
+                + ' Inferred from size and date — the export does not link a sale to an assignment,'
+                + ' so this sits beside the spread rather than inside it. Net is unaffected.'}>
+              → then {d.shares} shares @ {fmt(d.price)} {d.dayGap === 0 ? 'same day' : `${d.dayGap}d later`}
+              {': '}
+              <span style={{ color: pnlColor(d.pnl, isDark), fontWeight: 600 }}>{fmt(d.pnl)}</span>
+              <span style={{ color: textMid }}> (inferred)</span>
             </div>
           ))}
         </div>
