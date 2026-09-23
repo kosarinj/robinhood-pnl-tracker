@@ -834,7 +834,16 @@ io.on('connection', (socket) => {
         }
         console.log(`💾 Saved ${trades.length} trades and ${deposits.length} deposits to database for ${asofDate} (user: ${user.userId})`)
       } catch (error) {
+        // This used to log and fall through to the success emit below, so a
+        // failed import reported "worked" and left the user staring at an empty
+        // Positions tab with nothing to explain it. A save that did not save is
+        // a failed upload, and has to say so.
         console.error('Error saving trades:', error)
+        socket.emit('csv-processed', {
+          success: false,
+          error: `The file parsed but could not be saved: ${error.message}`,
+        })
+        return
       }
 
       // Populate short_call_entries for STO-call trades in background

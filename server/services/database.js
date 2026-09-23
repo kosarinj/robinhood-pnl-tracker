@@ -906,6 +906,104 @@ try {
   console.error('Migration error:', error)
 }
 
+/**
+ * Migration: drop the single-user UNIQUE constraints that block a second user.
+ *
+ * csv_uploads was created with `upload_date TEXT NOT NULL UNIQUE` and
+ * pnl_snapshots with `UNIQUE(asof_date, symbol)` — both from before multi-user,
+ * neither including user_id. Multi-user support added composite indexes
+ * alongside them and left the originals in place, because SQLite cannot drop a
+ * constraint. So they still apply, table-wide, across every account.
+ *
+ * The effect: a second user uploading a file whose upload_date another user
+ * already holds hits `UNIQUE constraint failed: csv_uploads.upload_date`. The
+ * ON CONFLICT clause names (upload_date, user_id) and so does not catch it, the
+ * transaction rolls back, and nothing imports. Uploading the SAME export as an
+ * existing user — the obvious thing for a new user to try — fails every time.
+ *
+ * SQLite drops a constraint only by rebuilding the table, so that is what this
+ * does: copy to a new table without it, keeping the composite unique indexes
+ * that replaced it. Columns are read from the live schema rather than assumed,
+ * and row counts are checked before the old table is dropped.
+ */
+try {
+  const legacyUnique = (table, needle) => {
+    const row = db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name = ?`).get(table)
+    return !!row?.sql && row.sql.replace(/\s+/g, ' ').includes(needle)
+  }
+
+  const rebuild = (table, createSql, indexSqls, needle) => {
+    if (!legacyUnique(table, needle)) return false
+    const cols = db.pragma(`table_info(${table})`).map(c => c.name)
+    const colList = cols.map(c => `"${c}"`).join(', ')
+    const before = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n
+    db.transaction(() => {
+      db.exec(`DROP TABLE IF EXISTS ${table}__rebuild`)
+      db.exec(createSql.replace(table, `${table}__rebuild`))
+      // Only columns present in BOTH tables travel, so a schema that has since
+      // gained a column does not abort the copy.
+      const newCols = db.pragma(`table_info(${table}__rebuild)`).map(c => c.name)
+      const shared = cols.filter(c => newCols.includes(c))
+      const sharedList = shared.map(c => `"${c}"`).join(', ')
+      db.exec(`INSERT INTO ${table}__rebuild (${sharedList}) SELECT ${sharedList} FROM ${table}`)
+      const after = db.prepare(`SELECT COUNT(*) AS n FROM ${table}__rebuild`).get().n
+      if (after !== before) {
+        throw new Error(`${table}: copied ${after} of ${before} rows — aborting rebuild`)
+      }
+      db.exec(`DROP TABLE ${table}`)
+      db.exec(`ALTER TABLE ${table}__rebuild RENAME TO ${table}`)
+      for (const sql of indexSqls) db.exec(sql)
+    })()
+    console.log(`✅ ${table}: dropped the legacy single-user UNIQUE (${before} rows preserved)`)
+    return true
+  }
+
+  rebuild('csv_uploads', `
+    CREATE TABLE csv_uploads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      upload_date TEXT NOT NULL,
+      latest_trade_date TEXT NOT NULL,
+      trade_count INTEGER NOT NULL,
+      total_principal REAL DEFAULT 0,
+      user_id INTEGER DEFAULT 1,
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+    )`,
+    ['CREATE UNIQUE INDEX IF NOT EXISTS idx_csv_uploads_user_date ON csv_uploads(user_id, upload_date)',
+     'CREATE INDEX IF NOT EXISTS idx_csv_uploads_date ON csv_uploads(upload_date DESC)'],
+    'upload_date TEXT NOT NULL UNIQUE')
+
+  rebuild('pnl_snapshots', `
+    CREATE TABLE pnl_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asof_date TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      position REAL NOT NULL,
+      avg_cost REAL,
+      current_price REAL,
+      current_value REAL,
+      realized_pnl REAL,
+      unrealized_pnl REAL,
+      total_pnl REAL,
+      daily_pnl REAL,
+      options_pnl REAL,
+      percentage REAL,
+      lowest_open_buy_price REAL,
+      lowest_open_buy_days_ago INTEGER,
+      recent_lowest_buy_price REAL,
+      recent_lowest_buy_days_ago INTEGER,
+      recent_lowest_sell_price REAL,
+      recent_lowest_sell_days_ago INTEGER,
+      user_id INTEGER DEFAULT 1,
+      created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    )`,
+    ['CREATE UNIQUE INDEX IF NOT EXISTS idx_pnl_snapshots_user_date_symbol ON pnl_snapshots(user_id, asof_date, symbol)'],
+    'UNIQUE(asof_date, symbol)')
+} catch (error) {
+  console.error('Migration error (legacy single-user UNIQUE):', error)
+}
+
 // Migration: Create DCA schedule table
 try {
   db.exec(`
