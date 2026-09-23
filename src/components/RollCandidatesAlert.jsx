@@ -261,7 +261,10 @@ export default function RollCandidatesAlert({ broker }) {
                   </td>
                   <td style={{ padding: '3px 6px', textAlign: 'right', color: textMid, whiteSpace: 'nowrap' }}>
                     {usd((p.avgCostPerContract || 0) / 100)} → {usd(p.markPrice)}
-                    {p.markSource !== 'quote' && (
+                    {/* 'ibkr' is a live two-sided market from IB Gateway — the
+                        best price available here, not an estimate. Only the
+                        modelled and intrinsic fallbacks get the badge. */}
+                    {p.markSource !== 'quote' && p.markSource !== 'ibkr' && (
                       <span title={p.markSource === 'intrinsic'
                         ? 'No live quote — marked at intrinsic value, so an out-of-the-money short reads as worth ~$0'
                         : 'No live quote — Black-Scholes estimate'}

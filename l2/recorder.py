@@ -39,7 +39,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 
-from ib_async import IB, Stock
+from ib_async import IB, Option, Stock
 
 from engine import AbsorptionEngine, Aggressor, Side, Thresholds
 
@@ -89,10 +89,15 @@ class Uploader:
         self.last_error: str | None = None
 
     def _send(self, method: str, path: str, payload: dict):
-        """One JSON request. The decoded reply, or None if it failed."""
-        req = urllib.request.Request(self.base + path, method=method,
-                                     data=json.dumps(payload).encode())
-        req.add_header("Content-Type", "application/json")
+        """One JSON request. The decoded reply, or None if it failed.
+
+        A None payload sends no body at all -- a GET carrying "null" is a
+        request some servers and proxies reject outright.
+        """
+        data = None if payload is None else json.dumps(payload).encode()
+        req = urllib.request.Request(self.base + path, method=method, data=data)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
         if self.token:
             req.add_header("x-orderflow-token", self.token)
         if self.cookie:
@@ -135,6 +140,24 @@ class Uploader:
 
     def push_marks(self, marks: list[dict]):
         return self._send("POST", "/api/orderflow/marks", {"marks": marks})
+
+    def push_option_marks(self, marks: list[dict]):
+        return self._send("POST", "/api/orderflow/option-marks", {"marks": marks})
+
+    def option_watchlist(self) -> list[dict]:
+        """The open option legs the server wants quoted.
+
+        Polygon refuses option quotes, so a contract that has not printed today
+        falls back to a stale daily close -- on a far-dated LEAP that is hundreds
+        of dollars a contract wrong, and a lone short leg has no second leg to
+        cancel the error against. The server owns the list so this subscribes to
+        exactly the open positions and nothing else, which also keeps it inside
+        IBKR's concurrent market-data line limit.
+        """
+        r = self._send("GET", "/api/orderflow/option-watchlist", None)
+        if not r:
+            return []
+        return r.get("contracts") or []
 
 
 class Recorder:
@@ -400,6 +423,11 @@ def main():
     # subscription, so marking fifty names overnight leaves all three books
     # free for the watch list and the screener.
     marks: dict[str, object] = {}
+    # Option subscriptions, keyed (ticker, YYYYMMDD, strike, right). Refreshed
+    # on its own slow timer -- the list only moves when a position opens or
+    # closes, and each contract costs one of IBKR's market-data lines.
+    opt_marks: dict[tuple, object] = {}
+    last_opt_list = 0.0
     # Screener state: what is being sampled now, and where the rotation is up to.
     scans: dict[str, Scan] = {}
     scan_at = 0
@@ -663,6 +691,57 @@ def main():
                                       "printedAt": printed_at})
                 if mark_rows:
                     up.push_marks(mark_rows)
+
+                # Option marks for the open legs. Refreshed on a slower cycle
+                # than stocks: the watchlist only changes when a position is
+                # opened or closed, and each contract costs a market-data line.
+                if time.monotonic() - last_opt_list >= 300:
+                    last_opt_list = time.monotonic()
+                    wanted = up.option_watchlist()
+                    want_keys = set()
+                    for c in wanted[:40]:
+                        try:
+                            key = (str(c["ticker"]).upper(),
+                                   str(c["expiry"]).replace("-", ""),
+                                   float(c["strike"]),
+                                   "P" if str(c.get("right", "C")).upper().startswith("P") else "C")
+                        except Exception:
+                            continue
+                        want_keys.add(key)
+                    for key in [k for k in opt_marks if k not in want_keys]:
+                        tkr = opt_marks.pop(key)
+                        try:
+                            ib.cancelMktData(tkr.contract)
+                        except Exception:
+                            pass
+                    for key in want_keys:
+                        if key in opt_marks:
+                            continue
+                        sym, exp, strike, right = key
+                        try:
+                            found = ib.qualifyContracts(
+                                Option(sym, exp, strike, right, "SMART", currency="USD"))
+                            if found and found[0] is not None:
+                                opt_marks[key] = ib.reqMktData(found[0], "", False, False)
+                        except Exception as e:
+                            print(f"  ! cannot mark {sym} {exp} {strike}{right}: "
+                                  f"{type(e).__name__}: {e}")
+
+                # Only a two-sided market is sent. These strikes can go a whole
+                # session without trading, so a "last" may be days old while the
+                # book is current -- and a one-sided quote is not a price, which
+                # is the trap the intrinsic floor exists to catch.
+                opt_rows = []
+                for (sym, exp, strike, right), tkr in opt_marks.items():
+                    bid = _num(getattr(tkr, "bid", None))
+                    ask = _num(getattr(tkr, "ask", None))
+                    if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
+                        continue
+                    opt_rows.append({"ticker": sym, "expiry": exp, "strike": strike,
+                                     "right": right, "bid": bid, "ask": ask,
+                                     "last": _num(getattr(tkr, "last", None))})
+                if opt_rows:
+                    up.push_option_marks(opt_rows)
 
                 # Midnight. The session was stamped once at startup, so a
                 # recorder left running overnight -- which is the normal case

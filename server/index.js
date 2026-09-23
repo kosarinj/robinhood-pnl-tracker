@@ -2416,6 +2416,21 @@ app.get('/api/options-pnl/open-positions', requireAuth, async (req, res) => {
       // back to intrinsic value (0 for an OTM option ≈ worthless).
       let mark = quotes?.mid || 0
       let markSource = mark > 0 ? 'quote' : null
+      // A live IBKR two-sided market outranks everything Polygon can offer
+      // here. Polygon refuses /v3/quotes, so `quotes.mid` above is derived from
+      // prints, and on a contract that hasn't traded for days that is a stale
+      // close wearing a quote's name. Measured 23 Sep 2026: MRVL 370C Jun-28
+      // closed 71.87 against a live 67.65/70.60 — $275 a contract out on a leg
+      // with no second leg to cancel the error against.
+      {
+        // req.user.userId, not a local `userId` — this handler has none, and
+        // the orderflow owner is the fallback because the recorder pushes as
+        // its own configured user, exactly as overnightMark is consulted.
+        const expStr = `${parsed.year}-${parsed.month}-${parsed.day}`
+        const om = optionMark(req.user.userId, parsed.ticker, expStr, parsed.strike, parsed.type)
+          || optionMark(orderFlowOwner(), parsed.ticker, expStr, parsed.strike, parsed.type)
+        if (om) { mark = om.mid; markSource = 'ibkr' }
+      }
       if (!(mark > 0) && underlyingNow > 0) {
         const entry = shortEntryBySymbol[pos.symbol]
         const modeled = (!isLong && parsed.type === 'call' && entry) ? modelOptionMark(entry, parsed, underlyingNow) : 0
@@ -8652,6 +8667,114 @@ app.post('/api/orderflow/marks', (req, res) => {
     stored++
   }
   res.json({ success: true, stored })
+})
+
+/**
+ * Option marks from IB Gateway, keyed on the full contract.
+ *
+ * Polygon refuses /v3/quotes, so an option's mark falls back to a trade
+ * printed today, then a model, then a stale daily close. A far-dated LEAP
+ * doesn't print for days, so it lands on the close — and the close is wrong by
+ * real money. Measured 23 Sep 2026 against live IBKR markets: MRVL 370C Jun-28
+ * closed 71.87 against a 67.65/70.60 market, $275 a contract out.
+ *
+ * A spread hides this, because both legs drift the same way and the
+ * subtraction cancels most of it. A lone short LEAP has nothing to cancel
+ * against, which is why those are the marks that visibly disagree.
+ *
+ * Keyed `${ownerId}:${OCC-ish symbol}` so strike, expiry and right all
+ * participate — a per-ticker key like stockMarks would collide every contract
+ * on the same underlying into one.
+ */
+const optionMarks = new Map()
+const OPTION_MARK_FRESH_MS = 10 * 60 * 1000
+
+/** Canonical key for a contract, so the recorder and the panel agree. */
+function optionKey(ticker, expiry, strike, right) {
+  const e = String(expiry || '').replace(/-/g, '')
+  const s = Number(strike)
+  const r = String(right || '').toUpperCase().startsWith('P') ? 'P' : 'C'
+  return `${String(ticker).toUpperCase()}|${e}|${s}|${r}`
+}
+
+/**
+ * Live mid for a contract, or null when there is nothing fresh.
+ *
+ * Mid rather than last: these strikes can go a whole session without trading,
+ * so a "last" may be days old while the two-sided market is current. Both
+ * sides must be present and positive — a one-sided book is not a price, which
+ * is the same trap the intrinsic floor was added for.
+ */
+function optionMark(ownerId, ticker, expiry, strike, right) {
+  const m = optionMarks.get(`${ownerId}:${optionKey(ticker, expiry, strike, right)}`)
+  if (!m) return null
+  if (Date.now() - m.at > OPTION_MARK_FRESH_MS) return null
+  if (!(m.bid > 0) || !(m.ask > 0) || m.ask < m.bid) return null
+  return { mid: Math.round(((m.bid + m.ask) / 2) * 10000) / 10000, bid: m.bid, ask: m.ask, at: m.at }
+}
+
+/** POST /api/orderflow/option-marks — { marks: [{ ticker, expiry, strike, right, bid, ask, last }] } */
+app.post('/api/orderflow/option-marks', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const now = Date.now()
+  let stored = 0
+  for (const m of Array.isArray(req.body?.marks) ? req.body.marks : []) {
+    const ticker = String(m?.ticker || '').toUpperCase()
+    const bid = Number(m?.bid), ask = Number(m?.ask)
+    if (!ticker || !m?.expiry || !(Number(m?.strike) > 0)) continue
+    if (!(bid > 0) || !(ask > 0)) continue
+    optionMarks.set(`${user.userId}:${optionKey(ticker, m.expiry, m.strike, m.right)}`, {
+      bid, ask, last: Number(m.last) > 0 ? Number(m.last) : null, at: now,
+    })
+    stored++
+  }
+  res.json({ success: true, stored })
+})
+
+/** GET /api/orderflow/option-marks — what is marked, and how fresh. */
+app.get('/api/orderflow/option-marks', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  const now = Date.now()
+  const out = []
+  for (const [key, m] of optionMarks) {
+    const [uid, contract] = key.split(':')
+    if (Number(uid) !== user.userId) continue
+    out.push({ contract, ...m, mid: Math.round(((m.bid + m.ask) / 2) * 100) / 100,
+      ageSec: Math.round((now - m.at) / 1000) })
+  }
+  res.json({ success: true, count: out.length, marks: out.sort((a, b) => a.contract.localeCompare(b.contract)) })
+})
+
+/**
+ * GET /api/orderflow/option-watchlist — the contracts worth quoting.
+ *
+ * The recorder shouldn't guess. This returns the owner's currently open option
+ * legs so it subscribes to exactly those and nothing else, which also keeps it
+ * inside IBKR's concurrent market-data line limit.
+ */
+app.get('/api/orderflow/option-watchlist', (req, res) => {
+  const user = orderFlowUser(req)
+  if (!user) return res.status(401).json({ error: 'Not authorised' })
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const positions = databaseService.getOpenOptionPositions(user.userId)
+    const out = []
+    for (const p of positions || []) {
+      const parsed = parseOptionDescription(p.symbol || '')
+      if (!parsed) continue
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      if (expiry < today) continue
+      const net = (p.net_long || 0) + (p.net_short || 0)
+      if (!(Math.abs(net) > 0)) continue
+      out.push({ ticker: parsed.ticker, expiry, strike: parsed.strike,
+        right: parsed.type === 'put' ? 'P' : 'C' })
+    }
+    res.json({ success: true, count: out.length, contracts: out })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
 })
 
 /** GET /api/orderflow/marks — what the recorder has marked, and how fresh. */
