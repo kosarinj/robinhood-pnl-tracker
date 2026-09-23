@@ -571,15 +571,6 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   style={{ fontSize: '12px' }}
                   label={{ value: 'Price', angle: -90, position: 'insideLeft' }}
                 />
-                <YAxis
-                  yAxisId="pnl"
-                  orientation="right"
-                  domain={['auto', 'auto']}
-                  tickFormatter={formatPrice}
-                  stroke="#28a745"
-                  style={{ fontSize: '12px' }}
-                  label={{ value: 'P&L', angle: 90, position: 'insideRight' }}
-                />
                 <Tooltip
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '6px' }}
                   labelFormatter={formatDate}
@@ -631,19 +622,6 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                     strokeDasharray="5 5"
                   />
                 )}
-
-                {/* Total P&L Line - dynamically includes Stock and/or Options based on checkboxes */}
-                <Line
-                  yAxisId="pnl"
-                  type="monotone"
-                  dataKey="runningPnL"
-                  stroke="#28a745"
-                  strokeWidth={3}
-                  dot={false}
-                  name="Total P&L"
-                  connectNulls={true}
-                  isAnimationActive={false}
-                />
 
                 {/* Buy markers (green dots) */}
                 <Scatter
