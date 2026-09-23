@@ -29,7 +29,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const [showFib, setShowFib] = useState(true)
   const [showStockPnL, setShowStockPnL] = useState(false)
   const [showOptionsPnL, setShowOptionsPnL] = useState(false)
-  const [dateRange, setDateRange] = useState('6mo') // '1mo', '3mo', '6mo', '1y', 'max'
+  const [dateRange, setDateRange] = useState('3mo') // '1mo', '3mo', '6mo', '1y', 'max'
   const [indicators, setIndicators] = useState({
     showEMA9: false,
     showEMA21: false,

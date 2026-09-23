@@ -14,8 +14,8 @@ import React, { useState } from 'react'
 
 const LEVEL_COLOR = (atLevel) => atLevel ? 'var(--accent)' : 'var(--textSecondary)'
 
-export default function FibRsiScreener() {
-  const [range, setRange] = useState('6mo')
+export default function FibRsiScreener({ onPickTicker }) {
+  const [range, setRange] = useState('3mo')
   const [rows, setRows] = useState(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
@@ -133,7 +133,18 @@ export default function FibRsiScreener() {
                   {rows.map(r => (
                     <tr key={r.ticker}>
                       <td style={{ ...td, textAlign: 'left', fontWeight: 700 }}>
-                        {r.ticker}
+                        {/* The whole point of a screener row is to go look at
+                            the chart, so the ticker is the way there. Falls
+                            back to plain text where no handler is passed. */}
+                        {onPickTicker ? (
+                          <button onClick={() => onPickTicker(r.ticker)}
+                            title={`Open the ${r.ticker} chart`}
+                            style={{
+                              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                              font: 'inherit', fontWeight: 700, color: 'var(--accent)',
+                              textDecoration: 'underline', textUnderlineOffset: 2,
+                            }}>{r.ticker}</button>
+                        ) : r.ticker}
                         {r.held && (
                           <span title="You hold this"
                             style={{
