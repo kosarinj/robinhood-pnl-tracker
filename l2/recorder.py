@@ -72,6 +72,28 @@ def _num(x):
     return None if math.isnan(x) or math.isinf(x) else x
 
 
+def _subscribe_options(ib, opt_marks: dict, want_keys: set) -> None:
+    """Open a Level 1 subscription for each wanted contract not already held.
+
+    Level 1, so this never touches the depth allowance MAX_SYMBOLS guards --
+    that cap is for reqMktDepth, and a fourth of those is refused outright.
+    A contract that will not qualify is reported and skipped rather than
+    retried, since a bad strike or expiry will not fix itself.
+    """
+    for key in want_keys:
+        if key in opt_marks:
+            continue
+        sym, exp, strike, right = key
+        try:
+            found = ib.qualifyContracts(
+                Option(sym, exp, strike, right, "SMART", currency="USD"))
+            if found and found[0] is not None:
+                opt_marks[key] = ib.reqMktData(found[0], "", False, False)
+        except Exception as e:
+            print(f"  ! cannot mark {sym} {exp} {strike}{right}: "
+                  f"{type(e).__name__}: {e}")
+
+
 class Uploader:
     """
     Batches pushes. A level updates on almost every book tick, so sending each
@@ -153,10 +175,16 @@ class Uploader:
         cancel the error against. The server owns the list so this subscribes to
         exactly the open positions and nothing else, which also keeps it inside
         IBKR's concurrent market-data line limit.
+
+        Returns None when the call FAILED, and a list when it succeeded --
+        including an empty list, which genuinely means no open legs. The caller
+        must tell those apart: treating a failure as "no contracts" cancels
+        every live subscription, and a server restart is exactly when that
+        call fails.
         """
         r = self._send("GET", "/api/orderflow/option-watchlist", None)
-        if not r:
-            return []
+        if r is None or not r.get("success"):
+            return None
         return r.get("contracts") or []
 
 
@@ -696,36 +724,35 @@ def main():
                 # than stocks: the watchlist only changes when a position is
                 # opened or closed, and each contract costs a market-data line.
                 if time.monotonic() - last_opt_list >= 300:
-                    last_opt_list = time.monotonic()
                     wanted = up.option_watchlist()
-                    want_keys = set()
-                    for c in wanted[:40]:
-                        try:
-                            key = (str(c["ticker"]).upper(),
-                                   str(c["expiry"]).replace("-", ""),
-                                   float(c["strike"]),
-                                   "P" if str(c.get("right", "C")).upper().startswith("P") else "C")
-                        except Exception:
-                            continue
-                        want_keys.add(key)
-                    for key in [k for k in opt_marks if k not in want_keys]:
-                        tkr = opt_marks.pop(key)
-                        try:
-                            ib.cancelMktData(tkr.contract)
-                        except Exception:
-                            pass
-                    for key in want_keys:
-                        if key in opt_marks:
-                            continue
-                        sym, exp, strike, right = key
-                        try:
-                            found = ib.qualifyContracts(
-                                Option(sym, exp, strike, right, "SMART", currency="USD"))
-                            if found and found[0] is not None:
-                                opt_marks[key] = ib.reqMktData(found[0], "", False, False)
-                        except Exception as e:
-                            print(f"  ! cannot mark {sym} {exp} {strike}{right}: "
-                                  f"{type(e).__name__}: {e}")
+                    if wanted is None:
+                        # The fetch FAILED -- a deploy, a blip, a timeout. Every
+                        # subscription is kept and nothing is reconciled: an
+                        # empty list would cancel the lot and leave the marks to
+                        # age out, and a server restart is precisely when this
+                        # call fails. Retry in a minute rather than five.
+                        print(f"  ! option watchlist unavailable ({up.last_error}) -- keeping "
+                              f"{len(opt_marks)} subscription(s)")
+                        last_opt_list = time.monotonic() - 240
+                    else:
+                        last_opt_list = time.monotonic()
+                        want_keys = set()
+                        for c in wanted[:40]:
+                            try:
+                                key = (str(c["ticker"]).upper(),
+                                       str(c["expiry"]).replace("-", ""),
+                                       float(c["strike"]),
+                                       "P" if str(c.get("right", "C")).upper().startswith("P") else "C")
+                            except Exception:
+                                continue
+                            want_keys.add(key)
+                        for key in [k for k in opt_marks if k not in want_keys]:
+                            tkr = opt_marks.pop(key)
+                            try:
+                                ib.cancelMktData(tkr.contract)
+                            except Exception:
+                                pass
+                        _subscribe_options(ib, opt_marks, want_keys)
 
                 # Only a two-sided market is sent. These strikes can go a whole
                 # session without trading, so a "last" may be days old while the
