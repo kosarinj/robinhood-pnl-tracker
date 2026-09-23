@@ -27,8 +27,13 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   // once buried the price line they're drawn over.
   const [showSupportResistance, setShowSupportResistance] = useState(false)
   const [showFib, setShowFib] = useState(true)
-  const [showStockPnL, setShowStockPnL] = useState(false)
-  const [showOptionsPnL, setShowOptionsPnL] = useState(false)
+  // The two "Include ... P&L" checkboxes are gone from the chart for now.
+  // Held as constants rather than ripped out: the overlay maths below reads
+  // them at several points, and false simply excludes it. Putting the controls
+  // back is a matter of restoring the two checkboxes and making these state
+  // again, with nothing else to reassemble.
+  const showStockPnL = false
+  const showOptionsPnL = false
   const [dateRange, setDateRange] = useState('3mo') // '1mo', '3mo', '6mo', '1y', 'max'
   const [indicators, setIndicators] = useState({
     showEMA9: false,
@@ -458,48 +463,6 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   onChange={(e) => setShowFib(e.target.checked)}
                 />
                 Fibonacci
-              </label>
-
-              {/* Stock P&L Toggle */}
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '4px 10px',
-                background: showStockPnL ? '#e3f2fd' : '#f0f0f0',
-                borderRadius: '6px',
-                fontSize: '14px',
-                color: '#666',
-                cursor: 'pointer',
-                border: showStockPnL ? '1px solid #3b82f6' : '1px solid transparent'
-              }}>
-                <input
-                  type="checkbox"
-                  checked={showStockPnL}
-                  onChange={(e) => setShowStockPnL(e.target.checked)}
-                />
-                Include Stock P&L
-              </label>
-
-              {/* Options P&L Toggle */}
-              <label style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '4px 10px',
-                background: showOptionsPnL ? '#fff7ed' : '#f0f0f0',
-                borderRadius: '6px',
-                fontSize: '14px',
-                color: '#666',
-                cursor: 'pointer',
-                border: showOptionsPnL ? '1px solid #f59e0b' : '1px solid transparent'
-              }}>
-                <input
-                  type="checkbox"
-                  checked={showOptionsPnL}
-                  onChange={(e) => setShowOptionsPnL(e.target.checked)}
-                />
-                Include Options P&L
               </label>
 
               {/* EMA 9 Toggle */}
