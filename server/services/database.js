@@ -3156,6 +3156,42 @@ export class DatabaseService {
    * but would silently merge two accounts in a figure meant to answer "am I
    * still collecting premium on this name".
    */
+  /**
+   * What is actually stored against one account.
+   *
+   * For answering "I uploaded the file and see nothing": if trades is 0 the
+   * import never landed, and if it is non-zero the data is there and something
+   * downstream is hiding it. Those two need very different fixes and nothing
+   * on screen told them apart.
+   */
+  getRowCountsForUser(userId = 1) {
+    const count = (sql, ...args) => {
+      try { return db.prepare(sql).get(userId, ...args)?.n ?? null } catch { return null }
+    }
+    const trades = count('SELECT COUNT(*) AS n FROM trades WHERE user_id = ?')
+    return {
+      trades,
+      optionTrades: count('SELECT COUNT(*) AS n FROM trades WHERE user_id = ? AND is_option = 1'),
+      shareTrades: count('SELECT COUNT(*) AS n FROM trades WHERE user_id = ? AND COALESCE(is_option,0) = 0'),
+      cashActivity: count('SELECT COUNT(*) AS n FROM cash_activity WHERE user_id = ?'),
+      shortCallEntries: count('SELECT COUNT(*) AS n FROM short_call_entries WHERE user_id = ?'),
+      brokers: (() => {
+        try {
+          return db.prepare(`SELECT COALESCE(broker,'robinhood') AS b, COUNT(*) AS n
+                             FROM trades WHERE user_id = ? GROUP BY b`).all(userId)
+            .map(r => `${r.b}:${r.n}`)
+        } catch { return null }
+      })(),
+      dateRange: (() => {
+        try {
+          const r = db.prepare(`SELECT MIN(trans_date) AS lo, MAX(trans_date) AS hi
+                                FROM trades WHERE user_id = ?`).get(userId)
+          return r?.lo ? { first: String(r.lo).slice(0, 10), last: String(r.hi).slice(0, 10) } : null
+        } catch { return null }
+      })(),
+    }
+  }
+
   getOptionTradesForLedger(userId = 1, ticker = '', broker = null, startDate = null) {
     try {
       const clauses = ['is_option = 1', 'user_id = ?', 'symbol LIKE ?']

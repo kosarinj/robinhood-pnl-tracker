@@ -2116,6 +2116,7 @@ app.post('/api/auth/logout', (req, res) => {
   }
 })
 
+
 app.get('/api/auth/me', (req, res) => {
   try {
     const sessionToken = req.cookies.session_token
@@ -2141,6 +2142,29 @@ const requireAuth = (req, res, next) => {
   req.user = user
   next()
 }
+
+/**
+ * GET /api/whoami — which account is this, and did its import land?
+ *
+ * "I uploaded the file and see nothing" has too many candidate causes to
+ * diagnose by reading code: the upload may not have reached the server, may
+ * have been written under another account, or may be there and filtered out of
+ * view. Nothing on screen distinguished those, so this answers the first two
+ * directly — your user id, and what is actually stored against it.
+ */
+app.get('/api/whoami', requireAuth, (req, res) => {
+  try {
+    const userId = req.user.userId
+    res.json({
+      success: true,
+      userId,
+      username: req.user.username,
+      stored: databaseService.getRowCountsForUser(userId),
+    })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
 
 // Debug endpoint to test Polygon connection and open option positions
 app.get('/api/debug/polygon-options', requireAuth, async (req, res) => {
