@@ -2564,7 +2564,7 @@ function AuthenticatedApp({ user }) {
               its own 120-second refresh keeps it current while it is out of
               sight. */}
           <div style={{ display: positionsTab === 'table' ? 'block' : 'none' }}>
-            <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} />
+            <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} onPickTicker={setDisplayChartSymbol} />
           </div>
           {positionsTab === 'spreads'  && <SpreadsPanel broker={brokerFilter} />}
           {positionsTab === 'cash'     && <CashCheckPanel broker={brokerFilter} />}

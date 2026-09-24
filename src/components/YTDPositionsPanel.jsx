@@ -68,7 +68,7 @@ const pnlColor = (n, isDark) => {
   return n > 0 ? '#22c55e' : '#ef4444'
 }
 
-export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
+export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPickTicker }) {
   const { isDark } = useTheme()
 
   // The period start decides which realized P&L is counted, so it follows the
@@ -911,6 +911,9 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   }
 
   const ALL_COLUMNS = [
+    // The ticker cell is rendered directly in the row rather than through
+    // `cell`, because it also carries the expander, the STK badge and the hide
+    // button. The chart link lives there with them.
     { key: 'ticker', label: 'Ticker', pinned: true, sort: 'ticker', align: 'left' },
 
     { key: 'realizedShortCalls', label: 'Short Calls', sort: 'realizedShortCalls', title: 'Realized P&L from short calls (covered calls sold)',
@@ -1774,7 +1777,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                             {openRow === row.ticker ? '−' : '+'}
                           </button>
                         )}
-                        {row.ticker}
+                        {/* The ticker opens its chart. Going to look at the
+                            chart is the usual next step from a row worth a
+                            second glance, and it meant reading the symbol,
+                            changing tab and typing it back in. On the ticker
+                            itself rather than as another control: this column
+                            already carries an expander, a STK badge and a hide
+                            button, and the table is hard enough to scroll. */}
+                        {onPickTicker ? (
+                          <button onClick={e => { e.stopPropagation(); onPickTicker(row.ticker) }}
+                            title={`${row.ticker} price chart — the same one the 📊 Chart button opens, with your trades marked. Not the option-vs-stock chart on Short Calls, which is per contract.`}
+                            style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',
+                              fontWeight: 'inherit', color: '#3b82f6', cursor: 'pointer' }}>
+                            {row.ticker} <span style={{ fontSize: 10 }}>📊</span>
+                          </button>
+                        ) : row.ticker}
                         {!row.hasOptions && (
                           <span title="Stock only — no option activity in this period."
                             style={{ marginLeft: 5, fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
