@@ -742,11 +742,29 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
           const unpriced = openPositions.length - priced.length
           const openOptionValue = priced.reduce(
             (s, p) => s + (p.isLong ? p.currentValue : -p.currentValue), 0)
-          const total = account.subtotalExcludingOpenOptions + openOptionValue
+          // The options side arrives from a different request than `account`,
+          // so for a moment there is a complete cash picture and no options at
+          // all. Adding zero for them published a total that was wrong by the
+          // whole book — short contracts carry negative value, so their absence
+          // inflates it, and it then dropped by thousands when they landed.
+          // The existing unpriced counter could not catch it either: with
+          // nothing loaded, length - length is 0 and it reported no problem.
+          //
+          // So the total waits. A pending figure is honest; a confident wrong
+          // one is not, which is the rule Day P&L already follows.
+          const optionsLoaded = Array.isArray(livePositions?.positions)
+            || Array.isArray(data?.openOptionPositions)
+          const total = optionsLoaded
+            ? account.subtotalExcludingOpenOptions + openOptionValue
+            : null
+          // A null value means "not known yet", which must not render as $0.00 —
+          // zero is a claim about the position, and an absent figure isn't.
           const row = (label, val, tip) => (
             <div title={tip} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12, padding: '2px 0' }}>
               <span style={{ color: textMid }}>{label}</span>
-              <span style={{ fontWeight: 600, color: val >= 0 ? green : red }}>{(val >= 0 ? '+' : '') + fmt(val)}</span>
+              {val == null
+                ? <span style={{ fontWeight: 600, color: textMid }}>—</span>
+                : <span style={{ fontWeight: 600, color: val >= 0 ? green : red }}>{(val >= 0 ? '+' : '') + fmt(val)}</span>}
             </div>
           )
           return (
@@ -756,9 +774,16 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                 <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: textMid }}>
                   Account P&L
                 </span>
-                <span style={{ fontSize: '1.6rem', fontWeight: 800, lineHeight: 1, color: total >= 0 ? green : red }}>
-                  {(total >= 0 ? '+' : '') + fmt(total)}
-                </span>
+                {total == null ? (
+                  <span style={{ fontSize: '1.05rem', fontWeight: 600, lineHeight: 1, color: textMid }}
+                    title="Waiting on the open option positions. Without them this total would be short the entire options book, which on a short position means it would read far too high.">
+                    pricing options…
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '1.6rem', fontWeight: 800, lineHeight: 1, color: total >= 0 ? green : red }}>
+                    {(total >= 0 ? '+' : '') + fmt(total)}
+                  </span>
+                )}
               </div>
               {row('Stock — cash in/out', account.stockCashFlow, 'Every stock sale minus every stock purchase.')}
               {row('Stock — held at market', account.stockMarketValue, `Market value of ${account.positionCount} position(s) held right now.`)}
@@ -772,7 +797,7 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                 'It nets to zero across all brokers, because nothing actually left the account: ' +
                 Object.entries(account.transferDetail || {}).map(([s, v]) => `${s} ${v >= 0 ? '+' : ''}${fmt(v)}`).join(', ')
               )}
-              {row('Options — open at market', openOptionValue, 'What the open contracts are worth now: long positions positive, short positions negative because they cost that much to close.')}
+              {row('Options — open at market', optionsLoaded ? openOptionValue : null, 'What the open contracts are worth now: long positions positive, short positions negative because they cost that much to close.')}
               {/* Deliberately below the total and outside it. Margin interest is a
                   financing cost, not a trading result — but it's real money and a
                   leveraged book can look profitable while the borrowing behind it
