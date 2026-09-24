@@ -245,6 +245,23 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
     setSpreadFor(ticker)
   }
 
+  // What Options Total is made of. Same shape as the spreads popover: the
+  // number on its own could not say whether a result came from short calls,
+  // puts, or something bought — which is most of what you'd want to know from
+  // it.
+  const [splitFor, setSplitFor] = useState(null)
+  const [splitAnchor, setSplitAnchor] = useState(null)
+  const [splitRow, setSplitRow] = useState(null)
+  const toggleSplit = (row, el) => {
+    if (splitFor === row.ticker) { setSplitFor(null); setSplitAnchor(null); return }
+    if (el) {
+      const box = el.getBoundingClientRect()
+      setSplitAnchor({ top: box.bottom, left: box.left, right: window.innerWidth - box.right })
+    }
+    setSplitRow(row)
+    setSplitFor(row.ticker)
+  }
+
   const [histFor, setHistFor] = useState(null)
   const [hist, setHist] = useState({ loading: false, visits: [], band: null, error: null })
 
@@ -913,7 +930,15 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       foot: (t) => <span style={{ color: pnlColor(t.realizedLongPuts, isDark), fontWeight: 700 }}>{fmt(t.realizedLongPuts)}</span> },
 
     { key: 'totalRealized', label: 'Options Total', sort: 'totalRealized',
-      cell: (r) => <span style={{ color: pnlColor(r.totalRealized, isDark), fontWeight: 700, fontSize: 14 }}>{fmt(r.totalRealized)}</span>,
+      cell: (r) => r.optionSplit
+        ? <button onClick={e => toggleSplit(r, e.currentTarget)}
+            title="What this is made of — short calls, long calls, short puts, long puts"
+            style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
+              color: pnlColor(r.totalRealized, isDark), fontWeight: 700, fontSize: 14,
+              textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3 }}>
+            {fmt(r.totalRealized)}
+          </button>
+        : <span style={{ color: pnlColor(r.totalRealized, isDark), fontWeight: 700, fontSize: 14 }}>{fmt(r.totalRealized)}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.totalRealized, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.totalRealized)}</span> },
 
     // A SUBSET of Options Total, deliberately not a term of Net.
@@ -1837,6 +1862,62 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           }}>
           <div style={{ width: proxy.scrollWidth, height: 1 }} />
         </div>,
+        document.body
+      )}
+
+      {splitFor && splitAnchor && splitRow?.optionSplit && createPortal(
+        (() => {
+          const s = splitRow.optionSplit
+          const rows = [
+            ['Short calls', s.shortCalls, 'Premium kept on calls you sold, less what it cost to close them.'],
+            ['Short puts', s.shortPuts, 'Premium kept on puts you sold, less what it cost to close them.'],
+            ['Long calls', s.longCalls, 'Calls you bought: what they sold for, less what you paid.'],
+            ['Long puts', s.longPuts, 'Puts you bought — the hedges.'],
+          ]
+          const sum = rows.reduce((a, [, v]) => a + (v || 0), 0)
+          const open = splitRow.openUnrealizedPnL
+          const WIDTH = Math.min(320, window.innerWidth - 24)
+          return (
+            <div style={{
+              position: 'fixed', top: splitAnchor.top + 4,
+              left: Math.max(8, Math.min(splitAnchor.left, window.innerWidth - WIDTH - 8)),
+              width: WIDTH, zIndex: 3000, background: surface,
+              border: `1px solid ${border}`, borderRadius: 10, padding: '10px 12px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <strong style={{ fontSize: 13, color: text }}>{splitRow.ticker} — Options Total</strong>
+                <button onClick={() => { setSplitFor(null); setSplitAnchor(null) }}
+                  style={{ background: 'none', border: 'none', color: textMid, cursor: 'pointer', fontSize: 14, padding: 0 }}>✕</button>
+              </div>
+              {rows.map(([label, v, tip]) => (
+                <div key={label} title={tip}
+                  style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '3px 0', fontSize: 12.5 }}>
+                  <span style={{ color: textMid }}>{label}</span>
+                  <span style={{ fontWeight: 600, color: v ? pnlColor(v, isDark) : textMid }}>
+                    {v ? fmt(v) : '—'}
+                  </span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+                borderTop: `1px solid ${border}`, marginTop: 5, paddingTop: 5, fontSize: 13 }}>
+                <span style={{ color: text, fontWeight: 600 }}>Realised</span>
+                <span style={{ fontWeight: 700, color: pnlColor(sum, isDark) }}>{fmt(sum)}</span>
+              </div>
+              {open != null && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, paddingTop: 3, fontSize: 12 }}
+                  title="Open contracts marked to market. Not part of Options Total — it is the Open column, shown here so the two can be read together.">
+                  <span style={{ color: textMid }}>Still open (separate)</span>
+                  <span style={{ fontWeight: 600, color: pnlColor(open, isDark) }}>{fmt(open)}</span>
+                </div>
+              )}
+              <div style={{ fontSize: 10.5, color: textMid, marginTop: 7, lineHeight: 1.45 }}>
+                The four add to Options Total. Expiries are already inside them — a sold
+                option that expired worthless is premium kept, and sits under its own side.
+              </div>
+            </div>
+          )
+        })(),
         document.body
       )}
 

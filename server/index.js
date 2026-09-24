@@ -3925,6 +3925,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           realizedShortPuts: r2(e.realizedShortPuts),
           realizedLongPuts: r2(e.realizedLongPuts),
           totalRealized: r2(e.totalRealized),
+          // What Options Total is made of. Already accumulated above, and
+          // summing to totalRealized by construction; carried so the panel can
+          // break the number down instead of leaving "is this short calls or
+          // puts?" unanswerable from the screen.
+          optionSplit: {
+            shortCalls: r2(e.realizedShortCalls || 0),
+            longCalls: r2(e.realizedLongCalls || 0),
+            shortPuts: r2(e.realizedShortPuts || 0),
+            longPuts: r2(e.realizedLongPuts || 0),
+          },
           // A SUBSET of totalRealized, not a separate term of Net.
           realizedExpired: r2(e.realizedExpired),
           shortCallsThisWeek: r2(e.shortCallsThisWeek),
