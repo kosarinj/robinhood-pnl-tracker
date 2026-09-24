@@ -2944,6 +2944,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // quote and the model, because it's a measurement rather than an estimate
       // — the model should only win when the market hasn't spoken recently.
       const optFresh = {}, optToday = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
+      // Yesterday's IBKR mids, so a leg priced from the live book today is
+      // differenced against the live book yesterday rather than against a
+      // Polygon close. Mixing the two makes the gap between the SOURCES read as
+      // movement — about +$1,500 across this book the afternoon it was turned
+      // on, and it would repeat every day rather than wash out.
+      const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+      const priorIbkr = databaseService.getPriorIbkrOptionCloses(userId, todayET)
+      const ibkrPrev = (parsed) => {
+        if (!parsed || !priorIbkr.date) return null
+        const k = optionKey(parsed.ticker, `${parsed.year}-${parsed.month}-${parsed.day}`,
+          parsed.strike, parsed.type)
+        const v = priorIbkr.marks[k]
+        return v > 0 ? v : null
+      }
       // Raw bid/ask per contract, for the realistic cost of getting out.
       const optQuote = {}
       // When each stale close was printed, so it can be aged forward.
@@ -3189,7 +3203,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // contracts that barely trade. So: live quote, then the model, then
           // two daily prints.
           let dayOptPerShare = null
-          if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) {
+          // Best of all: a live IBKR book at BOTH ends. Same source, same
+          // contract, one day apart — no source gap to mistake for movement,
+          // and it matches the mark Net + Open is using, which is the whole
+          // point of storing the closes.
+          const ibkrPrevMark = ibkrMark != null ? ibkrPrev(parsed) : null
+          if (ibkrMark != null && ibkrPrevMark != null) {
+            dayOptPerShare = ibkrPrevMark - ibkrMark
+          } else if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) {
             // A LIVE quote against yesterday's close. Both market, both current.
             dayOptPerShare = prevMkt - (optFresh[entry.symbol] || optToday[entry.symbol])
           } else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) {
@@ -3340,11 +3361,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // cumulative figure but not the daily one is arguably worse than one
         // missing from both, because the two then disagree by a number nothing
         // on screen explains.
-        const prevMark = optPrevClose[leg.symbol]
+        // Match the baseline to the mark: an IBKR mark today is differenced
+        // against yesterday's IBKR mid where we stored one, and only falls back
+        // to the Polygon close when we don't — in which case today's Polygon
+        // figure is used for both ends, so the pair still matches.
+        const prevIbkr = ibkrLegMark != null ? ibkrPrev(leg.parsed) : null
+        const nowForDay = (ibkrLegMark != null && prevIbkr == null)
+          ? (optFresh[leg.symbol] ?? optClose[leg.symbol] ?? nowMark)
+          : nowMark
+        const prevMark = prevIbkr ?? optPrevClose[leg.symbol]
         if (prevMark > 0) {
           // Short: the position gains as the mark falls.
           openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) +
-            daySplit(leg.symbol, leg.contracts, 'short', prevMark - nowMark, nowMark)
+            daySplit(leg.symbol, leg.contracts, 'short', prevMark - nowForDay, nowForDay)
           const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
           bs.market += 1
         } else {
@@ -8865,6 +8894,19 @@ app.post('/api/orderflow/option-marks', (req, res) => {
     })
     stored++
   }
+  // Persist today's mids so tomorrow's Day P&L has an IBKR baseline to
+  // difference against. Last write of the day wins, which makes the final push
+  // before the recorder stops the effective close.
+  try {
+    const etDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const rows = []
+    for (const [key, m] of optionMarks) {
+      const [uid, contract] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
+      if (Number(uid) !== user.userId) continue
+      if (m.bid > 0 && m.ask > 0) rows.push({ key: contract, mid: (m.bid + m.ask) / 2 })
+    }
+    if (rows.length) databaseService.saveIbkrOptionCloses(user.userId, etDate, rows)
+  } catch (e) { console.error('option close persist failed:', e.message) }
   res.json({ success: true, stored })
 })
 

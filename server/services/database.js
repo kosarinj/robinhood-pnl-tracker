@@ -1004,6 +1004,27 @@ try {
   console.error('Migration error (legacy single-user UNIQUE):', error)
 }
 
+// Daily IBKR option closes — the matched baseline for Day P&L. Without one,
+// today's live mark is differenced against yesterday's Polygon close and the
+// gap between the two sources reads as movement.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS option_ibkr_closes (
+      user_id INTEGER NOT NULL DEFAULT 1,
+      contract_key TEXT NOT NULL,
+      mark_date TEXT NOT NULL,
+      mid REAL NOT NULL,
+      updated_at INTEGER DEFAULT (strftime('%s','now')),
+      UNIQUE(user_id, contract_key, mark_date)
+    )
+  `)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_option_ibkr_closes_lookup
+           ON option_ibkr_closes(user_id, mark_date DESC)`)
+  console.log('✅ option_ibkr_closes table ready')
+} catch (error) {
+  console.error('Migration error (option_ibkr_closes):', error)
+}
+
 // Migration: Create DCA schedule table
 try {
   db.exec(`
@@ -3262,6 +3283,70 @@ export class DatabaseService {
    * downstream is hiding it. Those two need very different fixes and nothing
    * on screen told them apart.
    */
+  /**
+   * Record today's IBKR mid for a contract, so tomorrow has a matched baseline.
+   *
+   * Day P&L is (yesterday's close - today's mark). Once today's mark comes from
+   * a live IBKR book while yesterday's still comes from Polygon, the delta
+   * absorbs the gap between the two SOURCES as though it were movement -- about
+   * +$1,500 across this book in one afternoon, and not self-correcting, since
+   * the Polygon close returns every day.
+   *
+   * Last write of the day wins, which makes the final push before the recorder
+   * stops the effective close. Keyed on the whole contract, not the ticker.
+   */
+  saveIbkrOptionCloses(userId = 1, markDate, entries = []) {
+    if (!markDate || !entries.length) return 0
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO option_ibkr_closes (user_id, contract_key, mark_date, mid)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, contract_key, mark_date) DO UPDATE SET
+          mid = excluded.mid, updated_at = strftime('%s','now')
+      `)
+      const run = db.transaction(rows => {
+        for (const r of rows) {
+          if (!r?.key || !(r.mid > 0)) continue
+          stmt.run(userId, r.key, markDate, r.mid)
+        }
+      })
+      run(entries)
+      return entries.length
+    } catch (e) {
+      console.error('Error saving IBKR option closes:', e)
+      return 0
+    }
+  }
+
+  /**
+   * The most recent stored IBKR closes STRICTLY BEFORE the given date, as
+   * { contract_key: mid }.
+   *
+   * "Most recent before" rather than "yesterday" so weekends, holidays and days
+   * the recorder never ran resolve to the last real session instead of an empty
+   * result. Only one date is returned, so every leg is compared against the
+   * same session.
+   */
+  getPriorIbkrOptionCloses(userId = 1, beforeDate) {
+    try {
+      const row = db.prepare(`
+        SELECT MAX(mark_date) AS d FROM option_ibkr_closes
+        WHERE user_id = ? AND mark_date < ?
+      `).get(userId, beforeDate)
+      if (!row?.d) return { date: null, marks: {} }
+      const rows = db.prepare(`
+        SELECT contract_key, mid FROM option_ibkr_closes
+        WHERE user_id = ? AND mark_date = ?
+      `).all(userId, row.d)
+      const marks = {}
+      for (const r of rows) marks[r.contract_key] = r.mid
+      return { date: row.d, marks }
+    } catch (e) {
+      console.error('Error reading IBKR option closes:', e)
+      return { date: null, marks: {} }
+    }
+  }
+
   getRowCountsForUser(userId = 1) {
     const count = (sql, ...args) => {
       try { return db.prepare(sql).get(userId, ...args)?.n ?? null } catch { return null }
