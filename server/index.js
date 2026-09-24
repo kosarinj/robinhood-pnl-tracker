@@ -3061,13 +3061,27 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // $150 and now trades near $236, so a vol anchored to that sale is
         // describing a different world. That's where -3,200 against a broker's
         // -2,000 comes from.
-        const usedQuote = optFresh[entry.symbol] != null
-        let currentOptionPrice = optFresh[entry.symbol]
+        // A live IBKR two-sided market outranks everything below, exactly as it
+        // does in /api/options-pnl/open-positions. Added there first and not
+        // here, which split the two: the Spreads tab valued a leg off a live
+        // book while Net + Open on the same leg still used a stale close, and
+        // the measured gap ran to $275 on a single MRVL contract. Two views of
+        // one position must not price it differently.
+        const ibkrMark = (() => {
+          const p = parseOptionDescription(entry.symbol || '')
+          if (!p) return null
+          const exp = `${p.year}-${p.month}-${p.day}`
+          const m = optionMark(userId, p.ticker, exp, p.strike, p.type)
+            || optionMark(orderFlowOwner(), p.ticker, exp, p.strike, p.type)
+          return m?.mid > 0 ? m.mid : null
+        })()
+        const usedQuote = ibkrMark != null || optFresh[entry.symbol] != null
+        let currentOptionPrice = ibkrMark ?? optFresh[entry.symbol]
         // Which basis this mark is on decides what it can legitimately be
         // compared against. 'quote' and 'close' both come from the market;
         // 'model' is a Black-Scholes estimate and is only comparable to another
         // run of the same model.
-        let markBasis = usedQuote ? 'quote' : null
+        let markBasis = ibkrMark != null ? 'ibkr' : (usedQuote ? 'quote' : null)
         if (currentOptionPrice == null && optToday[entry.symbol] > 0) {
           currentOptionPrice = optToday[entry.symbol]
           markBasis = 'today'
