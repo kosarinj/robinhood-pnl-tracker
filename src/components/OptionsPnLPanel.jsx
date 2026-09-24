@@ -738,8 +738,19 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
           // much to buy back. currentValue is unsigned, so direction is applied
           // here. Only positions with a real mark count — a contract we couldn't
           // price is reported rather than silently valued at zero.
-          const priced = openPositions.filter(p => p.markSource && p.currentValue != null)
-          const unpriced = openPositions.length - priced.length
+          // Priced positions only, straight from /api/options-pnl/open-positions
+          // — the same marks the Options YTD panel and the Spreads tab read.
+          //
+          // NOT the shared `openPositions` above, which falls back to
+          // data.openOptionPositions when the live fetch hasn't landed. That
+          // fallback is the same contracts from the history payload with no
+          // marks on them, and valuing the book from it produced $0 for the
+          // options side and a total tens of thousands out. Everywhere else
+          // that array is only listed, so being unpriced costs nothing; here it
+          // is arithmetic, and it has to be the priced copy.
+          const liveOpen = livePositions?.positions
+          const priced = (liveOpen || []).filter(p => p.markSource && p.currentValue != null)
+          const unpriced = (liveOpen || []).length - priced.length
           const openOptionValue = priced.reduce(
             (s, p) => s + (p.isLong ? p.currentValue : -p.currentValue), 0)
           // The options side arrives from a different request than `account`,
@@ -757,9 +768,8 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
           // marks, which satisfied the test while `priced` was still empty — so
           // it published the inflated total anyway. The book has to be PRICED,
           // not merely present.
-          const optionsPresent = Array.isArray(livePositions?.positions)
-            || Array.isArray(data?.openOptionPositions)
-          const optionsPriced = openPositions.length === 0 || priced.length > 0
+          const optionsPresent = Array.isArray(liveOpen)
+          const optionsPriced = (liveOpen || []).length === 0 || priced.length > 0
           const total = (optionsPresent && optionsPriced)
             ? account.subtotalExcludingOpenOptions + openOptionValue
             : null
@@ -784,7 +794,7 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                   <span style={{ fontSize: '1.05rem', fontWeight: 600, lineHeight: 1,
                     color: optionsPresent ? '#f59e0b' : textMid }}
                     title={optionsPresent
-                      ? `None of the ${openPositions.length} open contract(s) has a usable mark, so the options side cannot be valued and this total would be short the whole book.`
+                      ? `None of the ${(liveOpen || []).length} open contract(s) has a usable mark, so the options side cannot be valued and this total would be short the whole book.`
                       : 'Waiting on the open option positions. Without them this total would be short the entire options book, which on a short position means it reads far too high.'}>
                     {optionsPresent ? 'options unpriced — total unavailable' : 'pricing options…'}
                   </span>
