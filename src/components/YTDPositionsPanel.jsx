@@ -117,6 +117,61 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   // underneath it. Same problem the spread and history popovers already solve
   // here: render to document.body and position from the button's rect, which
   // is immune to whatever stacking context an ancestor introduces.
+  /**
+   * Getting at a wide table's horizontal scroll.
+   *
+   * The scrollbar belongs to the container, so on a table this tall it sits
+   * below every row — you scroll the whole page down to reach it, drag, then
+   * scroll back up to read what you moved to.
+   *
+   * Two ways out, neither replacing the normal bar:
+   *  - shift + wheel pans, handled explicitly rather than trusting the browser
+   *    to route it to the right element;
+   *  - a proxy scrollbar pinned to the bottom of the viewport, shown only while
+   *    the table is on screen AND its own bar is scrolled out of sight.
+   */
+  const tableWrapRef = useRef(null)
+  const proxyRef = useRef(null)
+  const [proxy, setProxy] = useState(null)   // { left, width, scrollWidth }
+
+  useEffect(() => {
+    const el = tableWrapRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      if (!e.shiftKey) return
+      const canScroll = el.scrollWidth > el.clientWidth + 1
+      if (!canScroll) return
+      e.preventDefault()
+      el.scrollLeft += (e.deltaY || e.deltaX)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  useEffect(() => {
+    const measure = () => {
+      const el = tableWrapRef.current
+      if (!el) { setProxy(null); return }
+      const r = el.getBoundingClientRect()
+      const vh = window.innerHeight
+      const scrollable = el.scrollWidth > el.clientWidth + 1
+      // On screen, but with its own scrollbar below the fold.
+      const onScreen = r.top < vh && r.bottom > 0
+      const ownBarHidden = r.bottom > vh - 4
+      if (!scrollable || !onScreen || !ownBarHidden) { setProxy(null); return }
+      setProxy({ left: r.left, width: r.width, scrollWidth: el.scrollWidth })
+    }
+    measure()
+    window.addEventListener('scroll', measure, true)
+    window.addEventListener('resize', measure)
+    const t = setInterval(measure, 1000)   // columns and rows change under it
+    return () => {
+      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('resize', measure)
+      clearInterval(t)
+    }
+  }, [])
+
   const colBtnRef = useRef(null)
   const hiddenBtnRef = useRef(null)
   const [colAnchor, setColAnchor] = useState(null)
@@ -1617,7 +1672,13 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
       )}
 
       {!loading && rows.length > 0 && (
-        <div className="floating-panel" style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
+        <div ref={tableWrapRef}
+          onScroll={(e) => {
+            // Keep the proxy in step when the table is scrolled by any other
+            // means — the real bar, a trackpad swipe, shift+wheel.
+            if (proxyRef.current) proxyRef.current.scrollLeft = e.currentTarget.scrollLeft
+          }}
+          className="floating-panel" style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
           <table className="ytd-panel-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
             <colgroup>
               <col style={{ width: '44px' }} />
@@ -1752,6 +1813,33 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
           ticker column's stacking context. Positioned from the clicked cell's
           rect in viewport coordinates, which is why it's fixed rather than
           absolute. */}
+      {/* Proxy horizontal scrollbar, pinned to the bottom of the viewport while
+          the table's own one is below the fold. A real scroller rather than a
+          drawn bar, so it behaves exactly like the native control — drag, click
+          the track, flick on a trackpad. */}
+      {proxy && createPortal(
+        <div
+          ref={proxyRef}
+          onScroll={(e) => {
+            const el = tableWrapRef.current
+            if (el) el.scrollLeft = e.currentTarget.scrollLeft
+          }}
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            bottom: `calc(2px + env(safe-area-inset-bottom, 0px))`,
+            left: proxy.left, width: proxy.width,
+            overflowX: 'auto', overflowY: 'hidden',
+            zIndex: 2500, height: 14,
+            background: isDark ? 'rgba(20,24,33,0.85)' : 'rgba(255,255,255,0.85)',
+            borderRadius: 7,
+            boxShadow: '0 1px 6px rgba(0,0,0,0.18)',
+          }}>
+          <div style={{ width: proxy.scrollWidth, height: 1 }} />
+        </div>,
+        document.body
+      )}
+
       {spreadFor && spreadAnchor && createPortal(
         <SpreadPopover
           ticker={spreadFor}
