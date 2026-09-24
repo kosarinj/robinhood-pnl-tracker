@@ -3304,7 +3304,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       uncoveredShorts.forEach(leg => {
         const ticker = leg.ticker
         if (!ticker) return
-        let nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        // Same IBKR-first order as the short-call block above and as
+        // open-positions. Leaving it out here priced uncovered short legs --
+        // most of the book by count -- off a stale close while everything else
+        // had moved to the live book, which is its own inconsistency.
+        const ibkrLegMark = (() => {
+          const p = leg.parsed
+          if (!p) return null
+          const exp = `${p.year}-${p.month}-${p.day}`
+          const m = optionMark(userId, ticker, exp, p.strike, p.type)
+            || optionMark(orderFlowOwner(), ticker, exp, p.strike, p.type)
+          return m?.mid > 0 ? m.mid : null
+        })()
+        let nowMark = ibkrLegMark ?? optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
         // Floored at exercise value, not merely defaulted to it when missing: a
         // stale quote can sit BELOW intrinsic, which is arbitrage, not a price.
         {
