@@ -752,9 +752,15 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
           //
           // So the total waits. A pending figure is honest; a confident wrong
           // one is not, which is the rule Day P&L already follows.
-          const optionsLoaded = Array.isArray(livePositions?.positions)
+          // Checking only that an array had arrived was not enough: the history
+          // data supplies an openOptionPositions array whose entries carry no
+          // marks, which satisfied the test while `priced` was still empty — so
+          // it published the inflated total anyway. The book has to be PRICED,
+          // not merely present.
+          const optionsPresent = Array.isArray(livePositions?.positions)
             || Array.isArray(data?.openOptionPositions)
-          const total = optionsLoaded
+          const optionsPriced = openPositions.length === 0 || priced.length > 0
+          const total = (optionsPresent && optionsPriced)
             ? account.subtotalExcludingOpenOptions + openOptionValue
             : null
           // A null value means "not known yet", which must not render as $0.00 —
@@ -775,9 +781,12 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                   Account P&L
                 </span>
                 {total == null ? (
-                  <span style={{ fontSize: '1.05rem', fontWeight: 600, lineHeight: 1, color: textMid }}
-                    title="Waiting on the open option positions. Without them this total would be short the entire options book, which on a short position means it would read far too high.">
-                    pricing options…
+                  <span style={{ fontSize: '1.05rem', fontWeight: 600, lineHeight: 1,
+                    color: optionsPresent ? '#f59e0b' : textMid }}
+                    title={optionsPresent
+                      ? `None of the ${openPositions.length} open contract(s) has a usable mark, so the options side cannot be valued and this total would be short the whole book.`
+                      : 'Waiting on the open option positions. Without them this total would be short the entire options book, which on a short position means it reads far too high.'}>
+                    {optionsPresent ? 'options unpriced — total unavailable' : 'pricing options…'}
                   </span>
                 ) : (
                   <span style={{ fontSize: '1.6rem', fontWeight: 800, lineHeight: 1, color: total >= 0 ? green : red }}>
@@ -797,7 +806,7 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                 'It nets to zero across all brokers, because nothing actually left the account: ' +
                 Object.entries(account.transferDetail || {}).map(([s, v]) => `${s} ${v >= 0 ? '+' : ''}${fmt(v)}`).join(', ')
               )}
-              {row('Options — open at market', optionsLoaded ? openOptionValue : null, 'What the open contracts are worth now: long positions positive, short positions negative because they cost that much to close.')}
+              {row('Options — open at market', total == null ? null : openOptionValue, 'What the open contracts are worth now: long positions positive, short positions negative because they cost that much to close.')}
               {/* Deliberately below the total and outside it. Margin interest is a
                   financing cost, not a trading result — but it's real money and a
                   leveraged book can look profitable while the borrowing behind it
