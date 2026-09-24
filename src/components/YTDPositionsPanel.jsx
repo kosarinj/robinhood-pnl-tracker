@@ -606,10 +606,22 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     }
   }
 
+  // Last hide, offered back for a few seconds. Hiding is one small ✕ next to
+  // the chart link, and it does not just remove a row — a hidden ticker drops
+  // out of the totals too, so a mis-click quietly changes every figure at the
+  // bottom of the table with nothing to connect the two.
+  const [lastHidden, setLastHidden] = useState(null)
+  useEffect(() => {
+    if (!lastHidden) return
+    const t = setTimeout(() => setLastHidden(null), 8000)
+    return () => clearTimeout(t)
+  }, [lastHidden])
+
   const hideTicker = (t) => {
     const updated = [...new Set([...hiddenTickers, t])]
     setHiddenTickers(updated)
     setPref(hiddenKey(broker), updated)
+    setLastHidden(t)
   }
 
   const restoreTicker = (t) => {
@@ -1766,6 +1778,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         position: 'sticky', left: 0, zIndex: 1, background: c.tickerBg,
                         boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
+                        // Keep the content clear of the hide ✕, which is absolutely
+                        // positioned at the right edge of this same cell. Without the
+                        // gap, reaching for the chart link landed on ✕ instead and
+                        // silently dropped the ticker — and a hidden ticker is left out
+                        // of the totals, so the table just quietly reads differently.
+                        paddingRight: 22,
                       }}>
                         {row.hasOptions && (
                           <button onClick={e => { e.stopPropagation(); toggleRowDetail(row.ticker) }}
@@ -1855,6 +1873,32 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
           ticker column's stacking context. Positioned from the clicked cell's
           rect in viewport coordinates, which is why it's fixed rather than
           absolute. */}
+      {/* Undo for the last hide. Pinned above the proxy scrollbar so it is
+          visible wherever you are in a long table — the point is to catch a
+          mis-click straight away, and the totals it changed are at the bottom. */}
+      {lastHidden && createPortal(
+        <div style={{
+          position: 'fixed', zIndex: 3200,
+          bottom: `calc(24px + env(safe-area-inset-bottom, 0px))`,
+          left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: isDark ? '#1f2937' : '#111827', color: '#f9fafb',
+          padding: '8px 14px', borderRadius: 8, fontSize: 13,
+          boxShadow: '0 6px 20px rgba(0,0,0,0.3)', maxWidth: 'calc(100vw - 32px)',
+        }}>
+          <span>Hid <strong>{lastHidden}</strong> — it's out of the totals too.</span>
+          <button onClick={() => { restoreTicker(lastHidden); setLastHidden(null) }}
+            style={{ background: '#3b82f6', border: 'none', color: '#fff', padding: '4px 12px',
+              borderRadius: 5, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
+            Undo
+          </button>
+          <button onClick={() => setLastHidden(null)} aria-label="Dismiss"
+            style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer',
+              fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+        </div>,
+        document.body
+      )}
+
       {/* Proxy horizontal scrollbar, pinned to the bottom of the viewport while
           the table's own one is below the fold. A real scroller rather than a
           drawn bar, so it behaves exactly like the native control — drag, click
