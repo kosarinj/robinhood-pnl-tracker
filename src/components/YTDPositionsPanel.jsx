@@ -112,6 +112,64 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
   const [hiddenTickers, setHiddenTickers] = useState(() => getPref(hiddenKey(broker), loadHidden(broker)))
   const [showHiddenList, setShowHiddenList] = useState(false)
   const [showColumnEditor, setShowColumnEditor] = useState(false)
+  // The table header is sticky at z-index 500 (global `thead` rule in
+  // index.css), so an absolutely positioned dropdown inside the toolbar landed
+  // underneath it. Same problem the spread and history popovers already solve
+  // here: render to document.body and position from the button's rect, which
+  // is immune to whatever stacking context an ancestor introduces.
+  const colBtnRef = useRef(null)
+  const hiddenBtnRef = useRef(null)
+  const [colAnchor, setColAnchor] = useState(null)
+  const [hiddenAnchor, setHiddenAnchor] = useState(null)
+
+  /**
+   * Anchor a toolbar dropdown below its button, in viewport coordinates.
+   *
+   * Shared by the two dropdowns in this toolbar because they had the same bug:
+   * both were absolutely positioned under a table header that is sticky at
+   * z-index 500, and both lost. Re-anchored on scroll and resize since the
+   * panel is fixed and would otherwise drift away from its button.
+   */
+  const useDropdownAnchor = (open, ref, setAnchor, width) => {
+    useEffect(() => {
+      if (!open) { setAnchor(null); return }
+      const place = () => {
+        const r = ref.current?.getBoundingClientRect()
+        if (!r) return
+        // Keep it on screen: a button near the right edge would otherwise push
+        // the panel past the viewport on a phone.
+        setAnchor({
+          top: r.bottom + 4,
+          left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+        })
+      }
+      place()
+      window.addEventListener('scroll', place, true)
+      window.addEventListener('resize', place)
+      return () => {
+        window.removeEventListener('scroll', place, true)
+        window.removeEventListener('resize', place)
+      }
+    }, [open])
+  }
+
+  useDropdownAnchor(showColumnEditor, colBtnRef, setColAnchor, 260)
+  useDropdownAnchor(showHiddenList, hiddenBtnRef, setHiddenAnchor, 260)
+
+  // Click outside closes them. They are portalled, so neither sits inside its
+  // button's wrapper any more, and the button has to be excluded explicitly or
+  // its own mousedown closes the panel and the click reopens it.
+  useEffect(() => {
+    if (!showColumnEditor && !showHiddenList) return
+    const onDown = (e) => {
+      if (showColumnEditor && !colBtnRef.current?.contains(e.target)
+          && !e.target.closest?.('[data-column-editor]')) setShowColumnEditor(false)
+      if (showHiddenList && !hiddenBtnRef.current?.contains(e.target)
+          && !e.target.closest?.('[data-hidden-list]')) setShowHiddenList(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [showColumnEditor, showHiddenList])
   // "Last time RDDT was at 153, where was I?" — for a covered-call book the
   // shares are worth the same at the same price, so any difference is premium
   // and decay, which is the overlay earning its keep or not.
@@ -1452,13 +1510,13 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
         </div>
         {hiddenTickers.length > 0 && (
           <div style={{ position: 'relative' }}>
-            <button onClick={() => setShowHiddenList(v => !v)}
+            <button ref={hiddenBtnRef} onClick={() => setShowHiddenList(v => !v)}
               title={`Hidden on the ${broker === 'all' ? 'All brokers' : broker} tab only. Hidden rows are excluded from the totals below.`}
               style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>
               🚫 {hiddenTickers.length} hidden ▾
             </button>
-            {showHiddenList && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 200, background: surface, border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', minWidth: '180px', maxWidth: '260px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            {showHiddenList && hiddenAnchor && createPortal(
+              <div data-hidden-list style={{ position: 'fixed', top: hiddenAnchor.top, left: hiddenAnchor.left, zIndex: 3000, background: surface, border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', width: '260px', maxHeight: '60vh', overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
                   {hiddenTickers.map(t => (
                     <button key={t} onClick={() => restoreTicker(t)} title={`Restore ${t}`}
@@ -1475,7 +1533,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                   style={{ width: '100%', padding: '5px', borderRadius: '4px', border: 'none', background: '#3b82f6', color: 'white', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
                   Show all
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         )}
@@ -1484,17 +1543,18 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
             stored per user, so setting it here or by dragging on a laptop are
             two routes to the same setting. */}
         <div style={{ position: 'relative' }}>
-          <button onClick={() => setShowColumnEditor(v => !v)}
+          <button ref={colBtnRef} onClick={() => setShowColumnEditor(v => !v)}
             title="Reorder columns with buttons — works on touch, and the order follows your account to every device."
             style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${showColumnEditor ? '#667eea' : border}`,
               background: showColumnEditor ? '#667eea' : surface, color: showColumnEditor ? '#fff' : textMid,
               fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             ⇅ Columns
           </button>
-          {showColumnEditor && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '4px', zIndex: 200, background: surface,
-              border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', minWidth: '250px',
-              maxHeight: '60vh', overflowY: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+          {showColumnEditor && colAnchor && createPortal(
+            <div data-column-editor style={{ position: 'fixed', top: colAnchor.top, left: colAnchor.left,
+              zIndex: 3000, background: surface,
+              border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', width: '260px',
+              maxHeight: '60vh', overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
               <div style={{ fontSize: '10px', color: textMid, marginBottom: '6px', lineHeight: 1.4 }}>
                 Order for <strong style={{ color: text }}>{broker === 'all' ? 'All brokers' : broker}</strong>.
                 Saved to your account, so it carries to your other devices.
@@ -1516,7 +1576,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all' }) {
                 style={{ width: '100%', marginTop: '6px', padding: '5px', borderRadius: '4px', border: 'none', background: '#94a3b8', color: 'white', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
                 Reset to default
               </button>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
         <span style={{ fontSize: '12px', color: textMid }}>
