@@ -1778,13 +1778,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         position: 'sticky', left: 0, zIndex: 1, background: c.tickerBg,
                         boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
-                        // Keep the content clear of the hide ✕, which is absolutely
-                        // positioned at the right edge of this same cell. Without the
-                        // gap, reaching for the chart link landed on ✕ instead and
-                        // silently dropped the ticker — and a hidden ticker is left out
-                        // of the totals, so the table just quietly reads differently.
-                        paddingRight: 22,
                       }}>
+                        {/* Hide sits at the FAR LEFT of this cell, with the chart
+                            link at the far right. It used to be pinned to the right
+                            edge, inches from the ticker, so reaching for the chart
+                            removed the row instead — and a hidden ticker leaves the
+                            totals too. Opposite ends of the cell costs no width and
+                            needs no second sticky column. */}
+                        <button className="ytd-hide" onClick={e => { e.stopPropagation(); hideTicker(row.ticker) }}
+                          title={`Hide ${row.ticker} from view — it also leaves the totals`}
+                          style={{ marginRight: 6, verticalAlign: 'middle',
+                            width: 15, height: 15, padding: 0, lineHeight: '13px', textAlign: 'center',
+                            border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 12,
+                            fontWeight: 700, color: '#fff', background: '#ef4444' }}>{'×'}</button>
                         {row.hasOptions && (
                           <button onClick={e => { e.stopPropagation(); toggleRowDetail(row.ticker) }}
                             title={`Show the individual option contracts behind ${row.ticker}`}
@@ -1816,12 +1822,6 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                               padding: '1px 4px', borderRadius: 3, verticalAlign: 'middle',
                               color: textMid, border: `1px solid ${border}` }}>STK</span>
                         )}
-                        <button className="ytd-hide" onClick={e => { e.stopPropagation(); hideTicker(row.ticker) }}
-                          title={`Hide ${row.ticker} from view`}
-                          style={{ position: 'absolute', top: '50%', right: 1, transform: 'translateY(-50%)',
-                            width: 15, height: 15, padding: 0, lineHeight: '13px', textAlign: 'center',
-                            border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 12,
-                            fontWeight: 700, color: '#fff', background: '#ef4444' }}>{'×'}</button>
                       </td>
                     ) : (
                       <td key={col.key} style={{ padding: padCell, textAlign: col.align || 'right', ...cellBorder(col) }}>
