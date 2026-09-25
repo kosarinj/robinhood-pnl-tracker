@@ -1610,8 +1610,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
               border: `1px solid ${hiddenTickers.length ? '#f59e0b' : border}`,
               background: surface, color: hiddenTickers.length ? '#f59e0b' : textMid,
               fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            ☑ Tickers {hiddenTickers.length > 0
-              ? `(${allTickers.length - hiddenTickers.length}/${allTickers.length})`
+            {/* Spelt out rather than "(14/26)", which reads as one number
+                at a glance and did — it got reported as 1426 tickers. */}
+            ☑ Tickers{hiddenTickers.length > 0
+              ? ` · ${allTickers.length - hiddenTickers.length} of ${allTickers.length} shown`
               : ''} ▾
           </button>
           {showHiddenList && hiddenAnchor && createPortal(
