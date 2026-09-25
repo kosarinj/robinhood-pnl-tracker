@@ -606,22 +606,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     }
   }
 
-  // Last hide, offered back for a few seconds. Hiding is one small ✕ next to
-  // the chart link, and it does not just remove a row — a hidden ticker drops
-  // out of the totals too, so a mis-click quietly changes every figure at the
-  // bottom of the table with nothing to connect the two.
-  const [lastHidden, setLastHidden] = useState(null)
-  useEffect(() => {
-    if (!lastHidden) return
-    const t = setTimeout(() => setLastHidden(null), 8000)
-    return () => clearTimeout(t)
-  }, [lastHidden])
-
   const hideTicker = (t) => {
     const updated = [...new Set([...hiddenTickers, t])]
     setHiddenTickers(updated)
     setPref(hiddenKey(broker), updated)
-    setLastHidden(t)
   }
 
   const restoreTicker = (t) => {
@@ -631,11 +619,6 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     if (updated.length === 0) setShowHiddenList(false)
   }
 
-  const restoreAllTickers = () => {
-    setHiddenTickers([])
-    setPref(hiddenKey(broker), [])
-    setShowHiddenList(false)
-  }
 
   const toggleSort = (field) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -664,6 +647,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
 
   const q = search.trim().toUpperCase()
   const hiddenSet = new Set(hiddenTickers)
+  // Every ticker in the period, shown or not — the picker needs the hidden ones
+  // too, which is exactly what `rows` below filters out.
+  const allTickers = [...new Set((data?.byUnderlying || []).map(r => r.ticker).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b))
+  const setAllHidden = (list) => {
+    const updated = [...new Set(list)]
+    setHiddenTickers(updated)
+    setPref(hiddenKey(broker), updated)
+  }
+  const toggleTickerVisible = (t) => {
+    if (hiddenSet.has(t)) restoreTicker(t)
+    else hideTicker(t)
+  }
   // Rows now include stocks held without any options (hasOptions false). The
   // view filter narrows to one kind; totals below follow whatever is shown.
   const rows = (data?.byUnderlying || []).filter(r =>
@@ -1603,36 +1599,59 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                 color: textMid, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}>×</button>
           )}
         </div>
-        {hiddenTickers.length > 0 && (
-          <div style={{ position: 'relative' }}>
-            <button ref={hiddenBtnRef} onClick={() => setShowHiddenList(v => !v)}
-              title={`Hidden on the ${broker === 'all' ? 'All brokers' : broker} tab only. Hidden rows are excluded from the totals below.`}
-              style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>
-              🚫 {hiddenTickers.length} hidden ▾
-            </button>
-            {showHiddenList && hiddenAnchor && createPortal(
-              <div data-hidden-list style={{ position: 'fixed', top: hiddenAnchor.top, left: hiddenAnchor.left, zIndex: 3000, background: surface, border: `1px solid ${border}`, borderRadius: '8px', padding: '8px', width: '260px', maxHeight: '60vh', overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
-                  {hiddenTickers.map(t => (
-                    <button key={t} onClick={() => restoreTicker(t)} title={`Restore ${t}`}
-                      style={{ padding: '2px 7px', borderRadius: '4px', border: `1px solid ${border}`, background: isDark ? '#252d3d' : '#f1f5f9', color: text, fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
-                      {t} ✕
-                    </button>
-                  ))}
-                </div>
-                <div style={{ fontSize: '10px', color: textMid, marginBottom: '6px', lineHeight: 1.4 }}>
-                  Hidden on <strong style={{ color: text }}>{broker === 'all' ? 'All brokers' : broker}</strong> only —
-                  other broker tabs are unaffected. Hidden rows are left out of the totals.
-                </div>
-                <button onClick={restoreAllTickers}
-                  style={{ width: '100%', padding: '5px', borderRadius: '4px', border: 'none', background: '#3b82f6', color: 'white', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
-                  Show all
+        {/* One place to choose what the table shows, instead of a per-row ✕
+            that sat beside the chart link and got hit by mistake. Hiding is
+            not just a view filter — a hidden ticker leaves the totals too — so
+            it belongs somewhere deliberate rather than one stray click away. */}
+        <div style={{ position: 'relative' }}>
+          <button ref={hiddenBtnRef} onClick={() => setShowHiddenList(v => !v)}
+            title={`Choose which tickers the table shows. Applies to the ${broker === 'all' ? 'All brokers' : broker} tab only, and hidden rows are left out of the totals.`}
+            style={{ padding: '5px 10px', borderRadius: '6px',
+              border: `1px solid ${hiddenTickers.length ? '#f59e0b' : border}`,
+              background: surface, color: hiddenTickers.length ? '#f59e0b' : textMid,
+              fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            ☑ Tickers {hiddenTickers.length > 0
+              ? `(${allTickers.length - hiddenTickers.length}/${allTickers.length})`
+              : ''} ▾
+          </button>
+          {showHiddenList && hiddenAnchor && createPortal(
+            <div data-hidden-list style={{ position: 'fixed', top: hiddenAnchor.top, left: hiddenAnchor.left,
+              zIndex: 3000, background: surface, border: `1px solid ${border}`, borderRadius: '8px',
+              padding: '8px', width: '260px', maxHeight: '60vh', overflowY: 'auto',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}>
+              <div style={{ fontSize: '10px', color: textMid, marginBottom: '6px', lineHeight: 1.4 }}>
+                Unticked rows are hidden on <strong style={{ color: text }}>{broker === 'all' ? 'All brokers' : broker}</strong>{' '}
+                and <strong style={{ color: text }}>left out of the totals</strong>.
+              </div>
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
+                <button onClick={() => setAllHidden([])}
+                  style={{ flex: 1, padding: '4px', borderRadius: '4px', border: 'none', background: '#3b82f6', color: 'white', fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
+                  Select all
                 </button>
-              </div>,
-              document.body
-            )}
-          </div>
-        )}
+                <button onClick={() => setAllHidden(allTickers)}
+                  style={{ flex: 1, padding: '4px', borderRadius: '4px', border: `1px solid ${border}`, background: 'transparent', color: textMid, fontSize: '11px', fontWeight: '600', cursor: 'pointer' }}>
+                  Clear all
+                </button>
+              </div>
+              {allTickers.length === 0 && (
+                <div style={{ fontSize: 11, color: textMid, padding: '4px 2px' }}>No tickers in this period.</div>
+              )}
+              {allTickers.map(t => {
+                const on = !hiddenSet.has(t)
+                return (
+                  <label key={t} style={{ display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '3px 2px', fontSize: 12.5, cursor: 'pointer',
+                    color: on ? text : textMid }}>
+                    <input type="checkbox" checked={on} onChange={() => toggleTickerVisible(t)}
+                      style={{ cursor: 'pointer' }} />
+                    <span style={{ fontWeight: on ? 600 : 400 }}>{t}</span>
+                  </label>
+                )
+              })}
+            </div>,
+            document.body
+          )}
+        </div>
         {/* Reorder columns without dragging. On a phone the drag gesture is the
             page's own scroll, so header dragging can't work there. Order is
             stored per user, so setting it here or by dragging on a laptop are
@@ -1676,7 +1695,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
           )}
         </div>
         <span style={{ fontSize: '12px', color: textMid }}>
-          Click a date cell to set a per-symbol start date · hover a row to hide it · reorder columns by dragging a header or with ⇅ Columns (saved to your account)
+          Click a date cell to set a per-symbol start date · choose which tickers show with ☑ Tickers · reorder columns by dragging a header or with ⇅ Columns (saved to your account)
         </span>
         {stockDebug && (
           <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '4px',
@@ -1779,18 +1798,6 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                         position: 'sticky', left: 0, zIndex: 1, background: c.tickerBg,
                         boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
                       }}>
-                        {/* Hide sits at the FAR LEFT of this cell, with the chart
-                            link at the far right. It used to be pinned to the right
-                            edge, inches from the ticker, so reaching for the chart
-                            removed the row instead — and a hidden ticker leaves the
-                            totals too. Opposite ends of the cell costs no width and
-                            needs no second sticky column. */}
-                        <button className="ytd-hide" onClick={e => { e.stopPropagation(); hideTicker(row.ticker) }}
-                          title={`Hide ${row.ticker} from view — it also leaves the totals`}
-                          style={{ marginRight: 6, verticalAlign: 'middle',
-                            width: 15, height: 15, padding: 0, lineHeight: '13px', textAlign: 'center',
-                            border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 12,
-                            fontWeight: 700, color: '#fff', background: '#ef4444' }}>{'×'}</button>
                         {row.hasOptions && (
                           <button onClick={e => { e.stopPropagation(); toggleRowDetail(row.ticker) }}
                             title={`Show the individual option contracts behind ${row.ticker}`}
@@ -1873,32 +1880,6 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
           ticker column's stacking context. Positioned from the clicked cell's
           rect in viewport coordinates, which is why it's fixed rather than
           absolute. */}
-      {/* Undo for the last hide. Pinned above the proxy scrollbar so it is
-          visible wherever you are in a long table — the point is to catch a
-          mis-click straight away, and the totals it changed are at the bottom. */}
-      {lastHidden && createPortal(
-        <div style={{
-          position: 'fixed', zIndex: 3200,
-          bottom: `calc(24px + env(safe-area-inset-bottom, 0px))`,
-          left: '50%', transform: 'translateX(-50%)',
-          display: 'flex', alignItems: 'center', gap: 10,
-          background: isDark ? '#1f2937' : '#111827', color: '#f9fafb',
-          padding: '8px 14px', borderRadius: 8, fontSize: 13,
-          boxShadow: '0 6px 20px rgba(0,0,0,0.3)', maxWidth: 'calc(100vw - 32px)',
-        }}>
-          <span>Hid <strong>{lastHidden}</strong> — it's out of the totals too.</span>
-          <button onClick={() => { restoreTicker(lastHidden); setLastHidden(null) }}
-            style={{ background: '#3b82f6', border: 'none', color: '#fff', padding: '4px 12px',
-              borderRadius: 5, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>
-            Undo
-          </button>
-          <button onClick={() => setLastHidden(null)} aria-label="Dismiss"
-            style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer',
-              fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
-        </div>,
-        document.body
-      )}
-
       {/* Proxy horizontal scrollbar, pinned to the bottom of the viewport while
           the table's own one is below the fold. A real scroller rather than a
           drawn bar, so it behaves exactly like the native control — drag, click
