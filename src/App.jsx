@@ -2530,6 +2530,7 @@ function AuthenticatedApp({ user }) {
             {[
               ['table', 'Positions'],
               ['spreads', 'Spreads'],
+              ['realized', 'Realized P&L'],
               ['cash', 'Cash Check'],
               ['shorts', 'Short Calls'],
               ['expiries', 'Expirations'],
@@ -2567,6 +2568,7 @@ function AuthenticatedApp({ user }) {
             <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} onPickTicker={setDisplayChartSymbol} />
           </div>
           {positionsTab === 'spreads'  && <SpreadsPanel broker={brokerFilter} />}
+          {positionsTab === 'realized' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
           {positionsTab === 'cash'     && <CashCheckPanel broker={brokerFilter} />}
           {positionsTab === 'shorts'   && <ShortCallTracker broker={brokerFilter} />}
           {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}
@@ -2625,8 +2627,9 @@ function AuthenticatedApp({ user }) {
       {/* Buy schedule */}
       {activeMainTab === 'dashboard' && <DCAAlertPanel />}
 
-      {/* Detail */}
-      {activeMainTab === 'dashboard' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
+      {/* Realized P&L moved to Positions → Realized P&L. It is a day-by-day
+          ledger, which is detail rather than an answer, and the dashboard reads
+          better ending on the trend than on a list. */}
 
       {/* Support & Resistance Levels */}
       {activeMainTab === 'analytics' && connected && (

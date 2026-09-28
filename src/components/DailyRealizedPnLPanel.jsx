@@ -147,6 +147,8 @@ export default function DailyRealizedPnLPanel({ trades }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [search, setSearch] = useState('')
+  // 'ledger' = every close in date order; 'ticker' = the same closes rolled up.
+  const [view, setView] = useState('ledger')
 
   const allDates = useMemo(() => getDatesWithCloses(trades || []), [trades])
   const latestDate = allDates[0] || ''
@@ -192,6 +194,29 @@ export default function DailyRealizedPnLPanel({ trades }) {
     () => filteredTransactions.reduce((s, t) => s + t.realizedPnL, 0),
     [filteredTransactions]
   )
+
+  /**
+   * The same closes, rolled up per underlying.
+   *
+   * The ledger answers "what happened", one close at a time, and it is long —
+   * so "which names actually made me money over this range" was a question you
+   * had to answer by reading. Stock and options are split out, since a name can
+   * be carried by one and dragged by the other and the net alone hides that.
+   */
+  const byTicker = useMemo(() => {
+    const m = new Map()
+    for (const tx of filteredTransactions) {
+      const t = getUnderlying(tx) || tx.symbol
+      const e = m.get(t) || { ticker: t, total: 0, stock: 0, options: 0, closes: 0, proceeds: 0, cost: 0 }
+      e.total += tx.realizedPnL
+      e[tx.isOption ? 'options' : 'stock'] += tx.realizedPnL
+      e.proceeds += tx.sellValue || 0
+      e.cost += tx.costBasis || 0
+      e.closes += 1
+      m.set(t, e)
+    }
+    return [...m.values()].sort((a, b) => b.total - a.total)
+  }, [filteredTransactions])
 
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2d3748' : '#e2e8f0'
@@ -316,6 +341,19 @@ export default function DailyRealizedPnLPanel({ trades }) {
         </div>
       </div>
 
+      {/* Two readings of the same closes: the ledger says what happened, the
+          roll-up says which names it happened in. */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+        {[['ledger', 'By trade'], ['ticker', 'By ticker']].map(([k, label]) => (
+          <button key={k} onClick={() => setView(k)}
+            style={{ padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              borderRadius: 6, fontFamily: 'inherit',
+              border: `1px solid ${view === k ? '#3b82f6' : border}`,
+              background: view === k ? '#3b82f6' : 'transparent',
+              color: view === k ? '#fff' : textMid }}>{label}</button>
+        ))}
+      </div>
+
       {/* ── Body ── */}
       {!hasData ? (
         <div style={{ textAlign: 'center', padding: '30px 0', color: textMid, fontSize: '14px' }}>
@@ -326,6 +364,54 @@ export default function DailyRealizedPnLPanel({ trades }) {
           {search
             ? `No trades matching "${search}" in this range`
             : `No closed positions in this date range`}
+        </div>
+      ) : view === 'ticker' ? (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${border}` }}>
+                {[['Ticker', 'left'], ['Closes', 'center'], ['Stock', 'right'],
+                  ['Options', 'right'], ['Realized P&L', 'right']].map(([h, align]) => (
+                  <th key={h} style={{ padding: '8px 10px', textAlign: align,
+                    color: '#ffffff', fontWeight: '700', fontSize: '13px', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {byTicker.map(r => (
+                <tr key={r.ticker} style={{ borderBottom: `1px solid ${border}` }}>
+                  <td style={{ padding: '7px 10px', fontWeight: 700 }}>{r.ticker}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'center', color: textMid }}>{r.closes}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right',
+                    color: r.stock ? pnlColor(r.stock) : textMid }}>{r.stock ? fmt(r.stock) : '—'}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right',
+                    color: r.options ? pnlColor(r.options) : textMid }}>{r.options ? fmt(r.options) : '—'}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 700,
+                    color: pnlColor(r.total) }}>{fmt(r.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${border}` }}>
+                <td style={{ padding: '8px 10px', fontWeight: 700 }}>
+                  {byTicker.length} ticker{byTicker.length === 1 ? '' : 's'}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'center', color: textMid }}>
+                  {byTicker.reduce((s2, r) => s2 + r.closes, 0)}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700,
+                  color: pnlColor(byTicker.reduce((s2, r) => s2 + r.stock, 0)) }}>
+                  {fmt(byTicker.reduce((s2, r) => s2 + r.stock, 0))}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700,
+                  color: pnlColor(byTicker.reduce((s2, r) => s2 + r.options, 0)) }}>
+                  {fmt(byTicker.reduce((s2, r) => s2 + r.options, 0))}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 800,
+                  color: pnlColor(totalPnL) }}>{fmt(totalPnL)}</td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
