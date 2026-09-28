@@ -4417,8 +4417,40 @@ app.get('/api/debug-open-breakdown', requireAuth, async (req, res) => {
     const entries = databaseService.getShortCallEntries(userId)
     const today = todayStrLocal()
 
-    const shortOpen = new Set(open.filter(p => p.net_short > 0).map(p => p.symbol))
-    const mine = entries.filter(e => (e.ticker || '').toUpperCase() === ticker && shortOpen.has(e.symbol))
+    // Short legs from the OPEN POSITIONS, the same source as the longs below.
+    //
+    // They used to come from short_call_entries, which — as the note on the
+    // long side already says — only ever holds sold CALLS. So a short put had
+    // no row to be found by and simply never appeared: a put spread showed its
+    // long leg alone, with the short side of the position missing from the
+    // breakdown entirely. MRVL 247.5/250 and HOOD 114/115 were both showing
+    // one leg for this reason.
+    //
+    // The entries table is still consulted, but only to enrich a leg it knows
+    // about — it carries the sale premium, which the positions table does not.
+    const entryBySymbol = {}
+    for (const e of entries) {
+      if ((e.ticker || '').toUpperCase() === ticker) entryBySymbol[e.symbol] = e
+    }
+    const mine = open
+      .filter(p => p.net_short > 0)
+      .map(p => {
+        const parsed = parseOptionDescription(p.symbol)
+        if (!parsed || parsed.ticker.toUpperCase() !== ticker) return null
+        const e = entryBySymbol[p.symbol]
+        const contracts = p.net_short
+        // Premium per contract from the entry where there is one; otherwise
+        // from what the position itself was opened for, so a short put is
+        // priced rather than dropped.
+        const premium = e?.premium != null
+          ? e.premium
+          : (p.total_received != null && p.sto_contracts > 0
+              ? Math.abs(p.total_received) * (contracts / p.sto_contracts)
+              : 0)
+        return { ...(e || {}), symbol: p.symbol, ticker: parsed.ticker, contracts, premium,
+          premiumFrom: e ? 'entry' : 'position' }
+      })
+      .filter(Boolean)
 
     // Long legs too. Built from open positions rather than short_call_entries,
     // which only ever holds sold calls — a spread would otherwise show one side.
