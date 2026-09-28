@@ -1097,7 +1097,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       header: () => (<>
         <div>Theta {projectMonths}</div>
         <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', marginTop: 3 }}>
-          {[1, 2, 3].map(m => (
+          {PROJECT_KEYS.map(m => (
             <span key={m} onClick={e => { e.stopPropagation(); setProjectMonths(m) }}
               style={{ cursor: 'pointer', fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 3, lineHeight: 1.4,
                 background: projectMonths === m ? 'var(--accent)' : 'transparent',
