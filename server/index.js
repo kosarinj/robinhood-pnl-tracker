@@ -3292,7 +3292,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
                 const legs = openProjectedLegs[hKey][ticker] || { expired: 0, total: 0 }
                 legs.total += 1
                 if (expired) legs.expired += 1
-                openProjectedLegs[months][ticker] = legs
+                openProjectedLegs[hKey][ticker] = legs
               }
 
               // ── Price shock ──
@@ -3506,12 +3506,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             })
           }
           if (projMark == null) continue
-          openProjectedByTicker[months][ticker] =
-            (openProjectedByTicker[months][ticker] || 0) + (projMark - leg.costPerShare) * shares
-          const legs = openProjectedLegs[months][ticker] || { expired: 0, total: 0 }
+          openProjectedByTicker[hKey][ticker] =
+            (openProjectedByTicker[hKey][ticker] || 0) + (projMark - leg.costPerShare) * shares
+          const legs = openProjectedLegs[hKey][ticker] || { expired: 0, total: 0 }
           legs.total += 1
           if (expired) legs.expired += 1
-          openProjectedLegs[months][ticker] = legs
+          openProjectedLegs[hKey][ticker] = legs
         }
 
         for (const move of SCENARIO_MOVES) {
