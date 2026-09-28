@@ -86,42 +86,45 @@ try {
     assert.ok(row, `no AAPL row in ${JSON.stringify(Object.keys(res))}`)
   })
 
-  test('carries a projection for 1, 2 and 3 months', () => {
+  test('carries a projection for every horizon', () => {
     assert.ok(row.openProjected, 'openProjected missing')
-    for (const m of ['1', '2', '3']) {
+    // Weeks as well as months: a 1M projection on a weekly only says it will
+    // have settled, so 1W/2W were added and the keys became labels.
+    for (const m of ['1W', '2W', '1M', '2M', '3M']) {
       assert.ok(row.openProjected[m], `missing horizon ${m}: ${JSON.stringify(row.openProjected)}`)
       assert.equal(typeof row.openProjected[m].pnl, 'number')
     }
   })
 
   test('projections improve monotonically for a short call', () => {
-    const p1 = row.openProjected['1'].pnl
-    const p2 = row.openProjected['2'].pnl
-    const p3 = row.openProjected['3'].pnl
-    assert.ok(p2 >= p1, `2M (${p2}) should be >= 1M (${p1})`)
-    assert.ok(p3 >= p2, `3M (${p3}) should be >= 2M (${p2})`)
+    const keys = ['1W', '2W', '1M', '2M', '3M']
+    for (let i = 1; i < keys.length; i++) {
+      const prev = row.openProjected[keys[i - 1]].pnl
+      const cur = row.openProjected[keys[i]].pnl
+      assert.ok(cur >= prev, `${keys[i]} (${cur}) should be >= ${keys[i - 1]} (${prev})`)
+    }
   })
 
   test('projection beats today (decay is the whole point)', () => {
     if (row.openUnrealizedPnL == null) return   // no option price available in this env
-    assert.ok(row.openProjected['1'].pnl >= row.openUnrealizedPnL,
-      `1M (${row.openProjected['1'].pnl}) should beat today (${row.openUnrealizedPnL})`)
+    assert.ok(row.openProjected['1W'].pnl >= row.openUnrealizedPnL,
+      `1W (${row.openProjected['1W'].pnl}) should beat today (${row.openUnrealizedPnL})`)
   })
 
   test('never projects more than the premium collected', () => {
-    assert.ok(row.openProjected['3'].pnl <= premium + 0.01,
-      `${row.openProjected['3'].pnl} exceeds the ${premium} collected`)
+    assert.ok(row.openProjected['3M'].pnl <= premium + 0.01,
+      `${row.openProjected['3M'].pnl} exceeds the ${premium} collected`)
   })
 
   test('reports how many legs expire inside each horizon', () => {
-    for (const m of ['1', '2', '3']) {
+    for (const m of ['1W', '2W', '1M', '2M', '3M']) {
       const p = row.openProjected[m]
       assert.equal(typeof p.expiredLegs, 'number')
       assert.equal(typeof p.totalLegs, 'number')
       assert.ok(p.expiredLegs <= p.totalLegs)
     }
     // 150 days out — nothing has expired at 3 months.
-    assert.equal(row.openProjected['3'].expiredLegs, 0)
+    assert.equal(row.openProjected['3M'].expiredLegs, 0)
   })
 
   console.log(`\n${passed} passed\n`)
