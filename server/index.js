@@ -2792,11 +2792,22 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // the point — the mid is a valuation convention, not a fill.
     const openExitByTicker = {}
     const exitSpreadByTicker = {}   // total mid-vs-exit gap, so the cost is visible
-    // Theta projection: what Open P&L becomes in 1/2/3 months if the underlying
-    // doesn't move. Keyed [months][ticker].
-    const PROJECT_MONTHS = [1, 2, 3]
-    const openProjectedByTicker = { 1: {}, 2: {}, 3: {} }
-    const openProjectedLegs = { 1: {}, 2: {}, 3: {} }   // { ticker: {expired, total} }
+    // Theta projection: what Open P&L becomes over each horizon if the underlying
+    // does not move. Keyed [horizon key][ticker].
+    // Horizons for the theta projection. Spans in YEARS rather than whole
+    // months, because a week is the interval that actually matters on weekly
+    // options — a 1M projection on a contract expiring Friday says only that it
+    // will have settled, which is not a forecast.
+    const PROJECT_HORIZONS = [
+      { key: '1W', years: 7 / 365.25 },
+      { key: '2W', years: 14 / 365.25 },
+      { key: '1M', years: 1 / 12 },
+      { key: '2M', years: 2 / 12 },
+      { key: '3M', years: 3 / 12 },
+    ]
+    const openProjectedByTicker = {}
+    const openProjectedLegs = {}   // { ticker: {expired, total} }
+    for (const h of PROJECT_HORIZONS) { openProjectedByTicker[h.key] = {}; openProjectedLegs[h.key] = {} }
 
     // What-if: every underlying shocked by a percentage, right now. The theta
     // projection next door moves time with the underlying held still; this is
@@ -3257,8 +3268,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             if (T0 > 0) {
               let sigma = impliedVol(currentOptionPrice, S, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
               if (!(sigma > 0)) sigma = 0.001   // deep ITM: price is all intrinsic, no vol info
-              for (const months of PROJECT_MONTHS) {
-                const T1 = T0 - months / 12
+              for (const { key: hKey, years: hYears } of PROJECT_HORIZONS) {
+                const T1 = T0 - hYears
                 let projMark
                 let expired = false
                 if (T1 <= 0) {
@@ -3276,9 +3287,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
                   })
                 }
                 if (projMark == null) continue
-                openProjectedByTicker[months][ticker] =
-                  (openProjectedByTicker[months][ticker] || 0) + (premiumPerShare - projMark) * shares
-                const legs = openProjectedLegs[months][ticker] || { expired: 0, total: 0 }
+                openProjectedByTicker[hKey][ticker] =
+                  (openProjectedByTicker[hKey][ticker] || 0) + (premiumPerShare - projMark) * shares
+                const legs = openProjectedLegs[hKey][ticker] || { expired: 0, total: 0 }
                 legs.total += 1
                 if (expired) legs.expired += 1
                 openProjectedLegs[months][ticker] = legs
@@ -3480,8 +3491,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // S, T0 and sigma are already established above for the day move.
         if (!corrected || !(S > 0) || !(T0 > 0) || sigma == null) return
 
-        for (const months of PROJECT_MONTHS) {
-          const T1 = T0 - months / 12
+        for (const { key: hKey, years: hYears } of PROJECT_HORIZONS) {
+          const T1 = T0 - hYears
           let projMark, expired = false
           if (T1 <= 0) {
             expired = true
@@ -3961,11 +3972,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             if (v != null) acc[m] = r2(v)
             return acc
           }, {}),
-          openProjected: PROJECT_MONTHS.reduce((acc, m) => {
-            const v = openProjectedByTicker[m][e.ticker]
+          openProjected: PROJECT_HORIZONS.reduce((acc, h) => {
+            const v = openProjectedByTicker[h.key][e.ticker]
             if (v != null) {
-              const legs = openProjectedLegs[m][e.ticker] || { expired: 0, total: 0 }
-              acc[m] = { pnl: r2(v), expiredLegs: legs.expired, totalLegs: legs.total }
+              const legs = openProjectedLegs[h.key][e.ticker] || { expired: 0, total: 0 }
+              acc[h.key] = { pnl: r2(v), expiredLegs: legs.expired, totalLegs: legs.total }
             }
             return acc
           }, {}),

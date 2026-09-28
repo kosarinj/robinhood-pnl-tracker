@@ -78,8 +78,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // on screen, not how much is rendered — this trades breathing room for rows.
   const [dense, setDense] = useState(() => getPref(LS_DENSE_KEY, true))
   const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
-  // Horizon for the theta projection column (months ahead, underlying held flat)
-  const [projectMonths, setProjectMonths] = useState(1)
+  // Horizon for the theta projection column, underlying held flat. Weeks as
+  // well as months: on a contract expiring Friday, a 1M projection only says it
+  // will have settled, which is not a forecast. Defaults to 1M.
+  const PROJECT_KEYS = ['1W', '2W', '1M', '2M', '3M']
+  const [projectMonths, setProjectMonths] = useState('1M')
   // What-if: shock every underlying by this percentage, right now. 0 = off.
   // The mirror of the projection — that moves time and holds price, this moves
   // price and holds time.
@@ -1092,14 +1095,14 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     { key: 'theta', label: 'Theta',
       title: 'Estimated Open P&L if the stock doesn’t move — decay only. Volatility is held constant and backed out of today’s mark. Contracts expiring before then settle at intrinsic.',
       header: () => (<>
-        <div>Theta {projectMonths}M</div>
+        <div>Theta {projectMonths}</div>
         <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', marginTop: 3 }}>
           {[1, 2, 3].map(m => (
             <span key={m} onClick={e => { e.stopPropagation(); setProjectMonths(m) }}
               style={{ cursor: 'pointer', fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 3, lineHeight: 1.4,
                 background: projectMonths === m ? 'var(--accent)' : 'transparent',
                 color: projectMonths === m ? 'var(--accentText)' : textMid,
-                border: `1px solid ${projectMonths === m ? 'var(--accent)' : 'transparent'}` }}>{m}M</span>
+                border: `1px solid ${projectMonths === m ? 'var(--accent)' : 'transparent'}` }}>{m}</span>
           ))}
         </div>
       </>),
@@ -1108,7 +1111,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         const gain = c.proj.pnl - (r.openUnrealizedPnL || 0)
         const allExpired = c.proj.totalLegs > 0 && c.proj.expiredLegs === c.proj.totalLegs
         return (
-          <span title={`In ${projectMonths} month(s) with ${r.ticker} unchanged: ${fmt(c.proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).`}
+          <span title={`In ${projectMonths} with ${r.ticker} unchanged: ${fmt(c.proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).`}
             style={{ fontWeight: 700, color: pnlColor(c.proj.pnl, isDark) }}>
             {fmt(c.proj.pnl)}
             <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
