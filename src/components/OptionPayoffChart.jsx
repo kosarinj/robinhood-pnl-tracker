@@ -3,7 +3,7 @@ import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine, ReferenceDot,
 } from 'recharts'
-import { prepareLeg, pnlAtPrice, priceGrid, intrinsic } from '../utils/optionMath'
+import { prepareLeg, pnlAtPrice, priceGrid, intrinsic, netOpenAtPrice } from '../utils/optionMath'
 
 /**
  * P&L on one underlying's open option legs, across a range of prices for that
@@ -31,7 +31,7 @@ import { prepareLeg, pnlAtPrice, priceGrid, intrinsic } from '../utils/optionMat
  * a forecast — a point the footnote makes on screen rather than leaving to be
  * inferred.
  */
-export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onClose, isDark }) {
+export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, netOpenNow = null, onClose, isDark }) {
   // Change from today rather than the running total, because that is the
   // question being asked — "what would I make or lose if it goes there". It is
   // also the only basis the share line can honestly join: this view knows the
@@ -73,13 +73,26 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
     const at0 = pnlAtPrice(prepared, spot, spot)
     const rows = gridPrices.map(p => {
       const r = pnlAtPrice(prepared, spot, p)
+      const optDelta = r.today - at0.today
+      const shareDelta = shares > 0 ? shares * (p - spot) : 0
       return {
         price: p,
         todayTotal: r.today,
         expiryTotal: r.expiry,
-        todayChange: r.today - at0.today,
+        todayChange: optDelta,
         expiryChange: r.expiry - at0.expiry,
-        sharesChange: shares > 0 ? shares * (p - spot) : null,
+        sharesChange: shares > 0 ? shareDelta : null,
+        // Net + Open for this ticker, carried forward from whatever the grid
+        // shows now. Anchoring on the grid's own figure and adding only the
+        // CHANGES means the two can't disagree at today's price, and it dodges
+        // the question of which resolved stock price each side used — the cost
+        // basis cancels out of a difference, so only the share count matters.
+        //
+        // Shares are in this unconditionally, unlike the separate share line:
+        // Net + Open is realized + stock + open options by definition, so a
+        // version of it without the stock would not be that figure.
+        netOpenToday: netOpenAtPrice({ netOpenNow, optionPnlAt: r.today, optionPnlNow: at0.today, shares, spot, price: p }),
+        netOpenExpiry: netOpenAtPrice({ netOpenNow, optionPnlAt: r.expiry, optionPnlNow: at0.expiry, shares, spot, price: p }),
       }
     })
     return {
@@ -89,13 +102,15 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
       base: at0,
       unpricedLegs: at0.unpriced,
     }
-  }, [prepared, legs, spot, shares])
+  }, [prepared, legs, spot, shares, netOpenNow])
 
   const price = priceInput != null && priceInput > 0 ? priceInput : spot
   const at = useMemo(() => pnlAtPrice(prepared, spot, price), [prepared, spot, price])
   const sharesMove = shares > 0 ? shares * (price - spot) : 0
   const optionChange = at.today - base.today
   const combinedChange = optionChange + (withShares ? sharesMove : 0)
+  // The whole position's figure at that price. Always includes the shares.
+  const netOpenAt = netOpenAtPrice({ netOpenNow, optionPnlAt: at.today, optionPnlNow: base.today, shares, spot, price })
   const movePct = spot > 0 ? ((price - spot) / spot) * 100 : 0
 
   // Where a leg's kink sits. Deduplicated because two legs of a vertical often
@@ -110,9 +125,15 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
     return [...seen.values()].sort((a, b) => a.strike - b.strike)
   }, [legs])
 
-  const yKeys = basis === 'change'
-    ? { today: 'todayChange', expiry: 'expiryChange' }
+  const yKeys = basis === 'change' ? { today: 'todayChange', expiry: 'expiryChange' }
+    : basis === 'netopen' ? { today: 'netOpenToday', expiry: 'netOpenExpiry' }
     : { today: 'todayTotal', expiry: 'expiryTotal' }
+  // In Net + Open mode zero is the line the whole position turns at, so it is
+  // worth naming rather than leaving as an unlabelled rule.
+  const zeroLabel = basis === 'netopen' ? 'break even on the whole position' : null
+  // What the two lines are measuring, so the legend doesn't keep saying
+  // "Options" while the axis is carrying the whole position.
+  const seriesWhat = basis === 'netopen' ? 'Net + Open' : 'Options'
 
   const CurveTooltip = ({ active, payload }) => {
     if (!active || !payload?.length) return null
@@ -136,6 +157,12 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
               Together: {signed(combined)}
             </div>
           </>
+        )}
+        {row.netOpenToday != null && (
+          <div style={{ marginTop: 4, paddingTop: 4, borderTop: `1px solid ${border}`, fontWeight: 700, color: pnlColor(row.netOpenToday) }}>
+            Net + Open: {usd(row.netOpenToday)}
+            <span style={{ fontWeight: 500, color: textMid }}> (now {usd(netOpenNow)})</span>
+          </div>
         )}
       </div>
     )
@@ -196,7 +223,34 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
         </div>
 
         {/* The answer, before the chart — the chart is for the shape around it. */}
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${shares > 0 ? 3 : 2}, 1fr)`, gap: 8, marginTop: 10 }}>
+        {/* Net + Open first and on its own row when it's available: it is the
+            figure the grid is read by, and the one the other three add up
+            toward. Showing the current value beside the new one is the whole
+            point — the question is what the move does to it, not what it is. */}
+        {netOpenAt != null && (
+          <div style={{ marginTop: 10, padding: '11px 14px', borderRadius: 8, background: inset,
+                        border: `2px solid ${pnlColor(netOpenAt)}`, display: 'flex',
+                        alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 10, color: textMid, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Net + Open P&L at ${price.toFixed(2)}
+              </div>
+              <div style={{ fontSize: 11, color: textMid, marginTop: 2 }}>
+                realized + stock + open options, all {shares > 0 ? `${shares.toLocaleString()} shares included` : 'legs'}
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800, color: pnlColor(netOpenAt), fontVariantNumeric: 'tabular-nums', lineHeight: 1.1 }}>
+                {usd(netOpenAt)}
+              </div>
+              <div style={{ fontSize: 11, color: textMid, marginTop: 2 }}>
+                now {usd(netOpenNow)} · {signed(netOpenAt - netOpenNow)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, marginTop: 10 }}>
           <Stat label='Options, if it gets there now' value={signed(optionChange)} color={pnlColor(optionChange)}
                 sub={`total open P&L ${usd(at.today)}`} {...{ textMid, border, inset }} />
           <Stat label='Options, if it sits there to expiry' value={signed(at.expiry - base.expiry)} color={pnlColor(at.expiry - base.expiry)}
@@ -213,6 +267,9 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
           <span style={{ fontSize: 11, color: textMid, marginRight: 2 }}>Chart shows</span>
           <button onClick={() => setBasis('change')} style={chipStyle(basis === 'change')}>Change from today</button>
           <button onClick={() => setBasis('total')} style={chipStyle(basis === 'total')}>Total open P&L</button>
+          {netOpenNow != null && (
+            <button onClick={() => setBasis('netopen')} style={chipStyle(basis === 'netopen')}>Net + Open</button>
+          )}
           {shares > 0 && basis === 'change' && (
             <button onClick={() => setWithShares(v => !v)}
               style={{ ...chipStyle(withShares), borderColor: withShares ? SHARES : border, background: withShares ? SHARES : 'transparent' }}>
@@ -239,7 +296,8 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
               {/* Break-even for whatever the axis is showing. In change mode it
                   is today's price; in total mode it is where the position stops
                   costing money. */}
-              <ReferenceLine y={0} stroke={textMid} strokeWidth={1} />
+              <ReferenceLine y={0} stroke={textMid} strokeWidth={1}
+                label={zeroLabel ? { value: zeroLabel, position: 'insideBottomLeft', fill: textMid, fontSize: 10 } : undefined} />
               <ReferenceLine x={spot} stroke={textMid} strokeDasharray='4 3'
                 label={{ value: `now $${spot?.toFixed(2)}`, position: 'top', fill: textMid, fontSize: 10 }} />
               {strikeMarks.map(k => (
@@ -250,12 +308,13 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
                 <Line type='monotone' dataKey='sharesChange' name={`${shares.toLocaleString()} shares`}
                       stroke={SHARES} strokeWidth={1.5} strokeDasharray='5 3' dot={false} isAnimationActive={false} />
               )}
-              <Line type='monotone' dataKey={yKeys.expiry} name='Options — held to expiry'
+              <Line type='monotone' dataKey={yKeys.expiry} name={`${seriesWhat} — held to expiry`}
                     stroke={EXPIRY} strokeWidth={1.8} strokeDasharray='6 4' dot={false} isAnimationActive={false} />
-              <Line type='monotone' dataKey={yKeys.today} name='Options — if it gets there now'
+              <Line type='monotone' dataKey={yKeys.today} name={`${seriesWhat} — if it gets there now`}
                     stroke={TODAY} strokeWidth={2.4} dot={false} isAnimationActive={false} />
-              <ReferenceDot x={price} y={basis === 'change' ? optionChange : at.today} r={5}
-                            fill={TODAY} stroke={surface} strokeWidth={2} isFront />
+              <ReferenceDot x={price}
+                            y={basis === 'change' ? optionChange : basis === 'netopen' ? netOpenAt : at.today}
+                            r={5} fill={TODAY} stroke={surface} strokeWidth={2} isFront />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -325,6 +384,9 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, onCl
           the downside on the solid line is the <em>optimistic</em> end of the range rather than a forecast.
           {shares > 0 && <> The share line is exact — {shares.toLocaleString()} × the move — and covers only the
           move from here, not what the shares have already made.</>}
+          {netOpenNow != null && <> <strong>Net + Open</strong> starts from the {usd(netOpenNow)} the grid shows for{' '}
+          {ticker} and adds only the changes, so at today's price it is that figure exactly. It always counts the
+          shares, because realized + stock + open options is what Net + Open means.</>}
         </div>
       </div>
     </div>

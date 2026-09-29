@@ -220,3 +220,30 @@ export function priceGrid(spot, strikes, { span = 0.35, steps = 80 } = {}) {
   ks.forEach(k => { out.add(k); out.add(k - 0.01); out.add(k + 0.01) })
   return [...out].filter(p => p >= lo && p <= hi).sort((a, b) => a - b)
 }
+
+/**
+ * Net + Open P&L for one ticker at a hypothetical underlying price.
+ *
+ * Anchored on whatever the grid is showing NOW, with only the CHANGES added:
+ *
+ *     netOpenNow + optionPnl(S1) - optionPnl(spot) + shares x (S1 - spot)
+ *
+ * Anchoring rather than rebuilding the figure from its parts is deliberate.
+ * Net + Open is realized + stock + open options, and the stock term needs a
+ * cost basis and a resolved "current" price — both of which the grid picks
+ * through a chain of overrides and fallbacks. Reconstructing that here would
+ * give two subtly different numbers on one screen. In a difference the cost
+ * basis cancels outright, so only the share count is needed and the two figures
+ * cannot disagree at today's price.
+ *
+ * Shares are unconditional. Net + Open includes the stock by definition, so a
+ * version without it would be a different quantity wearing the same name — and
+ * on a hedged position it would read as a disaster the shares are paying for.
+ */
+export function netOpenAtPrice({ netOpenNow, optionPnlAt, optionPnlNow, shares = 0, spot, price }) {
+  if (netOpenNow == null || !Number.isFinite(netOpenNow)) return null
+  if (!Number.isFinite(optionPnlAt) || !Number.isFinite(optionPnlNow)) return null
+  const shareMove = shares > 0 && Number.isFinite(spot) && Number.isFinite(price)
+    ? shares * (price - spot) : 0
+  return netOpenNow + (optionPnlAt - optionPnlNow) + shareMove
+}

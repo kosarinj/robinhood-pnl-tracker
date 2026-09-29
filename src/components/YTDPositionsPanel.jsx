@@ -985,11 +985,18 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     { key: 'payoff', label: 'P&L↕', align: 'center',
       title: 'P&L on this ticker\'s open option legs across a range of prices for the stock — "what if it goes to 135", rather than the fixed percentages the What-if control uses',
       cell: (r) => {
-        // Gated on openScenario, which is the server saying it found open legs
-        // for this ticker AND could reprice them. Empty in an "as of" view, so
-        // the button correctly disappears there — the curve is about the
+        // Gated on the LEG COUNT, not on openScenario. openScenario is built in
+        // only two of the server's three leg loops — short puts and any short
+        // call without a short_call_entries row are missing from it — so a
+        // ticker whose shorts are all of that kind has real legs and an empty
+        // openScenario, and the button would have been hidden on exactly the
+        // positions worth looking at. The leg count is incremented in all three
+        // loops, and the curve derives its own marks anyway.
+        //
+        // Both counts are only produced for a live view, so the button still
+        // disappears in an "as of" view — which is right: the curve is about the
         // position as it stands now.
-        const hasLegs = Object.keys(r.openScenario || {}).length > 0
+        const hasLegs = ((r.openLegsPriced || 0) + (r.openLegsUnpriced || 0)) > 0
         if (!hasLegs || !(r.stockCurrentPrice > 0)) return null
         return (
           <button onClick={e => { e.stopPropagation(); openPayoff(r.ticker) }}
@@ -1559,12 +1566,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
             </div>
           )
         }
+        // Through rowCtx rather than off the raw row, so the share count and
+        // Net + Open are the SAME figures the grid is showing — including the
+        // manual cost override and the live-price resolution it applies. Copying
+        // them at click time would work too, until the table refreshed under an
+        // open modal and the two quietly diverged.
+        const ctx = row ? rowCtx(row, 0) : null
         return (
           <OptionPayoffChart
             ticker={payoffTicker}
             legs={legs}
             spot={spot}
-            shares={row?.stockPosition || 0}
+            shares={ctx?.pos || row?.stockPosition || 0}
+            netOpenNow={Number.isFinite(ctx?.netPlusOpen) ? ctx.netPlusOpen : null}
             isDark={isDark}
             onClose={() => setPayoffTicker(null)}
           />

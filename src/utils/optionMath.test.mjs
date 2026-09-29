@@ -12,7 +12,7 @@
  */
 import assert from 'node:assert/strict'
 import {
-  repriceFromAnchor, prepareLeg, pnlAtPrice, priceGrid,
+  repriceFromAnchor, prepareLeg, pnlAtPrice, priceGrid, netOpenAtPrice,
 } from './optionMath.js'
 
 let passed = 0
@@ -183,6 +183,58 @@ test('a far strike widens the axis rather than falling off it', () => {
   // hide that leg's kink entirely.
   const grid = priceGrid(SPOT, [200])
   assert.ok(grid.includes(200), 'a strike beyond the default span must still be on the axis')
+})
+
+console.log('\nNet + Open carried to a new price')
+
+test('at today price it is exactly what the grid shows, untouched', () => {
+  // The reason for anchoring instead of rebuilding: the two figures sit on one
+  // screen and must not disagree where they overlap.
+  const got = netOpenAtPrice({ netOpenNow: 620, optionPnlAt: 140, optionPnlNow: 140, shares: 200, spot: 50, price: 50 })
+  assert.ok(close(got, 620), `expected 620, got ${got}`)
+})
+
+test('it adds the option move and the share move, nothing else', () => {
+  // The shape of the reported case: Net + Open of 620, and a move that costs the
+  // position 720 once the shares are counted, leaving -100.
+  const got = netOpenAtPrice({ netOpenNow: 620, optionPnlAt: 420, optionPnlNow: 140, shares: 200, spot: 50, price: 45 })
+  //          620 + (420 - 140) + 200 x (45 - 50) = 620 + 280 - 1000 = -100
+  assert.ok(close(got, -100), `expected -100, got ${got}`)
+})
+
+test('shares are counted even though the separate share line can be toggled off', () => {
+  // Net + Open is realized + stock + open options by definition. A version
+  // without the stock would be a different quantity under the same name, and on
+  // a hedged position it reads as a loss the shares are already covering.
+  const v = netOpenAtPrice({ netOpenNow: 0, optionPnlAt: -500, optionPnlNow: 0, shares: 200, spot: 100, price: 110 })
+  assert.ok(close(v, -500 + 2000), `got ${v}`)
+})
+
+test('no shares held is not the same as no figure', () => {
+  const got = netOpenAtPrice({ netOpenNow: 300, optionPnlAt: 80, optionPnlNow: 100, shares: 0, spot: 100, price: 120 })
+  assert.ok(close(got, 280), `expected 280, got ${got}`)
+})
+
+test('it returns null rather than a wrong number when the grid has no figure', () => {
+  // The Dashboard entry point passes no Net + Open, and a silent 0 there would
+  // read as "you are flat" rather than "not shown here".
+  assert.equal(netOpenAtPrice({ netOpenNow: null, optionPnlAt: 1, optionPnlNow: 0, shares: 0, spot: 1, price: 1 }), null)
+  assert.equal(netOpenAtPrice({ netOpenNow: 620, optionPnlAt: NaN, optionPnlNow: 0, shares: 0, spot: 1, price: 1 }), null)
+})
+
+test('it tracks the real curve end to end', () => {
+  // Composed against the actual legs rather than hand-fed numbers, so a change
+  // to pnlAtPrice cannot leave this passing on stale assumptions.
+  const NOW = 1500
+  const at0 = pnlAtPrice(prep, SPOT, SPOT)
+  for (const p of priceGrid(SPOT, ALL.map(l => l.strike))) {
+    const r = pnlAtPrice(prep, SPOT, p)
+    const got = netOpenAtPrice({ netOpenNow: NOW, optionPnlAt: r.today, optionPnlNow: at0.today, shares: 100, spot: SPOT, price: p })
+    const want = NOW + (r.today - at0.today) + 100 * (p - SPOT)
+    assert.ok(close(got, want, 1e-6), `at ${p.toFixed(2)}: ${got} vs ${want}`)
+  }
+  const atSpot = netOpenAtPrice({ netOpenNow: NOW, optionPnlAt: at0.today, optionPnlNow: at0.today, shares: 100, spot: SPOT, price: SPOT })
+  assert.ok(close(atSpot, NOW), `must pass through the grid figure: ${atSpot}`)
 })
 
 console.log(`\n${passed} passed\n`)
