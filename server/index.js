@@ -2773,6 +2773,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const dayGapTickers = new Set()
     // ticker -> 'market' | 'model' | 'mixed', from how each leg's mark was got.
     const openBasisByTicker = {}
+    // ticker -> { <source>: legCount }. The same information as openBasisByTicker
+    // but unrounded: which feed each leg's mark actually came from, rather than
+    // the market/model verdict collapsed out of it. "Modelled" and "a four-day-old
+    // print aged forward" are both estimates and both land on the same side of
+    // that verdict, but they are not the same claim, and the one you'd act on
+    // differs — so the panel gets the counts and can name them.
+    const openSourceByTicker = {}
+    const countSource = (ticker, source) => {
+      if (!ticker || !source) return
+      const m = openSourceByTicker[ticker] || (openSourceByTicker[ticker] = {})
+      m[source] = (m[source] || 0) + 1
+    }
     // Legs that could not be priced at all. A leg with no mark used to be
     // skipped in silence, so Open P&L reported part of a position as though it
     // were the whole of it — a confident number that is simply wrong, and one
@@ -3186,9 +3198,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             }
           }
 
+          countSource(ticker, markBasis)
           // Aged and modelled marks are both estimates. Grouping the aged one
           // with the market would hide that it's been adjusted.
-          const isMarket = markBasis === 'quote' || markBasis === 'today'
+          //
+          // 'ibkr' belongs on the market side and was missing from this list. A
+          // live two-sided IBKR book is the best mark available anywhere here —
+          // it outranks Polygon, which refuses /v3/quotes and so serves prints
+          // wearing a quote's name — and it was being labelled an estimate and
+          // tagged "~est" on screen. Exactly backwards, and it only showed when
+          // the order-flow recorder was up, which is when the marks were at
+          // their most trustworthy.
+          const isMarket = markBasis === 'ibkr' || markBasis === 'quote' || markBasis === 'today'
           const prevBasis = openBasisByTicker[ticker]
           const thisBasis = isMarket ? 'market' : 'model'
           openBasisByTicker[ticker] = !prevBasis ? thisBasis
@@ -3349,16 +3370,30 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           return m?.mid > 0 ? m.mid : null
         })()
         let nowMark = ibkrLegMark ?? optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        let shortBasis = ibkrLegMark != null ? 'ibkr'
+          : optFresh[leg.symbol] != null ? 'quote'
+          : optToday[leg.symbol] > 0 ? 'today'
+          : optClose[leg.symbol] != null ? 'close' : null
         // Floored at exercise value, not merely defaulted to it when missing: a
         // stale quote can sit BELOW intrinsic, which is arbitrage, not a price.
         {
           const iv = intrinsicMark(leg.parsed, stockByTicker[ticker])
-          if (iv > (nowMark || 0)) nowMark = iv
+          if (iv > (nowMark || 0)) { nowMark = iv; shortBasis = 'intrinsic' }
         }
         // This return skips the OPEN figure as well as the day one, which is
         // why the two disagreed with nothing on screen to explain it.
         if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
         countLeg(ticker, true)
+        countSource(ticker, shortBasis)
+        // These legs were absent from the market/model verdict as well — this is
+        // most of the book by count, so a ticker could be marked entirely off
+        // stale closes and still report "from real market prices".
+        {
+          const isMarket = shortBasis === 'ibkr' || shortBasis === 'quote' || shortBasis === 'today'
+          const thisBasis = isMarket ? 'market' : 'model'
+          const prev = openBasisByTicker[ticker]
+          openBasisByTicker[ticker] = !prev ? thisBasis : prev === thisBasis ? thisBasis : 'mixed'
+        }
         const shares = leg.contracts * 100
         openUnrealizedByTicker[ticker] =
           (openUnrealizedByTicker[ticker] || 0) + (leg.premiumPerShare - nowMark) * shares
@@ -3398,6 +3433,16 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         if (!ticker) return
         const shares = leg.contracts * 100
         let nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        // Which feed that came from. The short side has tracked this all along;
+        // the long side never did, so on a book that is mostly bought contracts
+        // the Open P&L source read as though only the short legs had one.
+        // optClose is staleOptionMark — a print that may be days old — so it is
+        // split from a print made TODAY. The short side already draws that line
+        // and the two must agree, or the same feed reads as market on one leg
+        // and an estimate on the other.
+        let longBasis = optFresh[leg.symbol] != null ? 'quote'
+          : optToday[leg.symbol] > 0 ? 'today'
+          : optClose[leg.symbol] != null ? 'close' : null
         // Long legs have no model fallback — modelOptionMark is built from
         // short_call_entries — so when the option snapshot fails, every one of
         // them lands here. With far more bought contracts than sold, that is
@@ -3408,10 +3453,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // at 0.11 for exactly that contract.
         {
           const iv = intrinsicMark(leg.parsed, stockByTicker[ticker])
-          if (iv > (nowMark || 0)) nowMark = iv
+          if (iv > (nowMark || 0)) { nowMark = iv; longBasis = 'intrinsic' }
         }
         if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
         countLeg(ticker, true)
+        countSource(ticker, longBasis)
+        // Long legs join the market/model verdict too. They were left out of
+        // it, so a ticker whose long legs came from stale closes still reported
+        // whatever its short legs happened to be — and a name with no short
+        // legs at all reported no basis whatever, which the panel renders the
+        // same as "from real market prices".
+        {
+          // Same line as the short side: a live quote or a print from today is
+          // market data; a stale close and exercise value are not.
+          const isMarket = longBasis === 'quote' || longBasis === 'today'
+          const thisBasis = isMarket ? 'market' : 'model'
+          const prev = openBasisByTicker[ticker]
+          openBasisByTicker[ticker] = !prev ? thisBasis : prev === thisBasis ? thisBasis : 'mixed'
+        }
 
         const S = stockByTicker[ticker]
         const expiry = `${leg.parsed.year}-${leg.parsed.month}-${leg.parsed.day}`
@@ -4041,6 +4100,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // mark, or a model estimate. Reported so an estimate reads as one
           // rather than as a measurement.
           openMarkBasis: openBasisByTicker[e.ticker] || null,
+          // The same question answered precisely: how many legs came from which
+          // feed. { ibkr, quote, today, agedClose, model, close, intrinsic },
+          // keys present only when non-zero. Lets the panel name the source on
+          // hover instead of only grading it market vs model.
+          openMarkSources: openSourceByTicker[e.ticker] || null,
           // The Open P&L twin of dayPartial. Legs that could not be priced were
           // dropped, so the figure beside this is a part of the position rather
           // than the whole of it.

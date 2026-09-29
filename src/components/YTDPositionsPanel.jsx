@@ -2,6 +2,33 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '../contexts/ThemeContext'
 import { getPref, setPref, subscribePrefs } from '../services/prefs'
+import OptionPayoffChart from './OptionPayoffChart'
+
+// Where a mark came from, in words. The market/model verdict beside this says
+// whether to trust the figure; this says why — "a print from four days ago aged
+// forward" and "a Black-Scholes estimate" are both estimates and grade the same,
+// but they fail in different ways and you'd chase them differently.
+//
+// Ordered best-first, so the first thing read is the best mark in the position.
+const MARK_SOURCE_LABELS = [
+  ['ibkr', 'live IBKR bid/ask'],
+  ['quote', 'live Polygon quote'],
+  ['today', "today's Polygon print"],
+  ['agedClose', 'a stale print aged forward for the underlying'],
+  ['model', 'a Black-Scholes estimate'],
+  ['close', 'a stale Polygon print, not aged'],
+  ['intrinsic', 'exercise value only (no usable quote)'],
+]
+
+function markSourceNote(sources) {
+  if (!sources) return ''
+  const parts = MARK_SOURCE_LABELS
+    .filter(([key]) => sources[key] > 0)
+    .map(([key, label]) => `${sources[key]} × ${label}`)
+  if (!parts.length) return ''
+  const total = Object.values(sources).reduce((s, n) => s + n, 0)
+  return `\n\nMarked from — ${total} leg${total !== 1 ? 's' : ''}:\n· ${parts.join('\n· ')}`
+}
 
 const DEFAULT_GLOBAL_START = '2026-03-15'
 const LS_GLOBAL_KEY = 'ytdPanel_globalStart'
@@ -306,6 +333,31 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // each one got and where that mark came from.
   const [openRow, setOpenRow] = useState(null)
   const [rowDetail, setRowDetail] = useState({ loading: false, data: null, error: null })
+
+  // ── P&L-vs-price curve ──────────────────────────────────────────────────
+  // The rows carry openScenario — the same repricing at twelve fixed
+  // percentages — but not the legs behind it, and the curve needs the legs.
+  // They come from the endpoint the Dashboard's chart already uses, fetched on
+  // the first click rather than with the table: it prices every contract
+  // through Polygon, which is too much to spend on a panel most visits never
+  // open a curve from. Cached after that, so the second ticker is instant.
+  const [payoffTicker, setPayoffTicker] = useState(null)
+  const [openLegs, setOpenLegs] = useState({ loading: false, positions: null, stockPrices: {}, error: null })
+
+  const openPayoff = async (ticker) => {
+    setPayoffTicker(ticker)
+    if (openLegs.positions || openLegs.loading) return
+    setOpenLegs(s => ({ ...s, loading: true, error: null }))
+    try {
+      const q = broker && broker !== 'all' ? `?broker=${encodeURIComponent(broker)}` : ''
+      const r = await fetch(`/api/options-pnl/open-positions${q}`, { credentials: 'include' })
+      const d = await r.json()
+      if (d?.success) setOpenLegs({ loading: false, positions: d.positions || [], stockPrices: d.stockPrices || {}, error: null })
+      else setOpenLegs({ loading: false, positions: null, stockPrices: {}, error: d?.error || 'Could not load open contracts' })
+    } catch (e) {
+      setOpenLegs({ loading: false, positions: null, stockPrices: {}, error: e.message })
+    }
+  }
 
   const toggleRowDetail = async (ticker) => {
     if (openRow === ticker) { setOpenRow(null); return }
@@ -927,6 +979,30 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     // button. The chart link lives there with them.
     { key: 'ticker', label: 'Ticker', pinned: true, sort: 'ticker', align: 'left' },
 
+    // Its own column rather than a third control crammed into the ticker cell,
+    // which already carries the expander, the chart link, the STK badge and the
+    // hide button. Movable like any other, and it starts beside the ticker.
+    { key: 'payoff', label: 'P&L↕', align: 'center',
+      title: 'P&L on this ticker\'s open option legs across a range of prices for the stock — "what if it goes to 135", rather than the fixed percentages the What-if control uses',
+      cell: (r) => {
+        // Gated on openScenario, which is the server saying it found open legs
+        // for this ticker AND could reprice them. Empty in an "as of" view, so
+        // the button correctly disappears there — the curve is about the
+        // position as it stands now.
+        const hasLegs = Object.keys(r.openScenario || {}).length > 0
+        if (!hasLegs || !(r.stockCurrentPrice > 0)) return null
+        return (
+          <button onClick={e => { e.stopPropagation(); openPayoff(r.ticker) }}
+            title={`P&L curve for ${r.ticker}'s open options`}
+            style={{ padding: '1px 6px', fontSize: 11, lineHeight: 1.4, cursor: 'pointer',
+              border: `1px solid ${border}`, borderRadius: 3,
+              background: payoffTicker === r.ticker ? '#3b82f6' : 'transparent',
+              color: payoffTicker === r.ticker ? '#fff' : textMid }}>
+            📈
+          </button>
+        )
+      } },
+
     { key: 'realizedShortCalls', label: 'Short Calls', sort: 'realizedShortCalls', title: 'Realized P&L from short calls (covered calls sold)',
       cell: (r) => <span style={{ color: pnlColor(r.realizedShortCalls, isDark), fontWeight: 600 }}>{fmt(r.realizedShortCalls)}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.realizedShortCalls, isDark), fontWeight: 700 }}>{fmt(t.realizedShortCalls)}</span> },
@@ -1083,7 +1159,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
           (r.openUnrealizedPnL != null ? 'Premium collected/paid − current cost to close open options' : 'No live option price available')
           + (r.openMarkBasis === 'model' ? ' · MODELLED — no market price for these contracts, so this is a Black-Scholes estimate and can differ from your broker'
              : r.openMarkBasis === 'mixed' ? ' · some legs modelled, some from real market prices'
-             : r.openMarkBasis === 'market' ? ' · from real market prices' : '')}
+             : r.openMarkBasis === 'market' ? ' · from real market prices' : '')
+          + markSourceNote(r.openMarkSources)}
         style={{ fontWeight: 700, color: pnlColor(r.openUnrealizedPnL, isDark) }}>
         {r.openUnrealizedPnL != null ? `${asOf ? '~' : ''}${fmt(r.openUnrealizedPnL)}` : '—'}
         {r.openMarkBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~est</span>}
@@ -1402,6 +1479,14 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     // Each group of added columns is only meaningful beside its reference
     // column; appended to a saved order they land off the right edge of a table
     // this wide and read as though nothing happened.
+    // The curve button belongs against the ticker it's for, and the ticker is
+    // the pinned column — so there's no anchor key to sit after, it just goes
+    // first. Same rule as the rest: only while the saved order has never seen
+    // it. Drag it elsewhere once and that choice wins.
+    if (missing.includes('payoff')) {
+      out.splice(out.indexOf('payoff'), 1)
+      out.unshift('payoff')
+    }
     const NEIGHBOURS = [
       { keys: ['scenarioNet', 'scenarioDelta'], anchor: 'netPlusOpen' },
       { keys: ['dayStockPnl', 'dayOptionPnl'], anchor: 'dayPnl' },
@@ -1448,6 +1533,43 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
 
   return (
     <div style={{ marginBottom: '24px' }}>
+      {/* P&L vs price for one ticker's open legs. The legs arrive a beat after
+          the click, so the modal says it's loading rather than nothing
+          happening — this endpoint prices every contract through Polygon and
+          can take a few seconds on the first open. */}
+      {payoffTicker && (() => {
+        const row = rows.find(r => r.ticker === payoffTicker)
+        const legs = (openLegs.positions || []).filter(p => p.ticker === payoffTicker)
+        const spot = openLegs.stockPrices?.[payoffTicker] || row?.stockCurrentPrice || 0
+        if (openLegs.loading || openLegs.error || !legs.length || !(spot > 0)) {
+          return (
+            <div onClick={() => setPayoffTicker(null)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+              <div onClick={e => e.stopPropagation()}
+                style={{ background: surface, border: `1px solid ${border}`, borderRadius: 12, padding: '26px 30px', color: text, fontSize: 13, maxWidth: 420 }}>
+                {openLegs.loading ? `Pricing ${payoffTicker}'s open contracts…`
+                  : openLegs.error ? `Could not load open contracts: ${openLegs.error}`
+                  : !legs.length ? `No open option legs found for ${payoffTicker}.`
+                  : `No underlying price for ${payoffTicker}, so there is nothing to anchor the curve on.`}
+                <div style={{ marginTop: 14, textAlign: 'right' }}>
+                  <button onClick={() => setPayoffTicker(null)}
+                    style={{ padding: '4px 12px', fontSize: 12, borderRadius: 6, border: `1px solid ${border}`, background: 'transparent', color: textMid, cursor: 'pointer' }}>Close</button>
+                </div>
+              </div>
+            </div>
+          )
+        }
+        return (
+          <OptionPayoffChart
+            ticker={payoffTicker}
+            legs={legs}
+            spot={spot}
+            shares={row?.stockPosition || 0}
+            isDark={isDark}
+            onClose={() => setPayoffTicker(null)}
+          />
+        )
+      })()}
       {/* Header controls */}
       {/* position + z-index so the toolbar's popovers stay above the table.
           .floating-panel:hover applies a transform, and a transform creates a
