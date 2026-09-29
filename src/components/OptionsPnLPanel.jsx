@@ -4,6 +4,7 @@ import { getPref, setPref, subscribePrefs } from '../services/prefs'
 import IntradayChart, { RSIBadge } from './IntradayChart'
 import PutStrikeCalculator from './PutStrikeCalculator'
 import AverageDownCalculator from './AverageDownCalculator'
+import OptionPayoffChart from './OptionPayoffChart'
 
 // VIX: >30 = high fear, 20-30 = elevated, 15-20 = normal, <15 = complacent
 function vixColor(v) {
@@ -136,6 +137,8 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
   const [byUnderlyingWeeks, setByUnderlyingWeeks] = useState(1)
   const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, 1 = 1W ago, etc.
   const [chartTicker, setChartTicker] = useState(null)
+  // Ticker whose P&L-vs-price curve is open, or null.
+  const [payoffTicker, setPayoffTicker] = useState(null)
   const [whatIfData, setWhatIfData] = useState(null)
   const [whatIfLoading, setWhatIfLoading] = useState(false)
   const [whatIfError, setWhatIfError] = useState(null)
@@ -607,6 +610,13 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
     // Polygon live prices only when viewing current week (not historical)
     ...(!isHistoricalView ? openPositions.reduce((m, p) => { if (p.stockPrice > 0) m[p.ticker] = p.stockPrice; return m }, {}) : {})
   }
+  // Shares held per ticker, resolved the same way the Positions rows below do
+  // it — manual override first, then the server's count. The payoff chart uses
+  // this to show the hedge beside the options; a wrong count there would make
+  // a covered position read like a naked one.
+  const sharesHeldFor = (ticker) => shareOverrides[ticker] !== undefined
+    ? Number(shareOverrides[ticker]) || 0
+    : (cumulativeStockPrices[ticker]?.shares ?? data?.weeklyStockPnL?.[ticker]?.shares ?? 0)
   // Remaining premium — compute client-side using stock prices already in stockPriceByTicker
   const remPremByTicker = openPositions.reduce((m, p) => {
     const stockPrice = stockPriceByTicker[p.ticker]
@@ -702,6 +712,22 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
       {chartTicker && (
         <IntradayChart symbol={chartTicker} isDark={isDark} onClose={() => setChartTicker(null)} />
       )}
+      {/* P&L vs underlying price for one ticker's open option legs */}
+      {payoffTicker && (() => {
+        const legs = openPositions.filter(p => p.ticker === payoffTicker)
+        const spot = stockPriceByTicker[payoffTicker] || legs[0]?.stockPrice || 0
+        if (!legs.length || !(spot > 0)) return null
+        return (
+          <OptionPayoffChart
+            ticker={payoffTicker}
+            legs={legs}
+            spot={spot}
+            shares={sharesHeldFor(payoffTicker)}
+            isDark={isDark}
+            onClose={() => setPayoffTicker(null)}
+          />
+        )
+      })()}
       {/* Global Refresh */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         {livePositions?.fetchedAt && <span style={{ fontSize: '11px', color: textMid }}>Updated {new Date(livePositions.fetchedAt).toLocaleTimeString()}</span>}
@@ -2263,6 +2289,19 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
                           <span style={{ fontWeight: '700', fontSize: '13px', color: tickerUnrealized >= 0 ? green : red }}>
                             {tickerUnrealized >= 0 ? '+' : ''}{fmt(tickerUnrealized)}
                           </span>
+                        )}
+                        {/* Its own button rather than the row click, which is
+                            already spoken for by expand/collapse. */}
+                        {stockPrice > 0 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setPayoffTicker(ticker) }}
+                            title={`P&L on ${ticker} options if the stock moves`}
+                            style={{
+                              padding: '2px 8px', fontSize: '10px', fontWeight: '700', cursor: 'pointer',
+                              borderRadius: '5px', border: `1px solid ${border}`,
+                              background: 'transparent', color: textMid, whiteSpace: 'nowrap'
+                            }}
+                          >📈 P&L curve</button>
                         )}
                         <span style={{ color: textMid, fontSize: '10px' }}>{isExpanded ? '▲' : '▼'}</span>
                       </div>

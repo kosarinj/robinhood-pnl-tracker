@@ -88,3 +88,135 @@ export function yearsTo(expiry) {
   const ms = new Date(`${expiry}T20:00:00Z`).getTime() - Date.now()
   return ms / (365.25 * 24 * 3600 * 1000)
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payoff curves — P&L on a ticker's open option legs across a range of
+// underlying prices.
+//
+// The server already answers this at twelve fixed percentages (SCENARIO_MOVES
+// in /api/options-pnl/ytd). This is the same repricing on a continuous price
+// axis instead, so the question can be "what if RDDT is 135" rather than "what
+// if RDDT moves 10%".
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Exercise value per share. */
+export function intrinsic(type, S, K) {
+  return type === 'call' ? Math.max(0, S - K) : Math.max(0, K - S)
+}
+
+/**
+ * Reprice a contract after the underlying moves, anchored on its real mark.
+ *
+ * The client-side twin of repriceFromClose in server/utils/blackScholes.js, and
+ * deliberately the same difference form:
+ *
+ *     est = mark + [ BS(S1) - BS(S0) ]
+ *
+ * Anchoring on the observed mark rather than substituting a model price is what
+ * makes the curve pass exactly through today's Open P&L at today's price. A
+ * curve that disagreed with the number printed beside it at zero move would be
+ * unreadable — you couldn't tell a modelling artifact from a real move.
+ *
+ * The difference form also survives the deep-ITM case, where the price is all
+ * intrinsic, carries no vol information, and the solver pins sigma at its
+ * floor. Repricing off that sigma directly would throw away the extrinsic still
+ * in the mark; differencing gives the change in intrinsic, which is right for a
+ * delta-1 contract, and keeps the level honest.
+ */
+export function repriceFromAnchor({ type, mark, S0, S1, K, T0, T1 = T0, sigma, r = RISK_FREE }) {
+  if (!(mark >= 0) || !(S0 > 0) || !(S1 > 0) || !(K > 0) || !(sigma > 0)) return null
+  if (!(T1 > 0)) return intrinsic(type, S1, K)
+  const before = bsPrice(S0, K, T0, r, sigma, type)
+  const after = bsPrice(S1, K, T1, r, sigma, type)
+  if (before == null || after == null) return null
+  return Math.max(intrinsic(type, S1, K), mark + (after - before), 0)
+}
+
+/**
+ * Attach the vol and time a leg needs to be repriced, backed out of its own
+ * current mark (sticky strike).
+ *
+ * Three states come back, and they are not the same thing:
+ *   settling  — no time left, so there is no optionality to model; the leg is
+ *               worth exercise value at any price and needs no vol.
+ *   priced    — vol recovered, the leg can be put on both curves.
+ *   otherwise — no usable mark. The expiry curve still knows exactly what this
+ *               leg pays, so it stays on that one; only the "today" curve has
+ *               nothing to say about it, and the caller is told how many.
+ */
+export function prepareLeg(leg, spot) {
+  const T = yearsTo(leg.expiry)
+  const settling = !(T > 0)
+  let sigma = null
+  if (!settling && leg.markPrice > 0 && spot > 0) {
+    // A floor rather than a rejection: a contract priced at pure intrinsic
+    // admits no vol, but it is still a real leg with a real payoff.
+    sigma = impliedVol(leg.markPrice, spot, leg.strike, T, RISK_FREE, leg.optionType) || 0.001
+  }
+  return { ...leg, T, sigma, settling, priced: settling || sigma > 0 }
+}
+
+/**
+ * Dollars of P&L on one leg given a per-share mark.
+ *
+ * Mirrors /api/options-pnl/open-positions exactly — same cost-basis field, same
+ * sign convention — so at today's price this reproduces the leg's printed
+ * unrealized P&L to the cent instead of approximately.
+ */
+export function legPnlFromMark(leg, markPerShare) {
+  const value = markPerShare * 100 * leg.openContracts
+  const basis = leg.avgCostPerContract * leg.openContracts
+  return leg.isLong ? value - basis : basis - value
+}
+
+/**
+ * P&L on every leg at one underlying price, on two bases.
+ *
+ *   today  — time and vol held where they are, only the underlying moved. This
+ *            is the move's effect on its own, which is what "if it gaps to 135
+ *            tomorrow" means.
+ *   expiry — every leg settled at exercise value. The move plus all remaining
+ *            decay, and the ceiling a short position can reach.
+ *
+ * Real markets reprice vol on a large move, a selloff especially, so the
+ * downside of the `today` curve is the optimistic end of a range rather than a
+ * forecast.
+ */
+export function pnlAtPrice(preparedLegs, spot, S1) {
+  let today = 0, expiry = 0, unpriced = 0
+  for (const leg of preparedLegs) {
+    expiry += legPnlFromMark(leg, intrinsic(leg.optionType, S1, leg.strike))
+    if (leg.settling) {
+      today += legPnlFromMark(leg, intrinsic(leg.optionType, S1, leg.strike))
+    } else if (leg.priced) {
+      const m = repriceFromAnchor({
+        type: leg.optionType, mark: leg.markPrice, S0: spot, S1,
+        K: leg.strike, T0: leg.T, sigma: leg.sigma,
+      })
+      if (m == null) { unpriced++; continue }
+      today += legPnlFromMark(leg, m)
+    } else {
+      unpriced++
+    }
+  }
+  return { today, expiry, unpriced }
+}
+
+/**
+ * Price points to draw the curve over.
+ *
+ * Evenly spaced across the range, then every strike and today's price forced in
+ * as their own points. Without that the kinks land wherever the sampling
+ * happens to fall and a spread's corners get rounded off — the strikes are
+ * exactly where the shape changes, so they are the points that must be exact.
+ */
+export function priceGrid(spot, strikes, { span = 0.35, steps = 80 } = {}) {
+  const ks = strikes.filter(k => k > 0)
+  const lo = Math.max(0.01, Math.min(spot * (1 - span), ...ks.map(k => k * 0.9)))
+  const hi = Math.max(spot * (1 + span), ...ks.map(k => k * 1.1))
+  const out = new Set()
+  for (let i = 0; i <= steps; i++) out.add(lo + (hi - lo) * i / steps)
+  out.add(spot)
+  ks.forEach(k => { out.add(k); out.add(k - 0.01); out.add(k + 0.01) })
+  return [...out].filter(p => p >= lo && p <= hi).sort((a, b) => a - b)
+}
