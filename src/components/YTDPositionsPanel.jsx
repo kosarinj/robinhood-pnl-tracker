@@ -292,6 +292,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     setSplitFor(row.ticker)
   }
 
+  // Leg-by-leg detail behind Day Options. Already on the row, so unlike the
+  // spreads popover there is nothing to fetch and nothing to show a spinner for.
+  const [dayFor, setDayFor] = useState(null)
+  const [dayAnchor, setDayAnchor] = useState(null)
+  const [dayRow, setDayRow] = useState(null)
+  const toggleDayLegs = (row, el) => {
+    if (dayFor === row.ticker) { setDayFor(null); setDayAnchor(null); return }
+    if (el) {
+      const box = el.getBoundingClientRect()
+      setDayAnchor({ top: box.bottom, left: box.left, right: window.innerWidth - box.right })
+    }
+    setDayRow(row)
+    setDayFor(row.ticker)
+  }
+
   const [histFor, setHistFor] = useState(null)
   const [hist, setHist] = useState({ loading: false, visits: [], band: null, error: null })
 
@@ -1406,14 +1421,30 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
 
     { key: 'dayOptionPnl', label: 'Day Options', sort: 'dayOptionPnl', borderLeft: '1px',
       title: 'Today’s move on open option legs only, from your side of each trade — a short gains when its mark falls, a long when it rises. Blank when no leg could be priced at both ends.',
-      cell: (r) => <span
-        title={r.dayOptionBasis === 'market' ? 'From real prints at both ends'
+      cell: (r) => {
+        const tip = (r.dayOptionBasis === 'market' ? 'From real prints at both ends'
              : r.dayOptionBasis === 'model' ? 'MODELLED — repriced at yesterday’s underlying, an estimate of the move rather than the move'
-             : r.dayOptionBasis === 'mixed' ? 'Some legs modelled, some from real prints' : ''}
-        style={{ fontWeight: 600, color: pnlColor(r.dayOptionPnl, isDark) }}>
-        {r.dayOptionPnl != null ? `${r.dayOptionPnl >= 0 ? '+' : ''}${fmt(r.dayOptionPnl)}` : '—'}
-        {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
-      </span>,
+             : r.dayOptionBasis === 'mixed' ? 'Some legs modelled, some from real prints' : '')
+        const body = <>
+          {r.dayOptionPnl != null ? `${r.dayOptionPnl >= 0 ? '+' : ''}${fmt(r.dayOptionPnl)}` : '—'}
+          {r.dayOptionBasis === 'model' && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
+        </>
+        // Clickable whenever there are legs to show, INCLUDING when the total is
+        // blank. A withheld day is the case most worth opening — the popover
+        // names the leg that caused it, which the dash on its own cannot.
+        if (!r.dayOptionLegs?.length) {
+          return <span title={tip} style={{ fontWeight: 600, color: pnlColor(r.dayOptionPnl, isDark) }}>{body}</span>
+        }
+        return (
+          <button onClick={e => { e.stopPropagation(); toggleDayLegs(r, e.currentTarget) }}
+            title={`${tip}${tip ? ' · ' : ''}Click for the move on each leg`}
+            style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
+              fontWeight: 600, color: pnlColor(r.dayOptionPnl, isDark),
+              textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3 }}>
+            {body}
+          </button>
+        )
+      },
       foot: (t) => <span style={{ color: pnlColor(t.dayOptionPnl, isDark), fontWeight: 700 }}>
         {t.dayOptionPnl >= 0 ? '+' : ''}{fmt(t.dayOptionPnl)}</span> },
 
@@ -2115,6 +2146,16 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         document.body
       )}
 
+      {dayFor && dayAnchor && dayRow && createPortal(
+        <DayOptionsPopover
+          row={dayRow}
+          anchor={dayAnchor}
+          onClose={() => { setDayFor(null); setDayAnchor(null) }}
+          isDark={isDark} fmt={fmt} pnlColor={pnlColor}
+        />,
+        document.body
+      )}
+
       {histFor && histAnchor && createPortal(
         <PriceHistoryPopover
           state={hist}
@@ -2531,6 +2572,149 @@ function OpenContractsDetail({ d, isDark, fmt, pnlColor }) {
         recently — on a thin contract that can sit a long way from where it would trade now,
         which is the usual reason a figure disagrees with your broker.
       </div>
+    </div>
+  )
+}
+
+/**
+ * The move on each option leg behind one ticker's Day Options figure.
+ *
+ * The total is a sum over legs priced from different pairs of prices, and a leg
+ * on its own can read very differently from the position: a short call at -480
+ * on the day looks like a bad morning until the long call at +390 beside it
+ * makes the vertical -90. Same reason the spreads popover exists.
+ *
+ * Both marks are shown, not just the move, because the move is the only part
+ * that can be wrong in an interesting way — a prior mark from the wrong session
+ * invents a day that never happened, and the pair is the only place that shows.
+ */
+function DayOptionsPopover({ row, anchor, onClose, isDark, fmt, pnlColor }) {
+  const surface = isDark ? '#1e2130' : '#ffffff'
+  const border = isDark ? '#2a3142' : '#e2e8f0'
+  const text = isDark ? '#e2e8f0' : '#1e293b'
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+  const boxRef = useRef(null)
+
+  useEffect(() => {
+    const onKey = (ev) => { if (ev.key === 'Escape') onClose() }
+    const onDown = (ev) => { if (!boxRef.current?.contains(ev.target)) onClose() }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onClose)
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onClose)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [onClose])
+
+  // Same placement rules as the spreads popover: this column also sits near the
+  // right edge of a very wide table, so it is clamped fully on screen rather
+  // than left needing a sideways scroll that would close it.
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const WIDTH = Math.min(360, vw - 24)
+  const left = Math.max(8, Math.min(vw - WIDTH - 8, (anchor.left ?? vw - WIDTH - 8) - 120))
+  const top = Math.max(8, Math.min(anchor.top + 6, vh - 300))
+
+  const legs = row.dayOptionLegs || []
+  const moved = legs.filter(l => l.dollars != null)
+  const stuck = legs.filter(l => l.dollars == null)
+  const sum = Math.round(moved.reduce((s, l) => s + l.dollars, 0) * 100) / 100
+  // The column's own figure, to check against. If the parts don't add to the
+  // whole, that is worth seeing rather than smoothing over.
+  const shown = row.dayOptionPnl
+  const reconciles = shown == null || Math.abs(sum - shown) < 0.02
+
+  const shortDate = (d) => {
+    const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    return m ? `${Number(m[2])}/${Number(m[3])}` : String(d || '')
+  }
+  const legLabel = (l) =>
+    `${l.side === 'short' ? '−' : '+'}${l.contracts} ${l.strike != null ? `$${l.strike}` : '?'}` +
+    `${l.type === 'put' ? 'P' : l.type === 'call' ? 'C' : ''}`
+
+  return (
+    <div
+      ref={boxRef}
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed', top, left, width: WIDTH, zIndex: 9999,
+        background: surface, border: `1px solid ${border}`, borderRadius: 8,
+        padding: '10px 12px', maxHeight: Math.min(440, vh - top - 16),
+        overflowY: 'auto', overflowX: 'hidden',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+        <strong style={{ fontSize: 13, color: text }}>{row.ticker} — Day Options</strong>
+        <button onClick={onClose}
+          style={{ background: 'none', border: 'none', color: textMid, cursor: 'pointer', fontSize: 14, padding: 0 }}>✕</button>
+      </div>
+
+      {moved.length === 0 && (
+        <div style={{ fontSize: 12, color: textMid, padding: '4px 0' }}>
+          No leg could be moved today, so there is no figure to break down.
+        </div>
+      )}
+
+      {moved.map((l, i) => (
+        <div key={i} style={{ padding: '5px 0', borderTop: i ? `1px solid ${border}` : 'none' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: text }}>
+              {legLabel(l)}
+              <span style={{ fontWeight: 400, color: textMid, fontSize: 11 }}> exp {shortDate(l.expiry)}</span>
+            </span>
+            <span style={{ fontWeight: 700, fontSize: 13, color: pnlColor(l.dollars, isDark) }}>
+              {l.dollars >= 0 ? '+' : ''}{fmt(l.dollars)}
+              {l.basis === 'model' && (
+                <span title="Repriced at yesterday's underlying — an estimate of the move, not the move"
+                  style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>
+              )}
+            </span>
+          </div>
+          <div style={{ fontSize: 10.5, color: textMid, marginTop: 1 }}>
+            {l.prevMark != null ? `${fmt(l.prevMark)} → ${fmt(l.nowMark)}` : `now ${fmt(l.nowMark)}`}
+            {l.perShare != null && <> · {l.perShare >= 0 ? '+' : ''}{fmt(l.perShare)}/sh in your favour</>}
+            {l.partial && (
+              <span title="Part of this leg was opened today, so only the contracts held overnight were charged the overnight move. The rest is priced from its entry."> · part opened today</span>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {moved.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+          borderTop: `1px solid ${border}`, marginTop: 5, paddingTop: 5, fontSize: 13 }}>
+          <span style={{ color: text, fontWeight: 600 }}>Total</span>
+          <span style={{ fontWeight: 700, color: pnlColor(sum, isDark) }}>{sum >= 0 ? '+' : ''}{fmt(sum)}</span>
+        </div>
+      )}
+
+      {!reconciles && (
+        <div style={{ fontSize: 10.5, color: '#f59e0b', marginTop: 5, lineHeight: 1.45 }}>
+          These legs add to {fmt(sum)} but the column shows {fmt(shown)}. They should match — worth
+          reporting rather than ignoring.
+        </div>
+      )}
+
+      {stuck.length > 0 && (
+        <div style={{ marginTop: 7, paddingTop: 6, borderTop: `1px solid ${border}` }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', marginBottom: 3 }}>
+            {stuck.length} leg{stuck.length !== 1 ? 's' : ''} left out
+          </div>
+          {stuck.map((l, i) => (
+            <div key={i} style={{ fontSize: 11, color: textMid, padding: '2px 0' }}>
+              <span style={{ color: text, fontWeight: 600 }}>{legLabel(l)}</span>
+              <span style={{ fontSize: 10.5 }}> exp {shortDate(l.expiry)} — {l.reason || 'no comparable prior mark'}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: textMid, marginTop: 4, lineHeight: 1.45 }}>
+            This is why Day P&L for {row.ticker} may be withheld or marked partial: a day built from
+            some of the legs is a different number, not a slightly wrong one.
+          </div>
+        </div>
+      )}
     </div>
   )
 }

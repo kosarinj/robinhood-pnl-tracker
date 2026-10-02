@@ -2764,6 +2764,31 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // long legs) because the weekly change is asked about the sold side.
     const openShortCallPnlByTicker = {}
     const openDailyByTicker = {}   // option side of today's mark-to-market move (EOD close → now)
+    // What that total is made of, leg by leg. The figure has been available all
+    // along but not its parts, so a Day Options number that looked wrong could
+    // only be argued with, not checked — and this is the column most often worth
+    // checking, because each leg's move can come from a different pair of prices.
+    //
+    // Legs with no honest move are recorded too, with dollars null and the
+    // reason. They are precisely what makes a day partial, so leaving them out
+    // would hide the thing the reader is looking for.
+    const openDayLegsByTicker = {}
+    const rnd2 = n => (n == null || !Number.isFinite(n)) ? null : Math.round(n * 100) / 100
+    const recordDayLeg = (ticker, rec) => {
+      if (!ticker) return
+      const list = openDayLegsByTicker[ticker] || (openDayLegsByTicker[ticker] = [])
+      list.push({
+        ...rec,
+        prevMark: rnd2(rec.prevMark), nowMark: rnd2(rec.nowMark),
+        perShare: rnd2(rec.perShare), dollars: rnd2(rec.dollars),
+      })
+    }
+    // Strike/type/expiry off a parsed symbol, so each record can be labelled
+    // without the client re-parsing the description.
+    const legIdent = (parsed) => parsed ? {
+      strike: parsed.strike, type: parsed.type,
+      expiry: `${parsed.year}-${parsed.month}-${parsed.day}`,
+    } : { strike: null, type: null, expiry: null }
     // Which basis each ticker's day move came from, so a figure that disagrees
     // with a broker can be explained instead of guessed at.
     const dayBasisByTicker = {}    // ticker -> { market: n, model: n }
@@ -3186,6 +3211,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           if (iv > (currentOptionPrice || 0)) { currentOptionPrice = iv; markBasis = 'intrinsic' }
         }
         countLeg(ticker, currentOptionPrice != null)
+        if (currentOptionPrice == null) {
+          // Same reason as the two loops below: no mark means no day move, and a
+          // breakdown that omits the leg cannot explain why the day is partial.
+          recordDayLeg(ticker, {
+            symbol: entry.symbol, ...legIdent(parsed), contracts: effContracts, side: 'short',
+            prevMark: null, nowMark: null, perShare: null, dollars: null, basis: null,
+            reason: 'no mark from any source for this contract',
+          })
+        }
         if (currentOptionPrice != null) {
           // Short: buying it back costs the ask. Without a two-sided quote there
           // is nothing honest to say, so it contributes nothing rather than
@@ -3266,14 +3300,33 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // close from a MODEL mark measures the gap between model and market,
           // not a day's move — it persists whatever the stock did and never
           // reconciles. MRVL read -835 that way. Reporting nothing is honest.
-          if (dayOptPerShare == null) dayGapTickers.add(ticker)
+          if (dayOptPerShare == null) {
+            dayGapTickers.add(ticker)
+            recordDayLeg(ticker, {
+              symbol: entry.symbol, ...legIdent(parsed), contracts: effContracts, side: 'short',
+              prevMark: prevMkt > 0 ? prevMkt : null, nowMark: currentOptionPrice,
+              perShare: null, dollars: null, basis: null,
+              reason: 'no pair of comparable prices at both ends of the day',
+            })
+          }
           if (dayOptPerShare != null) {
-            openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) +
-              daySplit(entry.symbol, effContracts, 'short', dayOptPerShare, currentOptionPrice)
+            const dollars = daySplit(entry.symbol, effContracts, 'short', dayOptPerShare, currentOptionPrice)
+            openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dollars
             const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
-            if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) bs.market += 1
-            else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) bs.model += 1
-            else bs.market += 1     // two daily prints
+            let legBasis
+            if ((optFresh[entry.symbol] > 0 || optToday[entry.symbol] > 0) && prevMkt > 0) { bs.market += 1; legBasis = 'market' }
+            else if (openPrevUnderlying[ticker] > 0 && stockByTicker[ticker] > 0) { bs.model += 1; legBasis = 'model' }
+            else { bs.market += 1; legBasis = 'market' }     // two daily prints
+            recordDayLeg(ticker, {
+              symbol: entry.symbol, ...legIdent(parsed), contracts: effContracts, side: 'short',
+              prevMark: prevMkt > 0 ? prevMkt : null, nowMark: currentOptionPrice,
+              perShare: dayOptPerShare, dollars, basis: legBasis,
+              // daySplit charges only the part held overnight the overnight move
+              // and prices the rest from its entry price, so dollars can differ
+              // from perShare x size. Flagged rather than left to look like an
+              // arithmetic error in the popover.
+              partial: Math.abs(dollars - dayOptPerShare * effContracts * 100) > 0.01,
+            })
           }
 
           // ── Theta projection ──
@@ -3382,7 +3435,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         }
         // This return skips the OPEN figure as well as the day one, which is
         // why the two disagreed with nothing on screen to explain it.
-        if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
+        if (!(nowMark > 0)) {
+          countLeg(ticker, false); dayGapTickers.add(ticker)
+          // Recorded before the bail, not after. These legs have no mark from any
+          // source, so they never reach the day-move code below — and they are
+          // precisely the ones that make a day partial, so dropping them from the
+          // breakdown would hide what the reader opened it to find.
+          recordDayLeg(ticker, {
+            symbol: leg.symbol, ...legIdent(leg.parsed), contracts: leg.contracts, side: 'short',
+            prevMark: null, nowMark: null, perShare: null, dollars: null, basis: null,
+            reason: 'no mark from any source for this contract',
+          })
+          return
+        }
         countLeg(ticker, true)
         countSource(ticker, shortBasis)
         // These legs were absent from the market/model verdict as well — this is
@@ -3418,13 +3483,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const prevMark = prevIbkr ?? optPrevClose[leg.symbol]
         if (prevMark > 0) {
           // Short: the position gains as the mark falls.
-          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) +
-            daySplit(leg.symbol, leg.contracts, 'short', prevMark - nowForDay, nowForDay)
+          const perShare = prevMark - nowForDay
+          const dollars = daySplit(leg.symbol, leg.contracts, 'short', perShare, nowForDay)
+          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dollars
           const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
           bs.market += 1
+          recordDayLeg(ticker, {
+            symbol: leg.symbol, ...legIdent(leg.parsed), contracts: leg.contracts, side: 'short',
+            prevMark, nowMark: nowForDay, perShare, dollars, basis: 'market',
+            partial: Math.abs(dollars - perShare * leg.contracts * 100) > 0.01,
+          })
         } else {
           // No comparable yesterday: say so rather than invent a move.
           dayGapTickers.add(ticker)
+          recordDayLeg(ticker, {
+            symbol: leg.symbol, ...legIdent(leg.parsed), contracts: leg.contracts, side: 'short',
+            prevMark: null, nowMark: nowForDay, perShare: null, dollars: null, basis: null,
+            reason: 'no prior mark to measure against',
+          })
         }
       })
 
@@ -3455,7 +3531,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const iv = intrinsicMark(leg.parsed, stockByTicker[ticker])
           if (iv > (nowMark || 0)) { nowMark = iv; longBasis = 'intrinsic' }
         }
-        if (!(nowMark > 0)) { countLeg(ticker, false); dayGapTickers.add(ticker); return }
+        if (!(nowMark > 0)) {
+          countLeg(ticker, false); dayGapTickers.add(ticker)
+          recordDayLeg(ticker, {
+            symbol: leg.symbol, ...legIdent(leg.parsed), contracts: leg.contracts, side: 'long',
+            prevMark: null, nowMark: null, perShare: null, dollars: null, basis: null,
+            reason: 'no mark from any source for this contract',
+          })
+          return
+        }
         countLeg(ticker, true)
         countSource(ticker, longBasis)
         // Long legs join the market/model verdict too. They were left out of
@@ -3514,13 +3598,25 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         }
 
         if (dayLongPerShare != null) {
-          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) +
-            daySplit(leg.symbol, leg.contracts, 'long', dayLongPerShare, nowMark)
+          const dollars = daySplit(leg.symbol, leg.contracts, 'long', dayLongPerShare, nowMark)
+          openDailyByTicker[ticker] = (openDailyByTicker[ticker] || 0) + dollars
           const bs = dayBasisByTicker[ticker] || (dayBasisByTicker[ticker] = { market: 0, model: 0 })
           bs[basis] += 1
+          recordDayLeg(ticker, {
+            symbol: leg.symbol, ...legIdent(leg.parsed), contracts: leg.contracts, side: 'long',
+            prevMark: prevMark > 0 ? prevMark : null, nowMark,
+            perShare: dayLongPerShare, dollars, basis,
+            partial: Math.abs(dollars - dayLongPerShare * leg.contracts * 100) > 0.01,
+          })
         } else {
           // A leg we can't move honestly makes the whole ticker's day partial.
           dayGapTickers.add(ticker)
+          recordDayLeg(ticker, {
+            symbol: leg.symbol, ...legIdent(leg.parsed), contracts: leg.contracts, side: 'long',
+            prevMark: prevMark > 0 ? prevMark : null, nowMark,
+            perShare: null, dollars: null, basis: null,
+            reason: 'no comparable prior mark for a bought contract',
+          })
         }
 
         // Long: selling it takes the bid.
@@ -4115,6 +4211,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // figure is honest, a mid dressed up as an exit price is not.
           openExitPnL: openExitByTicker[e.ticker] != null ? r2(openExitByTicker[e.ticker]) : null,
           exitSpreadCost: exitSpreadByTicker[e.ticker] != null ? r2(exitSpreadByTicker[e.ticker]) : null,
+          // Leg by leg behind Day Options, sorted biggest mover first — the one
+          // that explains the total is the one you want at the top. Legs with no
+          // honest move carry dollars: null and a reason, and sort last.
+          dayOptionLegs: (openDayLegsByTicker[e.ticker] || null)?.slice().sort((a, b) =>
+            (b.dollars == null ? -Infinity : Math.abs(b.dollars)) -
+            (a.dollars == null ? -Infinity : Math.abs(a.dollars))) || null,
           dayOptionBasis: (() => {
             const bs = dayBasisByTicker[e.ticker]
             if (!bs) return null
