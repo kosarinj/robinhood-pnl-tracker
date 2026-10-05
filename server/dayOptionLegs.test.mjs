@@ -84,9 +84,16 @@ try {
   //   a short PUT                       -> uncoveredShorts (entries holds only
   //                                        sold calls, so a put can never be there)
   //   a long put                        -> openLongs
+  // Strikes chosen so every leg gets a mark in this environment. Polygon is
+  // given a dummy key so every quote fails; a short CALL still gets a
+  // Black-Scholes mark from its short_call_entries row, but a short put and a
+  // bought leg have no model fallback, so they are only marked if exercise value
+  // is positive. Struck deep in the money, they are -- which is what puts all
+  // three of the handler's leg loops on the board, the whole point of the
+  // coverage assertions below.
   const SHORT_CALL = sym('Call', 500)
-  const SHORT_PUT = sym('Put', 150)
-  const LONG_PUT = sym('Put', 140)
+  const SHORT_PUT = sym('Put', 900)
+  const LONG_PUT = sym('Put', 800)
 
   addTrade(SHORT_CALL, 'STO', 1, 300, false)
   db.prepare(`
@@ -180,6 +187,51 @@ try {
     if (!bases.size || row.dayOptionBasis == null) return
     if (row.dayOptionBasis === 'market') assert.ok(!bases.has('model'), 'ticker says market, a leg says model')
     if (row.dayOptionBasis === 'model') assert.ok(!bases.has('market'), 'ticker says model, a leg says market')
+  })
+
+  console.log('\nTheta and the what-if cover the same legs as Open P&L')
+
+  test('every priced leg is in the theta projection', () => {
+    // The bug this pins: the projection was written out in two of the three leg
+    // loops and omitted from the third, and the long-leg copy was additionally
+    // gated behind basis=corrected -- which the YTD panel does not send. So the
+    // panel differenced a complete Open P&L against a projection holding only
+    // the short calls that had a short_call_entries row, and rendered the
+    // difference as decay. A short put or a bought leg showed its whole P&L as
+    // though theta had produced it.
+    assert.ok(row.openProjected, 'no projection at all')
+    for (const h of ['1W', '2W', '1M', '2M', '3M']) {
+      assert.ok(row.openProjected[h], `missing horizon ${h}`)
+      assert.equal(row.openProjected[h].totalLegs, row.openLegsPriced,
+        `${h} projects ${row.openProjected[h].totalLegs} legs but Open P&L prices ${row.openLegsPriced}`)
+    }
+  })
+
+  test('all three leg loops reach the projection, not just the first', () => {
+    // A short put can never be in short_call_entries, so it reaches the
+    // projection only through the uncovered-shorts loop that had no projection
+    // code; a bought leg reaches it only through the longs loop, whose copy was
+    // gated behind a basis the panel never sends. Three positions, three loops,
+    // so anything under 3 means a loop is still missing.
+    assert.equal(row.openLegsPriced, 3,
+      `fixture should price all 3 legs, priced ${row.openLegsPriced} / unpriced ${row.openLegsUnpriced}`)
+    assert.equal(row.openProjected['1W'].totalLegs, 3,
+      `only ${row.openProjected['1W'].totalLegs} leg(s) projected -- a whole loop is still missing`)
+  })
+
+  test('the what-if covers those legs too', () => {
+    // Same omission, same consequence: the grid substitutes the what-if for Open
+    // P&L inside Net + Open, so a partial scenario silently drops the rest.
+    assert.ok(row.openScenario && Object.keys(row.openScenario).length > 0, 'no what-if at all')
+    for (const m of ['-10', '10']) {
+      assert.equal(typeof row.openScenario[m], 'number', `missing move ${m}`)
+    }
+  })
+
+  test('a 0% move is not published, so nothing competes with Open P&L', () => {
+    // At 0% the figure IS Open P&L; publishing it twice invites the two to
+    // disagree by rounding and makes the column look wrong at rest.
+    assert.equal(row.openScenario['0'], undefined)
   })
 
   console.log(`\n${passed} passed\n`)

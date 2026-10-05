@@ -2857,6 +2857,72 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const SCENARIO_MOVES = [-30, -20, -15, -10, -5, -2.5, 2.5, 5, 10, 15, 20, 30]
     const openScenarioByTicker = {}          // { move: { ticker: pnl } }
     SCENARIO_MOVES.forEach(m => { openScenarioByTicker[m] = {} })
+
+    /**
+     * Roll one leg forward in time, and sideways in price, into both columns.
+     *
+     * One function for all three leg loops because it was previously written out
+     * twice and omitted from the third, which is how Theta and the what-if came
+     * to cover a different set of legs than Open P&L. The two columns sit side
+     * by side and the panel subtracts one from the other to show decay, so a
+     * projection over fewer legs than the figure it is differenced against does
+     * not report slightly wrong decay — it reports the missing legs' P&L as
+     * though it were decay. On a book with far more bought contracts than sold
+     * that is most of the position.
+     *
+     * `pnlFromMark` is the only thing that differs per side: a short earns
+     * premium minus the mark, a long earns the mark minus its cost.
+     */
+    // S is passed in rather than read from stockByTicker, which is declared
+    // inside the live-view branch below and so is not in scope here.
+    const projectAndShockLeg = ({ ticker, parsed, mark, S, pnlFromMark }) => {
+      if (!parsed || !(S > 0) || mark == null || !(mark >= 0)) return
+      const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+      const T0 = (new Date(expiry).getTime() - Date.now()) / (365.25 * 24 * 3600 * 1000)
+      if (!(T0 > 0)) return
+      // Vol backed out of the leg's CURRENT mark, which is what makes both
+      // columns continuous with the Open P&L beside them: at a zero horizon and
+      // a zero shock each reproduces today's number exactly.
+      let sigma = impliedVol(mark, S, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
+      if (!(sigma > 0)) sigma = 0.001   // deep ITM: price is all intrinsic, no vol info
+
+      for (const { key: hKey, years: hYears } of PROJECT_HORIZONS) {
+        const T1 = T0 - hYears
+        let projMark, expired = false
+        if (T1 <= 0) {
+          // Already expired by this horizon. With the stock where it is the
+          // contract settles at exercise value — for a short that is the
+          // max-profit case, not a decayed guess.
+          expired = true
+          projMark = parsed.type === 'put'
+            ? Math.max(0, parsed.strike - S)
+            : Math.max(0, S - parsed.strike)
+        } else {
+          projMark = repriceFromClose({
+            type: parsed.type, closeMark: mark,
+            S0: S, S1: S, K: parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
+          })
+        }
+        if (projMark == null) continue
+        openProjectedByTicker[hKey][ticker] =
+          (openProjectedByTicker[hKey][ticker] || 0) + pnlFromMark(projMark)
+        const legs = openProjectedLegs[hKey][ticker] || { expired: 0, total: 0 }
+        legs.total += 1
+        if (expired) legs.expired += 1
+        openProjectedLegs[hKey][ticker] = legs
+      }
+
+      for (const move of SCENARIO_MOVES) {
+        const shocked = repriceFromClose({
+          type: parsed.type, closeMark: mark,
+          S0: S, S1: S * (1 + move / 100), K: parsed.strike, T0, T1: T0, sigma, r: RISK_FREE_RATE,
+        })
+        if (shocked == null) continue
+        openScenarioByTicker[move][ticker] =
+          (openScenarioByTicker[move][ticker] || 0) + pnlFromMark(shocked)
+      }
+    }
+
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!asOf) {
       const shortEntries = databaseService.getShortCallEntries(userId, brokerFilter)
@@ -3329,63 +3395,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             })
           }
 
-          // ── Theta projection ──
-          // Roll time forward with the underlying and vol held fixed, so the only
-          // thing moving is decay. Vol is backed out of the CURRENT mark, which
-          // makes the projection continuous with the Open P&L beside it: at zero
-          // months it reproduces today's number exactly.
-          const S = stockByTicker[ticker]
-          if (parsed && S > 0) {
-            const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
-            const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
-            const T0 = yrs(new Date(expiry).getTime() - Date.now())
-            if (T0 > 0) {
-              let sigma = impliedVol(currentOptionPrice, S, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
-              if (!(sigma > 0)) sigma = 0.001   // deep ITM: price is all intrinsic, no vol info
-              for (const { key: hKey, years: hYears } of PROJECT_HORIZONS) {
-                const T1 = T0 - hYears
-                let projMark
-                let expired = false
-                if (T1 <= 0) {
-                  // Already expired by this horizon. With the stock where it is,
-                  // the contract settles at intrinsic — this is the max-profit
-                  // case for a short call, not a decayed guess.
-                  expired = true
-                  projMark = parsed.type === 'put'
-                    ? Math.max(0, parsed.strike - S)
-                    : Math.max(0, S - parsed.strike)
-                } else {
-                  projMark = repriceFromClose({
-                    type: parsed.type, closeMark: currentOptionPrice,
-                    S0: S, S1: S, K: parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
-                  })
-                }
-                if (projMark == null) continue
-                openProjectedByTicker[hKey][ticker] =
-                  (openProjectedByTicker[hKey][ticker] || 0) + (premiumPerShare - projMark) * shares
-                const legs = openProjectedLegs[hKey][ticker] || { expired: 0, total: 0 }
-                legs.total += 1
-                if (expired) legs.expired += 1
-                openProjectedLegs[hKey][ticker] = legs
-              }
-
-              // ── Price shock ──
-              // Same vol, same expiry, underlying moved. Time is held still so
-              // this isolates the move; decay is what the projection beside it
-              // is for. At 0% it reproduces today's Open P&L exactly, which is
-              // what makes the two continuous with each other.
-              for (const move of SCENARIO_MOVES) {
-                const S1 = S * (1 + move / 100)
-                const shocked = repriceFromClose({
-                  type: parsed.type, closeMark: currentOptionPrice,
-                  S0: S, S1, K: parsed.strike, T0, T1: T0, sigma, r: RISK_FREE_RATE,
-                })
-                if (shocked == null) continue
-                openScenarioByTicker[move][ticker] =
-                  (openScenarioByTicker[move][ticker] || 0) + (premiumPerShare - shocked) * shares
-              }
-            }
-          }
+          // Theta projection and price shock, via the shared helper so all three
+          // leg loops put the same legs into both columns.
+          projectAndShockLeg({
+            ticker, parsed, mark: currentOptionPrice, S: stockByTicker[ticker],
+            // Short: premium kept less what it costs to buy back.
+            pnlFromMark: (m) => (premiumPerShare - m) * shares,
+          })
         }
       })
 
@@ -3465,6 +3481,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         openPremiumByTicker[ticker] =
           (openPremiumByTicker[ticker] || 0) + leg.premiumPerShare * shares
 
+        // Theta and the what-if. These legs were in NEITHER column before, while
+        // being in Open P&L -- so for a ticker whose shorts are all of this kind
+        // (every short put is, since short_call_entries only ever holds sold
+        // calls) the panel differenced a complete Open P&L against a projection
+        // that did not contain the position at all, and showed the result as
+        // decay.
+        projectAndShockLeg({
+          ticker, parsed: leg.parsed, mark: nowMark, S: stockByTicker[ticker],
+          pnlFromMark: (m) => (leg.premiumPerShare - m) * shares,
+        })
+
         // Today's move, on the same footing as every other leg. Leaving this
         // out was the other half of the same omission: CRCL's short $97 put
         // went 7.70 -> 4.15 for +355 on the day, and without it the ticker
@@ -3508,7 +3535,26 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const ticker = leg.ticker
         if (!ticker) return
         const shares = leg.contracts * 100
-        let nowMark = optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        // A live IBKR book first, exactly as both short loops do.
+        //
+        // This was the last leg type still priced off Polygon alone while the
+        // rest of the book had moved to the live book. Polygon refuses
+        // /v3/quotes, so its "mid" here is derived from prints, and on a contract
+        // that has not traded for days that is a stale close wearing a quote's
+        // name. The comment on the uncovered-short loop records the measurement:
+        // MRVL 370C Jun-28 closed 71.87 against a live 67.65/70.60, $275 a
+        // contract. On a vertical that error no longer cancels between the legs
+        // once only one side is priced from the live book -- which is the state
+        // this leaves behind if the long side is excluded.
+        const ibkrLongMark = (() => {
+          const pp = leg.parsed
+          if (!pp) return null
+          const exp = `${pp.year}-${pp.month}-${pp.day}`
+          const m = optionMark(userId, ticker, exp, pp.strike, pp.type)
+            || optionMark(orderFlowOwner(), ticker, exp, pp.strike, pp.type)
+          return m?.mid > 0 ? m.mid : null
+        })()
+        let nowMark = ibkrLongMark ?? optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
         // Which feed that came from. The short side has tracked this all along;
         // the long side never did, so on a book that is mostly bought contracts
         // the Open P&L source read as though only the short legs had one.
@@ -3516,7 +3562,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // split from a print made TODAY. The short side already draws that line
         // and the two must agree, or the same feed reads as market on one leg
         // and an estimate on the other.
-        let longBasis = optFresh[leg.symbol] != null ? 'quote'
+        let longBasis = ibkrLongMark != null ? 'ibkr'
+          : optFresh[leg.symbol] != null ? 'quote'
           : optToday[leg.symbol] > 0 ? 'today'
           : optClose[leg.symbol] != null ? 'close' : null
         // Long legs have no model fallback — modelOptionMark is built from
@@ -3548,9 +3595,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // legs at all reported no basis whatever, which the panel renders the
         // same as "from real market prices".
         {
-          // Same line as the short side: a live quote or a print from today is
-          // market data; a stale close and exercise value are not.
-          const isMarket = longBasis === 'quote' || longBasis === 'today'
+          // Same line as the short side: a live book, a live quote or a print
+          // from today is market data; a stale close and exercise value are not.
+          const isMarket = longBasis === 'ibkr' || longBasis === 'quote' || longBasis === 'today'
           const thisBasis = isMarket ? 'market' : 'model'
           const prev = openBasisByTicker[ticker]
           openBasisByTicker[ticker] = !prev ? thisBasis : prev === thisBasis ? thisBasis : 'mixed'
@@ -3578,7 +3625,18 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const prevMark = optPrevClose[leg.symbol]
         let dayLongPerShare = null
         let basis = null
-        if (optFresh[leg.symbol] > 0 && prevMark > 0) {
+        // Best of all, and the same first choice as the short loops: a live IBKR
+        // book at BOTH ends. Same source, same contract, one day apart, so there
+        // is no gap between feeds to mistake for movement -- and it matches the
+        // mark Open P&L is now using for this leg. Mixing an IBKR mark today
+        // against a Polygon close yesterday put about +$1,500 across this book
+        // the afternoon the live book was switched on, and it would repeat daily
+        // rather than wash out.
+        const prevIbkrLong = ibkrLongMark != null ? ibkrPrev(leg.parsed) : null
+        if (ibkrLongMark != null && prevIbkrLong != null) {
+          dayLongPerShare = ibkrLongMark - prevIbkrLong
+          basis = 'market'
+        } else if (optFresh[leg.symbol] > 0 && prevMark > 0) {
           dayLongPerShare = optFresh[leg.symbol] - prevMark
           basis = 'market'
         } else if (sigma != null && openPrevUnderlying[ticker] > 0) {
@@ -3643,41 +3701,22 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         openUnrealizedByTicker[ticker] =
           (openUnrealizedByTicker[ticker] || 0) + (nowMark - leg.costPerShare) * shares
 
-        // S, T0 and sigma are already established above for the day move.
-        if (!corrected || !(S > 0) || !(T0 > 0) || sigma == null) return
-
-        for (const { key: hKey, years: hYears } of PROJECT_HORIZONS) {
-          const T1 = T0 - hYears
-          let projMark, expired = false
-          if (T1 <= 0) {
-            expired = true
-            projMark = leg.parsed.type === 'put'
-              ? Math.max(0, leg.parsed.strike - S)
-              : Math.max(0, S - leg.parsed.strike)
-          } else {
-            projMark = repriceFromClose({
-              type: leg.parsed.type, closeMark: nowMark,
-              S0: S, S1: S, K: leg.parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
-            })
-          }
-          if (projMark == null) continue
-          openProjectedByTicker[hKey][ticker] =
-            (openProjectedByTicker[hKey][ticker] || 0) + (projMark - leg.costPerShare) * shares
-          const legs = openProjectedLegs[hKey][ticker] || { expired: 0, total: 0 }
-          legs.total += 1
-          if (expired) legs.expired += 1
-          openProjectedLegs[hKey][ticker] = legs
-        }
-
-        for (const move of SCENARIO_MOVES) {
-          const shocked = repriceFromClose({
-            type: leg.parsed.type, closeMark: nowMark,
-            S0: S, S1: S * (1 + move / 100), K: leg.parsed.strike, T0, T1: T0, sigma, r: RISK_FREE_RATE,
-          })
-          if (shocked == null) continue
-          openScenarioByTicker[move][ticker] =
-            (openScenarioByTicker[move][ticker] || 0) + (shocked - leg.costPerShare) * shares
-        }
+        // Theta and the what-if, through the same helper as both short loops.
+        //
+        // The `corrected` gate that used to sit here is gone. It kept long legs
+        // out of these two columns on the default basis -- which the YTD panel
+        // uses -- while Open P&L counted them. The panel differences the two to
+        // show decay, so excluding a leg from one side and not the other does not
+        // report slightly wrong decay: it reports that leg's entire P&L as
+        // though it were decay. With far more bought contracts than sold, that
+        // was most of the book, and it is the same argument the comment above
+        // already makes for Day P&L -- a figure built from some of the legs is a
+        // partial one, not a different convention.
+        projectAndShockLeg({
+          ticker, parsed: leg.parsed, mark: nowMark, S,
+          // Long: what it is worth now less what was paid.
+          pnlFromMark: (m) => (m - leg.costPerShare) * shares,
+        })
       })
     } else {
       // As-of view: open premium = credit still open on short legs, taken from the
