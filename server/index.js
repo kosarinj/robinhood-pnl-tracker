@@ -3072,6 +3072,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const v = priorIbkr.marks[k]
         return v > 0 ? v : null
       }
+      /**
+       * The live IBKR two-sided book for a contract, whole.
+       *
+       * All three leg loops looked this up and immediately discarded everything
+       * but the mid, which is why Close Now could never show anything: it needs a
+       * real bid and ask, Polygon answers /v3/quotes with 403 Not Entitled, and
+       * the one feed that does serve a book was being narrowed to a single number
+       * on the way in.
+       *
+       * optionMark already refuses a one-sided or crossed book, so a non-null
+       * return here is a genuine two-sided market.
+       */
+      const ibkrBook = (parsed) => {
+        if (!parsed) return null
+        const exp = `${parsed.year}-${parsed.month}-${parsed.day}`
+        return optionMark(userId, parsed.ticker, exp, parsed.strike, parsed.type)
+          || optionMark(orderFlowOwner(), parsed.ticker, exp, parsed.strike, parsed.type)
+      }
       // Raw bid/ask per contract, for the realistic cost of getting out.
       const optQuote = {}
       // When each stale close was printed, so it can be aged forward.
@@ -3195,14 +3213,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // book while Net + Open on the same leg still used a stale close, and
         // the measured gap ran to $275 on a single MRVL contract. Two views of
         // one position must not price it differently.
-        const ibkrMark = (() => {
-          const p = parseOptionDescription(entry.symbol || '')
-          if (!p) return null
-          const exp = `${p.year}-${p.month}-${p.day}`
-          const m = optionMark(userId, p.ticker, exp, p.strike, p.type)
-            || optionMark(orderFlowOwner(), p.ticker, exp, p.strike, p.type)
-          return m?.mid > 0 ? m.mid : null
-        })()
+        const ibkrQuote = ibkrBook(parseOptionDescription(entry.symbol || ''))
+        const ibkrMark = ibkrQuote?.mid > 0 ? ibkrQuote.mid : null
         const usedQuote = ibkrMark != null || optFresh[entry.symbol] != null
         let currentOptionPrice = ibkrMark ?? optFresh[entry.symbol]
         // Which basis this mark is on decides what it can legitimately be
@@ -3290,7 +3302,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Short: buying it back costs the ask. Without a two-sided quote there
           // is nothing honest to say, so it contributes nothing rather than
           // silently reusing the mid and pretending it's an exit price.
-          const q = optQuote[entry.symbol]
+          // Polygon first only because it is per-symbol here; in practice the
+          // plan serves no option quotes at all, so the IBKR book is what makes
+          // this column exist rather than a fallback for the odd gap.
+          const q = optQuote[entry.symbol]?.ask > 0 ? optQuote[entry.symbol] : ibkrQuote
           if (q?.ask > 0) {
             openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (premiumPerShare - q.ask) * shares
             if (q.mid > 0) {
@@ -3430,14 +3445,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // open-positions. Leaving it out here priced uncovered short legs --
         // most of the book by count -- off a stale close while everything else
         // had moved to the live book, which is its own inconsistency.
-        const ibkrLegMark = (() => {
-          const p = leg.parsed
-          if (!p) return null
-          const exp = `${p.year}-${p.month}-${p.day}`
-          const m = optionMark(userId, ticker, exp, p.strike, p.type)
-            || optionMark(orderFlowOwner(), ticker, exp, p.strike, p.type)
-          return m?.mid > 0 ? m.mid : null
-        })()
+        const ibkrLegQuote = ibkrBook(leg.parsed)
+        const ibkrLegMark = ibkrLegQuote?.mid > 0 ? ibkrLegQuote.mid : null
         let nowMark = ibkrLegMark ?? optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
         let shortBasis = ibkrLegMark != null ? 'ibkr'
           : optFresh[leg.symbol] != null ? 'quote'
@@ -3480,6 +3489,20 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           (openUnrealizedByTicker[ticker] || 0) + (leg.premiumPerShare - nowMark) * shares
         openPremiumByTicker[ticker] =
           (openPremiumByTicker[ticker] || 0) + leg.premiumPerShare * shares
+
+        // Close Now, which this loop never contributed to. Short puts live only
+        // here -- short_call_entries holds sold CALLS -- so every one of them was
+        // missing from the column while being present in Open P&L. A partial exit
+        // figure beside a complete valuation is the same trap as the theta gap.
+        {
+          const q = optQuote[leg.symbol]?.ask > 0 ? optQuote[leg.symbol] : ibkrLegQuote
+          if (q?.ask > 0) {
+            openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (leg.premiumPerShare - q.ask) * shares
+            if (q.mid > 0) {
+              exitSpreadByTicker[ticker] = (exitSpreadByTicker[ticker] || 0) + (q.ask - q.mid) * shares
+            }
+          }
+        }
 
         // Theta and the what-if. These legs were in NEITHER column before, while
         // being in Open P&L -- so for a ticker whose shorts are all of this kind
@@ -3546,14 +3569,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // contract. On a vertical that error no longer cancels between the legs
         // once only one side is priced from the live book -- which is the state
         // this leaves behind if the long side is excluded.
-        const ibkrLongMark = (() => {
-          const pp = leg.parsed
-          if (!pp) return null
-          const exp = `${pp.year}-${pp.month}-${pp.day}`
-          const m = optionMark(userId, ticker, exp, pp.strike, pp.type)
-            || optionMark(orderFlowOwner(), ticker, exp, pp.strike, pp.type)
-          return m?.mid > 0 ? m.mid : null
-        })()
+        const ibkrLongQuote = ibkrBook(leg.parsed)
+        const ibkrLongMark = ibkrLongQuote?.mid > 0 ? ibkrLongQuote.mid : null
         let nowMark = ibkrLongMark ?? optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
         // Which feed that came from. The short side has tracked this all along;
         // the long side never did, so on a book that is mostly bought contracts
@@ -3677,8 +3694,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           })
         }
 
-        // Long: selling it takes the bid.
-        const lq = optQuote[leg.symbol]
+        // Long: selling it takes the bid. Same source order as the shorts, and
+        // the same reason -- Polygon serves no option quotes, so the IBKR book is
+        // what gives this column anything to show.
+        const lq = optQuote[leg.symbol]?.bid > 0 ? optQuote[leg.symbol] : ibkrLongQuote
         if (lq?.bid > 0) {
           openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (lq.bid - leg.costPerShare) * shares
           if (lq.mid > 0) {

@@ -234,6 +234,62 @@ try {
     assert.equal(row.openScenario['0'], undefined)
   })
 
+  console.log('\nClose Now, off the live IBKR book')
+
+  // Polygon answers /v3/quotes with 403 Not Entitled on this plan, so the only
+  // source of a real bid/ask is the order-flow recorder's book. Push one for
+  // every leg and the column must come alive; every caller used to narrow
+  // optionMark() to its mid on the way in, which is why it never could.
+  const pushBook = async (strike, right, bid, ask) => {
+    const r = await fetch(`${BASE}/api/orderflow/option-marks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', cookie },
+      body: JSON.stringify({ marks: [{ ticker: 'AAPL', expiry, strike, right, bid, ask }] }),
+    })
+    assert.ok(r.ok, `option-marks push failed: ${r.status}`)
+  }
+  // Wide markets on purpose: the spread IS the figure this column exists to show.
+  await pushBook(500, 'C', 1.00, 1.40)
+  await pushBook(900, 'P', 700.00, 702.00)
+  await pushBook(800, 'P', 600.00, 602.00)
+
+  const res2 = await (await fetch(`${BASE}/api/options-pnl/ytd`, { headers: { cookie } })).json()
+  const row2 = (res2.byUnderlying || []).find(r => r.ticker === 'AAPL')
+
+  test('Close Now is no longer blank once a two-sided book exists', () => {
+    assert.ok(row2, 'no AAPL row on the second pass')
+    assert.ok(Number.isFinite(row2.openExitPnL),
+      `openExitPnL is ${row2.openExitPnL} -- the IBKR book is still being discarded`)
+  })
+
+  test('it is worse than Open P&L, because crossing the spread costs money', () => {
+    // Shorts are bought back at the ask and longs sold at the bid, so this can
+    // never flatter the mid-based figure. If it ever does, a mid has leaked in.
+    assert.ok(Number.isFinite(row2.openUnrealizedPnL), 'no Open P&L to compare against')
+    assert.ok(row2.openExitPnL <= row2.openUnrealizedPnL + 0.01,
+      `Close Now (${row2.openExitPnL}) must not beat Open P&L (${row2.openUnrealizedPnL})`)
+  })
+
+  test('the spread toll is reported and positive', () => {
+    // This is the number that actually decides whether a roll is worth it.
+    assert.ok(Number.isFinite(row2.exitSpreadCost), 'no exitSpreadCost')
+    assert.ok(row2.exitSpreadCost > 0, `expected a real toll, got ${row2.exitSpreadCost}`)
+  })
+
+  test('all three leg loops contribute to it, short puts included', () => {
+    // The uncovered-shorts loop never touched this column, and a short put can
+    // only ever reach it from there. A partial exit figure sitting beside a
+    // complete valuation is the same trap as the theta gap.
+    //
+    // Checked by arithmetic rather than a leg count, since the column carries no
+    // leg list: the three books above imply a specific total.
+    //   short 500C : premium 3.00/sh - ask 1.40 = +1.60 x 100
+    //   short 900P : premium 2.00/sh - ask 702.00 = -700.00 x 200
+    //   long  800P : bid 600.00 - cost 1.30/sh = +598.70 x 200
+    const want = (3.00 - 1.40) * 100 + (2.00 - 702.00) * 200 + (600.00 - 1.30) * 200
+    assert.ok(Math.abs(row2.openExitPnL - want) < 1,
+      `expected about ${want.toFixed(2)}, got ${row2.openExitPnL} -- a loop is still missing`)
+  })
+
   console.log(`\n${passed} passed\n`)
 } finally {
   await cleanup()
