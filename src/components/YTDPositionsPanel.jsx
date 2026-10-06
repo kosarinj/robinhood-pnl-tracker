@@ -309,6 +309,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     setDayFor(row.ticker)
   }
 
+  // Per-leg detail behind the Theta figure. Fed by the server for the all-legs
+  // scope and by shortCallTheta for the short-call scope, normalised to one shape.
+  const [thetaFor, setThetaFor] = useState(null)
+  const [thetaAnchor, setThetaAnchor] = useState(null)
+  const [thetaPayload, setThetaPayload] = useState(null)
+  const openThetaLegs = (row, legs, baseline, el) => {
+    if (thetaFor === row.ticker) { setThetaFor(null); setThetaAnchor(null); return }
+    if (el) {
+      const box = el.getBoundingClientRect()
+      setThetaAnchor({ top: box.bottom, left: box.left })
+    }
+    setThetaPayload({ ticker: row.ticker, legs, baseline })
+    setThetaFor(row.ticker)
+  }
+
   const [histFor, setHistFor] = useState(null)
   const [hist, setHist] = useState({ loading: false, visits: [], band: null, error: null })
 
@@ -978,6 +993,18 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
           const r = projectedPnl(g.legs, g.spot, yrs)
           return [k, { pnl: r.pnl, expiredLegs: r.expired, totalLegs: r.total }]
         })),
+        // Per leg, in the SAME shape the server sends for the all-legs scope, so
+        // one popover reads both without knowing which produced it.
+        projectionLegs: g.legs.map(leg => ({
+          strike: leg.strike, type: leg.optionType, expiry: leg.expiry,
+          side: leg.isLong ? 'long' : 'short', contracts: leg.openContracts,
+          mark: leg.markPrice,
+          nowPnl: projectedPnl([leg], g.spot, 0).pnl,
+          byHorizon: Object.fromEntries(Object.entries(SC_HORIZON_YEARS).map(([k, yrs]) => {
+            const r = projectedPnl([leg], g.spot, yrs)
+            return [k, { pnl: r.pnl, expired: r.expired > 0, projMark: null }]
+          })),
+        })),
       }
     }
     return out
@@ -1299,9 +1326,27 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         if (!proj) return <span style={{ color: isDark ? '#475569' : '#cbd5e1' }}>{'—'}</span>
         const gain = proj.pnl - baseline
         const allExpired = proj.totalLegs > 0 && proj.expiredLegs === proj.totalLegs
+        // Which legs this figure is made of, normalised to one shape so the
+        // popover does not care whether the server or shortCallTheta produced it.
+        const legs = thetaScope === 'sc'
+          ? (shortCallTheta?.[r.ticker]?.projectionLegs || null)
+          : (r.projectionLegs || null)
+        const openLegsPopover = (e) => {
+          e.stopPropagation()
+          openThetaLegs(r, legs, baseline, e.currentTarget)
+        }
+        const Shell = legs?.length ? 'button' : 'span'
         return (
-          <span title={`In ${projectMonths} with ${r.ticker} unchanged: ${fmt(proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).${scopeNote}`}
-            style={{ fontWeight: 700, color: pnlColor(proj.pnl, isDark) }}>
+          <Shell
+            {...(legs?.length ? {
+              onClick: openLegsPopover,
+              style: {
+                background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
+                fontWeight: 700, color: pnlColor(proj.pnl, isDark),
+                textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3,
+              },
+            } : { style: { fontWeight: 700, color: pnlColor(proj.pnl, isDark) } })}
+            title={`In ${projectMonths} with ${r.ticker} unchanged: ${fmt(proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).${scopeNote}${legs?.length ? ' Click for the split by leg.' : ''}`}>
             {fmt(proj.pnl)}
             <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
               {gain >= 0 ? '+' : ''}{fmt(gain)}
@@ -1309,7 +1354,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                 ? `All ${proj.totalLegs} contracts have expired by then — this is settlement at today's price, not decay collected.`
                 : `${proj.expiredLegs} of ${proj.totalLegs} contracts have expired by then and settle at today's price; the rest decay.`}>{' '}{allExpired ? '✓' : `✓${proj.expiredLegs}`}</span>}
             </div>
-          </span>
+          </Shell>
         )
       },
       foot: (t) => {
@@ -2264,6 +2309,17 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         document.body
       )}
 
+      {thetaFor && thetaAnchor && thetaPayload && createPortal(
+        <ThetaLegsPopover
+          payload={thetaPayload}
+          horizon={projectMonths}
+          anchor={thetaAnchor}
+          onClose={() => { setThetaFor(null); setThetaAnchor(null) }}
+          isDark={isDark} fmt={fmt} pnlColor={pnlColor}
+        />,
+        document.body
+      )}
+
       {histFor && histAnchor && createPortal(
         <PriceHistoryPopover
           state={hist}
@@ -2823,6 +2879,172 @@ function DayOptionsPopover({ row, anchor, onClose, isDark, fmt, pnlColor }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * The projection leg by leg, behind one ticker's Theta figure.
+ *
+ * The column could only ever say how MANY legs had expired by the horizon, which
+ * conflates two things worth keeping apart:
+ *
+ *   settled — the contract is gone at today's stock price. For an OTM short that
+ *             is the full credit, and it arrives whether or not you wait.
+ *   decayed — premium given up because time passed. This is what "collect theta"
+ *             actually refers to, and the only part that rewards patience.
+ *
+ * A large figure made mostly of settled legs is not the same claim as one made
+ * of decay, and before this you could not tell which you were looking at.
+ *
+ * Each row shows the leg's P&L now and at the horizon, so the difference IS its
+ * contribution to the gain on the column's second line.
+ */
+function ThetaLegsPopover({ payload, horizon, anchor, onClose, isDark, fmt, pnlColor }) {
+  const surface = isDark ? '#1e2130' : '#ffffff'
+  const border = isDark ? '#2a3142' : '#e2e8f0'
+  const text = isDark ? '#e2e8f0' : '#1e293b'
+  const textMid = isDark ? '#94a3b8' : '#64748b'
+  const boxRef = useRef(null)
+
+  useEffect(() => {
+    const onKey = (ev) => { if (ev.key === 'Escape') onClose() }
+    const onDown = (ev) => { if (!boxRef.current?.contains(ev.target)) onClose() }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onClose)
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onClose)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [onClose])
+
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const WIDTH = Math.min(380, vw - 24)
+  const left = Math.max(8, Math.min(vw - WIDTH - 8, (anchor.left ?? vw - WIDTH - 8) - 140))
+  const top = Math.max(8, Math.min(anchor.top + 6, vh - 300))
+
+  const legs = (payload?.legs || []).map(l => {
+    const h = l.byHorizon?.[horizon]
+    return h ? { ...l, projPnl: h.pnl, projMark: h.projMark, expired: !!h.expired } : null
+  }).filter(Boolean)
+
+  // Split by WHY the leg moved, not by side. That is the distinction the figure
+  // hides, and the reason this popover exists.
+  const settled = legs.filter(l => l.expired)
+  const decaying = legs.filter(l => !l.expired)
+  const sum = (arr, k) => Math.round(arr.reduce((a, l) => a + (l[k] || 0), 0) * 100) / 100
+  const gainOf = (arr) => Math.round(arr.reduce((a, l) => a + ((l.projPnl || 0) - (l.nowPnl || 0)), 0) * 100) / 100
+
+  const total = sum(legs, 'projPnl')
+  const baseline = payload?.baseline
+  const totalGain = baseline != null
+    ? Math.round((total - baseline) * 100) / 100
+    : gainOf(legs)
+
+  const shortDate = (d) => {
+    const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    return m ? `${Number(m[2])}/${Number(m[3])}/${String(m[1]).slice(2)}` : String(d || '')
+  }
+  const legLabel = (l) =>
+    `${l.side === 'short' ? '−' : '+'}${l.contracts || ''} $${l.strike}` +
+    `${l.type === 'put' ? 'P' : l.type === 'call' ? 'C' : ''}`
+
+  const Row = ({ l }) => {
+    const gain = (l.projPnl || 0) - (l.nowPnl || 0)
+    return (
+      <div style={{ padding: '5px 0', borderTop: `1px solid ${border}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: text }}>
+            {legLabel(l)}
+            <span style={{ fontWeight: 400, color: textMid, fontSize: 10.5 }}> exp {shortDate(l.expiry)}</span>
+          </span>
+          <span style={{ fontWeight: 700, fontSize: 12.5, color: pnlColor(gain, isDark) }}>
+            {gain >= 0 ? '+' : ''}{fmt(gain)}
+          </span>
+        </div>
+        <div style={{ fontSize: 10.5, color: textMid, marginTop: 1 }}>
+          {fmt(l.nowPnl)} → {fmt(l.projPnl)}
+          {l.mark != null && <> · mark {fmt(l.mark)}</>}
+          {l.projMark != null && <> → {fmt(l.projMark)}</>}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      ref={boxRef}
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed', top, left, width: WIDTH, zIndex: 9999,
+        background: surface, border: `1px solid ${border}`, borderRadius: 8,
+        padding: '10px 12px', maxHeight: Math.min(460, vh - top - 16),
+        overflowY: 'auto', overflowX: 'hidden',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 2 }}>
+        <strong style={{ fontSize: 13, color: text }}>{payload.ticker} — Theta {horizon}</strong>
+        <button onClick={onClose}
+          style={{ background: 'none', border: 'none', color: textMid, cursor: 'pointer', fontSize: 14, padding: 0 }}>✕</button>
+      </div>
+      <div style={{ fontSize: 10.5, color: textMid, marginBottom: 4 }}>
+        Each leg now versus at {horizon}, with the stock unchanged.
+      </div>
+
+      {legs.length === 0 && (
+        <div style={{ fontSize: 12, color: textMid, padding: '4px 0' }}>
+          No legs could be projected at this horizon.
+        </div>
+      )}
+
+      {decaying.length > 0 && (
+        <>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#0ca30c', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Still live — decay collected {gainOf(decaying) >= 0 ? '+' : ''}{fmt(gainOf(decaying))}
+          </div>
+          {decaying.map((l, i) => <Row key={`d${i}`} l={l} />)}
+        </>
+      )}
+
+      {settled.length > 0 && (
+        <>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#f59e0b', marginTop: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}
+            title="These contracts have expired by this horizon. They settle at today's stock price, so this is the position ending rather than premium earned for waiting.">
+            Settled by then {gainOf(settled) >= 0 ? '+' : ''}{fmt(gainOf(settled))}
+          </div>
+          {settled.map((l, i) => <Row key={`s${i}`} l={l} />)}
+        </>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10,
+        borderTop: `2px solid ${border}`, marginTop: 6, paddingTop: 5, fontSize: 13 }}>
+        <span style={{ color: text, fontWeight: 600 }}>At {horizon}</span>
+        <span style={{ fontWeight: 700, color: pnlColor(total, isDark) }}>{fmt(total)}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, paddingTop: 2 }}>
+        <span style={{ color: textMid }}>Change from today</span>
+        <span style={{ fontWeight: 700, color: pnlColor(totalGain, isDark) }}>
+          {totalGain >= 0 ? '+' : ''}{fmt(totalGain)}
+        </span>
+      </div>
+
+      {settled.length > 0 && (
+        <div style={{ fontSize: 10.5, color: textMid, marginTop: 7, lineHeight: 1.45 }}>
+          Only the <strong style={{ color: '#0ca30c' }}>live</strong> part is premium earned for waiting. The{' '}
+          <strong style={{ color: '#f59e0b' }}>settled</strong> part is contracts ending at today's price — it
+          arrives whether or not you hold, and a short that is in the money by then settles at a loss rather
+          than keeping its credit.
+        </div>
+      )}
+
+      <div style={{ fontSize: 10.5, color: textMid, marginTop: 6, lineHeight: 1.45 }}>
+        Volatility is held where each leg's own mark implies it today. A rise in implied vol makes a short leg
+        dearer and can erase months of this, so treat it as the no-surprises case rather than a forecast.
+      </div>
     </div>
   )
 }

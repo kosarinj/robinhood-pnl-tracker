@@ -290,6 +290,59 @@ try {
       `expected about ${want.toFixed(2)}, got ${row2.openExitPnL} -- a loop is still missing`)
   })
 
+  console.log('')
+  console.log('Theta broken down by leg')
+
+  test('a per-leg projection is carried for every horizon', () => {
+    assert.ok(Array.isArray(row.projectionLegs), `projectionLegs is ${typeof row.projectionLegs}`)
+    assert.equal(row.projectionLegs.length, row.openProjected['1W'].totalLegs,
+      'the leg list and the leg count must describe the same set')
+    for (const l of row.projectionLegs) {
+      for (const h of ['1W', '2W', '1M', '2M', '3M', '6M']) {
+        assert.ok(l.byHorizon?.[h], `leg $${l.strike} missing horizon ${h}`)
+        assert.equal(typeof l.byHorizon[h].pnl, 'number')
+      }
+    }
+  })
+
+  test('the legs add to the column at every horizon', () => {
+    // The whole point. A breakdown that explains a different number than the one
+    // on screen is worse than none, because it invites you to trust it -- the
+    // same standard the Day Options split is held to.
+    for (const h of ['1W', '2W', '1M', '2M', '3M', '6M']) {
+      const sum = row.projectionLegs.reduce((a, l) => a + l.byHorizon[h].pnl, 0)
+      assert.ok(Math.abs(sum - row.openProjected[h].pnl) < 0.05,
+        `${h}: legs sum to ${sum.toFixed(2)} but the column says ${row.openProjected[h].pnl}`)
+    }
+  })
+
+  test("each leg's today figure adds to Open P&L", () => {
+    // Makes the per-leg GAIN column trustworthy: it is projPnl - nowPnl, so the
+    // baseline has to be the same set of legs the projection covers.
+    const sum = row.projectionLegs.reduce((a, l) => a + l.nowPnl, 0)
+    assert.ok(Math.abs(sum - row.openUnrealizedPnL) < 0.05,
+      `legs' today P&L sums to ${sum.toFixed(2)} but Open P&L is ${row.openUnrealizedPnL}`)
+  })
+
+  test('settled and decaying legs are distinguishable', () => {
+    // The distinction the popover is built around, and the one the leg COUNT
+    // alone could not express: a settled leg ends at today's price, a decaying
+    // one pays for waiting.
+    for (const h of ['1W', '6M']) {
+      const flagged = row.projectionLegs.filter(l => l.byHorizon[h].expired).length
+      assert.equal(flagged, row.openProjected[h].expiredLegs,
+        `${h}: ${flagged} legs flagged expired but the count says ${row.openProjected[h].expiredLegs}`)
+    }
+  })
+
+  test('each leg says which side it is, so a sign can be read', () => {
+    for (const l of row.projectionLegs) {
+      assert.ok(l.side === 'short' || l.side === 'long', `bad side ${l.side}`)
+      assert.ok(l.contracts > 0, `bad contracts ${l.contracts}`)
+      assert.ok(l.strike > 0 && l.expiry, 'leg is not identifiable')
+    }
+  })
+
   console.log(`\n${passed} passed\n`)
 } finally {
   await cleanup()

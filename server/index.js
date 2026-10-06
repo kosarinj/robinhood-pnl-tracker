@@ -2846,6 +2846,17 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const openProjectedByTicker = {}
     const openProjectedLegs = {}   // { ticker: {expired, total} }
     for (const h of PROJECT_HORIZONS) { openProjectedByTicker[h.key] = {}; openProjectedLegs[h.key] = {} }
+    // Leg by leg behind the projection, so the Theta figure can be taken apart
+    // the way Day Options can. Only the sum was kept, which left a number like a
+    // large 6M gain impossible to attribute: the leg counts say how many settled
+    // but not what each was worth, and those are very different claims -- a
+    // settled leg is a contract gone at today's price, a decayed one is premium
+    // collected for waiting.
+    //
+    // One record per leg carrying every horizon, rather than a list per horizon:
+    // the panel switches horizon without refetching, so all of them have to be
+    // present, and this way the leg's identity is stored once.
+    const projectionLegsByTicker = {}
 
     // What-if: every underlying shocked by a percentage, right now. The theta
     // projection next door moves time with the underlying held still; this is
@@ -2876,8 +2887,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
      */
     // S is passed in rather than read from stockByTicker, which is declared
     // inside the live-view branch below and so is not in scope here.
-    const projectAndShockLeg = ({ ticker, parsed, mark, S, pnlFromMark }) => {
+    const projectAndShockLeg = ({ ticker, parsed, mark, S, pnlFromMark, side, contracts }) => {
       if (!parsed || !(S > 0) || mark == null || !(mark >= 0)) return
+      const rec = {
+        symbol: `${parsed.ticker} ${parsed.month}/${parsed.day}/${parsed.year} ${parsed.type} ${parsed.strike}`,
+        strike: parsed.strike, type: parsed.type,
+        expiry: `${parsed.year}-${parsed.month}-${parsed.day}`,
+        side: side || null, contracts: contracts || null,
+        mark: Math.round(mark * 10000) / 10000,
+        // Today's P&L on this leg, so the popover can show each leg's share of
+        // the GAIN rather than only its projected level.
+        nowPnl: Math.round(pnlFromMark(mark) * 100) / 100,
+        byHorizon: {},
+      }
       const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
       const T0 = (new Date(expiry).getTime() - Date.now()) / (365.25 * 24 * 3600 * 1000)
       if (!(T0 > 0)) return
@@ -2911,6 +2933,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         legs.total += 1
         if (expired) legs.expired += 1
         openProjectedLegs[hKey][ticker] = legs
+        rec.byHorizon[hKey] = {
+          projMark: Math.round(projMark * 10000) / 10000,
+          pnl: Math.round(pnlFromMark(projMark) * 100) / 100,
+          expired,
+        }
       }
 
       for (const move of SCENARIO_MOVES) {
@@ -2921,6 +2948,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         if (shocked == null) continue
         openScenarioByTicker[move][ticker] =
           (openScenarioByTicker[move][ticker] || 0) + pnlFromMark(shocked)
+      }
+
+      if (Object.keys(rec.byHorizon).length > 0) {
+        (projectionLegsByTicker[ticker] || (projectionLegsByTicker[ticker] = [])).push(rec)
       }
     }
 
@@ -3415,6 +3446,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // leg loops put the same legs into both columns.
           projectAndShockLeg({
             ticker, parsed, mark: currentOptionPrice, S: stockByTicker[ticker],
+            side: 'short', contracts: effContracts,
             // Short: premium kept less what it costs to buy back.
             pnlFromMark: (m) => (premiumPerShare - m) * shares,
           })
@@ -3513,6 +3545,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // decay.
         projectAndShockLeg({
           ticker, parsed: leg.parsed, mark: nowMark, S: stockByTicker[ticker],
+          side: 'short', contracts: leg.contracts,
           pnlFromMark: (m) => (leg.premiumPerShare - m) * shares,
         })
 
@@ -3734,6 +3767,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // partial one, not a different convention.
         projectAndShockLeg({
           ticker, parsed: leg.parsed, mark: nowMark, S,
+          side: 'long', contracts: leg.contracts,
           // Long: what it is worth now less what was paid.
           pnlFromMark: (m) => (m - leg.costPerShare) * shares,
         })
@@ -4186,6 +4220,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             if (v != null) acc[m] = r2(v)
             return acc
           }, {}),
+          // Sorted biggest contributor first at the longest horizon, so whatever
+          // explains the figure is at the top wherever the reader has the chips
+          // set. Legs are few per ticker, so one order serves all horizons.
+          projectionLegs: (projectionLegsByTicker[e.ticker] || null)?.slice().sort((a, b) => {
+            const last = PROJECT_HORIZONS[PROJECT_HORIZONS.length - 1].key
+            return Math.abs(b.byHorizon[last]?.pnl ?? 0) - Math.abs(a.byHorizon[last]?.pnl ?? 0)
+          }) || null,
           openProjected: PROJECT_HORIZONS.reduce((acc, h) => {
             const v = openProjectedByTicker[h.key][e.ticker]
             if (v != null) {
