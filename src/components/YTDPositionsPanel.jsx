@@ -1346,7 +1346,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                 textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3,
               },
             } : { style: { fontWeight: 700, color: pnlColor(proj.pnl, isDark) } })}
-            title={`In ${projectMonths} with ${r.ticker} unchanged: ${fmt(proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).${scopeNote}${legs?.length ? ' Click for the split by leg.' : ''}`}>
+            title={`In ${projectMonths} with ${r.ticker} unchanged: ${fmt(proj.pnl)}, `
+              + `${gain >= 0 ? 'up ' : 'down '}${fmt(Math.abs(gain))} from ${fmt(baseline)} now.`
+              + `${scopeNote}`
+              + `${thetaScope === 'sc' ? ' That is the short-call Open P&L, NOT the Open P&L column beside this one, which covers every leg -- the two legitimately differ.' : ''}`
+              + `${legs?.length ? ' Click for the split by leg.' : ''}`}>
             {fmt(proj.pnl)}
             <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
               {gain >= 0 ? '+' : ''}{fmt(gain)}
@@ -2993,6 +2997,8 @@ function ThetaLegsPopover({ payload, horizon, anchor, onClose, isDark, fmt, pnlC
       </div>
       <div style={{ fontSize: 10.5, color: textMid, marginBottom: 4 }}>
         Each leg now versus at {horizon}, with the stock unchanged.
+        {payload?.baseline != null && <> Measured from <strong>{fmt(payload.baseline)}</strong> today — the legs
+        listed here, which is not necessarily the Open P&amp;L column.</>}
       </div>
 
       {legs.length === 0 && (
