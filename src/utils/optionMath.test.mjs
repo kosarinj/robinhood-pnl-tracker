@@ -12,7 +12,7 @@
  */
 import assert from 'node:assert/strict'
 import {
-  repriceFromAnchor, prepareLeg, pnlAtPrice, priceGrid, netOpenAtPrice,
+  repriceFromAnchor, prepareLeg, pnlAtPrice, priceGrid, netOpenAtPrice, projectedPnl,
 } from './optionMath.js'
 
 let passed = 0
@@ -235,6 +235,66 @@ test('it tracks the real curve end to end', () => {
   }
   const atSpot = netOpenAtPrice({ netOpenNow: NOW, optionPnlAt: at0.today, optionPnlNow: at0.today, shares: 100, spot: SPOT, price: SPOT })
   assert.ok(close(atSpot, NOW), `must pass through the grid figure: ${atSpot}`)
+})
+
+  console.log('\nRolling time forward')
+
+test('a zero horizon reproduces today exactly', () => {
+  // Continuity, same as the price axis. Without it the column contradicts the
+  // Open P&L printed beside it at rest.
+  const want = pnlAtPrice(prep, SPOT, SPOT).today
+  const got = projectedPnl(prep, SPOT, 0).pnl
+  assert.ok(close(got, want, 1e-6), `${got} vs ${want}`)
+})
+
+test('decay helps a short call and hurts a long one', () => {
+  const sc = prepareLeg(shortCall, SPOT), lc = prepareLeg(longCall, SPOT)
+  const m = 30 / 365.25
+  assert.ok(projectedPnl([sc], SPOT, m).pnl > projectedPnl([sc], SPOT, 0).pnl, 'short should gain')
+  assert.ok(projectedPnl([lc], SPOT, m).pnl < projectedPnl([lc], SPOT, 0).pnl, 'long should lose')
+})
+
+test('a short call never decays past the premium it collected', () => {
+  const sc = prepareLeg(shortCall, SPOT)
+  // Far past expiry: the 110 strike is OTM at 100, so it settles worthless.
+  const r = projectedPnl([sc], SPOT, 10)
+  assert.ok(close(r.pnl, 300 * 2, 1e-6), `expected the ${300 * 2} credit, got ${r.pnl}`)
+  assert.equal(r.expired, 1, 'should be counted as settled, not decayed')
+})
+
+test('a leg expiring inside the horizon settles rather than decaying', () => {
+  // The distinction the checkmark in the Theta column is reporting.
+  const soon = prepareLeg({ ...shortCall, expiry: new Date(Date.now() + 5 * 864e5).toISOString().slice(0, 10) }, SPOT)
+  const near = projectedPnl([soon], SPOT, 30 / 365.25)
+  assert.equal(near.expired, 1, 'should settle')
+  const far = projectedPnl([soon], SPOT, 1 / 365.25)
+  assert.equal(far.expired, 0, 'one day out it still has time on it')
+})
+
+test('decay is monotonic for a short call', () => {
+  const sc = prepareLeg(shortCall, SPOT)
+  const horizons = [0, 7, 14, 30, 60, 89].map(d => d / 365.25)
+  const ys = horizons.map(h => projectedPnl([sc], SPOT, h).pnl)
+  for (let i = 1; i < ys.length; i++) {
+    assert.ok(ys[i] >= ys[i - 1] - 1e-6, `not monotonic at ${horizons[i]}: ${ys[i]} < ${ys[i - 1]}`)
+  }
+})
+
+test('unpriced legs are counted out rather than silently dropped', () => {
+  const noMark = prepareLeg({ ...longCall, markPrice: 0 }, SPOT)
+  const r = projectedPnl([noMark], SPOT, 30 / 365.25)
+  assert.equal(r.unpriced, 1)
+  assert.equal(r.total, 0, 'must not claim to have projected it')
+})
+
+test('total counts only what was actually projected', () => {
+  // The invariant behind the server-side fix: a projection differenced against
+  // an Open P&L covering MORE legs reports the missing legs as decay. A caller
+  // can only check that if the count is honest.
+  const legs = [...ALL.map(l => prepareLeg(l, SPOT)), prepareLeg({ ...longCall, markPrice: 0 }, SPOT)]
+  const r = projectedPnl(legs, SPOT, 30 / 365.25)
+  assert.equal(r.total, ALL.length, `projected ${r.total}, expected ${ALL.length}`)
+  assert.equal(r.unpriced, 1)
 })
 
 console.log(`\n${passed} passed\n`)

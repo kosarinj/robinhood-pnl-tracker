@@ -200,7 +200,7 @@ try {
     // difference as decay. A short put or a bought leg showed its whole P&L as
     // though theta had produced it.
     assert.ok(row.openProjected, 'no projection at all')
-    for (const h of ['1W', '2W', '1M', '2M', '3M']) {
+    for (const h of ['1W', '2W', '1M', '2M', '3M', '6M']) {
       assert.ok(row.openProjected[h], `missing horizon ${h}`)
       assert.equal(row.openProjected[h].totalLegs, row.openLegsPriced,
         `${h} projects ${row.openProjected[h].totalLegs} legs but Open P&L prices ${row.openLegsPriced}`)

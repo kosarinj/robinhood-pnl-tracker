@@ -2841,6 +2841,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       { key: '1M', years: 1 / 12 },
       { key: '2M', years: 2 / 12 },
       { key: '3M', years: 3 / 12 },
+      { key: '6M', years: 6 / 12 },
     ]
     const openProjectedByTicker = {}
     const openProjectedLegs = {}   // { ticker: {expired, total} }

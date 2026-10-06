@@ -247,3 +247,45 @@ export function netOpenAtPrice({ netOpenNow, optionPnlAt, optionPnlNow, shares =
     ? shares * (price - spot) : 0
   return netOpenNow + (optionPnlAt - optionPnlNow) + shareMove
 }
+
+/**
+ * P&L on a set of legs after rolling time forward, with the underlying held.
+ *
+ * The decay half of the pair: pnlAtPrice moves the stock and holds time, this
+ * holds the stock and moves time. Same anchoring, so at `years` = 0 it returns
+ * today's figure exactly.
+ *
+ * Mirrors the server's projectAndShockLeg deliberately — including settling a
+ * leg that expires inside the horizon at exercise value rather than decaying it,
+ * which for a short is the max-profit case and not a guess. The client needs its
+ * own copy because the one question the server cannot answer is this one
+ * restricted to UNPAIRED short calls: what counts as a spread is decided by
+ * pairSpreads, which is client-side on purpose so SpreadsPanel and the
+ * roll-candidates pill can never disagree about it.
+ *
+ * `expired` counts legs that settle rather than decay, so a caller can say which
+ * part of a gain is decay collected and which is a contract simply gone.
+ */
+export function projectedPnl(preparedLegs, spot, years) {
+  let pnl = 0, expired = 0, total = 0, unpriced = 0
+  for (const leg of preparedLegs) {
+    const settleMark = intrinsic(leg.optionType, spot, leg.strike)
+    if (leg.settling) {
+      pnl += legPnlFromMark(leg, settleMark); expired++; total++
+      continue
+    }
+    if (!leg.priced) { unpriced++; continue }
+    const T1 = leg.T - years
+    if (T1 <= 0) {
+      pnl += legPnlFromMark(leg, settleMark); expired++; total++
+      continue
+    }
+    const m = repriceFromAnchor({
+      type: leg.optionType, mark: leg.markPrice, S0: spot, S1: spot,
+      K: leg.strike, T0: leg.T, T1, sigma: leg.sigma,
+    })
+    if (m == null) { unpriced++; continue }
+    pnl += legPnlFromMark(leg, m); total++
+  }
+  return { pnl, expired, total, unpriced }
+}

@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useTheme } from '../contexts/ThemeContext'
 import { getPref, setPref, subscribePrefs } from '../services/prefs'
 import OptionPayoffChart from './OptionPayoffChart'
+import { pairSpreads } from '../utils/pairSpreads'
+import { prepareLeg, projectedPnl } from '../utils/optionMath'
 
 // Where a mark came from, in words. The market/model verdict beside this says
 // whether to trust the figure; this says why — "a print from four days ago aged
@@ -108,7 +110,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // Horizon for the theta projection column, underlying held flat. Weeks as
   // well as months: on a contract expiring Friday, a 1M projection only says it
   // will have settled, which is not a forecast. Defaults to 1M.
-  const PROJECT_KEYS = ['1W', '2W', '1M', '2M', '3M']
+  const PROJECT_KEYS = ['1W', '2W', '1M', '2M', '3M', '6M']
   const [projectMonths, setProjectMonths] = useState('1M')
   // What-if: shock every underlying by this percentage, right now. 0 = off.
   // The mirror of the projection — that moves time and holds price, this moves
@@ -359,8 +361,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   const [payoffTicker, setPayoffTicker] = useState(null)
   const [openLegs, setOpenLegs] = useState({ loading: false, positions: null, stockPrices: {}, error: null })
 
-  const openPayoff = async (ticker) => {
-    setPayoffTicker(ticker)
+  // Fetched once and shared by everything that needs individual legs: the payoff
+  // curve and the short-calls-only Theta scope. Both are opt-in for the same
+  // reason -- this endpoint prices every contract through Polygon, which is too
+  // much to spend on a panel most visits never ask either question from.
+  const ensureOpenLegs = async () => {
     if (openLegs.positions || openLegs.loading) return
     setOpenLegs(s => ({ ...s, loading: true, error: null }))
     try {
@@ -373,6 +378,23 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       setOpenLegs({ loading: false, positions: null, stockPrices: {}, error: e.message })
     }
   }
+
+  const openPayoff = async (ticker) => {
+    setPayoffTicker(ticker)
+    await ensureOpenLegs()
+  }
+
+  // Which legs the Theta column is about. 'all' is the server's figure over every
+  // open leg; 'sc' is short CALLS that are not part of a vertical, computed here
+  // because what counts as a spread is decided by pairSpreads -- deliberately
+  // client-side so SpreadsPanel and the roll pill can never disagree about it.
+  const [thetaScope, setThetaScope] = useState(() => getPref('ytdPanel_thetaScope', 'all'))
+  const changeThetaScope = (v) => {
+    setThetaScope(v)
+    setPref('ytdPanel_thetaScope', v)
+    if (v === 'sc') ensureOpenLegs()
+  }
+  useEffect(() => { if (thetaScope === 'sc') ensureOpenLegs() }, [thetaScope, broker])
 
   const toggleRowDetail = async (ticker) => {
     if (openRow === ticker) { setOpenRow(null); return }
@@ -918,6 +940,49 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // Ticker is pinned: its sticky-left positioning depends on being first, and
   // that frozen column is what makes 20-odd columns of sideways scroll usable.
 
+  // Short calls standing on their own, per ticker: today's P&L and the projection
+  // at each horizon.
+  //
+  // "Short calls against the stock" means the ones NOT paired into a vertical, so
+  // pairSpreads decides membership and only its `singles` leftovers count. A leg
+  // 3-short against 2-long contributes its 1 unpaired contract, which is why
+  // `remaining` is used rather than openContracts -- counting the whole leg would
+  // credit this scope with premium the long leg has already spent.
+  //
+  // Today's figure comes from the same `singles` rather than the row, so the
+  // horizon and its baseline cover exactly the same legs. Differencing a
+  // short-call projection against the row's all-leg Open P&L is the bug this
+  // column just had, and it would be reintroduced by using r.openUnrealizedPnL
+  // here.
+  const SC_HORIZON_YEARS = { '1W': 7 / 365.25, '2W': 14 / 365.25, '1M': 1 / 12, '2M': 2 / 12, '3M': 3 / 12, '6M': 6 / 12 }
+  const shortCallTheta = (() => {
+    if (thetaScope !== 'sc' || !openLegs.positions) return null
+    const { singles } = pairSpreads(openLegs.positions)
+    const byTicker = {}
+    for (const leg of singles) {
+      if (leg.isLong || leg.optionType !== 'call') continue
+      const spot = openLegs.stockPrices?.[leg.ticker] || leg.stockPrice || 0
+      if (!(spot > 0)) continue
+      const g = byTicker[leg.ticker] || (byTicker[leg.ticker] = { spot, legs: [] })
+      // Only the unpaired contracts, priced as a leg of that size.
+      g.legs.push(prepareLeg({ ...leg, openContracts: leg.remaining }, spot))
+    }
+    const out = {}
+    for (const [ticker, g] of Object.entries(byTicker)) {
+      const now = projectedPnl(g.legs, g.spot, 0)
+      out[ticker] = {
+        now: now.pnl,
+        legs: g.legs.length,
+        unpriced: now.unpriced,
+        byHorizon: Object.fromEntries(Object.entries(SC_HORIZON_YEARS).map(([k, yrs]) => {
+          const r = projectedPnl(g.legs, g.spot, yrs)
+          return [k, { pnl: r.pnl, expiredLegs: r.expired, totalLegs: r.total }]
+        })),
+      }
+    }
+    return out
+  })()
+
   // Everything a row's cells need, computed once per row instead of per cell.
   const rowCtx = (row, i) => {
     const sh = asOf ? null : stockHoldings[row.ticker]
@@ -1194,7 +1259,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     { key: 'theta', label: 'Theta',
       title: 'Estimated Open P&L if the stock doesn’t move — decay only. Volatility is held constant and backed out of today’s mark. Contracts expiring before then settle at intrinsic.',
       header: () => (<>
-        <div>Theta {projectMonths}</div>
+        <div>Theta {projectMonths}{thetaScope === 'sc' && <span style={{ fontSize: 9, fontWeight: 600 }}> · SC</span>}</div>
+        <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', marginTop: 2 }}>
+          {[['all', 'All legs'], ['sc', 'Short calls']].map(([v, label]) => (
+            <span key={v} onClick={e => { e.stopPropagation(); changeThetaScope(v) }}
+              title={v === 'sc'
+                ? 'Only short CALLS that are not part of a vertical — the covered-call side on its own. Spread legs are excluded by the same pairing the Spreads panel uses. Needs the per-contract fetch, so the first switch takes a moment.'
+                : 'Every open leg: short calls, short puts and bought contracts together. The complete figure.'}
+              style={{ cursor: 'pointer', fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 3, lineHeight: 1.4,
+                background: thetaScope === v ? 'var(--accent)' : 'transparent',
+                color: thetaScope === v ? 'var(--accentText)' : textMid,
+                border: `1px solid ${thetaScope === v ? 'var(--accent)' : 'transparent'}` }}>{label}</span>
+          ))}
+        </div>
         <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', marginTop: 3 }}>
           {PROJECT_KEYS.map(m => (
             <span key={m} onClick={e => { e.stopPropagation(); setProjectMonths(m) }}
@@ -1206,28 +1283,59 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         </div>
       </>),
       cell: (r, c) => {
-        if (!c.proj) return <span style={{ color: isDark ? '#475569' : '#cbd5e1' }}>{'—'}</span>
-        const gain = c.proj.pnl - (r.openUnrealizedPnL || 0)
-        const allExpired = c.proj.totalLegs > 0 && c.proj.expiredLegs === c.proj.totalLegs
+        // In short-call scope both the projection AND its baseline come from the
+        // same unpaired legs, so the gain below is decay on those legs rather
+        // than the difference between two different sets of them.
+        let proj = c.proj, baseline = r.openUnrealizedPnL || 0, scopeNote = ''
+        if (thetaScope === 'sc') {
+          if (openLegs.loading) return <span style={{ fontSize: 10, color: textMid }}>…</span>
+          if (openLegs.error) return <span style={{ fontSize: 10, color: '#f59e0b' }} title={openLegs.error}>!</span>
+          const sc = shortCallTheta?.[r.ticker]
+          if (!sc) return <span style={{ color: isDark ? '#475569' : '#cbd5e1' }} title={`No unpaired short calls on ${r.ticker} — every short call here is a leg of a vertical, or there are none.`}>{'—'}</span>
+          proj = sc.byHorizon[projectMonths]
+          baseline = sc.now
+          scopeNote = ` Short calls only, ${sc.legs} leg${sc.legs !== 1 ? 's' : ''} not in a spread.`
+        }
+        if (!proj) return <span style={{ color: isDark ? '#475569' : '#cbd5e1' }}>{'—'}</span>
+        const gain = proj.pnl - baseline
+        const allExpired = proj.totalLegs > 0 && proj.expiredLegs === proj.totalLegs
         return (
-          <span title={`In ${projectMonths} with ${r.ticker} unchanged: ${fmt(c.proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).`}
-            style={{ fontWeight: 700, color: pnlColor(c.proj.pnl, isDark) }}>
-            {fmt(c.proj.pnl)}
+          <span title={`In ${projectMonths} with ${r.ticker} unchanged: ${fmt(proj.pnl)} (${gain >= 0 ? '+' : ''}${fmt(gain)} of decay).${scopeNote}`}
+            style={{ fontWeight: 700, color: pnlColor(proj.pnl, isDark) }}>
+            {fmt(proj.pnl)}
             <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
               {gain >= 0 ? '+' : ''}{fmt(gain)}
-              {c.proj.expiredLegs > 0 && <span title={allExpired ? 'All contracts expired by then' : 'Some expired by then'}>{' '}{allExpired ? '✓' : `✓${c.proj.expiredLegs}`}</span>}
+              {proj.expiredLegs > 0 && <span title={allExpired
+                ? `All ${proj.totalLegs} contracts have expired by then — this is settlement at today's price, not decay collected.`
+                : `${proj.expiredLegs} of ${proj.totalLegs} contracts have expired by then and settle at today's price; the rest decay.`}>{' '}{allExpired ? '✓' : `✓${proj.expiredLegs}`}</span>}
             </div>
           </span>
         )
       },
-      foot: (t) => (
-        <span title="Total Open P&L at the selected horizon with every stock unchanged."
-          style={{ color: pnlColor(t.openProjectedPnL, isDark), fontWeight: 700 }}>
-          {fmt(t.openProjectedPnL)}
-          <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
-            {t.openProjectedPnL - t.openUnrealizedPnL >= 0 ? '+' : ''}{fmt(t.openProjectedPnL - t.openUnrealizedPnL)}
-          </div>
-        </span>) },
+      foot: (t) => {
+        // The footer has to follow the scope. Summing every leg under a column
+        // showing short calls only is the same partial-versus-complete mismatch
+        // one row up, just with more digits.
+        let total = t.openProjectedPnL, base = t.openUnrealizedPnL
+        if (thetaScope === 'sc') {
+          if (!shortCallTheta) return <span style={{ fontSize: 10, color: textMid }}>…</span>
+          // Only the tickers actually on screen, so the total matches the rows
+          // above it when a filter or a hidden name is in play.
+          const shown = rows.map(r => shortCallTheta[r.ticker]).filter(Boolean)
+          total = shown.reduce((a, sc) => a + (sc.byHorizon[projectMonths]?.pnl ?? 0), 0)
+          base = shown.reduce((a, sc) => a + sc.now, 0)
+        }
+        return (
+          <span title={thetaScope === 'sc'
+            ? 'Total on short calls not in a spread, at the selected horizon, with every stock unchanged.'
+            : 'Total Open P&L at the selected horizon with every stock unchanged.'}
+            style={{ color: pnlColor(total, isDark), fontWeight: 700 }}>
+            {fmt(total)}
+            <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
+              {total - base >= 0 ? '+' : ''}{fmt(total - base)}
+            </div>
+          </span>)
+      } },
 
     { key: 'shares', label: 'Shares', title: 'Shares held', borderLeft: '1px',
       cell: (r, c) => <span style={{ color: textMid }}>{c.pos != null && c.pos > 0 ? c.pos.toLocaleString() : '—'}</span> },
