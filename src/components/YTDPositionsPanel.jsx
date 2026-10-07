@@ -15,6 +15,8 @@ import { prepareLeg, projectedPnl } from '../utils/optionMath'
 const MARK_SOURCE_LABELS = [
   ['ibkr', 'live IBKR bid/ask'],
   ['quote', 'live Polygon quote'],
+  ['ibkrClose', "today's closing IBKR bid/ask"],
+  ['agedIbkrClose', "today's closing IBKR book, aged for the stock's move since"],
   ['today', "today's Polygon print"],
   ['agedClose', 'a stale print aged forward for the underlying'],
   ['model', 'a Black-Scholes estimate'],

@@ -343,7 +343,81 @@ try {
     }
   })
 
-  console.log(`\n${passed} passed\n`)
+  console.log('')
+  console.log("Today's closing IBKR book outranks the model")
+
+  // The outage case. A live mark expires ten minutes after the last recorder
+  // push, so once IB Gateway stops -- or the session simply ends -- every leg
+  // used to fall past Polygon (which serves no option quotes on this plan) to a
+  // model whose vol is backed out of the ORIGINAL sale, months and many dollars
+  // ago. Every push also persists the two-sided mids it saw, so a real market in
+  // the contract from today is already on disk; these prove it is now used.
+  //
+  // A FOURTH leg, deliberately given no live push, because the three above have
+  // fresh marks and a fresh mark rightly outranks a close. Added after the
+  // assertions above have run against their own fetches, so it cannot disturb
+  // them.
+  const LATE_CALL = sym('Call', 600)
+  const CLOSE_BID = 4.20, CLOSE_ASK = 4.60, CLOSE_MID = (CLOSE_BID + CLOSE_ASK) / 2
+  const etToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  const lateKey = `AAPL|${expiry.replace(/-/g, '')}|600|C`
+
+  addTrade(LATE_CALL, 'STO', 1, 250, false)
+  db.prepare(`
+    INSERT INTO short_call_entries (user_id, symbol, ticker, strike, expiry, contracts, premium, sale_date, underlying_close)
+    VALUES (?, ?, 'AAPL', 600, ?, 1, 250, date('now','-3 day'), 310)
+  `).run(userId, LATE_CALL, expiry)
+
+  const { databaseService: dbs } = await import('./services/database.js')
+  dbs.saveIbkrOptionCloses(userId, etToday,
+    [{ key: lateKey, mid: CLOSE_MID, bid: CLOSE_BID, ask: CLOSE_ASK }])
+
+  const res3 = await (await fetch(`${BASE}/api/options-pnl/ytd`, { headers: { cookie } })).json()
+  const row3 = (res3.byUnderlying || []).find(r => r.ticker === 'AAPL')
+
+  test('a stored close is readable for TODAY, not only for prior days', () => {
+    // getPriorIbkrOptionCloses reads mark_date < today by design, because its job
+    // is the Day P&L baseline. Marking after the close needs the SAME day, which
+    // is why a second reader exists rather than loosening that one.
+    const back = dbs.getIbkrOptionClosesOn(userId, etToday)
+    assert.ok(back[lateKey], `nothing stored under ${lateKey}: ${JSON.stringify(Object.keys(back))}`)
+    assert.ok(Math.abs(back[lateKey].mid - CLOSE_MID) < 1e-9, `mid ${back[lateKey].mid}`)
+    // The sides matter as much as the mid: exiting pays the ask on a short and
+    // takes the bid on a long, so Close Now cannot work from a mid alone.
+    assert.ok(Math.abs(back[lateKey].bid - CLOSE_BID) < 1e-9, `bid ${back[lateKey].bid}`)
+    assert.ok(Math.abs(back[lateKey].ask - CLOSE_ASK) < 1e-9, `ask ${back[lateKey].ask}`)
+  })
+
+  test('the leg with no live mark is priced from that close, not modelled', () => {
+    assert.ok(row3, 'no AAPL row after storing a close')
+    const src = row3.openMarkSources || {}
+    const fromClose = (src.ibkrClose || 0) + (src.agedIbkrClose || 0)
+    assert.ok(fromClose > 0,
+      `no leg marked from the stored close; sources were ${JSON.stringify(src)}`)
+  })
+
+  test('a fresh mark still beats a stored close', () => {
+    // Order matters both ways. The close is a fallback for when the book is
+    // gone, not a replacement for a live one -- three legs here do have live
+    // books and must still be using them.
+    const src = row3.openMarkSources || {}
+    assert.ok((src.ibkr || 0) >= 3,
+      `expected the 3 pushed legs to stay on the live book, sources ${JSON.stringify(src)}`)
+  })
+
+  test('Close Now covers the leg whose only book is the stored close', () => {
+    // The practical payoff: the column needs a bid/ask, and once the session
+    // ends the stored close is the only one left.
+    assert.ok(Number.isFinite(row3.openExitPnL),
+      'Close Now went blank even though a two-sided close is on disk')
+    // premium 2.50/sh - ask 4.60 = -2.10 x 100 on the new leg, on top of the
+    // three already checked. Only the direction is asserted, because the other
+    // legs' contribution is verified by its own test above.
+    assert.ok(row3.openExitPnL < row3.openUnrealizedPnL + 0.01,
+      'exiting must still cost more than the mid-based valuation')
+  })
+
+console.log(`\n${passed} passed\n`)
 } finally {
   await cleanup()
   setTimeout(() => process.exit(process.exitCode || 0), 100)

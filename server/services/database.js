@@ -1020,6 +1020,13 @@ try {
   `)
   db.exec(`CREATE INDEX IF NOT EXISTS idx_option_ibkr_closes_lookup
            ON option_ibkr_closes(user_id, mark_date DESC)`)
+  // The two sides as well as the mid. The mid alone is enough for a baseline to
+  // difference against, which is all this table was built for -- but marking a
+  // position after the close needs the SIDES, because exiting pays the ask on a
+  // short and takes the bid on a long. Without them Close Now has nothing to
+  // show once the live book goes away for the day.
+  try { db.exec(`ALTER TABLE option_ibkr_closes ADD COLUMN bid REAL`) } catch (e) { /* column already exists */ }
+  try { db.exec(`ALTER TABLE option_ibkr_closes ADD COLUMN ask REAL`) } catch (e) { /* column already exists */ }
   console.log('✅ option_ibkr_closes table ready')
 } catch (error) {
   console.error('Migration error (option_ibkr_closes):', error)
@@ -3299,15 +3306,16 @@ export class DatabaseService {
     if (!markDate || !entries.length) return 0
     try {
       const stmt = db.prepare(`
-        INSERT INTO option_ibkr_closes (user_id, contract_key, mark_date, mid)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO option_ibkr_closes (user_id, contract_key, mark_date, mid, bid, ask)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, contract_key, mark_date) DO UPDATE SET
-          mid = excluded.mid, updated_at = strftime('%s','now')
+          mid = excluded.mid, bid = excluded.bid, ask = excluded.ask,
+          updated_at = strftime('%s','now')
       `)
       const run = db.transaction(rows => {
         for (const r of rows) {
           if (!r?.key || !(r.mid > 0)) continue
-          stmt.run(userId, r.key, markDate, r.mid)
+          stmt.run(userId, r.key, markDate, r.mid, r.bid ?? null, r.ask ?? null)
         }
       })
       run(entries)
@@ -3327,6 +3335,37 @@ export class DatabaseService {
    * result. Only one date is returned, so every leg is compared against the
    * same session.
    */
+  /**
+   * The stored IBKR closes FOR one date, as { contract_key: {mid, bid, ask} }.
+   *
+   * The sibling below answers "what did this contract close at on the previous
+   * session", for differencing a day. This answers "what is the last real
+   * two-sided market we saw for it", which is a different job: once the book
+   * goes away for the day the live mark expires after ten minutes, and without
+   * this the code falls through to a model anchored on a months-old sale
+   * premium. A mid from 15:59 today, aged forward for what the underlying has
+   * done since, beats that comfortably -- and unlike `last` it can never be a
+   * print from days ago on a contract that barely trades.
+   */
+  getIbkrOptionClosesOn(userId = 1, markDate) {
+    try {
+      if (!markDate) return {}
+      const rows = db.prepare(`
+        SELECT contract_key, mid, bid, ask FROM option_ibkr_closes
+        WHERE user_id = ? AND mark_date = ?
+      `).all(userId, markDate)
+      const out = {}
+      for (const r of rows) {
+        if (!(r.mid > 0)) continue
+        out[r.contract_key] = { mid: r.mid, bid: r.bid || 0, ask: r.ask || 0 }
+      }
+      return out
+    } catch (e) {
+      console.error('Error reading IBKR option closes for date:', e)
+      return {}
+    }
+  }
+
   getPriorIbkrOptionCloses(userId = 1, beforeDate) {
     try {
       const row = db.prepare(`

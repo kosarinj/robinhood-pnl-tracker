@@ -3122,6 +3122,71 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         return optionMark(userId, parsed.ticker, exp, parsed.strike, parsed.type)
           || optionMark(orderFlowOwner(), parsed.ticker, exp, parsed.strike, parsed.type)
       }
+      /**
+       * Today's stored closing book for a contract, and a mark built from it.
+       *
+       * Every recorder push writes the two-sided mids it saw, last write of the
+       * day winning -- so after the close this holds a REAL market in the
+       * contract, taken minutes before the book went away. The live mark expires
+       * ten minutes after the last push, and without this the code falls past
+       * Polygon (no option quotes on this plan) to a model whose vol is backed
+       * out of the ORIGINAL sale: MRVL was sold near $150 and trades near $236,
+       * so that model is describing a different world.
+       *
+       * This is deliberately NOT the contract's `last`. On a 2028 LEAP a last
+       * can be days old -- the MRVL $380 printed at $76.25 on volume of one,
+       * four days stale, while the stock had fallen 8.65% -- whereas a stored
+       * close is always from today and always two-sided.
+       *
+       * Aged forward for whatever the underlying has done since, by the same
+       * repricing the extended-hours view uses. With the market shut the stock
+       * has not moved, so the ageing is a no-op and the close stands as the
+       * mark; in pre/post market it tracks the underlying instead of freezing.
+       */
+      const todayIbkrCloses = {
+        ...databaseService.getIbkrOptionClosesOn(orderFlowOwner(), todayET),
+        ...databaseService.getIbkrOptionClosesOn(userId, todayET),
+      }
+      const ibkrCloseBook = (parsed) => {
+        if (!parsed) return null
+        const k = optionKey(parsed.ticker, `${parsed.year}-${parsed.month}-${parsed.day}`,
+          parsed.strike, parsed.type)
+        const v = todayIbkrCloses[k]
+        return v && v.mid > 0 ? v : null
+      }
+      // The underlying's close today, so a stored option close can be aged from
+      // the same moment it was taken.
+      const undTodayByTicker = {}
+      {
+        const tks = [...new Set(Object.keys(todayIbkrCloses).map(k => k.split('|')[0]))]
+        await Promise.all(tks.map(async tk => {
+          try {
+            const px = await priceService.getPriceForDate(tk, todayET)
+            if (px > 0) undTodayByTicker[tk] = px
+          } catch (e) { /* no close: the mark stands unaged, which is still right */ }
+        }))
+      }
+      const agedIbkrClose = (parsed, ticker) => {
+        const book = ibkrCloseBook(parsed)
+        if (!book) return null
+        const raw = { mark: book.mid, book, basis: 'ibkrClose' }
+        const undNow = stockByTicker[ticker], undThen = undTodayByTicker[ticker]
+        // Below a tenth of a percent the ageing cannot say anything the close
+        // does not already, and running it only adds a model's assumptions.
+        if (!(undNow > 0) || !(undThen > 0) || Math.abs(undNow - undThen) / undThen <= 0.001) return raw
+        const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
+        const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+        const T0 = yrs(new Date(expiry).getTime() - new Date(todayET).getTime())
+        const T1 = yrs(new Date(expiry).getTime() - Date.now())
+        if (!(T0 > 0) || !(T1 > 0)) return raw
+        const sigma = impliedVol(book.mid, undThen, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
+        if (!(sigma > 0)) return raw
+        const aged = repriceFromClose({
+          type: parsed.type, closeMark: book.mid, S0: undThen, S1: undNow,
+          K: parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
+        })
+        return aged > 0 ? { mark: aged, book, basis: 'agedIbkrClose' } : raw
+      }
       // Raw bid/ask per contract, for the realistic cost of getting out.
       const optQuote = {}
       // When each stale close was printed, so it can be aged forward.
@@ -3258,6 +3323,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           currentOptionPrice = optToday[entry.symbol]
           markBasis = 'today'
         }
+        // Today's closing IBKR book, aged. Ahead of the Polygon stale close and
+        // the model because it is a real two-sided market in THIS contract from
+        // today, which neither of those can claim.
+        let ibkrCloseQuote = null
+        if (currentOptionPrice == null) {
+          const c = agedIbkrClose(parsed, ticker)
+          if (c) { currentOptionPrice = c.mark; markBasis = c.basis; ibkrCloseQuote = c.book }
+        }
         // A stale close AGED FORWARD for what the underlying has done since.
         //
         // This is the case that produced -3,363 against a broker's -2,000. The
@@ -3337,7 +3410,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Polygon first only because it is per-symbol here; in practice the
           // plan serves no option quotes at all, so the IBKR book is what makes
           // this column exist rather than a fallback for the odd gap.
-          const q = optQuote[entry.symbol]?.ask > 0 ? optQuote[entry.symbol] : ibkrQuote
+          const q = optQuote[entry.symbol]?.ask > 0 ? optQuote[entry.symbol]
+            : ibkrQuote?.ask > 0 ? ibkrQuote : ibkrCloseQuote
           if (q?.ask > 0) {
             openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (premiumPerShare - q.ask) * shares
             if (q.mid > 0) {
@@ -3357,6 +3431,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // the order-flow recorder was up, which is when the marks were at
           // their most trustworthy.
           const isMarket = markBasis === 'ibkr' || markBasis === 'quote' || markBasis === 'today'
+            || markBasis === 'ibkrClose'
           const prevBasis = openBasisByTicker[ticker]
           const thisBasis = isMarket ? 'market' : 'model'
           openBasisByTicker[ticker] = !prevBasis ? thisBasis
@@ -3480,10 +3555,15 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // had moved to the live book, which is its own inconsistency.
         const ibkrLegQuote = ibkrBook(leg.parsed)
         const ibkrLegMark = ibkrLegQuote?.mid > 0 ? ibkrLegQuote.mid : null
-        let nowMark = ibkrLegMark ?? optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        // Today's closing book sits between a live quote and a stale print, for
+        // the same reason as the loop above.
+        const legClose = ibkrLegMark == null && optFresh[leg.symbol] == null && !(optToday[leg.symbol] > 0)
+          ? agedIbkrClose(leg.parsed, ticker) : null
+        let nowMark = ibkrLegMark ?? optFresh[leg.symbol] ?? legClose?.mark ?? optClose[leg.symbol] ?? null
         let shortBasis = ibkrLegMark != null ? 'ibkr'
           : optFresh[leg.symbol] != null ? 'quote'
           : optToday[leg.symbol] > 0 ? 'today'
+          : legClose ? legClose.basis
           : optClose[leg.symbol] != null ? 'close' : null
         // Floored at exercise value, not merely defaulted to it when missing: a
         // stale quote can sit BELOW intrinsic, which is arbitrage, not a price.
@@ -3513,6 +3593,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // stale closes and still report "from real market prices".
         {
           const isMarket = shortBasis === 'ibkr' || shortBasis === 'quote' || shortBasis === 'today'
+            || shortBasis === 'ibkrClose'
           const thisBasis = isMarket ? 'market' : 'model'
           const prev = openBasisByTicker[ticker]
           openBasisByTicker[ticker] = !prev ? thisBasis : prev === thisBasis ? thisBasis : 'mixed'
@@ -3528,7 +3609,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // missing from the column while being present in Open P&L. A partial exit
         // figure beside a complete valuation is the same trap as the theta gap.
         {
-          const q = optQuote[leg.symbol]?.ask > 0 ? optQuote[leg.symbol] : ibkrLegQuote
+          const q = optQuote[leg.symbol]?.ask > 0 ? optQuote[leg.symbol]
+            : ibkrLegQuote?.ask > 0 ? ibkrLegQuote : legClose?.book
           if (q?.ask > 0) {
             openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (leg.premiumPerShare - q.ask) * shares
             if (q.mid > 0) {
@@ -3605,7 +3687,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // this leaves behind if the long side is excluded.
         const ibkrLongQuote = ibkrBook(leg.parsed)
         const ibkrLongMark = ibkrLongQuote?.mid > 0 ? ibkrLongQuote.mid : null
-        let nowMark = ibkrLongMark ?? optFresh[leg.symbol] ?? optClose[leg.symbol] ?? null
+        const longClose = ibkrLongMark == null && optFresh[leg.symbol] == null && !(optToday[leg.symbol] > 0)
+          ? agedIbkrClose(leg.parsed, ticker) : null
+        let nowMark = ibkrLongMark ?? optFresh[leg.symbol] ?? longClose?.mark ?? optClose[leg.symbol] ?? null
         // Which feed that came from. The short side has tracked this all along;
         // the long side never did, so on a book that is mostly bought contracts
         // the Open P&L source read as though only the short legs had one.
@@ -3616,6 +3700,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         let longBasis = ibkrLongMark != null ? 'ibkr'
           : optFresh[leg.symbol] != null ? 'quote'
           : optToday[leg.symbol] > 0 ? 'today'
+          : longClose ? longClose.basis
           : optClose[leg.symbol] != null ? 'close' : null
         // Long legs have no model fallback — modelOptionMark is built from
         // short_call_entries — so when the option snapshot fails, every one of
@@ -3649,6 +3734,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Same line as the short side: a live book, a live quote or a print
           // from today is market data; a stale close and exercise value are not.
           const isMarket = longBasis === 'ibkr' || longBasis === 'quote' || longBasis === 'today'
+            || longBasis === 'ibkrClose'
           const thisBasis = isMarket ? 'market' : 'model'
           const prev = openBasisByTicker[ticker]
           openBasisByTicker[ticker] = !prev ? thisBasis : prev === thisBasis ? thisBasis : 'mixed'
@@ -3731,7 +3817,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // Long: selling it takes the bid. Same source order as the shorts, and
         // the same reason -- Polygon serves no option quotes, so the IBKR book is
         // what gives this column anything to show.
-        const lq = optQuote[leg.symbol]?.bid > 0 ? optQuote[leg.symbol] : ibkrLongQuote
+        const lq = optQuote[leg.symbol]?.bid > 0 ? optQuote[leg.symbol]
+          : ibkrLongQuote?.bid > 0 ? ibkrLongQuote : longClose?.book
         if (lq?.bid > 0) {
           openExitByTicker[ticker] = (openExitByTicker[ticker] || 0) + (lq.bid - leg.costPerShare) * shares
           if (lq.mid > 0) {
@@ -9222,7 +9309,7 @@ app.post('/api/orderflow/option-marks', (req, res) => {
     for (const [key, m] of optionMarks) {
       const [uid, contract] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]
       if (Number(uid) !== user.userId) continue
-      if (m.bid > 0 && m.ask > 0) rows.push({ key: contract, mid: (m.bid + m.ask) / 2 })
+      if (m.bid > 0 && m.ask > 0) rows.push({ key: contract, mid: (m.bid + m.ask) / 2, bid: m.bid, ask: m.ask })
     }
     if (rows.length) databaseService.saveIbkrOptionCloses(user.userId, etDate, rows)
   } catch (e) { console.error('option close persist failed:', e.message) }
