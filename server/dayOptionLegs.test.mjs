@@ -485,8 +485,46 @@ try {
   // not add up to the move in Options Total -- two implementations of one idea,
   // disagreeing. The panel now displays THESE rows, so the only thing worth
   // testing is that they still sum to the column they came from.
+  // A completed round trip, so there is realized P&L to reconcile against. The
+  // fixture above is all opens, which is how an empty-list bug slipped past a
+  // reconciliation test: 0 === 0 holds when there is nothing to add up.
+  const CLOSED_CALL = sym('Call', 400)
+  const addOn = (symbol, code, contracts, amount, isBuy, offsetDays) =>
+    db.prepare(`
+      INSERT INTO trades (user_id, symbol, trans_date, trans_code, quantity, contracts, price, amount, is_option, is_buy, upload_date, description)
+      VALUES (?, ?, date('now', ?), ?, ?, ?, 0, ?, 1, ?, date('now', ?), ?)
+    `).run(userId, symbol, `-${offsetDays} day`, code, contracts, contracts, amount,
+           isBuy ? 1 : 0, `-${offsetDays} day`, symbol)
+  addOn(CLOSED_CALL, 'STO', 1, 500, false, 5)   // sold for a 500 credit
+  addOn(CLOSED_CALL, 'BTC', 1, 200, true, 2)    // bought back for 200 -> +300
+
   const resLedger = await (await fetch(
     `${BASE}/api/options-pnl/ytd?realizedTrades=1`, { headers: { cookie } })).json()
+
+  test('the rows are NOT EMPTY when closes exist', () => {
+    // This is the assertion that was missing, and its absence let a broken
+    // filter ship. The fixture below has real closes, so an empty list is a
+    // failure -- whereas "the rows sum to Options Total" passes vacuously at
+    // 0 === 0 when the list is empty and the total happens to be zero. A
+    // reconciliation test needs something to reconcile.
+    const closes = (resLedger.realizedOptionTrades || [])
+    assert.ok(closes.length >= 1,
+      `expected at least the closed round trip, got ${closes.length}`)
+    const nonZero = (resLedger.byUnderlying || []).some(r => Math.abs(r.totalRealized) > 0.001)
+    if (nonZero) {
+      assert.ok(closes.some(r => Math.abs(r.realizedPnl) > 0.001),
+        'Options Total is non-zero but every row reads zero')
+    }
+  })
+
+  test('the round trip books the figure the trades imply', () => {
+    const r = (resLedger.realizedOptionTrades || []).find(x => x.strike === 400)
+    assert.ok(r, 'the closed 400 call is missing from the ledger')
+    assert.ok(Math.abs(r.realizedPnl - 300) < 0.02,
+      `expected +300 (500 credit less 200 buyback), got ${r.realizedPnl}`)
+    assert.equal(r.side, 'short')
+    assert.equal(r.transCode, 'BTC')
+  })
 
   test('the per-trade rows are only sent when asked for', () => {
     // Every close over a long history is a lot of JSON for callers that want

@@ -2699,15 +2699,19 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
      * Stock is not here -- the stack above books options only, and stock realized
      * comes from calculateStockPnL -- so the ledger keeps its own stock rows.
      */
+    // No is_option check: getRawOptionTrades already restricts to is_option = 1
+    // and does not project the column, so testing it here matched nothing and
+    // emptied the whole list. Nor description, which it also does not select --
+    // the symbol IS the contract for an option.
     const realizedOptionTrades = sortedTrades
-      .filter(t => t._realizedPnl != null && t.is_option)
+      .filter(t => t._realizedPnl != null)
       .map(t => {
         const parsed = parseOptionDescription(t.symbol || '')
         return {
           date: t.trans_date,
           symbol: t.symbol,
           ticker: parsed?.ticker || t.symbol,
-          description: t.description || t.symbol,
+          description: t.symbol,
           transCode: (t.trans_code || '').toUpperCase(),
           contracts: Math.abs(t.contracts || 1),
           side: t._closingShort ? 'short' : 'long',
