@@ -4097,6 +4097,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // or were bought back since Monday. A subset of Options Total scoped
           // by date, never a term of Net.
           shortCallsThisWeek: 0, shortCallsLastWeek: 0,
+          optionsThisWeek: 0, optionsLastWeek: 0,
           realizedExpiredCalls: 0, realizedExpiredPuts: 0,
           // The vertical-spread slice of totalRealized: both legs of every
           // spread, so the figure is what the spread actually made — the credit
@@ -4162,6 +4163,14 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const d = String(t.trans_date || '')
           if (d >= thisMonday) entry.shortCallsThisWeek += t._realizedPnl
           else if (d >= lastMonday) entry.shortCallsLastWeek += t._realizedPnl
+        }
+        // Every option leg closed this week, not only short calls. "How much did
+        // I make on this name this week" is a question about the position, and on
+        // a book of verticals the short call alone is one leg of it.
+        {
+          const d = String(t.trans_date || '')
+          if (d >= thisMonday) entry.optionsThisWeek += t._realizedPnl
+          else if (d >= lastMonday) entry.optionsLastWeek += t._realizedPnl
         }
         if (optionType === 'call') {
           if (t._closingShort) entry.realizedShortCalls += t._realizedPnl
@@ -4286,6 +4295,33 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const pricesFetched = Object.keys(stockPrices).filter(t => stockPrices[t] > 0).length
     console.log(`YTD${asOf ? ` (as of ${asOf})` : ''}: ${Object.keys(stockPositions).length} stock positions, ${allTickers.length} tickers, ${pricesFetched} prices`)
 
+    // Week to date, measured from the last close BEFORE this Monday.
+    //
+    // Replaces fetchWeeklyChange, which asked Yahoo's v7 spark endpoint for a
+    // trailing five days. Two problems: v7 answers 401 now -- the same family
+    // that stopped Current Stock updating -- so the column was simply blank; and
+    // a trailing five days is not "this week", which is the question being
+    // asked. getPriceForDate walks back to the last real session, so a Monday
+    // holiday resolves to the Friday before it rather than coming back empty.
+    const weekStartPrices = {}
+    if (allTickers.length > 0 && !asOf) {
+      // The calendar day before Monday. getPriceForDate walks back from there to
+      // the last real session, so Sunday resolves to Friday's close. Computed
+      // here rather than with the dayBefore helper below, which is declared
+      // further down and inside a narrower block.
+      const refDate = (() => {
+        const d = new Date(`${thisMonday}T00:00:00Z`)
+        d.setUTCDate(d.getUTCDate() - 1)
+        return d.toISOString().slice(0, 10)
+      })()
+      await Promise.all(allTickers.map(async t => {
+        try {
+          const px = await priceService.getPriceForDate(t, refDate)
+          if (px > 0) weekStartPrices[t] = px
+        } catch (e) { /* no reference close: the column reports nothing rather than guessing */ }
+      }))
+    }
+
     // Weekly/daily change are "today"-relative — only for the live view.
     let weeklyChange = {}
     let dailyChange = {}
@@ -4399,6 +4435,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           },
           // A SUBSET of totalRealized, not a separate term of Net.
           realizedExpired: r2(e.realizedExpired),
+          optionsThisWeek: r2(e.optionsThisWeek),
+          optionsLastWeek: r2(e.optionsLastWeek),
           shortCallsThisWeek: r2(e.shortCallsThisWeek),
           shortCallsLastWeek: r2(e.shortCallsLastWeek),
           // Mark-to-market movement on open short calls. Null when there is no
@@ -4486,6 +4524,11 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           dividends: dividendsByTicker[e.ticker] ?? null,
           weeklyChangePct: wk ? wk.pct : null,
           weeklyChange: wk ? wk.change : null,
+          // The close this week is measured from. Dollars are left to the caller
+          // so the share count and current price come from the same resolution
+          // every other dollar figure in the panel uses -- manual overrides
+          // included. Computing them here would quietly ignore those.
+          weekStartPrice: weekStartPrices[e.ticker] ?? null,
           dayPnl,
           dayStockPnl,
           dayOptionPnl,
