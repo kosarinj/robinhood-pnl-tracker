@@ -2673,9 +2673,53 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
           t._realizedPnl = Math.round((closingShort ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
           t._closingShort = closingShort
+          // Kept so the Realized P&L ledger can show the two sides it is built
+          // from rather than recomputing them under a different convention.
+          t._costBasis = Math.round(costBasis * 100) / 100
+          t._proceeds = Math.round(proceeds * 100) / 100
         }
       }
     })
+
+    /**
+     * Every closing OPTION trade with the realized P&L this endpoint booked for
+     * it, so the Realized P&L ledger can display these figures instead of
+     * recomputing them.
+     *
+     * It recomputed from raw trades with FIFO while this matches LIFO, so the two
+     * screens disagreed on any contract with several open lots at different
+     * premiums -- which on a book that rolls the same strike weekly is most of
+     * them. A day's realized then did not add up to the move in Options Total,
+     * because the two were different arithmetic over the same trades.
+     *
+     * Exposed from THIS handler rather than a route of its own on purpose: the
+     * ledger and the total are now the same numbers by construction, not by two
+     * implementations agreeing. A separate route could drift again.
+     *
+     * Stock is not here -- the stack above books options only, and stock realized
+     * comes from calculateStockPnL -- so the ledger keeps its own stock rows.
+     */
+    const realizedOptionTrades = sortedTrades
+      .filter(t => t._realizedPnl != null && t.is_option)
+      .map(t => {
+        const parsed = parseOptionDescription(t.symbol || '')
+        return {
+          date: t.trans_date,
+          symbol: t.symbol,
+          ticker: parsed?.ticker || t.symbol,
+          description: t.description || t.symbol,
+          transCode: (t.trans_code || '').toUpperCase(),
+          contracts: Math.abs(t.contracts || 1),
+          side: t._closingShort ? 'short' : 'long',
+          optionType: parsed?.type || null,
+          strike: parsed?.strike ?? null,
+          // Named from the reader's side rather than the matcher's: what came in
+          // against what it cost, whichever way round the trade was.
+          sellValue: t._closingShort ? t._costBasis : t._proceeds,
+          costBasis: t._closingShort ? t._proceeds : t._costBasis,
+          realizedPnl: t._realizedPnl,
+        }
+      })
 
     // Which closes were legs of a vertical.
     //
@@ -4493,7 +4537,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         row,
       })
     }
-    res.json({ success: true, byUnderlying: result, globalStart, perSymbolDates, asOf })
+    res.json({
+      success: true, byUnderlying: result, globalStart, perSymbolDates, asOf,
+      // Only when asked for. Every row of it on a long history is a lot of JSON
+      // to send to callers that only want the per-underlying totals.
+      ...(req.query.realizedTrades ? { realizedOptionTrades } : {}),
+    })
   } catch (e) {
     console.error('Error in /api/options-pnl/ytd:', e.message)
     res.status(500).json({ success: false, error: e.message })

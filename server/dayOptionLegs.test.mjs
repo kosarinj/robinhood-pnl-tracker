@@ -476,6 +476,67 @@ try {
     }
   })
 
+  console.log('')
+  console.log('The realized ledger reconciles with Options Total')
+
+  // The Realized P&L panel used to recompute realized from raw trades with FIFO
+  // while this handler matches LIFO. On a contract with several open lots at
+  // different premiums the two give different answers, so a day's realized did
+  // not add up to the move in Options Total -- two implementations of one idea,
+  // disagreeing. The panel now displays THESE rows, so the only thing worth
+  // testing is that they still sum to the column they came from.
+  const resLedger = await (await fetch(
+    `${BASE}/api/options-pnl/ytd?realizedTrades=1`, { headers: { cookie } })).json()
+
+  test('the per-trade rows are only sent when asked for', () => {
+    // Every close over a long history is a lot of JSON for callers that want
+    // the per-underlying totals and nothing else.
+    assert.ok(Array.isArray(resLedger.realizedOptionTrades),
+      'realizedTrades=1 should return the rows')
+    assert.equal(res3.realizedOptionTrades, undefined,
+      'a request without the flag should not carry them')
+  })
+
+  test('they sum to Options Total, per ticker', () => {
+    for (const row of resLedger.byUnderlying || []) {
+      const mine = resLedger.realizedOptionTrades.filter(r => r.ticker === row.ticker)
+      const sum = mine.reduce((a, r) => a + r.realizedPnl, 0)
+      assert.ok(Math.abs(sum - row.totalRealized) < 0.05,
+        `${row.ticker}: rows sum to ${sum.toFixed(2)} but Options Total is ${row.totalRealized}`)
+    }
+  })
+
+  test('every row carries what the ledger displays', () => {
+    for (const r of resLedger.realizedOptionTrades) {
+      assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(r.date || ''), `bad date ${r.date}`)
+      assert.ok(r.ticker, 'no ticker to group by')
+      assert.ok(r.transCode, 'no trans code')
+      assert.ok(r.side === 'short' || r.side === 'long', `bad side ${r.side}`)
+      assert.equal(typeof r.realizedPnl, 'number')
+      // Both sides of the figure, so the ledger shows what came in against what
+      // it cost rather than only the net.
+      assert.equal(typeof r.sellValue, 'number')
+      assert.equal(typeof r.costBasis, 'number')
+    }
+  })
+
+  test('sellValue minus costBasis IS the realized figure', () => {
+    // The two columns are named from the reader's side, not the matcher's, so a
+    // short close reads as credit-minus-buyback rather than the other way up.
+    // If this drifts the ledger shows two numbers that do not make the third.
+    for (const r of resLedger.realizedOptionTrades) {
+      assert.ok(Math.abs((r.sellValue - r.costBasis) - r.realizedPnl) < 0.02,
+        `${r.symbol}: ${r.sellValue} - ${r.costBasis} != ${r.realizedPnl}`)
+    }
+  })
+
+  test('only closes appear, never an opening trade', () => {
+    for (const r of resLedger.realizedOptionTrades) {
+      assert.ok(!['BTO', 'STO'].includes(r.transCode),
+        `${r.transCode} is an opening trade and has no realized P&L`)
+    }
+  })
+
 console.log(`\n${passed} passed\n`)
 } finally {
   await cleanup()

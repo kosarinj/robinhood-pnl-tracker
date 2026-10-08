@@ -2568,7 +2568,7 @@ function AuthenticatedApp({ user }) {
             <YTDPositionsPanel pnlData={brokerScopedPnl} broker={brokerFilter} onPickTicker={setDisplayChartSymbol} />
           </div>
           {positionsTab === 'spreads'  && <SpreadsPanel broker={brokerFilter} />}
-          {positionsTab === 'realized' && <DailyRealizedPnLPanel trades={brokerScopedTrades} />}
+          {positionsTab === 'realized' && <DailyRealizedPnLPanel trades={brokerScopedTrades} broker={brokerFilter} />}
           {positionsTab === 'cash'     && <CashCheckPanel broker={brokerFilter} />}
           {positionsTab === 'shorts'   && <ShortCallTracker broker={brokerFilter} />}
           {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}

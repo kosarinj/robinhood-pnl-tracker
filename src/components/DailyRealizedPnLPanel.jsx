@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 
 const fmt = (n) => {
@@ -40,12 +40,24 @@ function getUnderlying(tx) {
   return m ? m[1] : tx.symbol
 }
 
-// FIFO matching over a date range — returns one row per closing transaction.
+/**
+ * FIFO matching over a date range — one row per closing transaction.
+ *
+ * STOCK ONLY now. Options come from /api/options-pnl/ytd, which is the same
+ * handler that produces Options Total, so the ledger and that column are the
+ * same arithmetic rather than two implementations that happen to agree. They
+ * did not agree: this is FIFO, the server matches LIFO, and on a contract with
+ * several open lots at different premiums the two give different answers -- so a
+ * day's realized did not add up to the move in Options Total.
+ *
+ * Stock stays here because the server's stack books options only; stock realized
+ * comes from calculateStockPnL, which is not per-trade.
+ */
 function computeTransactions(trades, fromDate, toDate) {
   if (!fromDate || !toDate) return []
 
   const bySymbol = {}
-  trades.forEach(t => {
+  trades.filter(t => !t.isOption).forEach(t => {
     if (!bySymbol[t.symbol]) bySymbol[t.symbol] = []
     bySymbol[t.symbol].push(t)
   })
@@ -141,8 +153,28 @@ function getDatesWithCloses(trades) {
   return [...dates].sort().reverse()
 }
 
-export default function DailyRealizedPnLPanel({ trades }) {
+export default function DailyRealizedPnLPanel({ trades, broker = 'all' }) {
   const { isDark } = useTheme()
+
+  // Option closes, with the realized P&L the YTD handler booked for each. Asked
+  // for from a date early enough that the ledger's own range can move freely
+  // without refetching -- the endpoint drops closes before startDate.
+  const [optionCloses, setOptionCloses] = useState(null)
+  const [optErr, setOptErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    const q = new URLSearchParams({ realizedTrades: '1', startDate: '2000-01-01' })
+    if (broker && broker !== 'all') q.set('broker', broker)
+    fetch(`/api/options-pnl/ytd?${q}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => {
+        if (!alive) return
+        if (d?.success) setOptionCloses(d.realizedOptionTrades || [])
+        else setOptErr(d?.error || 'Could not load option closes')
+      })
+      .catch(e => { if (alive) setOptErr(e.message) })
+    return () => { alive = false }
+  }, [broker])
 
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
@@ -150,7 +182,11 @@ export default function DailyRealizedPnLPanel({ trades }) {
   // 'ledger' = every close in date order; 'ticker' = the same closes rolled up.
   const [view, setView] = useState('ledger')
 
-  const allDates = useMemo(() => getDatesWithCloses(trades || []), [trades])
+  const allDates = useMemo(() => {
+    const fromStock = getDatesWithCloses((trades || []).filter(t => !t.isOption))
+    const fromOpts = (optionCloses || []).map(r => r.date).filter(Boolean)
+    return [...new Set([...fromStock, ...fromOpts])].sort().reverse()
+  }, [trades, optionCloses])
   const latestDate = allDates[0] || ''
   const earliestDate = allDates[allDates.length - 1] || ''
 
@@ -172,10 +208,23 @@ export default function DailyRealizedPnLPanel({ trades }) {
     return null
   }, [fromDate, toDate, today, weekStart, monthStart, earliestDate, latestDate])
 
-  const allTransactions = useMemo(
-    () => computeTransactions(trades || [], effectiveFrom, effectiveTo),
-    [trades, effectiveFrom, effectiveTo]
-  )
+  const allTransactions = useMemo(() => {
+    const stock = computeTransactions(trades || [], effectiveFrom, effectiveTo)
+    const opts = (optionCloses || [])
+      .filter(r => r.date >= effectiveFrom && r.date <= effectiveTo)
+      .map(r => ({
+        symbol: r.symbol, isOption: true, description: r.description,
+        transCode: r.transCode, date: r.date,
+        sellValue: r.sellValue, costBasis: r.costBasis,
+        realizedPnL: r.realizedPnl,
+        side: r.side, contracts: r.contracts,
+      }))
+    return [...stock, ...opts].sort((a, b) =>
+      b.date !== a.date
+        ? b.date.localeCompare(a.date)
+        : Math.abs(b.realizedPnL) - Math.abs(a.realizedPnL)
+    )
+  }, [trades, optionCloses, effectiveFrom, effectiveTo])
 
   const filteredTransactions = useMemo(() => {
     const q = search.trim().toUpperCase()
