@@ -2669,14 +2669,36 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           left -= matched; top.remaining -= matched
           if (top.remaining === 0) stack.pop()
         }
-        if (left === 0) {
-          const proceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
+        // Book whatever DID match, not only an exact match.
+        //
+        // This used to require left === 0, so a close that ran the stack dry
+        // booked nothing -- while the loop above had already consumed and popped
+        // the lots it matched. Both halves were lost: the opening cost basis and
+        // the P&L. One duplicate close row is enough to cause it, and this book
+        // has known duplicates; the contract then reports less realized P&L than
+        // it made, silently and permanently.
+        //
+        // Proceeds are pro-rated to the matched contracts, because `amount` is
+        // the whole closing trade. Unmatched size is recorded rather than
+        // dropped: a close with nothing to match against means the trade history
+        // is incomplete, which is worth saying instead of quietly rounding to a
+        // smaller number.
+        const matchedContracts = contracts - left
+        if (matchedContracts > 0) {
+          const fullProceeds = ['OEXP', 'OASGN'].includes(tc) ? 0 : amount
+          const proceeds = contracts > 0 ? fullProceeds * (matchedContracts / contracts) : fullProceeds
           t._realizedPnl = Math.round((closingShort ? costBasis - proceeds : proceeds - costBasis) * 100) / 100
           t._closingShort = closingShort
           // Kept so the Realized P&L ledger can show the two sides it is built
           // from rather than recomputing them under a different convention.
           t._costBasis = Math.round(costBasis * 100) / 100
           t._proceeds = Math.round(proceeds * 100) / 100
+          t._matchedContracts = matchedContracts
+          t._unmatchedContracts = left
+        } else if (left > 0) {
+          // Nothing matched at all -- an orphan close. No lots were touched, so
+          // there is nothing to salvage, but the count is worth carrying.
+          t._unmatchedContracts = left
         }
       }
     })
@@ -2722,8 +2744,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           sellValue: t._closingShort ? t._costBasis : t._proceeds,
           costBasis: t._closingShort ? t._proceeds : t._costBasis,
           realizedPnl: t._realizedPnl,
+          // >0 means this close had more contracts than the history could
+          // account for, so the figure covers only part of the trade.
+          unmatchedContracts: t._unmatchedContracts || 0,
         }
       })
+
+    // Closes the history could not fully account for, per ticker. A realized
+    // total built over these is incomplete by construction, and saying so beats
+    // presenting a smaller number as though it were the whole.
+    const unmatchedClosesByTicker = {}
+    for (const t of sortedTrades) {
+      if (!(t._unmatchedContracts > 0)) continue
+      const tk = parseOptionDescription(t.symbol || '')?.ticker
+      if (!tk) continue
+      const e = unmatchedClosesByTicker[tk] || (unmatchedClosesByTicker[tk] = { closes: 0, contracts: 0 })
+      e.closes += 1
+      e.contracts += t._unmatchedContracts
+    }
 
     // Which closes were legs of a vertical.
     //
@@ -4388,6 +4426,10 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // Sorted biggest contributor first at the longest horizon, so whatever
           // explains the figure is at the top wherever the reader has the chips
           // set. Legs are few per ticker, so one order serves all horizons.
+          // Non-null when some close could not be fully matched against the
+          // opening history, so the reader knows the realized figure beside it
+          // covers only part of what was traded.
+          unmatchedCloses: unmatchedClosesByTicker[e.ticker] || null,
           projectionLegs: (projectionLegsByTicker[e.ticker] || null)?.slice().sort((a, b) => {
             const last = PROJECT_HORIZONS[PROJECT_HORIZONS.length - 1].key
             return Math.abs(b.byHorizon[last]?.pnl ?? 0) - Math.abs(a.byHorizon[last]?.pnl ?? 0)
