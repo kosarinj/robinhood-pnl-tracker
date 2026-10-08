@@ -3143,40 +3143,70 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
        * has not moved, so the ageing is a no-op and the close stands as the
        * mark; in pre/post market it tracks the underlying instead of freezing.
        */
-      const todayIbkrCloses = {
-        ...databaseService.getIbkrOptionClosesOn(orderFlowOwner(), todayET),
-        ...databaseService.getIbkrOptionClosesOn(userId, todayET),
+      // The freshest stored book per contract, on or before today -- not only
+      // today's. Today-only covered the nightly gap but not an outage: with
+      // Gateway down for a session those legs had no close to fall back to and
+      // dropped to the model anyway, which is the case that started this.
+      //
+      // Capped at CLOSE_MAX_AGE_DAYS. Beyond that the vol backed out of the old
+      // book is describing a different market and the ageing is carrying too
+      // much of the answer; the Polygon path and the model are no worse, and
+      // they do not borrow a stale book's authority.
+      const CLOSE_MAX_AGE_DAYS = 10
+      const ibkrCloses = {
+        ...databaseService.getLatestIbkrOptionCloses(orderFlowOwner(), todayET),
+        ...databaseService.getLatestIbkrOptionCloses(userId, todayET),
       }
+      const dayMs = 24 * 3600 * 1000
+      const closeAgeDays = (markDate) =>
+        Math.round((new Date(`${todayET}T00:00:00Z`) - new Date(`${markDate}T00:00:00Z`)) / dayMs)
       const ibkrCloseBook = (parsed) => {
         if (!parsed) return null
         const k = optionKey(parsed.ticker, `${parsed.year}-${parsed.month}-${parsed.day}`,
           parsed.strike, parsed.type)
-        const v = todayIbkrCloses[k]
-        return v && v.mid > 0 ? v : null
+        const v = ibkrCloses[k]
+        if (!v || !(v.mid > 0)) return null
+        return closeAgeDays(v.markDate) <= CLOSE_MAX_AGE_DAYS ? v : null
       }
-      // The underlying's close today, so a stored option close can be aged from
-      // the same moment it was taken.
-      const undTodayByTicker = {}
+      // The underlying's close on the date each stored book was taken, so the
+      // option is aged from the same moment -- not from an unrelated day.
+      const undAtCloseByKey = {}
       {
-        const tks = [...new Set(Object.keys(todayIbkrCloses).map(k => k.split('|')[0]))]
-        await Promise.all(tks.map(async tk => {
+        const pairs = [...new Set(Object.values(ibkrCloses)
+          .filter(v => closeAgeDays(v.markDate) <= CLOSE_MAX_AGE_DAYS)
+          .map(v => v.markDate)
+          .flatMap(d => Object.keys(ibkrCloses).map(k => `${k.split('|')[0]}|${d}`)))]
+        await Promise.all(pairs.map(async key => {
+          const [tk, dt] = key.split('|')
           try {
-            const px = await priceService.getPriceForDate(tk, todayET)
-            if (px > 0) undTodayByTicker[tk] = px
-          } catch (e) { /* no close: the mark stands unaged, which is still right */ }
+            const px = await priceService.getPriceForDate(tk, dt)
+            if (px > 0) undAtCloseByKey[key] = px
+          } catch (e) { /* no close: the mark stands unaged, which is still honest */ }
         }))
       }
+      /**
+       * A mark from the freshest stored book, aged forward for the underlying.
+       *
+       * This is what covers all three windows. During the session a live book
+       * wins and this is never reached. Pre and post market the option does not
+       * quote at all -- US single-name options trade 09:30-16:00 -- so the last
+       * real book, moved for what the stock has done since, is the best answer
+       * that exists. stockByTicker already carries the extended-hours price and
+       * the recorder's overnight mark, so "since" means genuinely since.
+       */
       const agedIbkrClose = (parsed, ticker) => {
         const book = ibkrCloseBook(parsed)
         if (!book) return null
         const raw = { mark: book.mid, book, basis: 'ibkrClose' }
-        const undNow = stockByTicker[ticker], undThen = undTodayByTicker[ticker]
+        const undNow = stockByTicker[ticker]
+        const undThen = undAtCloseByKey[`${ticker}|${book.markDate}`]
         // Below a tenth of a percent the ageing cannot say anything the close
         // does not already, and running it only adds a model's assumptions.
         if (!(undNow > 0) || !(undThen > 0) || Math.abs(undNow - undThen) / undThen <= 0.001) return raw
         const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
         const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
-        const T0 = yrs(new Date(expiry).getTime() - new Date(todayET).getTime())
+        // Time to expiry AS AT the close, measured from that date's 16:00 ET.
+        const T0 = yrs(new Date(expiry).getTime() - new Date(`${book.markDate}T20:00:00Z`).getTime())
         const T1 = yrs(new Date(expiry).getTime() - Date.now())
         if (!(T0 > 0) || !(T1 > 0)) return raw
         const sigma = impliedVol(book.mid, undThen, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
@@ -5836,10 +5866,39 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
         ...entries.filter(e => openShortSymbols.has(e.symbol)).map(e => e.symbol),
         ...availableLongs.map(l => l.symbol),
       ]
+      // The same source order every other view uses, and for the same reason the
+      // comment on /api/options-pnl/ytd gives: two views of one position must not
+      // price it differently. This endpoint was the last one still on Polygon
+      // alone, so the tracker agreed with Net + Open whenever Polygon's print
+      // happened to be good and silently disagreed when it did not -- right on a
+      // liquid name, wrong on a LEAP that has not traded for days.
+      //
+      //   live IBKR book -> freshest stored IBKR close (aged) -> Polygon
+      //
+      // Both are looked up per contract and under the order-flow owner as well,
+      // exactly as optionMark is consulted elsewhere.
+      const trackerIbkrCloses = {
+        ...databaseService.getLatestIbkrOptionCloses(orderFlowOwner(), todayStrLocal()),
+        ...databaseService.getLatestIbkrOptionCloses(req.user.userId, todayStrLocal()),
+      }
       for (const symbol of [...new Set(toPrice)]) {
         const polygonTicker = toPolygonTicker(symbol)
         const parsed = parseOptionDescription(symbol)
         if (!polygonTicker || !parsed) continue
+        const exp = `${parsed.year}-${parsed.month}-${parsed.day}`
+        const live = optionMark(req.user.userId, parsed.ticker, exp, parsed.strike, parsed.type)
+          || optionMark(orderFlowOwner(), parsed.ticker, exp, parsed.strike, parsed.type)
+        if (live?.mid > 0) {
+          optionPrices[symbol] = live.mid
+          continue              // a live two-sided book needs no fallback behind it
+        }
+        // No live book: the last real one for this contract. Used unaged here --
+        // the tracker reads per contract rather than totalling a book, and the
+        // ageing needs an underlying price per close date that this endpoint does
+        // not gather. Still a real two-sided market, which beats a stale print.
+        const storedKey = optionKey(parsed.ticker, exp, parsed.strike, parsed.type)
+        const stored = trackerIbkrCloses[storedKey]
+        if (stored?.mid > 0) optionClose[symbol] = stored.mid
         // Real (delayed) bid/ask mid from the quotes endpoint — the actual market mark.
         const qMid = await fetchOptionQuoteMid(polygonTicker, polygonKey)
         if (qMid > 0) optionPrices[symbol] = qMid
@@ -5853,7 +5912,10 @@ app.get('/api/short-calls', requireAuth, async (req, res) => {
               if (fresh > 0) optionPrices[symbol] = fresh
             }
             const stale = staleOptionMark(snap)   // daily close / old trade (fallback)
-            if (stale > 0) optionClose[symbol] = stale
+            // Only if no stored IBKR book filled this slot. A two-sided market
+            // from the recorder outranks a daily close, and this assignment used
+            // to run unconditionally.
+            if (stale > 0 && !(optionClose[symbol] > 0)) optionClose[symbol] = stale
             const underlyingPrice = snap.underlying_asset?.price
             if (underlyingPrice > 0) polygonStockPrices[parsed.ticker] = underlyingPrice
           }

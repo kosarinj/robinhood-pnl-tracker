@@ -3366,6 +3366,43 @@ export class DatabaseService {
     }
   }
 
+  /**
+   * Per contract, the most recent stored close on or before `onOrBefore`, as
+   * { contract_key: {mid, bid, ask, markDate} }.
+   *
+   * PER CONTRACT rather than one shared session, which is the opposite of the
+   * sibling below and deliberate. That one feeds a day-over-day difference, so
+   * every leg must come from the SAME session or the subtraction compares two
+   * different days. This one supplies a MARK, and a mark only has to be the
+   * freshest real book that exists for its own contract -- a liquid leg quoted
+   * an hour ago and a LEAP last quoted on Tuesday should each use their own.
+   *
+   * Carrying markDate is what makes ageing possible: the caller needs the
+   * underlying's price on that date to move the option forward from it.
+   */
+  getLatestIbkrOptionCloses(userId = 1, onOrBefore) {
+    try {
+      if (!onOrBefore) return {}
+      const rows = db.prepare(`
+        SELECT contract_key, mid, bid, ask, mark_date FROM (
+          SELECT contract_key, mid, bid, ask, mark_date,
+                 ROW_NUMBER() OVER (PARTITION BY contract_key ORDER BY mark_date DESC) AS rn
+          FROM option_ibkr_closes
+          WHERE user_id = ? AND mark_date <= ?
+        ) WHERE rn = 1
+      `).all(userId, onOrBefore)
+      const out = {}
+      for (const r of rows) {
+        if (!(r.mid > 0)) continue
+        out[r.contract_key] = { mid: r.mid, bid: r.bid || 0, ask: r.ask || 0, markDate: r.mark_date }
+      }
+      return out
+    } catch (e) {
+      console.error('Error reading latest IBKR option closes:', e)
+      return {}
+    }
+  }
+
   getPriorIbkrOptionCloses(userId = 1, beforeDate) {
     try {
       const row = db.prepare(`

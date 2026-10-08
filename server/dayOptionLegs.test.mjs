@@ -417,6 +417,65 @@ try {
       'exiting must still cost more than the mid-based valuation')
   })
 
+  console.log('')
+  console.log('The freshest stored book, per contract')
+
+  // Today-only was not enough. With Gateway down for a whole session those legs
+  // had no close of their own to fall back to and dropped to the model anyway --
+  // the case that started this. The reader now takes the most recent book on or
+  // before today, PER CONTRACT, so a liquid leg quoted this morning and a LEAP
+  // last quoted on Tuesday each use their own freshest real market.
+  const OLD_KEY = `AAPL|${expiry.replace(/-/g, '')}|700|C`
+  const dayBefore = (n) => {
+    const d = new Date(Date.now() - n * 86400000)
+    return d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  }
+
+  dbs.saveIbkrOptionCloses(userId, dayBefore(3), [{ key: OLD_KEY, mid: 1.00, bid: 0.90, ask: 1.10 }])
+  dbs.saveIbkrOptionCloses(userId, dayBefore(1), [{ key: OLD_KEY, mid: 2.00, bid: 1.90, ask: 2.10 }])
+
+  test('the most recent book wins, not the first or the oldest', () => {
+    const got = dbs.getLatestIbkrOptionCloses(userId, etToday)
+    assert.ok(got[OLD_KEY], `nothing returned for ${OLD_KEY}`)
+    assert.ok(Math.abs(got[OLD_KEY].mid - 2.00) < 1e-9,
+      `expected the 1-day-old book (2.00), got ${got[OLD_KEY].mid}`)
+    assert.equal(got[OLD_KEY].markDate, dayBefore(1))
+  })
+
+  test('it carries the date, without which ageing is impossible', () => {
+    // The caller needs the underlying's price on THAT date to move the option
+    // forward from it. A mid with no date can only be used frozen.
+    const got = dbs.getLatestIbkrOptionCloses(userId, etToday)
+    for (const v of Object.values(got)) {
+      assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(v.markDate || ''), `bad markDate ${v.markDate}`)
+    }
+  })
+
+  test('onOrBefore is respected, so an as-of view cannot see the future', () => {
+    const asOfTwoDaysAgo = dbs.getLatestIbkrOptionCloses(userId, dayBefore(2))
+    assert.ok(asOfTwoDaysAgo[OLD_KEY], 'the 3-day-old book should still be visible')
+    assert.ok(Math.abs(asOfTwoDaysAgo[OLD_KEY].mid - 1.00) < 1e-9,
+      `expected the 3-day-old book (1.00), got ${asOfTwoDaysAgo[OLD_KEY].mid}`)
+  })
+
+  test('each contract resolves independently', () => {
+    // Deliberately unlike getPriorIbkrOptionCloses, which pins every leg to ONE
+    // session because it feeds a day-over-day difference. A mark has no such
+    // requirement, and forcing one would throw away a fresher book.
+    const got = dbs.getLatestIbkrOptionCloses(userId, etToday)
+    assert.equal(got[lateKey]?.markDate, etToday, 'the late call should use today')
+    assert.equal(got[OLD_KEY]?.markDate, dayBefore(1), 'the old call should use its own date')
+  })
+
+  test('the sides survive the round trip for every contract', () => {
+    // Close Now needs them, and a mid-only row would silently blank that column.
+    const got = dbs.getLatestIbkrOptionCloses(userId, etToday)
+    for (const [k, v] of Object.entries(got)) {
+      assert.ok(v.bid > 0 && v.ask > 0, `${k} lost its sides: ${JSON.stringify(v)}`)
+      assert.ok(v.ask >= v.bid, `${k} is crossed`)
+    }
+  })
+
 console.log(`\n${passed} passed\n`)
 } finally {
   await cleanup()
