@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
-import { pairSpreads } from '../utils/pairSpreads'
+import { pairSpreads, buildStructures } from '../utils/pairSpreads'
 import { impliedVol, probKeepCredit, yearsTo, RISK_FREE } from '../utils/optionMath'
 
 const fmt = (n, decimals = 2) => {
@@ -69,6 +69,7 @@ export default function SpreadsPanel({ broker = 'all' }) {
   }, [broker])
 
   const { spreads: rawSpreads, singles } = useMemo(() => pairSpreads(positions), [positions])
+  const structures = useMemo(() => buildStructures(rawSpreads, singles), [rawSpreads, singles])
 
   /**
    * Two extra readings per spread.
@@ -671,6 +672,56 @@ export default function SpreadsPanel({ broker = 'all' }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Structures: a spread plus whatever else sits at the same expiry.
+          Placed above the loose-leg list because it is the reason those legs
+          matter -- on its own that list is a pile of orphans, and here it is
+          the protection under a spread. */}
+      {structures.length > 0 && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${border}`, paddingTop: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: text, marginBottom: 2 }}>
+            Spread + extra protection, same expiry
+          </div>
+          <div style={{ fontSize: 11, color: muted, marginBottom: 7, lineHeight: 1.5 }}>
+            The spread rows above price each vertical on its own. Where you also hold a leg
+            outside the spread at the same expiry, the vertical can lose while that leg pays —
+            so the vertical's number is right and is not the whole story. This nets them.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {structures.map(g => (
+              <div key={g.key} style={{
+                border: `1px solid ${border}`, borderRadius: 7, padding: '7px 10px',
+                background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: text }}>
+                    {g.ticker} {g.type === 'put' ? 'puts' : 'calls'}
+                    <span style={{ fontWeight: 400, color: muted, fontSize: 11 }}> · {fmtDate(g.expiry)}</span>
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: pnlColor(g.pnl, isDark) }}>
+                    {g.pnl >= 0 ? '+' : ''}{fmt(g.pnl)}
+                    {!g.priced && <span title="A leg here has no mark, so this total is part of the structure, not all of it." style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: muted, marginTop: 3 }}>
+                  spread {g.spreadPnl >= 0 ? '+' : ''}{fmt(g.spreadPnl)}
+                  {'  ·  '}outside it {g.loosePnl >= 0 ? '+' : ''}{fmt(g.loosePnl)}
+                </div>
+                <div style={{ fontSize: 11, color: muted, marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  {g.parts.map((pt, i) => (
+                    <span key={i}>
+                      {pt.kind === 'spread' ? '▭' : '○'} {pt.label}{' '}
+                      <span style={{ color: pt.pnl == null ? muted : pnlColor(pt.pnl, isDark), fontWeight: 600 }}>
+                        {pt.pnl == null ? '—' : `${pt.pnl >= 0 ? '+' : ''}${fmt(pt.pnl)}`}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

@@ -85,4 +85,74 @@ export function pairSpreads(positions) {
   return { spreads, singles }
 }
 
+/**
+ * Every leg at one ticker, expiry and type, netted into one row.
+ *
+ * The spread rows answer "what did this vertical do", which is a correct
+ * question and the wrong one for a position with extra protection under it.
+ * Sell a 182.50 put against a 180, then buy a 175 as well: pairSpreads matches
+ * the short with the NEAREST long, so the 182.50/180 is the spread and the 175
+ * falls out as a loose leg. On a selloff the spread shows a loss while the 175
+ * pays -- and the loss is real, so crediting it to the spread would be a lie.
+ * They are one decision though, and this is the grouping that says so.
+ *
+ * Keyed on expiry as well as ticker and type: the extra put is bought at the
+ * same expiry, so it belongs with that week's structure rather than with every
+ * put ever held on the name. A diagonal would need the key relaxed, and would
+ * read as two structures here.
+ */
+export function buildStructures(spreads, singles) {
+  const m = new Map()
+  const touch = (ticker, expiry, type) => {
+    const k = `${ticker}|${expiry}|${type}`
+    if (!m.has(k)) {
+      m.set(k, {
+        key: k, ticker, expiry, type,
+        pnl: 0, spreadPnl: 0, loosePnl: 0,
+        spreads: 0, looseLegs: 0, parts: [],
+        priced: true,
+      })
+    }
+    return m.get(k)
+  }
+
+  for (const s of spreads) {
+    const g = touch(s.ticker, s.expiry, s.type)
+    g.pnl += s.pnl || 0
+    g.spreadPnl += s.pnl || 0
+    g.spreads += 1
+    if (!s.priced) g.priced = false
+    g.parts.push({
+      kind: 'spread',
+      label: `${s.lo}/${s.hi} ${s.type === 'put' ? 'put' : 'call'} ×${s.n}`,
+      pnl: s.pnl || 0,
+    })
+  }
+
+  for (const p of singles) {
+    const g = touch(p.ticker, p.expiry, p.optionType)
+    // remainingPnl, not the whole leg's: a partly-paired leg has already given
+    // its paired contracts to a spread above, and counting the leg twice would
+    // inflate the structure.
+    const v = p.remainingPnl
+    if (v == null) g.priced = false
+    g.pnl += v || 0
+    g.loosePnl += v || 0
+    g.looseLegs += 1
+    g.parts.push({
+      kind: 'loose',
+      label: `${p.isLong ? 'long' : 'short'} $${p.strike} ×${p.remaining}`,
+      pnl: v,
+    })
+  }
+
+  // Only the ones where the question even arises. A lone vertical with nothing
+  // beside it is already answered by its own row, and listing it again here
+  // would bury the cases that differ.
+  return [...m.values()]
+    .filter(g => g.spreads > 0 && g.looseLegs > 0)
+    .sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1
+      : a.ticker.localeCompare(b.ticker)))
+}
+
 export default pairSpreads
