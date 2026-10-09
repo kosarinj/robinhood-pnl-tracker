@@ -186,6 +186,24 @@ db.exec(`
     PRIMARY KEY (user_id, snap_date, ticker)
   );
 
+  -- Open option P&L per ticker, every leg, not just short calls.
+  --
+  -- short_call_pnl_history covers one leg type, which is a third of a book of
+  -- verticals -- so a week-over-week delta from it missed the long puts, the
+  -- long call legs and the short puts. This is the same shape for the whole
+  -- open position, so "what did my options do this week" can be answered from
+  -- two real marks instead of re-modelling the past.
+  CREATE TABLE IF NOT EXISTS option_open_pnl_history (
+    user_id      INTEGER NOT NULL,
+    snap_date    TEXT NOT NULL,
+    ticker       TEXT NOT NULL,
+    open_pnl     REAL NOT NULL,
+    legs         INTEGER,
+    mark_basis   TEXT,
+    created_at   INTEGER DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (user_id, snap_date, ticker)
+  );
+
   CREATE TABLE IF NOT EXISTS iv_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -2681,6 +2699,54 @@ export class DatabaseService {
     } catch (e) {
       console.error('Error recording short call P&L history:', e)
       return 0
+    }
+  }
+
+  /** Record today's open option P&L per ticker, all legs. Re-running replaces the day. */
+  recordOpenOptionPnl(userId, snapDate, rows) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO option_open_pnl_history (user_id, snap_date, ticker, open_pnl, legs, mark_basis)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, snap_date, ticker) DO UPDATE SET
+          open_pnl = excluded.open_pnl,
+          legs = excluded.legs,
+          mark_basis = excluded.mark_basis
+      `)
+      const run = db.transaction(list => {
+        for (const r of list) stmt.run(userId, snapDate, r.ticker, r.openPnl, r.legs ?? null, r.markBasis ?? null)
+      })
+      run(rows)
+      return rows.length
+    } catch (e) {
+      console.error('Error recording open option P&L history:', e)
+      return 0
+    }
+  }
+
+  /**
+   * The most recent all-leg open option snapshot on or before a date, per ticker.
+   *
+   * Carries mark_basis as well as the figure: a delta measured against a snapshot
+   * that was itself modelled is a weaker claim than one against a market mark,
+   * and the panel should be able to say which.
+   */
+  getOpenOptionPnlAsOf(userId, onOrBefore) {
+    try {
+      return db.prepare(`
+        SELECT h.ticker, h.open_pnl, h.snap_date, h.mark_basis
+        FROM option_open_pnl_history h
+        JOIN (
+          SELECT ticker, MAX(snap_date) AS d
+          FROM option_open_pnl_history
+          WHERE user_id = ? AND snap_date <= ?
+          GROUP BY ticker
+        ) latest ON latest.ticker = h.ticker AND latest.d = h.snap_date
+        WHERE h.user_id = ?
+      `).all(userId, onOrBefore, userId)
+    } catch (e) {
+      console.error('Error reading open option P&L history:', e)
+      return []
     }
   }
 

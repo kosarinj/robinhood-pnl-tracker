@@ -839,6 +839,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       weekStockPnl: acc.weekStockPnl + ((pos > 0 && r.weekStartPrice > 0 && price > 0)
         ? Math.round(pos * (price - r.weekStartPrice) * 100) / 100 : 0),
       optionsThisWeek: acc.optionsThisWeek + (r.optionsThisWeek || 0),
+      optionsOpenWeekChange: acc.optionsOpenWeekChange + (r.optionsOpenWeekChange || 0),
       // stockUnrealizedPnL carries realized too and feeds Net and the vs-Stock%
       // footer; stockUnrealizedOnly is what the Stock P&L column foots to.
       stockUnrealizedPnL: acc.stockUnrealizedPnL + stockPnL,
@@ -858,7 +859,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       dividends: acc.dividends + (r.dividends || 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, weekStockPnl: 0, optionsThisWeek: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, weekStockPnl: 0, optionsThisWeek: 0, optionsOpenWeekChange: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0 })
 
   /**
    * Record what this panel displayed, so "what did it say this morning" has an
@@ -1683,6 +1684,32 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       foot: (t) => <span style={{ color: pnlColor(t.optionsThisWeek, isDark), fontWeight: 700 }}>
         {t.optionsThisWeek >= 0 ? '+' : ''}{fmt(t.optionsThisWeek)}</span> },
 
+    { key: 'weekOptionsOpen', label: 'Wk Opt Open', sort: 'optionsOpenWeekChange',
+      title: 'Mark-to-market move on option legs still OPEN, since last week’s close. Together with Wk Opt (closed legs) this is what the options did for you this week — the two add to the option half of the change in Net + Open. Measured between two recorded snapshots, so it needs a snapshot from before Monday; blank until one exists.',
+      cell: (r) => {
+        const v = r.optionsOpenWeekChange
+        if (v == null) {
+          return <span style={{ color: isDark ? '#475569' : '#cbd5e1' }}
+            title="No snapshot from before this Monday yet. These are recorded as the panel loads, so this fills in once a week of history exists.">{'—'}</span>
+        }
+        return (
+          <span style={{ fontWeight: 700, color: pnlColor(v, isDark) }}
+            title={[
+              r.optionsOpenLastWeekChange != null
+                ? `Since last-last week: ${r.optionsOpenLastWeekChange >= 0 ? '+' : ''}${fmt(r.optionsOpenLastWeekChange)}` : null,
+              r.optionsOpenWeekBasis === 'model'
+                ? 'The earlier snapshot was MODELLED, so this move is an estimate against an estimate.'
+                : r.optionsOpenWeekBasis === 'mixed' ? 'Some legs in the earlier snapshot were modelled.' : null,
+            ].filter(Boolean).join(' · ')}>
+            {v >= 0 ? '+' : ''}{fmt(v)}
+            {(r.optionsOpenWeekBasis === 'model' || r.optionsOpenWeekBasis === 'mixed') &&
+              <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
+          </span>
+        )
+      },
+      foot: (t) => <span style={{ color: pnlColor(t.optionsOpenWeekChange, isDark), fontWeight: 700 }}>
+        {t.optionsOpenWeekChange >= 0 ? '+' : ''}{fmt(t.optionsOpenWeekChange)}</span> },
+
     { key: 'weeklyChangePct', label: 'Wk % (px)', sort: 'weeklyChangePct', borderLeft: '1px',
       title: 'Stock price change over the past ~week (5 trading days)',
       cell: (r) => <span title={r.weeklyChange != null ? `${r.weeklyChange >= 0 ? '+' : ''}${fmt(r.weeklyChange)} over ~1 week` : ''}
@@ -1731,7 +1758,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     }
     const NEIGHBOURS = [
       { keys: ['scenarioNet', 'scenarioDelta'], anchor: 'netPlusOpen' },
-      { keys: ['weekStock', 'weekOptions'], anchor: 'dayPnl' },
+      { keys: ['weekStock', 'weekOptions', 'weekOptionsOpen'], anchor: 'dayPnl' },
       { keys: ['dayStockPnl', 'dayOptionPnl'], anchor: 'dayPnl' },
       { keys: ['openExitPnL'], anchor: 'openUnrealizedPnL' },
       { keys: ['stockRealizedAll'], anchor: 'stockPnL' },

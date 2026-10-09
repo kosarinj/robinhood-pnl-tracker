@@ -4339,12 +4339,30 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // asking about a past date and must not overwrite today's row. Skipped when
     // marks are unavailable, since a snapshot of nothing is worse than a gap.
     let weekChangeByTicker = {}, lastWeekChangeByTicker = {}, snapshotNote = null
+    // Same for the WHOLE open option position, which is what "how did my
+    // options do this week" actually asks. The short-call history alone misses
+    // the long puts, the long call legs and the short puts -- on a book of
+    // verticals, most of it.
+    let optOpenWeekChange = {}, optOpenLastWeekChange = {}, optOpenBasisAt = {}
     if (!asOf) {
       try {
         const today = todayStrLocal()
         const rows = Object.entries(openShortCallPnlByTicker)
           .map(([ticker, openPnl]) => ({ ticker, openPnl: r2raw(openPnl) }))
         if (rows.length) databaseService.recordShortCallPnl(userId, today, rows)
+
+        // Only tickers whose legs were actually priced. A snapshot built on a
+        // leg that could not be marked is a smaller number pretending to be the
+        // position, and differencing against it next week would report the gap
+        // as movement.
+        const allRows = Object.entries(openUnrealizedByTicker)
+          .filter(([ticker]) => (openLegGaps[ticker]?.unpriced || 0) === 0)
+          .map(([ticker, openPnl]) => ({
+            ticker, openPnl: r2raw(openPnl),
+            legs: openLegGaps[ticker]?.priced || null,
+            markBasis: openBasisByTicker[ticker] || null,
+          }))
+        if (allRows.length) databaseService.recordOpenOptionPnl(userId, today, allRows)
 
         const dayBefore = (iso) => {
           const [y, m, d] = iso.split('-').map(Number)
@@ -4357,6 +4375,24 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         const atLastMonday = {}
         databaseService.getShortCallPnlAsOf(userId, dayBefore(lastMonday))
           .forEach(r => { atLastMonday[r.ticker] = r.open_pnl })
+
+        // The all-leg version of the same two baselines.
+        const allAtThisMonday = {}, allAtLastMonday = {}
+        databaseService.getOpenOptionPnlAsOf(userId, dayBefore(thisMonday))
+          .forEach(r => { allAtThisMonday[r.ticker] = r; })
+        databaseService.getOpenOptionPnlAsOf(userId, dayBefore(lastMonday))
+          .forEach(r => { allAtLastMonday[r.ticker] = r })
+        for (const [ticker, nowPnl] of Object.entries(openUnrealizedByTicker)) {
+          const a = allAtThisMonday[ticker]
+          if (a) {
+            optOpenWeekChange[ticker] = r2raw(nowPnl - a.open_pnl)
+            // Which basis the OLDER mark was on. Today's is reported separately;
+            // a delta is only as good as the weaker of its two ends.
+            optOpenBasisAt[ticker] = a.mark_basis || null
+          }
+          const b = allAtLastMonday[ticker]
+          if (b) optOpenLastWeekChange[ticker] = r2raw(nowPnl - b.open_pnl)
+        }
 
         // Null, not zero, when there is no baseline. A missing history is not a
         // week with no movement, and showing 0 would read as one.
@@ -4436,6 +4472,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           // A SUBSET of totalRealized, not a separate term of Net.
           realizedExpired: r2(e.realizedExpired),
           optionsThisWeek: r2(e.optionsThisWeek),
+          // Mark-to-market move on legs still OPEN, since last week's close.
+          // Null when there is no snapshot that far back -- a missing baseline is
+          // not a week without movement, and 0 would read as one.
+          optionsOpenWeekChange: optOpenWeekChange[e.ticker] ?? null,
+          optionsOpenLastWeekChange: optOpenLastWeekChange[e.ticker] ?? null,
+          optionsOpenWeekBasis: optOpenBasisAt[e.ticker] ?? null,
           optionsLastWeek: r2(e.optionsLastWeek),
           shortCallsThisWeek: r2(e.shortCallsThisWeek),
           shortCallsLastWeek: r2(e.shortCallsLastWeek),
