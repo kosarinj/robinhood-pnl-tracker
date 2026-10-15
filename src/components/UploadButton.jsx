@@ -1,4 +1,4 @@
-import React, { useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 /**
  * The Upload CSV control, with the broker it applies to.
@@ -15,8 +15,23 @@ const BROKERS = [
   { key: 'schwab', label: 'Schwab' },
 ]
 
-export default function UploadButton({ broker, onBrokerChange, onFile, style = {} }) {
+export default function UploadButton({ broker, onBrokerChange, onFile, refreshKey = 0, style = {} }) {
   const inputRef = useRef(null)
+  // Latest trade date already stored per broker. Imports only add what isn't
+  // stored yet, so an export starting a little before this date is enough.
+  const [lastDates, setLastDates] = useState({})
+
+  useEffect(() => {
+    fetch('/api/brokers', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setLastDates(Object.fromEntries((d?.brokers || []).map(b => [b.broker, b.last_trade_date]))))
+      .catch(() => {})
+  }, [refreshKey])
+
+  const lastDate = lastDates[broker]
+  const lastDateLabel = lastDate
+    ? new Date(`${lastDate}T00:00:00`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
+    : null
 
   const handleChange = (e) => {
     const file = e.target.files[0]
@@ -46,6 +61,15 @@ export default function UploadButton({ broker, onBrokerChange, onFile, style = {
         📁 Upload {label} CSV
         <input ref={inputRef} type="file" accept=".csv" onChange={handleChange} style={{ display: 'none' }} />
       </label>
+
+      {lastDateLabel && (
+        <span
+          title={`Trades through ${lastDateLabel} are already imported. Export from that date onward — overlap is fine, trades already stored are skipped.`}
+          style={{ fontSize: 11, color: 'var(--textSecondary)', whiteSpace: 'nowrap' }}
+        >
+          through {lastDateLabel}
+        </span>
+      )}
     </span>
   )
 }

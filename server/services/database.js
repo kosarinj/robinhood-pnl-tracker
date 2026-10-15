@@ -1142,6 +1142,23 @@ const insertDeposit = db.prepare(`
   VALUES (@uploadDate, @depositDate, @amount, @description, @userId, @broker)
 `)
 
+// How many copies of a deposit any single OTHER upload already holds. MAX per
+// upload rather than a total, because every full-history import before
+// incremental imports stored the whole deposit list again — summing across
+// uploads would count each deposit once per import.
+const countExistingDeposit = db.prepare(`
+  SELECT COALESCE(MAX(n), 0) AS cnt FROM (
+    SELECT COUNT(*) AS n FROM deposits
+    WHERE user_id = @userId
+      AND COALESCE(broker, 'robinhood') = @broker
+      AND deposit_date = @depositDate
+      AND amount = @amount
+      AND COALESCE(description, '') = @description
+      AND upload_date != @uploadDate
+    GROUP BY upload_date
+  )
+`)
+
 export class DatabaseService {
   // Record a signal snapshot
   recordSignal(signal) {
@@ -1738,17 +1755,36 @@ export class DatabaseService {
           }
         }
 
-        // Save deposits
+        // Save deposits — only the ones earlier uploads don't already hold, so
+        // an export that covers just the last few days (or overlaps the last
+        // import) adds what's new instead of re-adding or replacing the rest.
+        const depositGroups = new Map()
         for (const deposit of deposits) {
           const depositDate = new Date(deposit.date).toISOString().split('T')[0]
-          insertDeposit.run({
-            uploadDate,
-            depositDate,
-            amount: deposit.amount,
-            description: deposit.description || null,
+          const key = `${depositDate}|${deposit.amount}|${deposit.description || ''}`
+          if (!depositGroups.has(key)) depositGroups.set(key, [])
+          depositGroups.get(key).push({ ...deposit, _depositDate: depositDate })
+        }
+        for (const [, list] of depositGroups) {
+          const d = list[0]
+          const { cnt: alreadyInDb } = countExistingDeposit.get({
             userId,
-            broker
+            broker,
+            depositDate: d._depositDate,
+            amount: d.amount,
+            description: d.description || '',
+            uploadDate
           })
+          for (let i = 0; i < Math.max(0, list.length - alreadyInDb); i++) {
+            insertDeposit.run({
+              uploadDate,
+              depositDate: list[i]._depositDate,
+              amount: list[i].amount,
+              description: list[i].description || null,
+              userId,
+              broker
+            })
+          }
         }
 
         // Update metadata
@@ -1836,7 +1872,10 @@ export class DatabaseService {
   }
 
   // Get all trades for a user across all upload dates (deduped by the save logic — each unique trade lives in exactly one upload_date)
-  getAllTradesForUser(userId = 1) {
+  //
+  // splitAdjust: false returns share counts and prices as traded — what the
+  // Positions table has always been computed from (it was fed the raw CSV).
+  getAllTradesForUser(userId = 1, { splitAdjust = true } = {}) {
     try {
       const rows = db.prepare(`
         SELECT * FROM trades
@@ -1849,9 +1888,11 @@ export class DatabaseService {
       // Options are deliberately left alone: a split rewrites strikes and
       // deliverables in ways this can't infer, so quietly scaling them would
       // invent numbers.
-      const splits = this.getSplits([...new Set(rows.filter(r => !r.is_option).map(r => r.symbol))])
+      const splits = splitAdjust
+        ? this.getSplits([...new Set(rows.filter(r => !r.is_option).map(r => r.symbol))])
+        : {}
       return rows.map(row => {
-        const f = row.is_option ? 1 : this.splitFactor(splits[row.symbol], row.trans_date)
+        const f = (row.is_option || !splitAdjust) ? 1 : this.splitFactor(splits[row.symbol], row.trans_date)
         return {
           date: row.trans_date,
           transDate: row.trans_date,
@@ -1882,12 +1923,66 @@ export class DatabaseService {
     }
   }
 
+  // Every deposit across all uploads, each counted once. Full-history imports
+  // stored the whole list under every upload date, so a deposit's true count is
+  // the most copies any single upload holds — not the total across uploads.
+  getAllDepositsForUser(userId = 1) {
+    try {
+      const rows = db.prepare(`
+        SELECT deposit_date, amount, description, broker, MAX(n) AS copies FROM (
+          SELECT upload_date, deposit_date, amount, COALESCE(description, '') AS description,
+                 COALESCE(broker, 'robinhood') AS broker, COUNT(*) AS n
+          FROM deposits WHERE user_id = ?
+          GROUP BY upload_date, deposit_date, amount, COALESCE(description, ''), COALESCE(broker, 'robinhood')
+        )
+        GROUP BY deposit_date, amount, description, broker
+        ORDER BY deposit_date ASC
+      `).all(userId)
+      return rows.flatMap(r => Array.from({ length: r.copies }, () => ({
+        date: r.deposit_date,
+        amount: r.amount,
+        description: r.description || null,
+        broker: r.broker,
+      })))
+    } catch (error) {
+      console.error('Error getting all deposits:', error)
+      return []
+    }
+  }
+
+  // Stored dividends, interest, margin and fees, in the shape the CSV parser
+  // produces — so a page load or a partial import sees the whole history.
+  getDividendsAndInterestForUser(userId = 1) {
+    try {
+      return db.prepare(`
+        SELECT trans_date, trans_code, symbol, amount, description, broker
+        FROM cash_activity WHERE user_id = ?
+        ORDER BY trans_date ASC, id ASC
+      `).all(userId).map((r, i) => ({
+        id: i,
+        date: r.trans_date,
+        symbol: r.symbol || '',
+        amount: r.amount,
+        transCode: r.trans_code,
+        isDividend: r.trans_code === 'CDIV' || r.trans_code === 'MDIV',
+        isInterest: r.trans_code === 'INT' || r.trans_code === 'MINT',
+        isCharge: r.trans_code === 'MINT' || r.trans_code === 'GOLD',
+        description: r.description || '',
+        broker: r.broker || 'robinhood',
+      }))
+    } catch (error) {
+      console.error('Error getting dividends and interest:', error)
+      return []
+    }
+  }
+
   // Which brokers this user actually has data for — drives the tab bar, so the
   // UI never shows a tab that would be empty.
   getBrokersForUser(userId = 1) {
     try {
       return db.prepare(`
-        SELECT COALESCE(broker,'robinhood') AS broker, COUNT(*) AS trade_count
+        SELECT COALESCE(broker,'robinhood') AS broker, COUNT(*) AS trade_count,
+               MAX(trans_date) AS last_trade_date
         FROM trades WHERE user_id = ?
         GROUP BY COALESCE(broker,'robinhood')
         ORDER BY trade_count DESC
@@ -1912,8 +2007,11 @@ export class DatabaseService {
         return { trades: [], uploadDate: null }
       }
 
+      // Every stored trade, not just the latest upload's rows. Each upload only
+      // keeps the trades earlier uploads didn't already have, so the latest
+      // upload alone is just the newest slice of history.
       return {
-        trades: this.getTrades(latestUpload.upload_date, userId),
+        trades: this.getAllTradesForUser(userId, { splitAdjust: false }),
         uploadDate: latestUpload.upload_date
       }
     } catch (error) {

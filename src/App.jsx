@@ -1010,6 +1010,9 @@ function AuthenticatedApp({ user }) {
 
         // Set state from server response
         setTrades(response.trades)
+        // The panels read allTrades, which otherwise stays as it was at page
+        // load and misses whatever this import just added.
+        socketService.getAllTrades().then(setAllTrades).catch(() => {})
         setDeposits(response.deposits)
         setTotalPrincipal(response.totalPrincipal)
         setDividendsAndInterest(response.dividendsAndInterest || [])
@@ -1292,6 +1295,7 @@ function AuthenticatedApp({ user }) {
             broker={uploadBroker}
             onBrokerChange={changeUploadBroker}
             onFile={handleFileUpload}
+            refreshKey={brokerRefreshKey}
           />
           <ThemeToggle />
         </div>
@@ -1441,6 +1445,7 @@ function AuthenticatedApp({ user }) {
             broker={uploadBroker}
             onBrokerChange={changeUploadBroker}
             onFile={handleFileUpload}
+            refreshKey={brokerRefreshKey}
           />
           <button
             className="upload-button"

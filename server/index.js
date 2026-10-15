@@ -772,7 +772,7 @@ io.on('connection', (socket) => {
 
       // Get unique stock symbols
       const allSymbols = [...new Set(trades.map(t => t.symbol))]
-      const stockSymbols = allSymbols.filter(s => {
+      let stockSymbols = allSymbols.filter(s => {
         return !s.includes(' ') && !s.includes('Put') && !s.includes('Call')
       })
 
@@ -846,8 +846,25 @@ io.on('connection', (socket) => {
         return
       }
 
+      // From here on, work from everything stored — not just this file. The
+      // save above only adds rows earlier imports don't already hold, so an
+      // export covering just the last few days (or overlapping the last import)
+      // is enough. Building positions from the file alone would show only the
+      // trades in it, and principal as only the deposits in it.
+      const fileTrades = trades
+      trades = databaseService.getAllTradesForUser(user.userId, { splitAdjust: false })
+      deposits = databaseService.getAllDepositsForUser(user.userId)
+      totalPrincipal = deposits.reduce((sum, d) => sum + (d.amount || 0), 0)
+      dividendsAndInterest = databaseService.getDividendsAndInterestForUser(user.userId)
+      stockSymbols = [...new Set(trades.map(t => t.symbol))].filter(s =>
+        !s.includes(' ') && !s.includes('Put') && !s.includes('Call'))
+      Object.assign(clientSessions.get(socket.id) || {}, { trades, deposits, totalPrincipal, dividendsAndInterest, stockSymbols })
+      priceService.addSymbols(stockSymbols)
+      stockSymbols.forEach(symbol => trackedSymbols.add(symbol))
+      console.log(`📚 Building from ${trades.length} stored trades (${fileTrades.length} in this file)`)
+
       // Populate short_call_entries for STO-call trades in background
-      const stoCallTrades = trades.filter(t =>
+      const stoCallTrades = fileTrades.filter(t =>
         t.transCode?.toUpperCase() === 'STO' && t.isOption &&
         (t.symbol || t.description || '').toLowerCase().includes('call')
       )
@@ -1339,8 +1356,11 @@ io.on('connection', (socket) => {
           console.log(`   ⚠️ Skipping enrichment - no snapshot for ${weekAgoDate}`)
         }
 
-        const deposits = databaseService.getDeposits(uploadDate, user.userId)
-        const totalPrincipal = databaseService.getTotalPrincipal(uploadDate, user.userId)
+        // All deposits and income across uploads — the latest upload only
+        // holds what was new in it.
+        const deposits = databaseService.getAllDepositsForUser(user.userId)
+        const totalPrincipal = deposits.reduce((sum, d) => sum + (d.amount || 0), 0)
+        const dividendsAndInterest = databaseService.getDividendsAndInterestForUser(user.userId)
 
         socket.emit('latest-trades-result', {
           success: true,
@@ -1348,6 +1368,7 @@ io.on('connection', (socket) => {
           uploadDate,
           deposits,
           totalPrincipal,
+          dividendsAndInterest,
           currentPrices: historicalPrices,
           pnlData: enrichedPnlData,
           madeUpGroundDate: weekAgoDate
