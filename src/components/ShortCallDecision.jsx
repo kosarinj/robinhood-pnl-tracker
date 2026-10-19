@@ -300,7 +300,11 @@ export default function ShortCallDecision({ entryId, isDark }) {
       )}
 
       {/* Scenario table */}
-      <div style={{ overflowX: 'auto', marginTop: 10 }}>
+      <div style={{ marginTop: 10, fontSize: 12.5, padding: '8px 10px', borderRadius: 8, border: `1px solid ${border}` }}>
+        <span style={{ fontWeight: 700 }}>Close now: keep {money(keptNow)}</span>
+        <span style={{ color: textMid }}> — locked in, whatever {data.ticker} does. Every number below is how much better (+) or worse (−) than that each choice ends up, by where {data.ticker} is on {shortDate(horizonDate)}.</span>
+      </div>
+      <div style={{ overflowX: 'auto', marginTop: 8 }}>
         <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
           <thead>
             <tr style={{ color: textMid, borderBottom: `1px solid ${border}` }}>
@@ -320,24 +324,45 @@ export default function ShortCallDecision({ entryId, isDark }) {
             </tr>
           </thead>
           <tbody>
-            {model.strategies.map(s => {
+            {/* Every choice against the one sure number, closing today: the
+                big figure is how much better or worse than that, the small one
+                the total kept. */}
+            {model.strategies.filter(s => s.key !== 'close').map(s => {
               const vals = cols.map(c => s.at(S * (1 + c.move)))
               return (
                 <tr key={s.key} style={{ borderBottom: `1px solid ${border}` }}>
                   <td style={{ ...td, textAlign: 'left', fontWeight: 600 }}>{s.label}</td>
                   {vals.map((v, i) => {
                     const best = Math.max(...model.strategies.map(t => t.at(S * (1 + cols[i].move))))
+                    const isBest = Math.abs(v - best) < 1
+                    const diff = v - keptNow
                     return (
-                      <td key={i} style={{ ...td, color: v >= 0 ? GOOD : CRIT, fontWeight: Math.abs(v - best) < 1 ? 800 : 400,
-                                           borderLeft: i >= MOVES.length ? `1px dashed ${border}` : undefined,
-                                           background: Math.abs(v - best) < 1 ? (isDark ? 'rgba(12,163,12,0.12)' : 'rgba(12,163,12,0.08)') : undefined }}>
-                        {money(v)}
+                      <td key={i} style={{ ...td, borderLeft: i >= MOVES.length ? `1px dashed ${border}` : undefined,
+                                           background: isBest ? (isDark ? 'rgba(12,163,12,0.12)' : 'rgba(12,163,12,0.08)') : undefined }}>
+                        <div style={{ color: Math.abs(diff) < 1 ? textMid : diff > 0 ? GOOD : CRIT, fontWeight: isBest ? 800 : 600 }}>
+                          {Math.abs(diff) < 1 ? 'same' : `${diff > 0 ? '+' : '−'}${money(Math.abs(diff))}`}
+                        </div>
+                        <div style={{ fontSize: 10, color: textMid }}>total {money(v)}</div>
                       </td>
                     )
                   })}
                 </tr>
               )
             })}
+            <tr>
+              <td style={{ ...td, textAlign: 'left', fontWeight: 700 }}>Best choice</td>
+              {cols.map((c, i) => {
+                const S1 = S * (1 + c.move)
+                const top = model.strategies.reduce((a, t) => (t.at(S1) > a.at(S1) + 0.5 ? t : a))
+                const name = { hold: 'Leave it', close: 'Close now', roll: 'Roll', rollLong: 'Roll + long' }[top.key]
+                return (
+                  <td key={i} style={{ ...td, fontWeight: 700, color: top.key === 'close' ? text : GOOD,
+                                       borderLeft: i >= MOVES.length ? `1px dashed ${border}` : undefined }}>
+                    {name}
+                  </td>
+                )
+              })}
+            </tr>
           </tbody>
         </table>
       </div>
@@ -347,7 +372,7 @@ export default function ShortCallDecision({ entryId, isDark }) {
         {roll && <>Roll: buy back at ${cur.ask.toFixed(2)}, sell ${roll.strike} {shortDate(roll.expiry)} at ${roll.bid.toFixed(2)} ({SOURCE[roll.source] || roll.source}) for {money(roll.netCredit * 100 * n)} more credit;
           most it can keep is {money((prem - cur.ask + roll.bid) * model.x)} if it expires worthless in {roll.dte} days ({Math.round(model.probItm(roll) * 100)}% chance it ends in the money).<br /></>}
         {long && <>Long ${long.strike} {shortDate(long.expiry)} costs {money(long.ask * 100 * n)} ({SOURCE[long.source] || long.source}) and expires before the roll — it covers a fast rally, not one late in the roll.<br /></>}
-        Each cell is the total kept on this call, premium already collected included, if you close everything on that date at that stock price.
+        "Total" is everything kept on this call, premium already collected included, if you close everything on that date at that stock price; the big number is that total minus closing now.
         Options only — shares held against the call are not counted. Estimates at today's implied vols, held constant; a rally usually lifts them.
         {data.ibkrQuoted === 0 && ' No IBKR quotes yet — with the recorder running, reopen in about 5 minutes for live bid/ask on these contracts.'}
       </div>
