@@ -1372,6 +1372,9 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
             {fmt(proj.pnl)}
             <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
               {gain >= 0 ? '+' : ''}{fmt(gain)}
+              {/* In short-call scope the gain is measured from the short calls'
+                  own Open P&L, not the all-leg column beside it — say so. */}
+              {thetaScope === 'sc' && <span> from {fmt(baseline)}</span>}
               {proj.expiredLegs > 0 && <span title={allExpired
                 ? `All ${proj.totalLegs} contracts have expired by then — this is settlement at today's price, not decay collected.`
                 : `${proj.expiredLegs} of ${proj.totalLegs} contracts have expired by then and settle at today's price; the rest decay.`}>{' '}{allExpired ? '✓' : `✓${proj.expiredLegs}`}</span>}
@@ -1400,6 +1403,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
             {fmt(total)}
             <div style={{ fontSize: 10, fontWeight: 500, color: textMid }}>
               {total - base >= 0 ? '+' : ''}{fmt(total - base)}
+              {thetaScope === 'sc' && <span> from {fmt(base)}</span>}
             </div>
           </span>)
       } },
