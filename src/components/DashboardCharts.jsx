@@ -149,6 +149,71 @@ export default function DashboardCharts({ broker = 'all' }) {
     net: Math.round(data.reduce((s, d) => s + d.net, 0) * 100) / 100,
   }), [data])
 
+  // Today at a glance: how many held stocks are up vs down, and what the
+  // shares did in dollars. "13 of 15 down but only −$400" is the read.
+  const today = (() => {
+    const held = (rows || []).filter(r => (Number(r.stockPosition) || 0) > 0)
+    const priced = held.filter(r => r.dayStockPnl != null)
+    let up = 0, down = 0, flat = 0, stock = 0, value = 0, options = 0, hasOptions = false
+    for (const r of priced) {
+      const d = Number(r.dayStockPnl) || 0
+      if (d > 0.5) up++; else if (d < -0.5) down++; else flat++
+      stock += d
+      value += (Number(r.stockPosition) || 0) * (Number(r.stockCurrentPrice) || 0)
+    }
+    for (const r of rows || []) {
+      if (r.dayOptionPnl != null) { options += Number(r.dayOptionPnl) || 0; hasOptions = true }
+    }
+    const prior = value - stock
+    const best = [...priced].sort((a, b) => b.dayStockPnl - a.dayStockPnl)[0]
+    const worst = [...priced].sort((a, b) => a.dayStockPnl - b.dayStockPnl)[0]
+    return { held: held.length, priced: priced.length, up, down, flat, stock, value,
+             pct: prior > 0 ? stock / prior * 100 : null, options, hasOptions, best, worst }
+  })()
+
+  const todayStrip = today.held > 0 && (
+    <div className="floating-panel" style={{
+      gridColumn: '1 / -1', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+      padding: '12px 16px', color: 'var(--text)', display: 'flex', flexWrap: 'wrap', gap: '10px 28px', alignItems: 'center',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--textSecondary)', textTransform: 'uppercase', letterSpacing: '0.11em', fontWeight: 700 }}>
+        Stocks today
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 700 }}>
+        <span style={{ color: tokens.chartPositive }}>{today.up} up</span>
+        <span style={{ color: 'var(--textSecondary)', fontWeight: 400 }}> · </span>
+        <span style={{ color: tokens.chartNegative }}>{today.down} down</span>
+        {today.flat > 0 && <span style={{ color: 'var(--textSecondary)', fontWeight: 400 }}> · {today.flat} flat</span>}
+        <span style={{ color: 'var(--textSecondary)', fontWeight: 400, fontSize: 12 }}> of {today.held}</span>
+      </div>
+      <div title="Shares × move since yesterday's close, all held stocks">
+        <span style={{ fontSize: 11, color: 'var(--textSecondary)' }}>Shares </span>
+        <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+                       color: today.stock >= 0 ? tokens.chartPositive : tokens.chartNegative }}>{moneySigned(today.stock)}</span>
+        {today.pct != null && <span style={{ fontSize: 12, color: 'var(--textSecondary)' }}>
+          {' '}({today.pct >= 0 ? '+' : ''}{today.pct.toFixed(2)}% of {money(today.value)})</span>}
+      </div>
+      {today.hasOptions && (
+        <div title="Today's move on open options — short calls usually gain when the stock falls">
+          <span style={{ fontSize: 11, color: 'var(--textSecondary)' }}>Options </span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: today.options >= 0 ? tokens.chartPositive : tokens.chartNegative }}>
+            {moneySigned(today.options)}</span>
+          <span style={{ fontSize: 11, color: 'var(--textSecondary)' }}> · together </span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: today.stock + today.options >= 0 ? tokens.chartPositive : tokens.chartNegative }}>
+            {moneySigned(today.stock + today.options)}</span>
+        </div>
+      )}
+      {today.best && today.worst && today.priced > 1 && (
+        <div style={{ fontSize: 12, color: 'var(--textSecondary)' }}>
+          Best {today.best.ticker} {moneySigned(today.best.dayStockPnl)} · worst {today.worst.ticker} {moneySigned(today.worst.dayStockPnl)}
+        </div>
+      )}
+      {today.priced < today.held && (
+        <div style={{ fontSize: 11, color: '#f59e0b' }}>{today.held - today.priced} without a price yet</div>
+      )}
+    </div>
+  )
+
   if (rows === null) return null
   if (!top.length) {
     return (
@@ -178,6 +243,7 @@ export default function DashboardCharts({ broker = 'all' }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16, marginBottom: 20 }}>
+      {todayStrip}
 
       {/* ── Net by position ── one series, so no legend; sign carried by the label ── */}
       <div className="floating-panel" style={card}>
