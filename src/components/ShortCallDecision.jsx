@@ -92,11 +92,11 @@ export default function ShortCallDecision({ entryId, isDark }) {
 
   const roll = data?.rolls.find(r => keyOf(r) === (rollKey ?? defaults.roll)) || null
 
-  // Hedges must expire before the roll does ("shorter time frame").
+  // With a roll, hedges must expire before it does ("shorter time frame");
+  // without one, any hedge can sit against the call as it stands.
   const longChoices = useMemo(() => {
     if (!data) return []
-    const limit = roll ? roll.expiry : data.current.expiry
-    return data.longs.filter(l => l.expiry < limit && l.dte >= 21)
+    return data.longs.filter(l => (!roll || l.expiry < roll.expiry) && l.dte >= 21)
   }, [data, roll])
 
   const defaultLong = useMemo(() => {
@@ -133,6 +133,10 @@ export default function ShortCallDecision({ entryId, isDark }) {
       { key: 'hold', label: 'Leave it', at: S1 => (prem - valueAt(cur, S1)) * x },
       { key: 'close', label: 'Close now', at: () => (prem - cur.ask) * x },
     ]
+    if (long) strategies.push({
+      key: 'holdLong', label: `Leave it + long $${long.strike} ${shortDate(long.expiry)}`,
+      at: S1 => (prem - valueAt(cur, S1) + valueAt(long, S1) - long.ask) * x,
+    })
     if (roll) strategies.push({
       key: 'roll', label: `Roll → $${roll.strike} ${shortDate(roll.expiry)}`,
       at: S1 => (prem - cur.ask + roll.bid - valueAt(roll, S1)) * x,
@@ -153,6 +157,7 @@ export default function ShortCallDecision({ entryId, isDark }) {
 
     // Where the best alternative overtakes leaving it, scanned on a fine grid.
     const alt = strategies.find(s => s.key === 'rollLong') || strategies.find(s => s.key === 'roll')
+      || strategies.find(s => s.key === 'holdLong')
     const hold = strategies[0]
     let crossings = []
     if (alt) {
@@ -199,8 +204,10 @@ export default function ShortCallDecision({ entryId, isDark }) {
   // The plain-language read: which is ahead where the stock is now, and the
   // price at which that flips.
   const summary = (() => {
-    if (!model.alt) return 'No roll found for a net credit at this strike or higher.'
-    const name = model.alt.key === 'rollLong' ? 'Rolling with the long call' : 'Rolling'
+    if (!model.alt) return data.rolls.length
+      ? 'Pick a roll or a long call above to compare it with leaving it and closing now.'
+      : `No roll pays a net credit right now — every later ${data.ticker} call at $${cur.strike} or higher sells for less than this one costs to buy back. Pick a long call to see leaving it with a hedge.`
+    const name = { rollLong: 'Rolling with the long call', roll: 'Rolling', holdLong: 'Adding the long call' }[model.alt.key]
     const c = model.crossings.filter(x => x.price > S * 0.5)
     if (!c.length) {
       return model.altBetterNow
@@ -354,7 +361,7 @@ export default function ShortCallDecision({ entryId, isDark }) {
               {cols.map((c, i) => {
                 const S1 = S * (1 + c.move)
                 const top = model.strategies.reduce((a, t) => (t.at(S1) > a.at(S1) + 0.5 ? t : a))
-                const name = { hold: 'Leave it', close: 'Close now', roll: 'Roll', rollLong: 'Roll + long' }[top.key]
+                const name = { hold: 'Leave it', holdLong: 'Leave + long', close: 'Close now', roll: 'Roll', rollLong: 'Roll + long' }[top.key]
                 return (
                   <td key={i} style={{ ...td, fontWeight: 700, color: top.key === 'close' ? text : GOOD,
                                        borderLeft: i >= MOVES.length ? `1px dashed ${border}` : undefined }}>
