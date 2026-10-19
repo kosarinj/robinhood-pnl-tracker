@@ -5,7 +5,7 @@ import cors from 'cors'
 import multer from 'multer'
 import { parseTrades, parseDeposits } from './services/csvParser.js'
 import { calculatePnL } from './services/pnlCalculator.js'
-import { PriceService } from './services/priceService.js'
+import { PriceService, currentUsSession } from './services/priceService.js'
 import { SignalService } from './services/signalService.js'
 import { PolygonService } from './services/polygonService.js'
 import { databaseService, dbPath, VOLUME_CANDIDATES } from './services/database.js'
@@ -9747,9 +9747,10 @@ app.post('/api/orderflow/option-marks', (req, res) => {
     stored++
   }
   // Persist today's mids so tomorrow's Day P&L has an IBKR baseline to
-  // difference against. Last write of the day wins, which makes the final push
-  // before the recorder stops the effective close.
-  try {
+  // difference against. Last write of the day wins, so only regular-session
+  // pushes are saved: the recorder keeps running after 4pm and over weekends,
+  // and those books are wide and stale -- saving them made a junk "close".
+  if (currentUsSession() === 'regular') try {
     const etDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
     const rows = []
     for (const [key, m] of optionMarks) {

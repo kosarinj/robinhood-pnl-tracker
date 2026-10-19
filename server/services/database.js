@@ -3,6 +3,29 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 
+/**
+ * True when a stored IBKR close was last written during the regular session
+ * (9:30-16:00 ET) of the day it is filed under.
+ *
+ * The recorder pushes at every hour and each push overwrote the day's row, so
+ * the "close" was whatever IBKR showed last -- after 4pm and over the weekend
+ * that is a wide, stale book, not a price. Friday 10/16 read about $1,000 too
+ * negative all weekend, and Monday's Day P&L then differenced against it and
+ * showed the options up on a down day. A row overwritten after the bell has
+ * lost its good value, so it is skipped and the caller falls back to Polygon.
+ */
+export function isRegularSessionClose(markDate, updatedAtSec) {
+  if (!markDate || !(updatedAtSec > 0)) return false
+  const at = new Date(updatedAtSec * 1000)
+  const etDate = at.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  if (etDate !== markDate) return false
+  const et = new Date(at.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+  const day = et.getDay()
+  if (day === 0 || day === 6) return false
+  const mins = et.getHours() * 60 + et.getMinutes()
+  return mins >= 9 * 60 + 30 && mins < 16 * 60 + 1
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
@@ -3515,12 +3538,12 @@ export class DatabaseService {
     try {
       if (!markDate) return {}
       const rows = db.prepare(`
-        SELECT contract_key, mid, bid, ask FROM option_ibkr_closes
+        SELECT contract_key, mid, bid, ask, updated_at FROM option_ibkr_closes
         WHERE user_id = ? AND mark_date = ?
       `).all(userId, markDate)
       const out = {}
       for (const r of rows) {
-        if (!(r.mid > 0)) continue
+        if (!(r.mid > 0) || !isRegularSessionClose(markDate, r.updated_at)) continue
         out[r.contract_key] = { mid: r.mid, bid: r.bid || 0, ask: r.ask || 0 }
       }
       return out
@@ -3548,16 +3571,15 @@ export class DatabaseService {
     try {
       if (!onOrBefore) return {}
       const rows = db.prepare(`
-        SELECT contract_key, mid, bid, ask, mark_date FROM (
-          SELECT contract_key, mid, bid, ask, mark_date,
-                 ROW_NUMBER() OVER (PARTITION BY contract_key ORDER BY mark_date DESC) AS rn
-          FROM option_ibkr_closes
-          WHERE user_id = ? AND mark_date <= ?
-        ) WHERE rn = 1
+        SELECT contract_key, mid, bid, ask, mark_date, updated_at
+        FROM option_ibkr_closes
+        WHERE user_id = ? AND mark_date <= ?
+        ORDER BY mark_date DESC
       `).all(userId, onOrBefore)
+      // Newest valid row per contract; rows written after the bell are skipped.
       const out = {}
       for (const r of rows) {
-        if (!(r.mid > 0)) continue
+        if (out[r.contract_key] || !(r.mid > 0) || !isRegularSessionClose(r.mark_date, r.updated_at)) continue
         out[r.contract_key] = { mid: r.mid, bid: r.bid || 0, ask: r.ask || 0, markDate: r.mark_date }
       }
       return out
@@ -3569,18 +3591,19 @@ export class DatabaseService {
 
   getPriorIbkrOptionCloses(userId = 1, beforeDate) {
     try {
-      const row = db.prepare(`
-        SELECT MAX(mark_date) AS d FROM option_ibkr_closes
-        WHERE user_id = ? AND mark_date < ?
-      `).get(userId, beforeDate)
-      if (!row?.d) return { date: null, marks: {} }
+      // The latest session with any valid (in-session) rows. Weekend and
+      // after-hours writes used to make Saturday or Sunday the "prior session".
       const rows = db.prepare(`
-        SELECT contract_key, mid FROM option_ibkr_closes
-        WHERE user_id = ? AND mark_date = ?
-      `).all(userId, row.d)
+        SELECT contract_key, mid, mark_date, updated_at FROM option_ibkr_closes
+        WHERE user_id = ? AND mark_date < ? AND mark_date >= date(?, '-14 days')
+        ORDER BY mark_date DESC
+      `).all(userId, beforeDate, beforeDate)
+      const valid = rows.filter(r => r.mid > 0 && isRegularSessionClose(r.mark_date, r.updated_at))
+      if (!valid.length) return { date: null, marks: {} }
+      const d = valid[0].mark_date
       const marks = {}
-      for (const r of rows) marks[r.contract_key] = r.mid
-      return { date: row.d, marks }
+      for (const r of valid) if (r.mark_date === d) marks[r.contract_key] = r.mid
+      return { date: d, marks }
     } catch (e) {
       console.error('Error reading IBKR option closes:', e)
       return { date: null, marks: {} }
