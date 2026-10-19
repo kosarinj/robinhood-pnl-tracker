@@ -59,6 +59,9 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
     keptNoDecay: p.callNoDecay != null && premiumPerShare > 0
       ? Math.round((premiumPerShare - p.callNoDecay) * 100 * contracts * 100) / 100
       : null,
+    // The same split in dollars kept (sign flipped: a cheaper call is a gain).
+    keptStock: p.stockPart != null ? Math.round(-p.stockPart * 100 * contracts * 100) / 100 : null,
+    keptVol: p.volPart != null ? Math.round(-p.volPart * 100 * contracts * 100) / 100 : null,
   })).map(p => ({
     ...p,
     // Stacked as a band: the invisible floor is the no-decay line, the green
@@ -147,9 +150,9 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
                 <div style={{ fontSize: 11, color: textMid, marginBottom: 4 }}>
                   What you'd keep buying it back at each day's estimated price. Decay pushes it up
                   toward the ceiling; a rally pulls it down, and below zero it costs more to close
-                  than you sold it for. The green band is decay already captured — the dashed floor
-                  is where this line would sit if the stock had moved the same way but no time had
-                  passed, so a wide band means the call is outrunning the stock.
+                  than you sold it for. The green band is time decay already captured — the dashed
+                  floor is where this line would sit with no time passed. Hover a day to see the
+                  amount kept split into time decay, the change in implied volatility, and the stock's move.
                 </div>
                 <div style={{ width: '100%', height: '190px' }}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -240,7 +243,18 @@ function KeptTooltip({ active, payload, label, contracts }) {
       <div style={{ color: 'var(--textSecondary, #64748b)', fontSize: 11, marginTop: 2 }}>
         buy back at ${p.callPrice?.toFixed(2)}/sh × {contracts} contract{contracts === 1 ? '' : 's'}
       </div>
-      {p.decayGain != null && (
+      {p.decayGain != null && p.keptVol != null ? (
+        // Where the amount kept came from. Sums to the headline figure.
+        <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
+          {[['Time decay', p.decayGain], ['Volatility change', p.keptVol], ['Stock move', p.keptStock]].map(([k, v]) => (
+            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12,
+                                  color: v >= 0 ? '#0ca30c' : '#d03b3b' }}>
+              <span style={{ color: 'var(--textSecondary, #64748b)' }}>{k}</span>
+              <span>{v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      ) : p.decayGain != null && (
         <div style={{ color: '#0ca30c', fontSize: 11, marginTop: 3 }}>
           decay captured ${Math.round(p.decayGain).toLocaleString()}
           <span style={{ color: 'var(--textSecondary, #64748b)' }}>

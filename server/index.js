@@ -6541,7 +6541,7 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
       if (!d || d < saleDate || d > endDate) continue
       const close = h.close
       if (!(close > 0)) continue
-      let callPrice = null, callNoDecay = null
+      let callPrice = null, callNoDecay = null, stockPart = null, volPart = null, decayPart = null
       if (optionModeled) {
         const T = yrs(d, expiry)
         const w = sigmaNow > 0
@@ -6556,10 +6556,42 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
         // CRWV reads -$417 today against -$294 on 7/30 with the stock ~$10
         // higher: nearly the same loss while the underlying ran, which is decay
         // doing the work and nothing on the chart said so.
-        const rawNoDecay = Tsale > 0 ? bsCall(close, K, Tsale, r, sig) : Math.max(0, close - K)
-        callNoDecay = Math.round(rawNoDecay * 100) / 100
+        //
+        // That counterfactual used to hold the vol at today's blended value,
+        // so a drop in implied vol since the sale landed in the "without decay"
+        // part and read as if the stock had moved. CRWV: stock flat since the
+        // July sale, +$700 kept, "decay captured $143" — the other ~$557 was
+        // the vol coming in, labelled as nothing at all.
+        //
+        // Now the change in the call is split three ways — stock, vol, time —
+        // averaged over every order of applying them (the split depends on the
+        // order, so no single order is fair). The parts sum exactly to the
+        // modeled change since the sale.
+        if (T > 0 && Tsale > 0 && Sat > 0) {
+          const f = (useS, useV, useT) =>
+            bsCall(useS ? close : Sat, K, useT ? T : Tsale, r, useV ? sig : sigma)
+          const orders = [[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]]
+          const part = [0, 0, 0]
+          for (const order of orders) {
+            const on = [false, false, false]
+            let prev = f(...on)
+            for (const i of order) {
+              on[i] = true
+              const next = f(...on)
+              part[i] += (next - prev) / orders.length
+              prev = next
+            }
+          }
+          // Per share, as a change in the CALL price: negative is good for a short.
+          stockPart = Math.round(part[0] * 100) / 100
+          volPart = Math.round(part[1] * 100) / 100
+          decayPart = Math.round(part[2] * 100) / 100
+          callNoDecay = Math.round((raw - part[2]) * 100) / 100
+        } else {
+          callNoDecay = Math.round(rawNoDecay * 100) / 100
+        }
       }
-      series.push({ date: d, stock: Math.round(close * 100) / 100, callPrice, callNoDecay })
+      series.push({ date: d, stock: Math.round(close * 100) / 100, callPrice, callNoDecay, stockPart, volPart, decayPart })
     }
 
     res.json({
