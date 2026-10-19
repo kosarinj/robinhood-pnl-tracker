@@ -28,7 +28,9 @@ const SESSION_LABEL = {
   unknown: '',
 }
 
-export default function ExtendedHoursPanel({ broker = 'all' }) {
+// standalone: shown as its own tab, where vanishing during regular hours would
+// leave a blank page that looks broken, so it says why it is empty instead.
+export default function ExtendedHoursPanel({ broker = 'all', standalone = false }) {
   const { isDark } = useTheme()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -81,8 +83,21 @@ export default function ExtendedHoursPanel({ broker = 'all' }) {
 
   // Hide entirely during regular hours — the real marks are live then, and a
   // model estimate sitting next to them would just be confusing.
-  if (!loading && data?.session === 'regular') return null
-  if (loading) return null
+  if (!loading && data?.session === 'regular') {
+    if (!standalone) return null
+    return (
+      <div className="floating-panel" style={card}>
+        <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Extended-hours options</h2>
+        <div style={{ fontSize: '13px', color: textMid, marginTop: '6px' }}>
+          Regular session — option marks are live, so there is nothing to estimate.
+          This fills in pre-market and after the close.
+        </div>
+      </div>
+    )
+  }
+  if (loading) return standalone
+    ? <div style={{ ...card, color: textMid, fontSize: 13 }}>Loading extended-hours estimates…</div>
+    : null
   if (error) {
     return (
       <div className="floating-panel" style={card}>

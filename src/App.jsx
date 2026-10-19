@@ -2541,6 +2541,7 @@ function AuthenticatedApp({ user }) {
               ['expiries', 'Expirations'],
               ['longs', 'Long Options'],
               ['coverage', 'Coverage'],
+              ['extended', 'Extended Hours'],
             ].map(([key, label]) => {
               const active = positionsTab === key
               return (
@@ -2579,6 +2580,7 @@ function AuthenticatedApp({ user }) {
           {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}
           {positionsTab === 'longs'    && <LongOptionsPanel broker={brokerFilter} />}
           {positionsTab === 'coverage' && <CallCoveragePanel broker={brokerFilter} />}
+          {positionsTab === 'extended' && <ExtendedHoursPanel broker={brokerFilter} standalone />}
       </div>
 
       {/* Tax tab */}
@@ -2616,21 +2618,21 @@ function AuthenticatedApp({ user }) {
 
       {/* Totals, with the charts slotted in directly under the Cumulative P&L
           figures rather than after the whole panel. */}
+      {/* The dashboard shows the P&L totals, the charts and the earnings
+          calendar. Everything else the panel carries — the week/history
+          detail, calculators, open positions, what-if — sits behind one
+          "More" toggle, closed by default. Extended-hours estimates moved to
+          Positions → Extended Hours. */}
       {activeMainTab === 'dashboard' && (
         <OptionsPnLPanel
           broker={brokerFilter}
-          afterCumulative={<DashboardCharts broker={brokerFilter} />}
+          afterCumulative={<>
+            <DashboardCharts broker={brokerFilter} />
+            <EarningsPanel broker={brokerFilter} />
+          </>}
+          moreDetail={<DCAAlertPanel />}
         />
       )}
-
-      {/* Pre/post market option estimates — self-hides during regular hours */}
-      {activeMainTab === 'dashboard' && <ExtendedHoursPanel broker={brokerFilter} />}
-
-      {/* Upcoming earnings — next to the estimates it invalidates */}
-      {activeMainTab === 'dashboard' && <EarningsPanel broker={brokerFilter} />}
-
-      {/* Buy schedule */}
-      {activeMainTab === 'dashboard' && <DCAAlertPanel />}
 
       {/* Realized P&L moved to Positions → Realized P&L. It is a day-by-day
           ledger, which is detail rather than an answer, and the dashboard reads

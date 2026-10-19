@@ -117,7 +117,7 @@ const getMondayOfWeek = (dateStr) => {
   return { monday: monday.toISOString().slice(0, 10), friday: fri.toISOString().slice(0, 10) }
 }
 
-export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null }) {
+export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null, moreDetail = null }) {
   const { isDark } = useTheme()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -151,6 +151,10 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
   // These three decide what Cumulative P&L reports, so they follow the USER.
   // Held per device they made one account show three different totals across a
   // laptop, a phone browser and the iOS app.
+  // Everything below the totals, charts and earnings is behind this, closed by
+  // default — the dashboard was carrying every view the app has.
+  const [showMore, setShowMore] = useState(() => getPref('dashboard_showMore', false) === true)
+  const toggleMore = () => setShowMore(v => { setPref('dashboard_showMore', !v); return !v })
   const [cumulativeWeeks, setCumulativeWeeks] = useState(() => Number(getPref('optionsPnl_cumulativeWeeks', 0)) || 0)
   const changeCumulativeWeeks = (v) => {
     setCumulativeWeeks(v)
@@ -942,17 +946,7 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
           the ~1600 lines of week/history detail that follow. */}
       {afterCumulative}
 
-      {/* Tab bar */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: `2px solid ${border}`, paddingBottom: '0' }}>
-        {[['week', 'This Week'], ['history', 'History']].map(([key, label]) => (
-          <button key={key} onClick={() => setActiveTab(key)} style={{
-            padding: '8px 20px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
-            background: 'none', borderBottom: activeTab === key ? `2px solid #667eea` : '2px solid transparent',
-            marginBottom: '-2px', color: activeTab === key ? '#667eea' : textMid,
-            transition: 'color 0.15s'
-          }}>{label}</button>
-        ))}
-      </div>
+      {/* A risk alert, not detail — it stays out from behind the toggle. */}
       {hasShortPuts && (
         <div style={{ marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', background: isDark ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.1)', border: '1.5px solid #ef4444', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
           <span style={{ fontSize: '18px', lineHeight: 1 }}>⚠️</span>
@@ -969,6 +963,26 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
           </div>
         </div>
       )}
+
+      <button onClick={toggleMore} aria-expanded={showMore}
+        style={{ ...btnStyle(showMore), width: '100%', padding: '8px 14px', marginBottom: '16px',
+                 display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{showMore ? 'Hide' : 'Show'} more — this week, history, open options, calculators, what-if, buy schedule</span>
+        <span>{showMore ? '▲' : '▼'}</span>
+      </button>
+
+      {showMore && <>
+      {/* Tab bar */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: `2px solid ${border}`, paddingBottom: '0' }}>
+        {[['week', 'This Week'], ['history', 'History']].map(([key, label]) => (
+          <button key={key} onClick={() => setActiveTab(key)} style={{
+            padding: '8px 20px', fontSize: '13px', fontWeight: '600', border: 'none', cursor: 'pointer',
+            background: 'none', borderBottom: activeTab === key ? `2px solid #667eea` : '2px solid transparent',
+            marginBottom: '-2px', color: activeTab === key ? '#667eea' : textMid,
+            transition: 'color 0.15s'
+          }}>{label}</button>
+        ))}
+      </div>
       <MarketPulse isDark={isDark} />
       <PutStrikeCalculator tickers={
         Object.entries(stockPriceByTicker)
@@ -2584,6 +2598,8 @@ export default function OptionsPnLPanel({ broker = 'all', afterCumulative = null
           })()}
         </div>
       )}
+      </>}
+      {moreDetail}
       </>}
     </div>
   )
