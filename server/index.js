@@ -6618,6 +6618,154 @@ app.get('/api/short-calls/:id/history', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/short-calls/:id/decision — what the choices are for one short call.
+ *
+ * Leave it, close it, roll it out, or roll it and buy a cheaper, shorter long
+ * call to cover a fast rally. This returns the inputs — the current short's
+ * mark, roll targets and hedge candidates, each with a price and an implied
+ * vol — and the panel runs the scenarios, so switching candidates is instant.
+ *
+ * Prices, best first: a live IBKR two-sided market (bid for a sale, ask for a
+ * purchase — what a fill would actually be), else a Black–Scholes price from
+ * Polygon's implied vol for that contract. The recorder only quotes contracts
+ * already held, so every candidate shown is registered with it for the next
+ * 20 minutes; reopening a few minutes later picks up real bid/ask.
+ */
+app.get('/api/short-calls/:id/decision', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const entry = databaseService.getShortCallEntries(userId).find(e => e.id === parseInt(req.params.id))
+    if (!entry) return res.status(404).json({ success: false, error: 'Entry not found' })
+    const parsed = parseOptionDescription(entry.symbol)
+    if (!parsed || parsed.type !== 'call') return res.status(400).json({ success: false, error: 'Not a call contract' })
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return res.status(503).json({ success: false, error: 'No Polygon key — option chain unavailable' })
+
+    const ticker = parsed.ticker
+    const K = parsed.strike
+    const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+    const today = new Date().toISOString().slice(0, 10)
+    const r = RISK_FREE_RATE
+    const yrs = (exp) => Math.max(0, (new Date(exp + 'T21:00:00Z') - Date.now()) / (365.25 * 86400000))
+    // Contracts currently short on this symbol, not the entry's original size.
+    const open = databaseService.getOpenOptionPositions(userId).find(p => p.symbol === entry.symbol)
+    const contracts = open?.net_short > 0 ? open.net_short : (entry.contracts || 1)
+    const premiumPerShare = entry.premium / ((entry.contracts || 1) * 100)
+
+    let stock = 0
+    try { stock = (await priceService.fetchPrices([ticker]))[ticker] || 0 } catch { /* chain below has it too */ }
+
+    // The chain: every call from two weeks out to ~8 months past the current
+    // expiry, strikes from just below spot to about double it.
+    const horizonEnd = new Date(new Date(expiry).getTime() + 240 * 86400000).toISOString().slice(0, 10)
+    const chain = []
+    let url = `https://api.polygon.io/v3/snapshot/options/${ticker}`
+    let params = {
+      apiKey: polygonKey, contract_type: 'call', limit: 250,
+      'expiration_date.gte': new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+      'expiration_date.lte': horizonEnd,
+    }
+    if (stock > 0) {
+      params['strike_price.gte'] = Math.floor(stock * 0.9)
+      params['strike_price.lte'] = Math.ceil(Math.max(stock * 2.2, K * 1.5))
+    }
+    for (let page = 0; url && page < 6; page++) {
+      const resp = await axios.get(url, { params, timeout: 10000 })
+      for (const c of resp.data?.results || []) {
+        const d = c.details || {}
+        if (!(d.strike_price > 0) || !d.expiration_date) continue
+        chain.push({
+          strike: d.strike_price, expiry: d.expiration_date,
+          iv: c.implied_volatility > 0 ? c.implied_volatility : null,
+          close: c.day?.close > 0 ? c.day.close : null,
+        })
+        if (!(stock > 0) && c.underlying_asset?.price > 0) stock = c.underlying_asset.price
+      }
+      url = resp.data?.next_url || null
+      params = { apiKey: polygonKey }
+    }
+    if (!(stock > 0)) return res.status(502).json({ success: false, error: 'No stock price' })
+
+    // A price for a contract as a fill would see it: a sale takes the bid, a
+    // purchase pays the ask. IBKR first, then the contract's own implied vol.
+    const ivFallback = (() => {
+      const near = chain.filter(c => c.iv).sort((a, b) => Math.abs(a.strike - stock) - Math.abs(b.strike - stock))
+      return near[0]?.iv || 0.6
+    })()
+    const priceOf = (strike, exp, iv, close) => {
+      const live = optionMark(userId, ticker, exp, strike, 'call') || optionMark(orderFlowOwner(), ticker, exp, strike, 'call')
+      const T = yrs(exp)
+      if (live?.mid > 0) {
+        const sig = T > 0 ? impliedVolCall(live.mid, stock, strike, T, r) : 0
+        return { mid: live.mid, bid: live.bid, ask: live.ask, iv: sig > 0 ? sig : (iv || ivFallback), source: 'ibkr' }
+      }
+      const sig = iv || (close > 0 && T > 0 ? impliedVolCall(close, stock, strike, T, r) : 0) || ivFallback
+      const mid = T > 0 ? bsCall(stock, strike, T, r, sig) : Math.max(0, stock - strike)
+      return { mid, bid: mid, ask: mid, iv: sig, source: iv ? 'polygon-iv' : close > 0 ? 'close' : 'flat-iv' }
+    }
+    const round = (n, d = 2) => Math.round(n * 10 ** d) / 10 ** d
+    const pack = (strike, exp, p) => ({
+      strike, expiry: exp, mid: round(p.mid), bid: round(p.bid), ask: round(p.ask),
+      iv: round(p.iv, 4), source: p.source, dte: Math.round(yrs(exp) * 365.25),
+    })
+
+    const curChain = chain.find(c => c.strike === K && c.expiry === expiry)
+    const current = pack(K, expiry, priceOf(K, expiry, curChain?.iv, curChain?.close))
+
+    // Roll targets: later expiry, same strike or higher, for a net credit — the
+    // new sale's bid less the current one's ask.
+    const rolls = chain
+      .filter(c => c.expiry > expiry && c.strike >= K)
+      .map(c => {
+        const p = pack(c.strike, c.expiry, priceOf(c.strike, c.expiry, c.iv, c.close))
+        return { ...p, netCredit: round(p.bid - current.ask) }
+      })
+      .filter(c => c.netCredit > 0)
+      .sort((a, b) => a.expiry.localeCompare(b.expiry) || a.strike - b.strike)
+
+    // Hedges: out-of-the-money long calls up to $600 a contract, any expiry in
+    // range — the panel keeps the ones shorter than the chosen roll.
+    const longs = chain
+      .filter(c => c.strike > stock * 1.03)
+      .map(c => pack(c.strike, c.expiry, priceOf(c.strike, c.expiry, c.iv, c.close)))
+      .filter(c => c.ask > 0.05 && c.ask * 100 <= 600)
+      .sort((a, b) => a.expiry.localeCompare(b.expiry) || a.strike - b.strike)
+
+    // Ask the IBKR recorder to quote what's on screen. Capped so candidates
+    // can't crowd the open legs out of the market-data lines.
+    const until = Date.now() + 20 * 60 * 1000
+    const byCredit = [...rolls].sort((a, b) => b.netCredit - a.netCredit).slice(0, 8)
+    const cheapest = [...longs].sort((a, b) => a.ask - b.ask).slice(0, 8)
+    for (const c of [current, ...byCredit, ...cheapest]) {
+      requestedOptionMarks.set(optionKey(ticker, c.expiry, c.strike, 'C'),
+        { ticker, expiry: c.expiry, strike: c.strike, right: 'C', until })
+    }
+
+    // Seasonality: daily closes for the stock and the market, so the panel can
+    // show how the same calendar window went in earlier years for whatever
+    // horizon is picked. Compact [date, close] pairs; failures just omit it.
+    const closesOf = async (sym) => {
+      try {
+        const h = await priceService.fetchHistoricalPrices(sym, '10y', '1d')
+        return h.filter(p => p.close > 0).map(p => [p.date.slice(0, 10), round(p.close)])
+      } catch { return [] }
+    }
+    const [stockHistory, marketHistory] = await Promise.all([closesOf(ticker), closesOf('QQQ')])
+
+    res.json({
+      success: true, ticker, stock: round(stock), today,
+      contracts, premiumPerShare: round(premiumPerShare), riskFree: r,
+      current, rolls, longs,
+      seasonality: { stock: stockHistory, market: marketHistory, marketSymbol: 'QQQ' },
+      ibkrQuoted: [current, ...rolls, ...longs].filter(c => c.source === 'ibkr').length,
+    })
+  } catch (e) {
+    console.error('Error in /api/short-calls/:id/decision:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 // Get daily EOD price snapshot for a specific date (default: most recent trading day)
 app.get('/api/daily-snapshot', requireAuth, async (req, res) => {
   try {
@@ -9554,6 +9702,9 @@ app.post('/api/orderflow/marks', (req, res) => {
  */
 const optionMarks = new Map()
 const OPTION_MARK_FRESH_MS = 10 * 60 * 1000
+// Contracts not held but on screen in a short call's decision panel, so the
+// recorder quotes them too. key -> { ticker, expiry, strike, right, until }.
+const requestedOptionMarks = new Map()
 
 /** Canonical key for a contract, so the recorder and the panel agree. */
 function optionKey(ticker, expiry, strike, right) {
@@ -9649,6 +9800,14 @@ app.get('/api/orderflow/option-watchlist', (req, res) => {
       if (!(Math.abs(net) > 0)) continue
       out.push({ ticker: parsed.ticker, expiry, strike: parsed.strike,
         right: parsed.type === 'put' ? 'P' : 'C' })
+    }
+    // Held legs first -- the recorder takes the first 40, and those are what
+    // the P&L runs on. Requested candidates fill whatever room is left.
+    const held = new Set(out.map(c => optionKey(c.ticker, c.expiry, c.strike, c.right)))
+    const now = Date.now()
+    for (const [key, c] of requestedOptionMarks) {
+      if (c.until < now) { requestedOptionMarks.delete(key); continue }
+      if (!held.has(key)) out.push({ ticker: c.ticker, expiry: c.expiry, strike: c.strike, right: c.right })
     }
     res.json({ success: true, count: out.length, contracts: out })
   } catch (e) {

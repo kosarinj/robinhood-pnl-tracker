@@ -3,6 +3,7 @@ import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine
 } from 'recharts'
+import ShortCallDecision from './ShortCallDecision'
 
 const fmtUSD = (n) => (n == null || isNaN(n)) ? '—' : `$${Number(n).toFixed(2)}`
 const shortDate = (s) => {
@@ -215,6 +216,9 @@ export default function ShortCallChart({ entry, onClose, isDark }) {
             </div>
           </>
         )}
+
+        {/* Only an open short has a decision to make. */}
+        {entry.isOpen !== false && <ShortCallDecision entryId={entry.id} isDark={isDark} />}
       </div>
     </div>
   )
