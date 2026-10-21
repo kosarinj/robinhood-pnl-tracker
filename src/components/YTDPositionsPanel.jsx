@@ -1714,6 +1714,27 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       foot: (t) => <span style={{ color: pnlColor(t.optionsOpenWeekChange, isDark), fontWeight: 700 }}>
         {t.optionsOpenWeekChange >= 0 ? '+' : ''}{fmt(t.optionsOpenWeekChange)}</span> },
 
+    { key: 'weekTotal', label: 'Wk P&L', borderLeft: '1px',
+      title: 'The week so far on this name: Wk $ (shares) + Wk Opt (options closed) + Wk Opt Open (options still open).',
+      cell: (r, c) => {
+        const parts = [c.weekStockPnl, r.optionsThisWeek || 0, r.optionsOpenWeekChange]
+        if (parts.every(v => v == null || v === 0)) return <span style={{ color: isDark ? '#475569' : '#cbd5e1' }}>{'—'}</span>
+        const v = parts.reduce((a, x) => a + (x || 0), 0)
+        // Open options held but no week-start snapshot: the total is missing that piece.
+        const partial = r.optionsOpenWeekChange == null && r.openUnrealizedPnL != null
+        return (
+          <span style={{ fontWeight: 800, color: pnlColor(v, isDark) }}
+            title={`Shares ${c.weekStockPnl != null ? fmt(c.weekStockPnl) : '—'} + closed options ${fmt(r.optionsThisWeek || 0)} + open options ${r.optionsOpenWeekChange != null ? fmt(r.optionsOpenWeekChange) : '— (no snapshot yet)'}`}>
+            {v >= 0 ? '+' : ''}{fmt(v)}
+            {partial && <span style={{ fontSize: 10, color: '#f59e0b' }}> partial</span>}
+          </span>
+        )
+      },
+      foot: (t) => {
+        const v = t.weekStockPnl + t.optionsThisWeek + t.optionsOpenWeekChange
+        return <span style={{ color: pnlColor(v, isDark), fontWeight: 800, fontSize: 15 }}>{v >= 0 ? '+' : ''}{fmt(v)}</span>
+      } },
+
     { key: 'weeklyChangePct', label: 'Wk % (px)', sort: 'weeklyChangePct', borderLeft: '1px',
       title: 'Stock price change over the past ~week (5 trading days)',
       cell: (r) => <span title={r.weeklyChange != null ? `${r.weeklyChange >= 0 ? '+' : ''}${fmt(r.weeklyChange)} over ~1 week` : ''}
@@ -1763,6 +1784,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     const NEIGHBOURS = [
       { keys: ['scenarioNet', 'scenarioDelta'], anchor: 'netPlusOpen' },
       { keys: ['weekStock', 'weekOptions', 'weekOptionsOpen'], anchor: 'dayPnl' },
+      { keys: ['weekTotal'], anchor: 'weekOptionsOpen' },
       { keys: ['dayStockPnl', 'dayOptionPnl'], anchor: 'dayPnl' },
       { keys: ['openExitPnL'], anchor: 'openUnrealizedPnL' },
       { keys: ['stockRealizedAll'], anchor: 'stockPnL' },
