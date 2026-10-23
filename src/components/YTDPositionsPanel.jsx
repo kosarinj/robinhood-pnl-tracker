@@ -2167,7 +2167,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
             // means — the real bar, a trackpad swipe, shift+wheel.
             if (proxyRef.current) proxyRef.current.scrollLeft = e.currentTarget.scrollLeft
           }}
-          className="floating-panel" style={{ overflowX: 'auto', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
+          // A height cap makes this box the vertical scroller too. The header
+          // and totals rows were already sticky, but only against a box that
+          // scrolls: with overflowX alone the PAGE scrolled, and the column
+          // names went off the top with it.
+          className="floating-panel" style={{ overflow: 'auto', maxHeight: 'calc(100vh - 90px)', position: 'relative', borderRadius: '10px', border: `1px solid ${border}` }}>
           <table className="ytd-panel-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: '13px', background: surface }}>
             <colgroup>
               <col style={{ width: '44px' }} />
