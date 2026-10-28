@@ -1600,13 +1600,135 @@ button:disabled {
   [data-theme^="rightCapital"] .main-nav { justify-content: flex-start; }
 }
 
-/* ── Soft controls for Prift and RightCapital ──────────────────────────────
+/* ── Revolut theme ─────────────────────────────────────────────────────────
+   After the Revolut app: grey page, white cards with deep rounding and no
+   outline, near-black bold figures, and pills -- the nav, the buttons and the
+   current tab are all fully rounded. */
+[data-theme^="revolut"] body {
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+[data-theme^="revolut"] :is(table, input, select, button) {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+[data-theme^="revolut"] .app-container {
+  background: transparent;
+  box-shadow: none;
+  padding: 24px 28px;
+}
+[data-theme^="revolut"] .floating-panel {
+  border-radius: 22px !important;
+  border-color: transparent !important;
+  box-shadow: 0 2px 12px var(--shadow);
+}
+[data-theme^="revolut"] .floating-panel:hover { transform: none; box-shadow: 0 2px 12px var(--shadow); }
+[data-theme^="revolut"] :is(h1, h2, h3) { font-weight: 800; letter-spacing: -0.02em; }
+[data-theme^="revolut"] th { font-weight: 700; }
+[data-theme^="revolut"] button { border-radius: 999px; }
+/* The nav is one grey pill track; the current page is a white pill on it. */
+[data-theme^="revolut"] .main-nav {
+  background: var(--panel) !important;
+  border-bottom: none !important;
+  border-radius: 999px;
+  padding: 4px !important;
+  gap: 2px !important;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+[data-theme^="revolut"] .main-nav button {
+  border: none !important;
+  margin-bottom: 0 !important;
+  padding: 8px 18px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--textSecondary) !important;
+  background: transparent !important;
+}
+[data-theme^="revolut"] .main-nav button[aria-current="page"] {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  box-shadow: 0 1px 4px var(--shadow);
+}
+@media (max-width: 700px) {
+  [data-theme^="revolut"] .app-container { padding: 12px 4px; }
+}
+
+/* ── Vivid theme ───────────────────────────────────────────────────────────
+   After Vivid Money: purple everywhere, soft violet glows behind the page,
+   rounded pocket cards, and a segmented pill nav whose current tab carries
+   the violet gradient. */
+[data-theme^="vivid"] body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+[data-theme="vividDark"] body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(125, 80, 255, 0.22), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(220, 90, 255, 0.12), transparent 60%),
+    var(--background);
+  background-attachment: fixed;
+}
+[data-theme="vivid"] body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(125, 80, 255, 0.12), transparent 60%),
+    var(--background);
+  background-attachment: fixed;
+}
+[data-theme^="vivid"] :is(table, input, select, button) {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+[data-theme^="vivid"] .app-container {
+  background: transparent;
+  box-shadow: none;
+  padding: 24px 28px;
+}
+[data-theme^="vivid"] .floating-panel {
+  border-radius: 20px !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 8px 30px var(--shadow);
+}
+[data-theme^="vivid"] .floating-panel:hover { transform: none; box-shadow: 0 8px 30px var(--shadow); }
+[data-theme^="vivid"] :is(h1, h2, h3) { font-weight: 700; letter-spacing: -0.015em; }
+[data-theme^="vivid"] th { font-weight: 600; }
+[data-theme^="vivid"] button { border-radius: 12px; }
+[data-theme^="vivid"] .main-nav {
+  background: color-mix(in srgb, var(--surface) 70%, transparent) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 16px;
+  padding: 5px !important;
+  gap: 4px !important;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+[data-theme^="vivid"] .main-nav button {
+  border: none !important;
+  margin-bottom: 0 !important;
+  padding: 8px 18px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--textSecondary) !important;
+  background: transparent !important;
+}
+[data-theme^="vivid"] .main-nav button[aria-current="page"] {
+  background: linear-gradient(135deg, #6d4aff, #b25cff) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 14px rgba(109, 74, 255, 0.35);
+}
+@media (max-width: 700px) {
+  [data-theme^="vivid"] .app-container { padding: 12px 4px; }
+}
+
+/* ── Soft controls for Prift, RightCapital, Revolut and Vivid ──────────────────────────────
    The base stylesheet paints every default button, table header and summary
    card in a purple gradient with a coloured glow -- the "loud" part of the
    Analytics tab. Under these two themes they become quiet: outlined neutral
    buttons, accent only as a soft tint, flat headers. Buttons and panels that
    set their own inline colours are unaffected. */
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) button {
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) button {
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
@@ -1615,18 +1737,18 @@ button:disabled {
   font-size: 13.5px;
   padding: 9px 18px;
 }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) button:hover {
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) button:hover {
   transform: none;
   background: var(--surfaceHover);
   box-shadow: none;
 }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.upload-button, .btn-signals, .btn-split) {
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) :is(.upload-button, .btn-signals, .btn-split) {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   color: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   box-shadow: none;
 }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.upload-button, .btn-signals, .btn-split):hover {
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) :is(.upload-button, .btn-signals, .btn-split):hover {
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
 }
 /* A flat, muted band in place of the gradient. Kept dark because many panels
@@ -1635,38 +1757,42 @@ button:disabled {
 [data-theme^="prift"] thead th:nth-child(3) { background: #2c3b57; }
 [data-theme^="rightCapital"] thead,
 [data-theme^="rightCapital"] thead th:nth-child(3) { background: #4a4560; }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) tfoot {
+[data-theme^="revolut"] thead,
+[data-theme^="revolut"] thead th:nth-child(3) { background: #23272d; }
+[data-theme^="vivid"] thead,
+[data-theme^="vivid"] thead th:nth-child(3) { background: #3a2c78; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) tfoot {
   background: var(--panel);
   border-top: 1px solid var(--border);
 }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card {
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .summary-card {
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: 0 1px 2px var(--shadow), 0 6px 20px var(--shadow);
 }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card:hover { transform: none; }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card h3 { color: var(--textSecondary); letter-spacing: 0.04em; }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card .value { color: var(--text); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .upload-section {
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .summary-card:hover { transform: none; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .summary-card h3 { color: var(--textSecondary); letter-spacing: 0.04em; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .summary-card .value { color: var(--text); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .upload-section {
   border: 2px dashed var(--border);
   background: var(--panel);
 }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .upload-section:hover { border-color: var(--accent); background: var(--surfaceHover); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.upload-section h2, .expand-icon, .trades-detail h4, .controls label:hover) { color: var(--accent); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .controls input[type="checkbox"] { accent-color: var(--accent); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .symbol-search:focus { border-color: var(--accent); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .positive { color: var(--positive); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .negative { color: var(--negative); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-edit { color: var(--accent); border: 1px solid var(--border); background: var(--surface); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-edit:hover { background: var(--surfaceHover); color: var(--accent); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-save { background: var(--positive); color: #fff; border: none; }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-cancel { background: var(--surface); color: var(--negative); border: 1px solid var(--border); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-clear { background: var(--cardNeutral); color: var(--text); border: 1px solid var(--border); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.price-input, .split-input) { border: 1px solid var(--accent); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .split-indicator { background: var(--accent); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .signals-panel { border: 1px solid var(--border); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .signals-header h3 { color: var(--text); }
-:is([data-theme^="prift"], [data-theme^="rightCapital"]) .signal-card { border-left: 3px solid var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .upload-section:hover { border-color: var(--accent); background: var(--surfaceHover); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) :is(.upload-section h2, .expand-icon, .trades-detail h4, .controls label:hover) { color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .controls input[type="checkbox"] { accent-color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .symbol-search:focus { border-color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .positive { color: var(--positive); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .negative { color: var(--negative); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .btn-edit { color: var(--accent); border: 1px solid var(--border); background: var(--surface); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .btn-edit:hover { background: var(--surfaceHover); color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .btn-save { background: var(--positive); color: #fff; border: none; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .btn-cancel { background: var(--surface); color: var(--negative); border: 1px solid var(--border); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .btn-clear { background: var(--cardNeutral); color: var(--text); border: 1px solid var(--border); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) :is(.price-input, .split-input) { border: 1px solid var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .split-indicator { background: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .signals-panel { border: 1px solid var(--border); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .signals-header h3 { color: var(--text); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"], [data-theme^="revolut"], [data-theme^="vivid"]) .signal-card { border-left: 3px solid var(--accent); }
 
 /* Soft buttons: the accent as a tint rather than a fill. Used by the Analytics
    components in place of their old bright blue/red/purple/green buttons, so

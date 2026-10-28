@@ -433,6 +433,172 @@ export const themes = {
     buttonSecondaryHover: '#8b8696',
     buttonDanger: '#e7726c',
     buttonDangerHover: '#d45f59'
+  },
+
+  // ── Revolut ───────────────────────────────────────────────────────────────
+  // After the Revolut app: a light grey page, big white cards with deep
+  // rounding and no outline, near-black type, one electric blue, and pill
+  // shapes for the nav and buttons. Card, font and nav treatment in index.css
+  // under [data-theme^="revolut"].
+  revolut: {
+    name: 'revolut', label: 'Revolut', dark: false,
+    chartPositive: '#00a37a', chartNegative: '#e2364b',
+    chartSeriesStock: '#0666eb', chartSeriesOptions: '#00a37a',
+    accent: '#0666eb', accentHover: '#0556c7', accentText: '#ffffff',
+    panel: '#f2f3f5', rule: '#e8eaed', severity: '#e2364b',
+    background: '#f2f3f5',
+    surface: '#ffffff',
+    surfaceHover: '#f6f7f8',
+    text: '#191c1f',
+    textSecondary: '#717780',
+    border: '#e8eaed',
+    shadow: 'rgba(25, 28, 31, 0.06)',
+
+    positive: '#00a37a',
+    negative: '#e2364b',
+    neutral: '#717780',
+    warning: '#c97a00',
+
+    cardPositive: '#e2f6ef',
+    cardNegative: '#fdeaec',
+    cardNeutral: '#f2f3f5',
+
+    chartLine: '#0666eb',
+    chartGrid: '#eceef1',
+    chartText: '#717780',
+
+    tableHeader: '#f6f7f8',
+    tableRowHover: '#f3f6fc',
+    tableRowExpanded: '#edf2fb',
+
+    buttonPrimary: '#0666eb',
+    buttonPrimaryHover: '#0556c7',
+    buttonSecondary: '#717780',
+    buttonSecondaryHover: '#5c626a',
+    buttonDanger: '#e2364b',
+    buttonDangerHover: '#c92c40'
+  },
+
+  revolutDark: {
+    name: 'revolutDark', label: 'Revolut Dark', dark: true,
+    chartPositive: '#2fd3a1', chartNegative: '#ff5c6c',
+    chartSeriesStock: '#4d8dff', chartSeriesOptions: '#2fd3a1',
+    accent: '#4d8dff', accentHover: '#6a9fff', accentText: '#000000',
+    panel: '#111114', rule: '#26262c', severity: '#ff5c6c',
+    background: '#000000',
+    surface: '#18181c',
+    surfaceHover: '#212126',
+    text: '#f4f5f7',
+    textSecondary: '#8e929b',
+    border: '#26262c',
+    shadow: 'rgba(0, 0, 0, 0.5)',
+
+    positive: '#2fd3a1',
+    negative: '#ff5c6c',
+    neutral: '#8e929b',
+    warning: '#f0a83a',
+
+    cardPositive: '#0e2a22',
+    cardNegative: '#2e1418',
+    cardNeutral: '#18181c',
+
+    chartLine: '#4d8dff',
+    chartGrid: '#26262c',
+    chartText: '#8e929b',
+
+    tableHeader: '#111114',
+    tableRowHover: '#212126',
+    tableRowExpanded: '#26262c',
+
+    buttonPrimary: '#4d8dff',
+    buttonPrimaryHover: '#6a9fff',
+    buttonSecondary: '#8e929b',
+    buttonSecondaryHover: '#767a83',
+    buttonDanger: '#ff5c6c',
+    buttonDangerHover: '#e84a5a'
+  },
+
+  // ── Vivid ─────────────────────────────────────────────────────────────────
+  // After Vivid Money: rich purples and soft violet gradients, rounded
+  // "pocket" cards, a segmented pill nav whose current tab carries the
+  // gradient. Dark is its home look. Treatment in index.css under
+  // [data-theme^="vivid"].
+  vivid: {
+    name: 'vivid', label: 'Vivid', dark: false,
+    chartPositive: '#12a77b', chartNegative: '#e5466a',
+    chartSeriesStock: '#6d4aff', chartSeriesOptions: '#12a77b',
+    accent: '#6d4aff', accentHover: '#5b38ef', accentText: '#ffffff',
+    panel: '#f3f0fd', rule: '#e9e4fa', severity: '#e5466a',
+    background: '#f3f0fd',
+    surface: '#ffffff',
+    surfaceHover: '#f8f6ff',
+    text: '#1c1533',
+    textSecondary: '#6f6888',
+    border: '#e9e4fa',
+    shadow: 'rgba(76, 48, 170, 0.08)',
+
+    positive: '#12a77b',
+    negative: '#e5466a',
+    neutral: '#6f6888',
+    warning: '#c47d0e',
+
+    cardPositive: '#e3f6ef',
+    cardNegative: '#fdebf0',
+    cardNeutral: '#f3f0fd',
+
+    chartLine: '#6d4aff',
+    chartGrid: '#eeeaf9',
+    chartText: '#6f6888',
+
+    tableHeader: '#f8f6ff',
+    tableRowHover: '#f5f2ff',
+    tableRowExpanded: '#eee9ff',
+
+    buttonPrimary: '#6d4aff',
+    buttonPrimaryHover: '#5b38ef',
+    buttonSecondary: '#6f6888',
+    buttonSecondaryHover: '#5a5371',
+    buttonDanger: '#e5466a',
+    buttonDangerHover: '#cc3a5b'
+  },
+
+  vividDark: {
+    name: 'vividDark', label: 'Vivid Dark', dark: true,
+    chartPositive: '#3ddc9e', chartNegative: '#ff6b8b',
+    chartSeriesStock: '#9b7bff', chartSeriesOptions: '#3ddc9e',
+    accent: '#9b7bff', accentHover: '#ae93ff', accentText: '#120d24',
+    panel: '#16112b', rule: '#2c2450', severity: '#ff6b8b',
+    background: '#0e0a1f',
+    surface: '#1a1433',
+    surfaceHover: '#231b42',
+    text: '#f1edff',
+    textSecondary: '#a49cc4',
+    border: '#2c2450',
+    shadow: 'rgba(0, 0, 0, 0.45)',
+
+    positive: '#3ddc9e',
+    negative: '#ff6b8b',
+    neutral: '#a49cc4',
+    warning: '#f3b04a',
+
+    cardPositive: '#122b28',
+    cardNegative: '#33152a',
+    cardNeutral: '#1a1433',
+
+    chartLine: '#9b7bff',
+    chartGrid: '#2c2450',
+    chartText: '#a49cc4',
+
+    tableHeader: '#16112b',
+    tableRowHover: '#231b42',
+    tableRowExpanded: '#2c2450',
+
+    buttonPrimary: '#9b7bff',
+    buttonPrimaryHover: '#ae93ff',
+    buttonSecondary: '#a49cc4',
+    buttonSecondaryHover: '#8c84ad',
+    buttonDanger: '#ff6b8b',
+    buttonDangerHover: '#e85878'
   }
 }
 
