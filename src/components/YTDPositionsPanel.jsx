@@ -2191,6 +2191,46 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         </div>
       )}
 
+      {/* Up/down at a glance on Net + Open for the chosen period: how many
+          names are ahead, how many behind, and what each side adds up to.
+          Built from the same per-row figure the column shows. */}
+      {!loading && rows.length > 0 && (() => {
+        const vals = sorted.map((row, i) => ({ t: row.ticker, v: rowCtx(row, i).netPlusOpen }))
+          .filter(x => Number.isFinite(x.v))
+        const up = vals.filter(x => x.v > 0), down = vals.filter(x => x.v < 0)
+        const sum = (xs) => xs.reduce((a, x) => a + x.v, 0)
+        const total = sum(vals)
+        const best = [...vals].sort((a, b) => b.v - a.v)[0], worst = [...vals].sort((a, b) => a.v - b.v)[0]
+        const pctUp = vals.length ? up.length / vals.length : 0
+        const period = asOf ? `${fmtDate(globalStart)} – ${fmtDate(asOf)}` : `since ${fmtDate(globalStart)}`
+        const stat = (label, value, color, sub) => (
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: textMid, fontWeight: 600 }}>{label}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+            {sub && <div style={{ fontSize: 11, color: textMid }}>{sub}</div>}
+          </div>
+        )
+        return (
+          <div className="floating-panel" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '12px 28px',
+            padding: '12px 16px', marginBottom: 12, borderRadius: 10, border: `1px solid ${border}`, background: surface }}>
+            {stat(`Net + Open · ${period}`, fmt(total), pnlColor(total, isDark), `${vals.length} names`)}
+            {stat('Up', `${up.length}`, pnlColor(1, isDark), `${fmt(sum(up))}`)}
+            {stat('Down', `${down.length}`, pnlColor(-1, isDark), `${fmt(sum(down))}`)}
+            <div style={{ flex: '1 1 160px', minWidth: 140 }}>
+              <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: border }}>
+                <div style={{ width: `${pctUp * 100}%`, background: pnlColor(1, isDark) }} />
+                <div style={{ width: `${vals.length ? down.length / vals.length * 100 : 0}%`, background: pnlColor(-1, isDark), marginLeft: 'auto' }} />
+              </div>
+              <div style={{ fontSize: 11, color: textMid, marginTop: 4 }}>
+                {Math.round(pctUp * 100)}% up
+                {best && best.v > 0 && <> · best <b style={{ color: text }}>{best.t}</b> {fmt(best.v)}</>}
+                {worst && worst.v < 0 && <> · worst <b style={{ color: text }}>{worst.t}</b> {fmt(worst.v)}</>}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {!loading && rows.length > 0 && (
         <div ref={tableWrapRef}
           onScroll={(e) => {
