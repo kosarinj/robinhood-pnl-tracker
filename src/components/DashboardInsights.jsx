@@ -38,13 +38,15 @@ export function useDashboardData(broker) {
       fetchShared(`/api/options-pnl/ytd?${ytdQ}`, ttl),
       fetchShared(withQuery('/api/earnings', bq), 30 * 60000),
       fetchShared(withQuery('/api/dividend-schedule', bq), 30 * 60000),
-    ]).then(([insights, ytd, earnings, divs]) => {
+      fetchShared('/api/macro-calendar?days=45', 30 * 60000),
+    ]).then(([insights, ytd, earnings, divs, macro]) => {
       if (!alive) return
       setData({
         insights: insights?.success ? insights : null,
         rows: ytd?.success ? ytd.byUnderlying || [] : null,
         earnings: earnings?.success ? earnings.upcoming || [] : [],
         dividends: divs?.success ? divs.events || [] : [],
+        macro: macro?.success ? macro.events || [] : [],
       })
     })
     return () => { alive = false }
@@ -214,7 +216,7 @@ function WeeklyRecap({ insights, rows }) {
 }
 
 // ── Coming up ─────────────────────────────────────────────────────────────
-function UpcomingTimeline({ insights, rows, earnings, dividends }) {
+function UpcomingTimeline({ insights, rows, earnings, dividends, macro = [] }) {
   const [days, setDays] = useState(() => Number(getPref('timelineDays', 14)) || 14)
   if (!insights || !rows) return <Panel title="Coming up"><div style={{ fontSize: 12, color: 'var(--textSecondary)' }}>…</div></Panel>
   const today = insights.today
@@ -251,7 +253,13 @@ function UpcomingTimeline({ insights, rows, earnings, dividends }) {
     events.push({ date: d.exDate, kind: 'ex', color: '#a855f7', ticker: d.ticker,
       text: `ex-dividend $${d.amount} × ${(sharesBy[d.ticker] || d.shares).toLocaleString()} = ${money(d.expected)}${d.status === 'estimated' ? ' (est.)' : ''}${d.shortCalls ? ' — early assignment risk' : ''}` })
   }
-  const order = { near: 0, exp: 1, earn: 2, ex: 3 }
+  for (const m of macro) if (within(m.date)) {
+    const t = m.time ? (() => { const [h, mi] = m.time.split(':').map(Number); return `${(h % 12) || 12}:${String(mi).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}` })() : ''
+    const nums = [m.forecast && `exp ${m.forecast}`, m.previous && `prev ${m.previous}`].filter(Boolean).join(', ')
+    events.push({ date: m.date, kind: 'macro', color: m.impact === 'High' ? '#ec4899' : '#f9a8d4', ticker: 'MACRO',
+      text: `${t ? t + ' ' : ''}${m.title}${nums ? ` (${nums})` : ''}` })
+  }
+  const order = { near: 0, macro: 1, exp: 2, earn: 3, ex: 4 }
   events.sort((a, b) => a.date.localeCompare(b.date) || order[a.kind] - order[b.kind] || a.ticker.localeCompare(b.ticker))
   const byDate = []
   for (const e of events) {
@@ -282,6 +290,79 @@ function UpcomingTimeline({ insights, rows, earnings, dividends }) {
           ))}
         </div>
       )}
+    </Panel>
+  )
+}
+
+// ── Weekday odds ──────────────────────────────────────────────────────────
+// For each weekday over the last 52 weeks: sessions that closed up vs down.
+// The next session to trade is highlighted.
+function WeekdayOdds({ rows }) {
+  const [symbol, setSymbol] = useState(() => getPref('weekdaySymbol', 'SPY'))
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    let alive = true
+    setData(null)
+    fetchShared(`/api/weekday-stats?symbol=${encodeURIComponent(symbol)}`, 60 * 60000)
+      .then(d => alive && setData(d))
+    return () => { alive = false }
+  }, [symbol])
+  const choices = [...new Set(['SPY', 'QQQ', 'IWM', ...(rows || []).filter(r => r.stockPosition > 0).map(r => r.ticker).sort()])]
+
+  // The next session: today if the market hasn't closed, else the next weekday.
+  const now = new Date()
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }))
+  let next = new Date(et)
+  if (et.getHours() >= 16) next.setDate(next.getDate() + 1)
+  while (next.getDay() === 0 || next.getDay() === 6) next.setDate(next.getDate() + 1)
+  const nextDow = next.getDay()
+  const dayStart = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const ahead = Math.round((dayStart(next) - dayStart(et)) / 86400000)
+  const nextLabel = ahead === 0 ? 'today' : ahead === 1 ? 'tomorrow' : 'next'
+  const FULL = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday' }
+
+  return (
+    <Panel title="Up or down by weekday · 52 weeks" right={
+      <select value={symbol} onChange={e => { setSymbol(e.target.value); setPref('weekdaySymbol', e.target.value) }}
+        style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontFamily: 'inherit' }}>
+        {choices.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>}>
+      {!data ? <div style={{ fontSize: 12, color: 'var(--textSecondary)' }}>…</div>
+        : !data.success ? <div style={{ fontSize: 12, color: 'var(--textSecondary)' }}>Unavailable: {data.error}</div>
+        : (
+          <div style={{ fontSize: 12.5 }}>
+            {data.days.map(d => {
+              const isNext = d.dow === nextDow
+              const total = d.up + d.down + d.flat || 1
+              const upPct = Math.round(d.up / total * 100)
+              return (
+                <div key={d.dow} title={`${d.day}: ${d.up} up, ${d.down} down${d.flat ? `, ${d.flat} flat` : ''} of ${d.sessions} sessions\nAverage ${d.avgPct}% · avg up day +${d.avgUpPct ?? 0}% · avg down day ${d.avgDownPct ?? 0}%\nLast few: ${d.recent.map(x => `${x.date.slice(5)} ${x.pct > 0 ? '+' : ''}${x.pct}%`).join(', ')}`}
+                  style={{ display: 'grid', gridTemplateColumns: '64px 1fr 74px', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8,
+                    background: isNext ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent',
+                    outline: isNext ? '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' : 'none' }}>
+                  <span style={{ fontWeight: isNext ? 700 : 600 }}>{d.day}{isNext && <span style={{ fontSize: 10, color: 'var(--accent)', marginLeft: 4 }}>{nextLabel}</span>}</span>
+                  <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', background: 'var(--rule)' }}>
+                    <div style={{ width: `${upPct}%`, background: 'var(--positive)' }} />
+                    <div style={{ width: `${Math.round(d.down / total * 100)}%`, background: 'var(--negative)', marginLeft: 'auto' }} />
+                  </div>
+                  <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ color: 'var(--positive)', fontWeight: 700 }}>{d.up}</span>
+                    <span style={{ color: 'var(--textSecondary)' }}> / </span>
+                    <span style={{ color: 'var(--negative)', fontWeight: 700 }}>{d.down}</span>
+                  </span>
+                </div>
+              )
+            })}
+            {(() => {
+              const d = data.days.find(x => x.dow === nextDow)
+              if (!d) return null
+              const total = d.up + d.down + d.flat || 1
+              return <div style={{ marginTop: 8, color: 'var(--textSecondary)', fontSize: 12 }}>
+                {data.symbol} closed up on {d.up} of the last {total} {FULL[d.day]}s ({Math.round(d.up / total * 100)}%), average move {d.avgPct > 0 ? '+' : ''}{d.avgPct}%.
+              </div>
+            })()}
+          </div>
+        )}
     </Panel>
   )
 }
@@ -387,6 +468,7 @@ export default function DashboardInsights({ broker = 'all' }) {
       <PremiumGoal insights={data.insights} />
       <WeeklyRecap insights={data.insights} rows={data.rows} />
       <UpcomingTimeline {...data} />
+      <WeekdayOdds rows={data.rows} />
       <StrategyPockets insights={data.insights} rows={data.rows} status={status} />
     </div>
   )

@@ -7143,6 +7143,146 @@ app.get('/api/news', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/macro-calendar — scheduled US macro events.
+ *
+ * Two sources. This week comes from the Forex Factory feed, which carries
+ * everything (GDP, PCE, claims, sentiment) with times and forecasts but only
+ * ever covers the current week. Beyond that, the three releases that move
+ * markets most come from the official schedules, kept here: FOMC decisions
+ * (Federal Reserve calendar; 2027 tentative until each prior meeting confirms),
+ * CPI and the jobs report (BLS release schedules). Refresh these lists each
+ * year from federalreserve.gov/monetarypolicy/fomccalendars.htm and
+ * bls.gov/schedule/news_release/{cpi,empsit}.htm.
+ */
+const MACRO_SCHEDULE = [
+  // FOMC decision day (second day of the meeting), 2:00 PM ET.
+  ...['2026-01-28', '2026-03-18', '2026-04-29', '2026-06-17', '2026-07-29', '2026-09-16', '2026-10-28', '2026-12-09',
+      '2027-01-27', '2027-03-17', '2027-04-28', '2027-06-09', '2027-07-28', '2027-09-15', '2027-10-27', '2027-12-08']
+    .map(date => ({ date, time: '14:00', title: 'FOMC rate decision', impact: 'High', key: 'fomc' })),
+  // CPI, 8:30 AM ET.
+  ...['2026-11-10', '2026-12-10', '2027-01-13', '2027-02-11', '2027-03-10', '2027-04-13', '2027-05-12', '2027-06-10',
+      '2027-07-14', '2027-08-11', '2027-09-14', '2027-10-14', '2027-11-10', '2027-12-10']
+    .map(date => ({ date, time: '08:30', title: 'CPI (inflation)', impact: 'High', key: 'cpi' })),
+  // Employment Situation (jobs report), 8:30 AM ET.
+  ...['2026-11-06', '2026-12-04', '2027-01-08', '2027-02-05', '2027-03-05', '2027-04-02', '2027-05-07', '2027-06-04',
+      '2027-07-02', '2027-08-06', '2027-09-03', '2027-10-08', '2027-11-05', '2027-12-03']
+    .map(date => ({ date, time: '08:30', title: 'Jobs report (nonfarm payrolls)', impact: 'High', key: 'jobs' })),
+]
+// Which feed titles stand for a scheduled entry, so the same release isn't listed twice.
+const MACRO_FEED_KEY = [
+  [/FOMC|Federal Funds Rate/i, 'fomc'],
+  [/\bCPI\b/i, 'cpi'],
+  [/Non-Farm|Nonfarm|Unemployment Rate/i, 'jobs'],
+]
+let macroFeedCache = null
+
+app.get('/api/macro-calendar', requireAuth, async (req, res) => {
+  try {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const days = Math.min(120, Math.max(1, parseInt(req.query.days) || 45))
+    const end = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10)
+
+    let feed = [], feedNote = null
+    try {
+      if (!macroFeedCache || Date.now() - macroFeedCache.at > 60 * 60000) {
+        const r = await axios.get('https://nfs.faireconomy.media/ff_calendar_thisweek.json', { timeout: 8000 })
+        macroFeedCache = { at: Date.now(), rows: Array.isArray(r.data) ? r.data : [] }
+      }
+      feed = macroFeedCache.rows
+        .filter(e => e.country === 'USD' && (e.impact === 'High' || e.impact === 'Medium'))
+        .map(e => {
+          // The feed's timestamps carry the ET offset, so the date and time
+          // read off the string are already Eastern.
+          const date = String(e.date).slice(0, 10), time = String(e.date).slice(11, 16)
+          const key = (MACRO_FEED_KEY.find(([re]) => re.test(e.title)) || [])[1] || null
+          return { date, time, title: e.title, impact: e.impact, forecast: e.forecast || null, previous: e.previous || null, key, source: 'feed' }
+        })
+    } catch (e) {
+      feedNote = `this week's detailed calendar unavailable (${e.message})`
+    }
+
+    // A scheduled entry is dropped when the feed already has that release that day.
+    const feedKeys = new Set(feed.filter(e => e.key).map(e => `${e.date}|${e.key}`))
+    const scheduled = MACRO_SCHEDULE.filter(e => !feedKeys.has(`${e.date}|${e.key}`)).map(e => ({ ...e, source: 'schedule' }))
+
+    // FOMC statement and press conference arrive as two feed rows; one line reads better.
+    const merged = []
+    for (const e of [...feed, ...scheduled].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))) {
+      if (e.date < today || e.date > end) continue
+      const last = merged[merged.length - 1]
+      if (e.key === 'fomc' && last?.key === 'fomc' && last.date === e.date) continue
+      merged.push(e.key === 'fomc' && e.source === 'feed' ? { ...e, title: 'FOMC rate decision' + (e.forecast ? ` (exp. ${e.forecast})` : '') } : e)
+    }
+    res.json({ success: true, today, events: merged, ...(feedNote ? { note: feedNote } : {}) })
+  } catch (e) {
+    console.error('Error in /api/macro-calendar:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+/**
+ * GET /api/weekday-stats?symbol=SPY — for each weekday over the last 52 weeks,
+ * how many sessions closed up and down (close vs the prior session's close),
+ * and the average move. Polygon daily bars, cached six hours.
+ */
+const weekdayCache = new Map()
+
+app.get('/api/weekday-stats', requireAuth, async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || 'SPY').toUpperCase()
+    if (!/^[A-Z.]{1,6}$/.test(symbol)) return res.status(400).json({ success: false, error: 'bad symbol' })
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return res.json({ success: false, error: 'no Polygon key configured' })
+
+    let bars
+    const hit = weekdayCache.get(symbol)
+    if (hit && Date.now() - hit.at < 6 * 60 * 60000) bars = hit.bars
+    else {
+      const to = new Date().toISOString().slice(0, 10)
+      const from = new Date(Date.now() - 372 * 86400000).toISOString().slice(0, 10)
+      const r = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${from}/${to}`, {
+        params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 500 }, timeout: 10000,
+      })
+      bars = (r.data?.results || []).map(b => ({
+        date: new Date(b.t).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }), c: b.c,
+      }))
+      weekdayCache.set(symbol, { at: Date.now(), bars })
+    }
+
+    // Only completed sessions: today's bar is still moving during market hours.
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const closed = currentUsSession() === 'regular' || currentUsSession() === 'pre' ? bars.filter(b => b.date < today) : bars
+    const cutoff = new Date(Date.now() - 364 * 86400000).toISOString().slice(0, 10)
+    const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const by = {}
+    for (let i = 1; i < closed.length; i++) {
+      const b = closed[i]
+      if (b.date < cutoff) continue
+      const pct = (b.c - closed[i - 1].c) / closed[i - 1].c * 100
+      const dow = new Date(b.date + 'T12:00:00Z').getUTCDay()
+      const d = by[dow] || (by[dow] = { day: names[dow], dow, up: 0, down: 0, flat: 0, sum: 0, n: 0, upSum: 0, downSum: 0, last: [] })
+      if (pct > 0) { d.up++; d.upSum += pct } else if (pct < 0) { d.down++; d.downSum += pct } else d.flat++
+      d.sum += pct; d.n++
+      d.last.push({ date: b.date, pct: Math.round(pct * 100) / 100 })
+    }
+    const days = [1, 2, 3, 4, 5].map(dow => {
+      const d = by[dow] || { day: names[dow], dow, up: 0, down: 0, flat: 0, sum: 0, n: 0, upSum: 0, downSum: 0, last: [] }
+      return {
+        day: d.day, dow, up: d.up, down: d.down, flat: d.flat, sessions: d.n,
+        avgPct: d.n ? Math.round(d.sum / d.n * 100) / 100 : null,
+        avgUpPct: d.up ? Math.round(d.upSum / d.up * 100) / 100 : null,
+        avgDownPct: d.down ? Math.round(d.downSum / d.down * 100) / 100 : null,
+        recent: d.last.slice(-8),
+      }
+    })
+    res.json({ success: true, symbol, today, from: cutoff, days })
+  } catch (e) {
+    console.error('Error in /api/weekday-stats:', e.message)
+    res.status(500).json({ success: false, error: e.response?.status ? `Polygon HTTP ${e.response.status}` : e.message })
+  }
+})
+
+/**
  * GET /api/insights — the cheap facts behind the dashboard's goal ring, weekly
  * recap, timeline, pockets and status dots.
  *

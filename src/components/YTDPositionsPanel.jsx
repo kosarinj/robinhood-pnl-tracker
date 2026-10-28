@@ -888,9 +888,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       openLegsPriced: acc.openLegsPriced + (r.openLegsPriced || 0),
       openLegsUnpriced: acc.openLegsUnpriced + (r.openLegsUnpriced || 0),
       dividends: acc.dividends + (r.dividends || 0),
+      shares: acc.shares + (pos > 0 ? pos : 0),
+      sharesValue: acc.sharesValue + (pos > 0 && price > 0 ? pos * price : 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, weekStockPnl: 0, optionsThisWeek: 0, optionsOpenWeekChange: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0 })
+  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, weekStockPnl: 0, optionsThisWeek: 0, optionsOpenWeekChange: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0, shares: 0, sharesValue: 0 })
 
   /**
    * Record what this panel displayed, so "what did it say this morning" has an
@@ -1440,7 +1442,13 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       } },
 
     { key: 'shares', label: 'Shares', title: 'Shares held', borderLeft: '1px',
-      cell: (r, c) => <span style={{ color: textMid }}>{c.pos != null && c.pos > 0 ? c.pos.toLocaleString() : '—'}</span> },
+      cell: (r, c) => <span style={{ color: textMid }}>{c.pos != null && c.pos > 0 ? c.pos.toLocaleString() : '—'}</span>,
+      // Share count across every name shown, with what they're worth at
+      // today's prices underneath -- the count alone mixes $5 and $500 stocks.
+      foot: (t) => <span title={`${Math.round(t.shares).toLocaleString()} shares worth ${fmt(t.sharesValue)} at current prices`}>
+        <span style={{ fontWeight: 700 }}>{Math.round(t.shares).toLocaleString()}</span>
+        {t.sharesValue > 0 && <span style={{ display: 'block', fontSize: 10.5, color: textMid }}>{fmt(Math.round(t.sharesValue))}</span>}
+      </span> },
 
     { key: 'avgCost', label: 'Avg Cost', title: 'Average cost per share',
       cell: (r, c) => c.isCostEditing ? (
