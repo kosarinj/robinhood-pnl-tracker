@@ -1824,3 +1824,12 @@ nav:is(.main-nav, .sub-nav) button { flex-shrink: 0; }
     min-height: 36px;
   }
 }
+
+/* News strip: two copies of the headlines side by side, slid by half, loops
+   seamlessly. Flashes slide in from the right. */
+@keyframes newsScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes newsFlashIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+.news-flash { animation: newsFlashIn 0.35s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .news-flash { animation: none; }
+}

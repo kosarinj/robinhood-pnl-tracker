@@ -7064,6 +7064,85 @@ app.get('/api/upcoming-dividends', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/news — headlines on the names you hold, plus macro.
+ *
+ * Two Polygon reads, both cached: the latest general feed (one call, three
+ * minutes), and each held ticker's own recent stories (one call per ticker,
+ * fifteen minutes). The general feed is what catches macro -- Fed, CPI, jobs,
+ * yields, tariffs -- and anything tagged SPY/QQQ; it is matched by keyword on
+ * the headline, so a story qualifies by what it says, not by where it ran.
+ *
+ * Polygon attaches a per-ticker sentiment to many stories; it is passed through
+ * for the held tickers only.
+ */
+const newsCache = new Map()
+const MACRO_RE = /\b(fed|fomc|powell|cpi|ppi|pce|inflation|jobs report|payrolls|nonfarm|unemployment|jobless|gdp|treasur(y|ies)|yields?|rate (cut|hike)s?|interest rates?|tariffs?|recession|ecb|opec|debt ceiling|shutdown|consumer confidence|retail sales)\b/i
+const MACRO_TICKERS = new Set(['SPY', 'QQQ', 'DIA', 'IWM', 'VIX', 'TLT'])
+
+app.get('/api/news', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (!polygonKey) return res.json({ success: true, items: [], unavailable: 'no Polygon key configured' })
+
+    const stock = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
+    const held = new Set(Object.entries(stock).filter(([t, p]) => p.position > 0).map(([t]) => t))
+    for (const pos of databaseService.getOpenOptionPositions(userId, brokerFilter)) {
+      const p = parseOptionDescription(pos.symbol)
+      if (p) held.add(p.ticker)
+    }
+    const tickers = [...held].filter(t => /^[A-Z.]{1,6}$/.test(t)).slice(0, 40)
+
+    const get = async (key, ttlMs, params) => {
+      const hit = newsCache.get(key)
+      if (hit && Date.now() - hit.at < ttlMs) return hit.rows
+      const r = await axios.get('https://api.polygon.io/v2/reference/news', {
+        params: { apiKey: polygonKey, order: 'desc', sort: 'published_utc', ...params }, timeout: 8000,
+      })
+      const rows = r.data?.results || []
+      newsCache.set(key, { at: Date.now(), rows })
+      return rows
+    }
+
+    let unavailable = null
+    const raw = []
+    try { raw.push(...await get('__general', 3 * 60000, { limit: 100 })) } catch (e) {
+      unavailable = `news feed failed: ${e.response?.status || e.message}`
+    }
+    for (let i = 0; i < tickers.length; i += 6) {
+      await Promise.all(tickers.slice(i, i + 6).map(async t => {
+        try { raw.push(...await get(t, 15 * 60000, { ticker: t, limit: 8 })) } catch { /* one ticker failing isn't the feed failing */ }
+      }))
+    }
+
+    const cutoff = Date.now() - 3 * 86400000
+    const seen = new Set()
+    const items = []
+    for (const n of raw) {
+      if (!n?.id || seen.has(n.id)) continue
+      seen.add(n.id)
+      const published = n.published_utc
+      if (!published || new Date(published).getTime() < cutoff) continue
+      const mine = (n.tickers || []).filter(t => held.has(t))
+      const macro = MACRO_RE.test(n.title || '') || (n.tickers || []).some(t => MACRO_TICKERS.has(t))
+      if (!mine.length && !macro) continue
+      const sentiment = {}
+      for (const ins of n.insights || []) if (held.has(ins.ticker)) sentiment[ins.ticker] = ins.sentiment
+      items.push({
+        id: n.id, title: n.title, url: n.article_url, publisher: n.publisher?.name || '',
+        published, tickers: mine, macro, sentiment,
+      })
+    }
+    items.sort((a, b) => b.published.localeCompare(a.published))
+    res.json({ success: true, items: items.slice(0, 120), checked: tickers.length, ...(unavailable ? { unavailable } : {}) })
+  } catch (e) {
+    console.error('Error in /api/news:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+/**
  * GET /api/insights — the cheap facts behind the dashboard's goal ring, weekly
  * recap, timeline, pockets and status dots.
  *

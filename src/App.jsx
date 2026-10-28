@@ -17,6 +17,7 @@ import EarningsPanel from './components/EarningsPanel'
 import DividendSchedulePanel from './components/DividendSchedulePanel'
 import DashboardTopCards from './components/DashboardTopCards'
 import DashboardInsights from './components/DashboardInsights'
+import NewsTicker from './components/NewsTicker'
 import FibRsiScreener from './components/FibRsiScreener'
 import { loadPrefs, getPref, setPref } from './services/prefs'
 import UploadButton from './components/UploadButton'
@@ -1354,6 +1355,8 @@ function AuthenticatedApp({ user }) {
           )
         })}
       </nav>
+
+      <NewsTicker broker={brokerFilter} />
 
       {/* Context row. Its contents change with the tab — the broker filter used
           to float loose in the page body and disappear on tabs that don't use
