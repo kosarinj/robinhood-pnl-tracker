@@ -1535,3 +1535,69 @@ button:disabled {
   color: var(--accent) !important;
   font-weight: 600 !important;
 }
+
+/* ── RightCapital theme ────────────────────────────────────────────────────
+   After the RightCapital planning app: a white page and white sheet, a warm
+   grey band behind the navigation with uppercase tracked labels, light large
+   headings, and square-edged cards on hairline rules instead of shadow. */
+[data-theme^="rightCapital"] body {
+  font-family: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+[data-theme^="rightCapital"] table,
+[data-theme^="rightCapital"] input,
+[data-theme^="rightCapital"] select,
+[data-theme^="rightCapital"] button {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+[data-theme^="rightCapital"] .app-container {
+  border-radius: 0;
+  box-shadow: none;
+  padding: 24px 32px;
+}
+[data-theme^="rightCapital"] .floating-panel {
+  border-radius: 4px !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: none;
+}
+[data-theme^="rightCapital"] .floating-panel:hover {
+  transform: none;
+  box-shadow: 0 2px 10px var(--shadow);
+}
+[data-theme^="rightCapital"] h1,
+[data-theme^="rightCapital"] h2 {
+  font-weight: 300;
+  letter-spacing: -0.01em;
+}
+[data-theme^="rightCapital"] h3 { font-weight: 600; }
+[data-theme^="rightCapital"] th {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--textSecondary);
+}
+/* The nav band: warm grey, uppercase labels, current page underlined in blue. */
+[data-theme^="rightCapital"] .main-nav {
+  background: var(--panel) !important;
+  border-bottom: none !important;
+  justify-content: center;
+  overflow-x: auto;
+}
+[data-theme^="rightCapital"] .main-nav button {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  padding: 14px 18px !important;
+  color: var(--textSecondary) !important;
+}
+[data-theme^="rightCapital"] .main-nav button[aria-current="page"] {
+  color: var(--text) !important;
+  border-bottom: 3px solid var(--accent) !important;
+}
+@media (max-width: 700px) {
+  [data-theme^="rightCapital"] .app-container { padding: 12px 4px; }
+  [data-theme^="rightCapital"] .main-nav { justify-content: flex-start; }
+}

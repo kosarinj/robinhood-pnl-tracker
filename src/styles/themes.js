@@ -350,6 +350,90 @@ export const themes = {
     buttonDanger: '#f06a6e',
     buttonDangerHover: '#d9575b'
   }
+,
+
+  // ── RightCapital ──────────────────────────────────────────────────────────
+  // After the RightCapital planning app: plain white page, a warm grey band
+  // behind the navigation, uppercase tracked nav labels, light large headings,
+  // square-edged cards on hairline rules, periwinkle blue and sea green. Card,
+  // font and nav treatment in index.css under [data-theme^="rightCapital"].
+  rightCapital: {
+    name: 'rightCapital', label: 'RightCapital', dark: false,
+    chartPositive: '#3f9e7b', chartNegative: '#d2554f',
+    chartSeriesStock: '#4f6fd0', chartSeriesOptions: '#3f9e7b',
+    accent: '#4f6fd0', accentHover: '#405fc0', accentText: '#ffffff',
+    panel: '#efeeec', rule: '#e4e2df', severity: '#c8433d',
+    background: '#ffffff',
+    surface: '#ffffff',
+    surfaceHover: '#f7f6f4',
+    text: '#2c2838',
+    textSecondary: '#6d6878',
+    border: '#e4e2df',
+    shadow: 'rgba(44, 40, 56, 0.05)',
+
+    positive: '#2f8f6b',
+    negative: '#c8433d',
+    neutral: '#6d6878',
+    warning: '#b7791f',
+
+    cardPositive: '#e5f3ed',
+    cardNegative: '#f8e7e6',
+    cardNeutral: '#f4f3f1',
+
+    chartLine: '#4f6fd0',
+    chartGrid: '#ecebe8',
+    chartText: '#6d6878',
+
+    tableHeader: '#f4f3f1',
+    tableRowHover: '#f7f6f4',
+    tableRowExpanded: '#efeeec',
+
+    buttonPrimary: '#4f6fd0',
+    buttonPrimaryHover: '#405fc0',
+    buttonSecondary: '#6d6878',
+    buttonSecondaryHover: '#585362',
+    buttonDanger: '#c8433d',
+    buttonDangerHover: '#b03731'
+  },
+
+  rightCapitalDark: {
+    name: 'rightCapitalDark', label: 'RightCapital Dark', dark: true,
+    chartPositive: '#5bbf98', chartNegative: '#e7726c',
+    chartSeriesStock: '#8199e6', chartSeriesOptions: '#5bbf98',
+    accent: '#8199e6', accentHover: '#93a8ec', accentText: '#17151d',
+    panel: '#22202a', rule: '#34313d', severity: '#e7726c',
+    background: '#17151d',
+    surface: '#1d1b24',
+    surfaceHover: '#26232f',
+    text: '#ebe8f0',
+    textSecondary: '#a39eae',
+    border: '#34313d',
+    shadow: 'rgba(0, 0, 0, 0.3)',
+
+    positive: '#5bbf98',
+    negative: '#e7726c',
+    neutral: '#a39eae',
+    warning: '#d9a441',
+
+    cardPositive: '#15291f',
+    cardNegative: '#2e1a1a',
+    cardNeutral: '#22202a',
+
+    chartLine: '#8199e6',
+    chartGrid: '#34313d',
+    chartText: '#a39eae',
+
+    tableHeader: '#22202a',
+    tableRowHover: '#26232f',
+    tableRowExpanded: '#34313d',
+
+    buttonPrimary: '#8199e6',
+    buttonPrimaryHover: '#93a8ec',
+    buttonSecondary: '#a39eae',
+    buttonSecondaryHover: '#8b8696',
+    buttonDanger: '#e7726c',
+    buttonDangerHover: '#d45f59'
+  }
 }
 
 // Keys that are metadata, not CSS custom properties.
