@@ -7076,7 +7076,7 @@ app.get('/api/upcoming-dividends', requireAuth, async (req, res) => {
  * for the held tickers only.
  */
 const newsCache = new Map()
-const MACRO_RE = /\b(fed|fomc|powell|cpi|ppi|pce|inflation|jobs report|payrolls|nonfarm|unemployment|jobless|gdp|treasur(y|ies)|yields?|rate (cut|hike)s?|interest rates?|tariffs?|recession|ecb|opec|debt ceiling|shutdown|consumer confidence|retail sales)\b/i
+const MACRO_RE = /\b(fed|federal reserve|fomc|powell|cpi|ppi|pce|inflation|jobs report|payrolls|nonfarm|unemployment|jobless|gdp|treasur(y|ies)|yields?|rate (cut|hike)s?|interest rates?|tariffs?|recession|ecb|opec|debt ceiling|shutdown|consumer confidence|retail sales)\b/i
 const MACRO_TICKERS = new Set(['SPY', 'QQQ', 'DIA', 'IWM', 'VIX', 'TLT'])
 
 app.get('/api/news', requireAuth, async (req, res) => {
