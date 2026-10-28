@@ -2491,19 +2491,27 @@ function AuthenticatedApp({ user }) {
         </div>
       )}
 
+      {/* Server connection: a small monitor in the corner instead of a banner
+          across the page. Green light when live; red, with a word beside it,
+          when the socket is down -- the one state worth drawing the eye. */}
       {useServer && (
-        <div style={{
-          padding: '10px 20px',
-          background: connected ? '#d4edda' : '#f8d7da',
-          borderRadius: '8px',
-          marginBottom: '15px',
-          fontSize: '14px',
-          color: connected ? '#155724' : '#721c24',
-          textAlign: 'center',
-          fontWeight: '500',
-          border: `1px solid ${connected ? '#c3e6cb' : '#f5c6cb'}`
-        }}>
-          {connected ? '✅ Connected to server - Real-time updates enabled' : '⚠️ Not connected to server - Check if server is running'}
+        <div role="status"
+          title={connected ? 'Connected to server — real-time updates on' : 'Not connected to server — prices and updates are paused'}
+          style={{
+            position: 'fixed', right: 14, bottom: 'calc(24px + env(safe-area-inset-bottom, 0px))', zIndex: 2600,
+            display: 'flex', alignItems: 'center', gap: 6, padding: connected ? 6 : '6px 10px 6px 6px',
+            borderRadius: 12, background: 'var(--surface)', border: '1px solid var(--border)',
+            boxShadow: '0 2px 10px var(--shadow)', color: 'var(--textSecondary)', fontSize: 12, fontWeight: 600,
+            opacity: connected ? 0.75 : 1, pointerEvents: 'auto',
+          }}>
+          <svg width="26" height="22" viewBox="0 0 26 22" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="23" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M9 20.5h8M13 15.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <circle cx="13" cy="8.5" r="3.2" fill={connected ? '#22c55e' : '#ef4444'}>
+              {!connected && <animate attributeName="opacity" values="1;0.3;1" dur="1.4s" repeatCount="indefinite" />}
+            </circle>
+          </svg>
+          {!connected && <span style={{ color: 'var(--negative)' }}>Offline</span>}
         </div>
       )}
 
