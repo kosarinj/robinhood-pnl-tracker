@@ -7064,6 +7064,132 @@ app.get('/api/upcoming-dividends', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/insights — the cheap facts behind the dashboard's goal ring, weekly
+ * recap, timeline, pockets and status dots.
+ *
+ * Realized option P&L per closing trade, matched LIFO the same way
+ * /api/options-pnl/history does it, then bucketed by the CLOSING date: a call
+ * sold in September that expires worthless in October is October's money,
+ * because October is when it was kept. Plus the open legs straight from the
+ * position netting -- strikes and expiries only, no pricing, so this stays
+ * fast enough to call from every panel that wants it.
+ */
+const CLOSING_CODES = ['STC', 'BTC', 'OEXP', 'OASGN', 'OEXC', 'OEXCS']
+
+app.get('/api/insights', requireAuth, (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const monthStart = `${today.slice(0, 7)}-01`
+    const lastMonthStart = (() => {
+      const d = new Date(monthStart + 'T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1)
+      return d.toISOString().slice(0, 10)
+    })()
+    const weekStart = (() => {
+      const d = new Date(today + 'T12:00:00Z'); const dow = d.getUTCDay()
+      d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1))
+      return d.toISOString().slice(0, 10)
+    })()
+
+    // LIFO realized per closing trade.
+    const stacks = {}
+    const closes = []
+    for (const t of databaseService.getRawOptionTrades(userId, brokerFilter)) {
+      const tc = (t.trans_code || '').toUpperCase()
+      const p = parseOptionDescription(t.symbol || '')
+      if (!p) continue
+      const key = `${p.ticker}|${p.year}${p.month}${p.day}|${p.type}|${p.strike}`
+      const contracts = Math.abs(Number(t.contracts) || 1)
+      const amount = Math.abs(Number(t.amount) || 0)
+      const per = amount / contracts
+      const s = stacks[key] || (stacks[key] = { long: [], short: [] })
+      if (tc === 'BTO') { s.long.push({ per, left: contracts }); continue }
+      if (tc === 'STO') { s.short.push({ per, left: contracts }); continue }
+      if (!CLOSING_CODES.includes(tc)) continue
+      const closingShort = tc === 'BTC' ? true
+        : (tc === 'STC' || tc === 'OEXC' || tc === 'OEXCS') ? false
+        : s.short.length > 0
+      const stack = closingShort ? s.short : s.long
+      let left = contracts, basis = 0
+      while (left > 0 && stack.length) {
+        const top = stack[stack.length - 1]
+        const m = Math.min(left, top.left)
+        basis += m * top.per; left -= m; top.left -= m
+        if (top.left === 0) stack.pop()
+      }
+      if (left > 0) continue // no opening trade on file; nothing honest to report
+      const proceeds = tc === 'OEXP' || tc === 'OASGN' ? 0 : amount
+      closes.push({
+        date: t.trans_date, ticker: p.ticker, type: p.type, strike: p.strike,
+        expiry: `${p.year}-${p.month}-${p.day}`, code: tc, contracts, short: closingShort,
+        realized: Math.round((closingShort ? basis - proceeds : proceeds - basis) * 100) / 100,
+      })
+    }
+
+    const sum = (rows) => Math.round(rows.reduce((a, r) => a + r.realized, 0) * 100) / 100
+    const month = closes.filter(c => c.date >= monthStart && c.date <= today)
+    const lastMonth = closes.filter(c => c.date >= lastMonthStart && c.date < monthStart)
+    const byDay = {}
+    for (const c of month) byDay[c.date] = Math.round(((byDay[c.date] || 0) + c.realized) * 100) / 100
+
+    // The week: what expired worthless, what was bought back, what was rolled.
+    const week = closes.filter(c => c.date >= weekStart && c.date <= today)
+    const expiredShort = week.filter(c => c.code === 'OEXP' && c.short)
+    const assigned = week.filter(c => c.code === 'OASGN')
+    // A roll: a short bought back and a new short of the same type sold on the
+    // same ticker the same day.
+    const stoThisWeek = databaseService.getRawOptionTrades(userId, brokerFilter)
+      .filter(t => t.trans_date >= weekStart && (t.trans_code || '').toUpperCase() === 'STO')
+      .map(t => ({ date: t.trans_date, p: parseOptionDescription(t.symbol || '') }))
+      .filter(x => x.p)
+    const rollKeys = new Set()
+    for (const c of week.filter(c => c.code === 'BTC')) {
+      if (stoThisWeek.some(x => x.date === c.date && x.p.ticker === c.ticker && x.p.type === c.type)) {
+        rollKeys.add(`${c.date}|${c.ticker}|${c.type}`)
+      }
+    }
+
+    // Open legs, unpriced.
+    const openLegs = databaseService.getOpenOptionPositions(userId, brokerFilter).map(pos => {
+      const p = parseOptionDescription(pos.symbol)
+      if (!p) return null
+      const expiry = `${p.year}-${p.month}-${p.day}`
+      if (expiry < today) return null
+      const isLong = pos.net_long > 0
+      return { ticker: p.ticker, type: p.type, strike: p.strike, expiry, isLong,
+               contracts: isLong ? pos.net_long : pos.net_short }
+    }).filter(Boolean).sort((a, b) => a.expiry.localeCompare(b.expiry))
+
+    // Daily Net + Open, last capture per day, for the account sparkline.
+    const snaps = databaseService.getNetOpenSnapshots(userId, { broker: brokerFilter || 'all', sinceDays: 45 })
+    const perDay = {}
+    for (const s of snaps) {
+      if (s.net_plus_open == null) continue
+      if (!perDay[s.asof_date] || s.captured_at > perDay[s.asof_date].at) perDay[s.asof_date] = { at: s.captured_at, v: s.net_plus_open }
+    }
+    const trend = Object.entries(perDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, x]) => ({ date, value: Math.round(x.v) }))
+
+    res.json({
+      success: true, today, monthStart, weekStart,
+      month: { realized: sum(month), closes: month.length, byDay },
+      lastMonth: { realized: sum(lastMonth) },
+      week: {
+        realized: sum(week),
+        closes: week.map(c => ({ ...c, roll: c.code === 'BTC' && rollKeys.has(`${c.date}|${c.ticker}|${c.type}`) })),
+        expiredWorthless: { contracts: expiredShort.reduce((a, c) => a + c.contracts, 0), kept: sum(expiredShort) },
+        assigned: { contracts: assigned.reduce((a, c) => a + c.contracts, 0) },
+        rolls: rollKeys.size,
+      },
+      openLegs, trend,
+    })
+  } catch (e) {
+    console.error('Error in /api/insights:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+/**
  * GET /api/dividend-schedule — dividends coming on the shares you hold.
  *
  * Polygon lists a payment once it is declared, which is usually only the next
