@@ -16,6 +16,7 @@ import DashboardCharts from './components/DashboardCharts'
 import EarningsPanel from './components/EarningsPanel'
 import DividendSchedulePanel from './components/DividendSchedulePanel'
 import DashboardTopCards from './components/DashboardTopCards'
+import DashboardInsights from './components/DashboardInsights'
 import FibRsiScreener from './components/FibRsiScreener'
 import { loadPrefs, getPref, setPref } from './services/prefs'
 import UploadButton from './components/UploadButton'
@@ -2626,6 +2627,7 @@ function AuthenticatedApp({ user }) {
           "More" toggle, closed by default. Extended-hours estimates moved to
           Positions → Extended Hours. */}
       {activeMainTab === 'dashboard' && <DashboardTopCards broker={brokerFilter} />}
+      {activeMainTab === 'dashboard' && <DashboardInsights broker={brokerFilter} />}
       {activeMainTab === 'dashboard' && (
         <OptionsPnLPanel
           broker={brokerFilter}

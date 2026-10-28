@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { getPref } from '../services/prefs'
+import { fetchShared, brokerQuery, withQuery } from '../services/dashData'
+import { Sparkline } from './DashboardInsights'
 
 /**
  * The three numbers at the top of the dashboard: where the account stands,
@@ -21,6 +23,7 @@ export default function DashboardTopCards({ broker = 'all' }) {
   const [account, setAccount] = useState(null)
   const [open, setOpen] = useState(null)
   const [rows, setRows] = useState(null)
+  const [trend, setTrend] = useState(null)
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
@@ -37,8 +40,9 @@ export default function DashboardTopCards({ broker = 'all' }) {
     // Same period as the Options YTD panel; Day and Week don't depend on it.
     const p = new URLSearchParams(q)
     p.set('startDate', getPref('ytdPanel_globalStart', '2026-03-15'))
-    fetch(`/api/options-pnl/ytd?${p}`, { credentials: 'include' })
-      .then(r => r.json()).then(d => setRows(d?.success ? d.byUnderlying || [] : null)).catch(() => setRows(null))
+    const ttl = tick === 0 ? 60000 : 1000
+    fetchShared(`/api/options-pnl/ytd?${p}`, ttl).then(d => setRows(d?.success ? d.byUnderlying || [] : null))
+    fetchShared(withQuery('/api/insights', brokerQuery(broker)), ttl).then(d => setTrend(d?.success ? d.trend || [] : null))
   }, [broker, tick])
 
   // Account value, held back until the options are priced -- short contracts
@@ -69,10 +73,32 @@ export default function DashboardTopCards({ broker = 'all' }) {
     week = wkStock + wkClosed + wkOpen
   }
 
+  // Today's line: the dashboard samples the day figure on each refresh and keeps
+  // the day's samples in this browser. It only fills in while the page is open,
+  // which is the only time anyone is looking at it.
+  const todayKey = `todaySamples:${broker}:${new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })}`
+  const [samples, setSamples] = useState([])
+  useEffect(() => {
+    let list = []
+    try { list = JSON.parse(localStorage.getItem(todayKey) || '[]') } catch { list = [] }
+    if (day != null && (!list.length || list[list.length - 1].v !== Math.round(day))) {
+      list = [...list, { t: Date.now(), v: Math.round(day) }].slice(-400)
+      try {
+        localStorage.setItem(todayKey, JSON.stringify(list))
+        // Yesterday's samples are no use; drop other days' keys.
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i)
+          if (k && k.startsWith('todaySamples:') && !k.endsWith(todayKey.slice(-10))) localStorage.removeItem(k)
+        }
+      } catch { /* private mode */ }
+    }
+    setSamples(list)
+  }, [todayKey, day])
+
   const pct = (n, base) => (base > 0 && n != null) ? `${n >= 0 ? '↑' : '↓'} ${Math.abs(n / base * 100).toFixed(2)}%` : null
   const tone = (n) => n == null ? 'var(--textSecondary)' : n >= 0 ? 'var(--positive)' : 'var(--negative)'
 
-  const Card = ({ label, big, bigColor, delta, deltaColor, sub, title }) => (
+  const Card = ({ label, big, bigColor, delta, deltaColor, sub, title, spark, sparkColor, sparkNote }) => (
     <div className="floating-panel" title={title} style={{
       background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
       padding: '16px 20px', color: 'var(--text)', minWidth: 0,
@@ -85,6 +111,11 @@ export default function DashboardTopCards({ broker = 'all' }) {
         {delta && <span style={{ fontSize: 13, fontWeight: 600, color: deltaColor || 'var(--textSecondary)' }}>{delta}</span>}
       </div>
       {sub && <div style={{ fontSize: 12, color: 'var(--textSecondary)', marginTop: 6 }}>{sub}</div>}
+      {spark && spark.length >= 2 && (
+        <div style={{ marginTop: 8 }} title={sparkNote}>
+          <Sparkline points={spark} color={sparkColor} />
+        </div>
+      )}
     </div>
   )
 
@@ -95,11 +126,16 @@ export default function DashboardTopCards({ broker = 'all' }) {
         big={value == null ? '…' : money(value)}
         delta={pnl != null ? `${signed(pnl)} all-time` : null} deltaColor={tone(pnl)}
         sub={deposits != null ? `on ${money(deposits)} deposited · estimate` : 'pricing options…'}
+        spark={trend ? trend.slice(-30).map(x => x.value) : null}
+        sparkColor={trend && trend.length >= 2 ? tone(trend[trend.length - 1].value - trend[Math.max(0, trend.length - 30)].value) : undefined}
+        sparkNote="Last 30 days of Net + Open from the Positions table's daily captures — the shape of the account's P&L, not including deposits."
         title="Net deposits + every trade's cash + shares at market + open options at their mark + dividends. Interest, fees and margin aren't in the imports, so expect it to differ from the broker a little." />
       <Card label="Today"
         big={day == null ? '—' : signed(day)} bigColor={tone(day)}
         delta={prior ? pct(day, prior) : null} deltaColor={tone(day)}
         sub={day == null ? 'no prices yet' : `stocks ${signed(dayStock)} · options ${signed(dayOpt)}`}
+        spark={samples.map(x => x.v)} sparkColor={tone(day)}
+        sparkNote="Today's P&L as sampled every two minutes while this page was open."
         title="Same as the Day P&L column in Positions: shares × move since yesterday's close, plus open options." />
       <Card label="This week"
         big={week == null ? '…' : signed(week)} bigColor={tone(week)}

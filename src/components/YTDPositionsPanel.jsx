@@ -4,6 +4,8 @@ import { useTheme } from '../contexts/ThemeContext'
 import { getPref, setPref, subscribePrefs } from '../services/prefs'
 import OptionPayoffChart from './OptionPayoffChart'
 import { pairSpreads } from '../utils/pairSpreads'
+import { fetchShared, brokerQuery, withQuery } from '../services/dashData'
+import { tickerStatus, statusTitle } from '../utils/positionStatus'
 import { prepareLeg, projectedPnl } from '../utils/optionMath'
 
 // Where a mark came from, in words. The market/model verdict beside this says
@@ -377,6 +379,35 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // open a curve from. Cached after that, so the second ticker is instant.
   const [payoffTicker, setPayoffTicker] = useState(null)
   const [openLegs, setOpenLegs] = useState({ loading: false, positions: null, stockPrices: {}, error: null })
+
+  // Status dot inputs: unpriced open legs, earnings and ex-dates. All cheap or
+  // cached server side, and shared with the dashboard panels.
+  const [statusInputs, setStatusInputs] = useState(null)
+  useEffect(() => {
+    let alive = true
+    const bq = brokerQuery(broker)
+    Promise.all([
+      fetchShared(withQuery('/api/insights', bq)),
+      fetchShared(withQuery('/api/earnings', bq), 30 * 60000),
+      fetchShared(withQuery('/api/dividend-schedule', bq), 30 * 60000),
+    ]).then(([ins, earn, divs]) => {
+      if (!alive || !ins?.success) return
+      const legsBy = {}
+      for (const l of ins.openLegs || []) (legsBy[l.ticker] ||= []).push(l)
+      const exBy = {}
+      for (const d of (divs?.success ? divs.events : []) || []) (exBy[d.ticker] ||= []).push(d.exDate)
+      const earnBy = Object.fromEntries(((earn?.success ? earn.upcoming : []) || []).map(e => [e.ticker, e.earningsDate]))
+      setStatusInputs({ today: ins.today, legsBy, exBy, earnBy })
+    })
+    return () => { alive = false }
+  }, [broker])
+  const statusFor = (row) => {
+    if (!statusInputs) return []
+    const { today, legsBy, exBy, earnBy } = statusInputs
+    if (!legsBy[row.ticker] && !(row.stockPosition > 0)) return []
+    return tickerStatus({ price: row.stockCurrentPrice, legs: legsBy[row.ticker] || [],
+      earningsDate: earnBy[row.ticker], exDates: exBy[row.ticker] || [], today })
+  }
 
   // Fetched once and shared by everything that needs individual legs: the payoff
   // curve and the short-calls-only Theta scope. Both are opt-in for the same
@@ -2232,6 +2263,15 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
                         position: 'sticky', left: 0, zIndex: 1, background: c.tickerBg,
                         boxShadow: `2px 0 4px ${isDark ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.08)'}`,
                       }}>
+                        {(() => {
+                          // Most urgent status first: red near strike, amber
+                          // expiring, purple ex-date, blue earnings, green safe.
+                          const tags = statusFor(row)
+                          return <span title={tags.length ? statusTitle(tags) : 'Nothing needs attention'}
+                            style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', marginRight: 5,
+                              verticalAlign: 'middle', background: tags[0]?.color || 'transparent',
+                              border: tags[0] ? 'none' : `1px solid ${border}` }} />
+                        })()}
                         {row.hasOptions && (
                           <button onClick={e => { e.stopPropagation(); toggleRowDetail(row.ticker) }}
                             title={`Show the individual option contracts behind ${row.ticker}`}
