@@ -1380,7 +1380,7 @@ function AuthenticatedApp({ user }) {
                   border: '1px solid #ccc',
                   fontSize: '14px',
                   cursor: 'pointer',
-                  background: currentUploadDate ? '#d4edda' : 'white'
+                  background: currentUploadDate ? 'var(--cardPositive)' : 'var(--surface)', color: 'var(--text)'
                 }}
               >
                 <option value="live">🔴 Live View (Upload New Data)</option>
@@ -1408,12 +1408,12 @@ function AuthenticatedApp({ user }) {
                 style={{
                   padding: '8px 12px',
                   borderRadius: '6px',
-                  border: 'none',
+                  border: '1px solid var(--border)',
                   fontSize: '13px',
                   fontWeight: '500',
                   cursor: 'pointer',
-                  background: '#dc3545',
-                  color: 'white'
+                  background: 'var(--surface)',
+                  color: 'var(--negative)'
                 }}
                 title="Clear all saved data from database"
               >
@@ -1433,7 +1433,7 @@ function AuthenticatedApp({ user }) {
                   border: '1px solid #ccc',
                   fontSize: '14px',
                   cursor: 'pointer',
-                  background: isViewingSnapshot ? '#fff3cd' : 'white'
+                  background: isViewingSnapshot ? 'var(--cardNeutral)' : 'var(--surface)', color: 'var(--text)'
                 }}
               >
                 <option value="">Live View</option>

@@ -16,11 +16,11 @@ export default function AvgCostCalculator({ pnlData = [] }) {
   const [buyPrice, setBuyPrice] = useState('')
   const [known, setKnown] = useState(false)
 
-  const surface = isDark ? '#1e2130' : '#ffffff'
-  const surface2 = isDark ? '#252a3a' : '#f8fafc'
-  const border = isDark ? '#2d3748' : '#e2e8f0'
-  const text = isDark ? '#e2e8f0' : '#1a202c'
-  const textMid = isDark ? '#94a3b8' : '#64748b'
+  const surface = 'var(--surface)'
+  const surface2 = 'var(--panel)'
+  const border = 'var(--border)'
+  const text = 'var(--text)'
+  const textMid = 'var(--textSecondary)'
 
   // Held stock positions keyed by symbol → { position, avgCost }.
   const positions = useMemo(() => {
@@ -64,7 +64,7 @@ export default function AvgCostCalculator({ pnlData = [] }) {
     <div style={{ marginBottom: '16px' }}>
       <button
         onClick={() => setOpen(o => !o)}
-        style={{ padding: '7px 14px', fontSize: '13px', fontWeight: 700, borderRadius: '6px', cursor: 'pointer', border: `1px solid ${open ? '#667eea' : border}`, background: open ? 'rgba(102,126,234,0.12)' : 'transparent', color: open ? '#667eea' : textMid }}
+        style={{ padding: '7px 14px', fontSize: '13px', fontWeight: 700, borderRadius: '6px', cursor: 'pointer', border: `1px solid ${open ? 'var(--softBtnBorder)' : border}`, background: open ? 'var(--softBtnBg)' : 'transparent', color: open ? 'var(--softBtnText)' : textMid }}
       >
         🧮 Avg Cost Calculator {open ? '▲' : '▼'}
       </button>
@@ -110,7 +110,7 @@ export default function AvgCostCalculator({ pnlData = [] }) {
             <div style={{ background: surface2, borderRadius: '8px', padding: '12px 16px', display: 'flex', gap: '28px', flexWrap: 'wrap', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: '11px', color: textMid, fontWeight: 600 }}>NEW AVG COST</div>
-                <div style={{ fontSize: '22px', fontWeight: 800, color: '#667eea' }}>{fmt(result.newAvg)}</div>
+                <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--accent)' }}>{fmt(result.newAvg)}</div>
               </div>
               <div>
                 <div style={{ fontSize: '11px', color: textMid, fontWeight: 600 }}>NEW TOTAL SHARES</div>

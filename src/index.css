@@ -1667,3 +1667,12 @@ button:disabled {
 :is([data-theme^="prift"], [data-theme^="rightCapital"]) .signals-panel { border: 1px solid var(--border); }
 :is([data-theme^="prift"], [data-theme^="rightCapital"]) .signals-header h3 { color: var(--text); }
 :is([data-theme^="prift"], [data-theme^="rightCapital"]) .signal-card { border-left: 3px solid var(--accent); }
+
+/* Soft buttons: the accent as a tint rather than a fill. Used by the Analytics
+   components in place of their old bright blue/red/purple/green buttons, so
+   they follow whichever theme is on. */
+:root {
+  --softBtnBg: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  --softBtnText: var(--accent);
+  --softBtnBorder: color-mix(in srgb, var(--accent) 28%, transparent);
+}

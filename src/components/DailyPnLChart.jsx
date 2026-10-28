@@ -470,10 +470,10 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
         <div style={{
           backgroundColor: isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(255, 255, 255, 0.95)',
           padding: '10px',
-          border: `1px solid ${isDark ? '#555' : '#ccc'}`,
+          border: `1px solid ${'var(--border)'}`,
           borderRadius: '6px',
           fontSize: '13px',
-          color: isDark ? '#e0e0e0' : '#333'
+          color: 'var(--text)'
         }}>
           <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
             {(() => {
@@ -490,7 +490,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
           {hasHypothetical && (
             <>
               <div style={{
-                borderTop: `1px solid ${isDark ? '#555' : '#ddd'}`,
+                borderTop: `1px solid ${'var(--border)'}`,
                 marginTop: '6px',
                 paddingTop: '6px',
                 fontSize: '12px'
@@ -498,7 +498,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                 <div style={{ color: '#9333ea', fontWeight: '500' }}>
                   Hypothetical P&L: {formatCurrency(dataPoint.hypotheticalPnL)}
                 </div>
-                <div style={{ color: isDark ? '#999' : '#666', fontSize: '11px', marginTop: '2px' }}>
+                <div style={{ color: 'var(--textSecondary)', fontSize: '11px', marginTop: '2px' }}>
                   If price was ${dataPoint.price.toFixed(2)} (from ${dataPoint.currentPrice.toFixed(2)})
                 </div>
               </div>
@@ -525,11 +525,11 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
     return (
       <div style={{
         padding: '20px',
-        background: isDark ? '#2a2a2a' : '#f8f9fa',
+        background: 'var(--panel)',
         borderRadius: '8px',
         marginBottom: '20px',
         textAlign: 'center',
-        color: isDark ? '#e0e0e0' : '#333'
+        color: 'var(--text)'
       }}>
         Loading daily P&L history...
       </div>
@@ -557,12 +557,12 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
 
   return (
     <div style={{
-      background: isDark ? '#1e1e1e' : 'white',
+      background: 'var(--surface)',
       borderRadius: '12px',
       padding: collapsed ? '15px' : '20px',
       marginBottom: '20px',
       boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.1)',
-      border: `1px solid ${isDark ? '#444' : '#e0e0e0'}`
+      border: `1px solid ${'var(--border)'}`
     }}>
       <div style={{
         display: 'flex',
@@ -572,7 +572,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
         flexWrap: 'wrap',
         gap: '10px'
       }}>
-        <h3 style={{ margin: 0, fontSize: '18px', color: isDark ? '#e0e0e0' : '#333' }}>
+        <h3 style={{ margin: 0, fontSize: '18px', color: 'var(--text)' }}>
           📈 Daily P&L History
         </h3>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
@@ -583,9 +583,9 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
               style={{
                 padding: '6px 12px',
                 borderRadius: '6px',
-                border: `1px solid ${isDark ? '#555' : '#ccc'}`,
-                background: isDark ? '#2a2a2a' : 'white',
-                color: isDark ? '#e0e0e0' : '#333',
+                border: `1px solid ${'var(--border)'}`,
+                background: 'var(--surface)',
+                color: 'var(--text)',
                 fontSize: '13px',
                 cursor: 'pointer'
               }}
@@ -605,9 +605,9 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
               }
             }}
             style={{
-              background: '#28a745',
-              color: 'white',
-              border: 'none',
+              background: 'var(--softBtnBg)',
+              color: 'var(--softBtnText)',
+              border: '1px solid var(--softBtnBorder)',
               borderRadius: '6px',
               padding: '6px 12px',
               cursor: 'pointer',
@@ -623,9 +623,9 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
               setCalculationMode(newMode)
             }}
             style={{
-              background: calculationMode === 'historical' ? '#3b82f6' : '#9333ea',
-              color: 'white',
-              border: 'none',
+              background: 'var(--softBtnBg)',
+              color: 'var(--softBtnText)',
+              border: '1px solid var(--softBtnBorder)',
               borderRadius: '6px',
               padding: '6px 12px',
               cursor: 'pointer',
@@ -639,9 +639,9 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
             <button
               onClick={handleClearSnapshots}
               style={{
-                background: '#dc3545',
-                color: 'white',
-                border: 'none',
+                background: 'var(--softBtnBg)',
+                color: 'var(--softBtnText)',
+                border: '1px solid var(--softBtnBorder)',
                 borderRadius: '6px',
                 padding: '6px 12px',
                 cursor: 'pointer',
@@ -655,9 +655,9 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
           <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
-              background: '#667eea',
-              color: 'white',
-              border: 'none',
+              background: 'var(--softBtnBg)',
+              color: 'var(--softBtnText)',
+              border: '1px solid var(--softBtnBorder)',
               borderRadius: '6px',
               padding: '6px 12px',
               cursor: 'pointer',
@@ -673,7 +673,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
       {!collapsed && (
         <>
           {symbolLoading && (
-            <div style={{ textAlign: 'center', padding: '20px', color: isDark ? '#b0b0b0' : '#666' }}>
+            <div style={{ textAlign: 'center', padding: '20px', color: 'var(--textSecondary)' }}>
               Loading {selectedSymbol} data...
             </div>
           )}
@@ -685,18 +685,18 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                 gap: '20px',
                 marginBottom: '15px',
                 fontSize: '14px',
-                color: isDark ? '#b0b0b0' : '#666',
+                color: 'var(--textSecondary)',
                 flexWrap: 'wrap',
                 alignItems: 'center'
               }}>
                 <div>
-                  <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Days tracked:</span>{' '}
-                  <strong style={{ color: isDark ? '#e0e0e0' : '#333' }}>{chartData.length}</strong>
+                  <span style={{ color: 'var(--textSecondary)' }}>Days tracked:</span>{' '}
+                  <strong style={{ color: 'var(--text)' }}>{chartData.length}</strong>
                 </div>
                 <div>
-                  <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Latest Total P&L:</span>{' '}
+                  <span style={{ color: 'var(--textSecondary)' }}>Latest Total P&L:</span>{' '}
                   <strong style={{
-                    color: chartData[chartData.length - 1]?.totalPnL >= 0 ? '#28a745' : '#dc3545'
+                    color: chartData[chartData.length - 1]?.totalPnL >= 0 ? 'var(--positive)' : 'var(--negative)'
                   }}>
                     {formatCurrency(chartData[chartData.length - 1]?.totalPnL || 0)}
                   </strong>
@@ -708,7 +708,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                       alignItems: 'center',
                       gap: '6px',
                       padding: '4px 10px',
-                      background: isDark ? '#2a2a2a' : '#f0f0f0',
+                      background: 'var(--panel)',
                       borderRadius: '6px'
                     }}>
                       <input
@@ -727,7 +727,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                       alignItems: 'center',
                       gap: '6px',
                       padding: '4px 10px',
-                      background: isDark ? '#2a2a2a' : '#f0f0f0',
+                      background: 'var(--panel)',
                       borderRadius: '6px'
                     }}>
                       <input
@@ -747,16 +747,16 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
 
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#444' : '#e0e0e0'} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={'var(--border)'} />
                   <XAxis
                     dataKey="date"
                     tickFormatter={formatDate}
-                    stroke={isDark ? '#999' : '#666'}
+                    stroke={'var(--textSecondary)'}
                     style={{ fontSize: '12px' }}
                   />
                   <YAxis
                     tickFormatter={formatCurrency}
-                    stroke={isDark ? '#999' : '#666'}
+                    stroke={'var(--textSecondary)'}
                     style={{ fontSize: '12px' }}
                   />
                   <Tooltip content={<CustomTooltip />} />
@@ -791,7 +791,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                     dataKey="totalPnL"
                     stroke="#667eea"
                     strokeWidth={3}
-                    dot={{ fill: '#667eea', r: 3 }}
+                    dot={{ fill: 'var(--accent)', r: 3 }}
                     name="Total P&L"
                     connectNulls={true}
                     isAnimationActive={false}
@@ -813,7 +813,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
 
               <div style={{
                 fontSize: '12px',
-                color: isDark ? '#999' : '#666',
+                color: 'var(--textSecondary)',
                 marginTop: '10px',
                 fontStyle: 'italic'
               }}>
@@ -831,24 +831,24 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                 gap: '20px',
                 marginBottom: '15px',
                 fontSize: '14px',
-                color: isDark ? '#b0b0b0' : '#666',
+                color: 'var(--textSecondary)',
                 flexWrap: 'wrap',
                 alignItems: 'center'
               }}>
                 <div>
-                  <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Days tracked:</span>{' '}
-                  <strong style={{ color: isDark ? '#e0e0e0' : '#333' }}>{symbolData.length}</strong>
+                  <span style={{ color: 'var(--textSecondary)' }}>Days tracked:</span>{' '}
+                  <strong style={{ color: 'var(--text)' }}>{symbolData.length}</strong>
                 </div>
                 <div>
-                  <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Latest Price:</span>{' '}
-                  <strong style={{ color: isDark ? '#e0e0e0' : '#333' }}>
+                  <span style={{ color: 'var(--textSecondary)' }}>Latest Price:</span>{' '}
+                  <strong style={{ color: 'var(--text)' }}>
                     {formatCurrency(symbolData[symbolData.length - 1]?.price || 0)}
                   </strong>
                 </div>
                 <div>
-                  <span style={{ color: isDark ? '#b0b0b0' : '#666' }}>Latest Total P&L:</span>{' '}
+                  <span style={{ color: 'var(--textSecondary)' }}>Latest Total P&L:</span>{' '}
                   <strong style={{
-                    color: symbolData[symbolData.length - 1]?.totalPnL >= 0 ? '#28a745' : '#dc3545'
+                    color: symbolData[symbolData.length - 1]?.totalPnL >= 0 ? 'var(--positive)' : 'var(--negative)'
                   }}>
                     {formatCurrency(symbolData[symbolData.length - 1]?.totalPnL || 0)}
                   </strong>
@@ -860,7 +860,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                       alignItems: 'center',
                       gap: '6px',
                       padding: '4px 10px',
-                      background: isDark ? '#2a2a2a' : '#f0f0f0',
+                      background: 'var(--panel)',
                       borderRadius: '6px'
                     }}>
                       <input
@@ -879,7 +879,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                       alignItems: 'center',
                       gap: '6px',
                       padding: '4px 10px',
-                      background: isDark ? '#2a2a2a' : '#f0f0f0',
+                      background: 'var(--panel)',
                       borderRadius: '6px'
                     }}>
                       <input
@@ -899,11 +899,11 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
 
               <ResponsiveContainer width="100%" height={300}>
                 <ComposedChart data={symbolData} margin={{ top: 5, right: 60, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#444' : '#e0e0e0'} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={'var(--border)'} />
                   <XAxis
                     dataKey="date"
                     tickFormatter={formatDate}
-                    stroke={isDark ? '#999' : '#666'}
+                    stroke={'var(--textSecondary)'}
                     style={{ fontSize: '12px' }}
                   />
                   <YAxis
@@ -928,7 +928,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
                     dataKey="price"
                     stroke="#667eea"
                     strokeWidth={2}
-                    dot={{ fill: '#667eea', r: 3 }}
+                    dot={{ fill: 'var(--accent)', r: 3 }}
                     name="Stock Price"
                     connectNulls={true}
                     isAnimationActive={false}
@@ -989,7 +989,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
 
               <div style={{
                 fontSize: '12px',
-                color: isDark ? '#999' : '#666',
+                color: 'var(--textSecondary)',
                 marginTop: '10px',
                 fontStyle: 'italic'
               }}>
@@ -1014,7 +1014,7 @@ function DailyPnLChart({ useServer, connected, trades, currentPrices }) {
             <div style={{
               textAlign: 'center',
               padding: '40px',
-              color: isDark ? '#999' : '#666',
+              color: 'var(--textSecondary)',
               fontSize: '14px'
             }}>
               No historical data available for {selectedSymbol}

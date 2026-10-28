@@ -196,7 +196,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
 
   return (
     <div style={{
-      background: isDark ? '#1e1e1e' : 'white',
+      background: 'var(--surface)',
       borderRadius: '12px',
       padding: '20px',
       marginTop: '20px',
@@ -213,7 +213,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
           margin: 0,
           fontSize: '18px',
           fontWeight: '600',
-          color: isDark ? '#e0e0e0' : '#1f2937'
+          color: 'var(--text)'
         }}>
           🎯 Support & Resistance Levels
         </h2>
@@ -224,7 +224,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             alignItems: 'center',
             gap: '6px',
             fontSize: '13px',
-            color: isDark ? '#b0b0b0' : '#6b7280'
+            color: 'var(--textSecondary)'
           }}>
             <input
               type="checkbox"
@@ -238,8 +238,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             onClick={() => setShowConfig(!showConfig)}
             style={{
               padding: '6px 12px',
-              background: isDark ? '#333' : '#f3f4f6',
-              color: isDark ? '#e0e0e0' : '#374151',
+              background: 'var(--panel)',
+              color: 'var(--text)',
               border: 'none',
               borderRadius: '6px',
               fontSize: '13px',
@@ -254,9 +254,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             disabled={loading}
             style={{
               padding: '6px 12px',
-              background: loading ? '#94a3b8' : '#3b82f6',
-              color: 'white',
-              border: 'none',
+              background: 'var(--softBtnBg)',
+              color: 'var(--softBtnText)',
+              border: '1px solid var(--softBtnBorder)',
               borderRadius: '6px',
               fontSize: '13px',
               cursor: loading ? 'not-allowed' : 'pointer'
@@ -270,9 +270,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             disabled={alertsLoading || !symbols || symbols.length === 0}
             style={{
               padding: '6px 12px',
-              background: alertsLoading ? '#94a3b8' : '#ef4444',
-              color: 'white',
-              border: 'none',
+              background: 'var(--softBtnBg)',
+              color: 'var(--softBtnText)',
+              border: '1px solid var(--softBtnBorder)',
               borderRadius: '6px',
               fontSize: '13px',
               cursor: (alertsLoading || !symbols || symbols.length === 0) ? 'not-allowed' : 'pointer',
@@ -307,9 +307,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             disabled={emaAlertsLoading || !symbols || symbols.length === 0}
             style={{
               padding: '6px 12px',
-              background: emaAlertsLoading ? '#94a3b8' : '#8b5cf6',
-              color: 'white',
-              border: 'none',
+              background: 'var(--softBtnBg)',
+              color: 'var(--softBtnText)',
+              border: '1px solid var(--softBtnBorder)',
               borderRadius: '6px',
               fontSize: '13px',
               cursor: (emaAlertsLoading || !symbols || symbols.length === 0) ? 'not-allowed' : 'pointer',
@@ -344,7 +344,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
       {/* Configuration Panel */}
       {showConfig && (
         <div style={{
-          background: isDark ? '#2a2a2a' : '#f9fafb',
+          background: 'var(--panel)',
           padding: '15px',
           borderRadius: '8px',
           marginBottom: '15px'
@@ -353,7 +353,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             margin: '0 0 10px 0',
             fontSize: '14px',
             fontWeight: '600',
-            color: isDark ? '#e0e0e0' : '#1f2937'
+            color: 'var(--text)'
           }}>
             Detection Settings
           </h3>
@@ -361,7 +361,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             <div>
               <label style={{
                 fontSize: '12px',
-                color: isDark ? '#b0b0b0' : '#6b7280',
+                color: 'var(--textSecondary)',
                 display: 'block',
                 marginBottom: '4px'
               }}>
@@ -375,8 +375,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                   padding: '6px',
                   borderRadius: '4px',
                   border: isDark ? '1px solid #444' : '1px solid #d1d5db',
-                  background: isDark ? '#1e1e1e' : 'white',
-                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
                   fontSize: '13px',
                   cursor: 'pointer'
                 }}
@@ -390,7 +390,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             <div>
               <label style={{
                 fontSize: '12px',
-                color: isDark ? '#b0b0b0' : '#6b7280',
+                color: 'var(--textSecondary)',
                 display: 'block',
                 marginBottom: '4px'
               }}>
@@ -407,8 +407,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                   padding: '6px',
                   borderRadius: '4px',
                   border: isDark ? '1px solid #444' : '1px solid #d1d5db',
-                  background: isDark ? '#1e1e1e' : 'white',
-                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
                   fontSize: '13px'
                 }}
               />
@@ -416,7 +416,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             <div>
               <label style={{
                 fontSize: '12px',
-                color: isDark ? '#b0b0b0' : '#6b7280',
+                color: 'var(--textSecondary)',
                 display: 'block',
                 marginBottom: '4px'
               }}>
@@ -431,8 +431,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                   padding: '6px',
                   borderRadius: '4px',
                   border: isDark ? '1px solid #444' : '1px solid #d1d5db',
-                  background: isDark ? '#1e1e1e' : 'white',
-                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
                   fontSize: '13px'
                 }}
               />
@@ -440,7 +440,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             <div>
               <label style={{
                 fontSize: '12px',
-                color: isDark ? '#b0b0b0' : '#6b7280',
+                color: 'var(--textSecondary)',
                 display: 'block',
                 marginBottom: '4px'
               }}>
@@ -456,8 +456,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                   padding: '6px',
                   borderRadius: '4px',
                   border: isDark ? '1px solid #444' : '1px solid #d1d5db',
-                  background: isDark ? '#1e1e1e' : 'white',
-                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
                   fontSize: '13px'
                 }}
               />
@@ -465,7 +465,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             <div>
               <label style={{
                 fontSize: '12px',
-                color: isDark ? '#b0b0b0' : '#6b7280',
+                color: 'var(--textSecondary)',
                 display: 'block',
                 marginBottom: '4px'
               }}>
@@ -480,8 +480,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                   padding: '6px',
                   borderRadius: '4px',
                   border: isDark ? '1px solid #444' : '1px solid #d1d5db',
-                  background: isDark ? '#1e1e1e' : 'white',
-                  color: isDark ? '#e0e0e0' : '#1f2937',
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
                   fontSize: '13px'
                 }}
               />
@@ -492,9 +492,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
             style={{
               marginTop: '10px',
               padding: '6px 12px',
-              background: '#10b981',
-              color: 'white',
-              border: 'none',
+              background: 'var(--softBtnBg)',
+              color: 'var(--softBtnText)',
+              border: '1px solid var(--softBtnBorder)',
               borderRadius: '6px',
               fontSize: '13px',
               cursor: 'pointer'
@@ -523,8 +523,8 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
               padding: '8px 12px',
               borderRadius: '6px',
               border: isDark ? '1px solid #444' : '1px solid #d1d5db',
-              background: isDark ? '#2a2a2a' : 'white',
-              color: isDark ? '#e0e0e0' : '#1f2937',
+              background: 'var(--surface)',
+              color: 'var(--text)',
               fontSize: '14px',
               cursor: 'pointer'
             }}
@@ -540,7 +540,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
       {/* Resistance Alerts Display */}
       {showAlerts && resistanceAlerts.length > 0 && (
         <div style={{
-          background: isDark ? '#2a2a2a' : '#fef2f2',
+          background: 'var(--panel)',
           border: `2px solid #ef4444`,
           borderRadius: '8px',
           padding: '15px',
@@ -560,7 +560,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
               style={{
                 padding: '4px 10px',
                 background: 'transparent',
-                color: isDark ? '#888' : '#6b7280',
+                color: 'var(--textSecondary)',
                 border: 'none',
                 fontSize: '18px',
                 cursor: 'pointer'
@@ -569,7 +569,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
               ✕
             </button>
           </div>
-          <div style={{ fontSize: '13px', color: isDark ? '#888' : '#6b7280', marginBottom: '12px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--textSecondary)', marginBottom: '12px' }}>
             Stocks near or above their highest resistance levels
           </div>
           <div style={{ display: 'grid', gap: '8px' }}>
@@ -585,7 +585,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     padding: '12px',
-                    background: isDark ? '#1e1e1e' : 'white',
+                    background: 'var(--surface)',
                     borderRadius: '6px',
                     borderLeft: `4px solid ${statusColor}`
                   }}
@@ -594,7 +594,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                     <div style={{
                       fontSize: '15px',
                       fontWeight: '600',
-                      color: isDark ? '#e0e0e0' : '#1f2937',
+                      color: 'var(--text)',
                       marginBottom: '4px'
                     }}>
                       {alert.symbol}
@@ -603,7 +603,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                         fontSize: '12px',
                         fontWeight: '500',
                         color: statusColor,
-                        background: isDark ? '#2a2a2a' : '#f3f4f6',
+                        background: 'var(--panel)',
                         padding: '2px 8px',
                         borderRadius: '4px'
                       }}>
@@ -612,7 +612,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                     </div>
                     <div style={{
                       fontSize: '13px',
-                      color: isDark ? '#888' : '#6b7280'
+                      color: 'var(--textSecondary)'
                     }}>
                       Current: ${alert.currentPrice.toFixed(2)} • Resistance: ${alert.resistancePrice.toFixed(2)}
                       {' • '}{alert.percentFromResistance >= 0 ? '+' : ''}{alert.percentFromResistance}%
@@ -627,7 +627,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                     <div style={{
                       width: '60px',
                       height: '6px',
-                      background: isDark ? '#333' : '#e5e7eb',
+                      background: 'var(--rule)',
                       borderRadius: '3px',
                       overflow: 'hidden'
                     }}>
@@ -650,9 +650,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                       onClick={() => setChartSymbol(alert.symbol)}
                       style={{
                         padding: '6px 10px',
-                        background: '#3b82f6',
-                        color: 'white',
-                        border: 'none',
+                        background: 'var(--softBtnBg)',
+                        color: 'var(--softBtnText)',
+                        border: '1px solid var(--softBtnBorder)',
                         borderRadius: '4px',
                         fontSize: '12px',
                         cursor: 'pointer',
@@ -672,12 +672,12 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
 
       {showAlerts && resistanceAlerts.length === 0 && !alertsLoading && (
         <div style={{
-          background: isDark ? '#2a2a2a' : '#f0fdf4',
+          background: 'var(--panel)',
           border: '1px solid #22c55e',
           borderRadius: '8px',
           padding: '12px 16px',
           marginBottom: '15px',
-          color: '#166534'
+          color: 'var(--text)'
         }}>
           <div style={{ fontWeight: '600', marginBottom: '4px' }}>✅ All Clear</div>
           <div style={{ fontSize: '14px' }}>No stocks are currently near or above resistance levels.</div>
@@ -687,7 +687,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
       {/* Technical Alerts Display (EMA Crossovers + RSI) */}
       {showEmaAlerts && emaAlerts.length > 0 && (
         <div style={{
-          background: isDark ? '#2a2a2a' : '#f5f3ff',
+          background: 'var(--panel)',
           border: '2px solid #8b5cf6',
           borderRadius: '8px',
           padding: '15px',
@@ -698,7 +698,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
               margin: 0,
               fontSize: '16px',
               fontWeight: '600',
-              color: '#8b5cf6'
+              color: 'var(--accent)'
             }}>
               📊 Technical Alerts ({emaAlerts.length})
             </h3>
@@ -707,7 +707,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
               style={{
                 padding: '4px 10px',
                 background: 'transparent',
-                color: isDark ? '#888' : '#6b7280',
+                color: 'var(--textSecondary)',
                 border: 'none',
                 fontSize: '18px',
                 cursor: 'pointer'
@@ -718,7 +718,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
           </div>
           <div style={{
             fontSize: '14px',
-            color: isDark ? '#b0b0b0' : '#6b7280',
+            color: 'var(--textSecondary)',
             marginBottom: '12px'
           }}>
             EMA 9/21 crossovers and RSI overbought/oversold signals
@@ -758,7 +758,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                       <span style={{
                         fontWeight: '700',
                         fontSize: '15px',
-                        color: isDark ? '#e0e0e0' : '#1f2937'
+                        color: 'var(--text)'
                       }}>
                         {alert.symbol}
                       </span>
@@ -774,14 +774,14 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                       </span>
                       <span style={{
                         fontSize: '13px',
-                        color: isDark ? '#b0b0b0' : '#6b7280'
+                        color: 'var(--textSecondary)'
                       }}>
                         ${alert.currentPrice}
                       </span>
                     </div>
                     <div style={{
                       fontSize: '13px',
-                      color: isDark ? '#b0b0b0' : '#6b7280'
+                      color: 'var(--textSecondary)'
                     }}>
                       {isEMACross && (
                         <>EMA 9: ${alert.ema9} | EMA 21: ${alert.ema21} | Diff: {alert.percentDiff > 0 ? '+' : ''}{alert.percentDiff}%</>
@@ -800,9 +800,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                       onClick={() => setChartSymbol(alert.symbol)}
                       style={{
                         padding: '6px 10px',
-                        background: '#3b82f6',
-                        color: 'white',
-                        border: 'none',
+                        background: 'var(--softBtnBg)',
+                        color: 'var(--softBtnText)',
+                        border: '1px solid var(--softBtnBorder)',
                         borderRadius: '4px',
                         fontSize: '12px',
                         cursor: 'pointer',
@@ -821,12 +821,12 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
 
       {showEmaAlerts && emaAlerts.length === 0 && !emaAlertsLoading && (
         <div style={{
-          background: isDark ? '#2a2a2a' : '#f0fdf4',
+          background: 'var(--panel)',
           border: '1px solid #22c55e',
           borderRadius: '8px',
           padding: '12px 16px',
           marginBottom: '15px',
-          color: '#166534'
+          color: 'var(--text)'
         }}>
           <div style={{ fontWeight: '600', marginBottom: '4px' }}>✅ No Technical Alerts</div>
           <div style={{ fontSize: '14px' }}>No EMA crossovers or RSI extremes detected in your portfolio.</div>
@@ -863,7 +863,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
         <div style={{
           textAlign: 'center',
           padding: '40px',
-          color: isDark ? '#666' : '#9ca3af'
+          color: 'var(--textSecondary)'
         }}>
           {loading ? '⏳ Loading levels...' : '📊 No support/resistance levels detected yet. Click Refresh to scan.'}
         </div>
@@ -876,7 +876,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                   margin: 0,
                   fontSize: '16px',
                   fontWeight: '600',
-                  color: isDark ? '#e0e0e0' : '#1f2937'
+                  color: 'var(--text)'
                 }}>
                   {symbol}
                 </h3>
@@ -884,9 +884,9 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                   onClick={() => setChartSymbol(symbol)}
                   style={{
                     padding: '6px 12px',
-                    background: '#3b82f6',
-                    color: 'white',
-                    border: 'none',
+                    background: 'var(--softBtnBg)',
+                    color: 'var(--softBtnText)',
+                    border: '1px solid var(--softBtnBorder)',
                     borderRadius: '6px',
                     fontSize: '13px',
                     cursor: 'pointer',
@@ -908,7 +908,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         padding: '12px',
-                        background: isDark ? '#2a2a2a' : '#f9fafb',
+                        background: 'var(--panel)',
                         borderRadius: '8px',
                         borderLeft: `4px solid ${level.type === 'support' ? '#22c55e' : '#ef4444'}`
                       }}
@@ -923,7 +923,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                         </div>
                         <div style={{
                           fontSize: '12px',
-                          color: isDark ? '#888' : '#6b7280',
+                          color: 'var(--textSecondary)',
                           marginTop: '4px'
                         }}>
                           {level.touches} touches • {level.methods || 'swing_pivot'}
@@ -948,7 +948,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                         <div style={{ textAlign: 'right' }}>
                           <div style={{
                             fontSize: '11px',
-                            color: isDark ? '#888' : '#6b7280',
+                            color: 'var(--textSecondary)',
                             marginBottom: '2px'
                           }}>
                             Distance
@@ -956,7 +956,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                           <div style={{
                             fontSize: '13px',
                             fontWeight: '500',
-                            color: isDark ? '#e0e0e0' : '#374151'
+                            color: 'var(--text)'
                           }}>
                             {level.distanceFromPrice > 0 ? '+' : ''}{level.distanceFromPrice}%
                           </div>
@@ -970,7 +970,7 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
                           <div style={{
                             width: '60px',
                             height: '6px',
-                            background: isDark ? '#333' : '#e5e7eb',
+                            background: 'var(--rule)',
                             borderRadius: '3px',
                             overflow: 'hidden'
                           }}>
@@ -1003,10 +1003,10 @@ function SupportResistanceLevels({ socket, symbols, trades, connected, currentPr
       <div style={{
         marginTop: '15px',
         padding: '10px',
-        background: isDark ? '#2a2a2a' : '#f9fafb',
+        background: 'var(--panel)',
         borderRadius: '6px',
         fontSize: '12px',
-        color: isDark ? '#888' : '#6b7280'
+        color: 'var(--textSecondary)'
       }}>
         <strong>Strength Score:</strong> <span style={{ color: '#22c55e' }}>80-100 (Strong)</span> • <span style={{ color: '#eab308' }}>60-79 (Moderate)</span> • <span style={{ color: '#94a3b8' }}>0-59 (Weak)</span>
       </div>
