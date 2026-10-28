@@ -7059,6 +7059,149 @@ app.get('/api/upcoming-dividends', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/dividend-schedule — dividends coming on the shares you hold.
+ *
+ * Polygon lists a payment once it is declared, which is usually only the next
+ * one. So each ticker's recent history is read too, and the rest of the coming
+ * year is projected from the last payment and its frequency -- marked as an
+ * estimate, never shown as declared. Expected dollars are today's share count
+ * times the amount; shares called away before an ex-date won't collect it.
+ *
+ * Also returns what was actually received this year, from the imported cash
+ * activity, so "what's coming" sits beside "what came".
+ */
+const divHistCache = new Map()
+
+app.get('/api/dividend-schedule', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    const stock = databaseService.getStockPositionsWithCost(userId, null, brokerFilter)
+    const held = Object.entries(stock)
+      .filter(([t, p]) => p.position > 0 && /^[A-Z.]{1,6}$/.test(t))
+      .slice(0, 40)
+
+    const today = new Date().toISOString().slice(0, 10)
+    const yearEnd = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10)
+    const addMonths = (iso, m) => {
+      const d = new Date(iso + 'T12:00:00Z')
+      d.setUTCMonth(d.getUTCMonth() + m)
+      return d.toISOString().slice(0, 10)
+    }
+
+    let unavailable = polygonKey ? null : 'no Polygon key configured'
+    const events = []
+    const payers = []
+    const fetchHist = async (t) => {
+      const hit = divHistCache.get(t)
+      if (hit && Date.now() - hit.at < 6 * 60 * 60 * 1000) return hit.rows
+      const r = await axios.get('https://api.polygon.io/v3/reference/dividends', {
+        params: { apiKey: polygonKey, ticker: t, limit: 12, order: 'desc', sort: 'ex_dividend_date' },
+        timeout: 8000,
+      })
+      const rows = (r.data?.results || [])
+        .filter(d => d.ex_dividend_date && Number(d.cash_amount) > 0)
+        // Specials are one-offs; projecting them forward would invent income.
+        .map(d => ({ exDate: d.ex_dividend_date, payDate: d.pay_date || null,
+                     amount: Number(d.cash_amount), frequency: Number(d.frequency) || 0,
+                     special: d.dividend_type === 'SC' || d.dividend_type === 'LT' || d.dividend_type === 'ST' }))
+      divHistCache.set(t, { at: Date.now(), rows })
+      return rows
+    }
+
+    if (polygonKey) {
+      for (let i = 0; i < held.length; i += 6) {
+        await Promise.all(held.slice(i, i + 6).map(async ([t, p]) => {
+          let rows
+          try { rows = await fetchHist(t) } catch (e) {
+            const code = e.response?.status
+            unavailable = code === 403 || code === 401
+              ? `Polygon refused dividend reference data (HTTP ${code})`
+              : (unavailable || `dividend lookup failed: ${e.message}`)
+            return
+          }
+          if (!rows.length) return
+          const shares = p.position
+          const regular = rows.filter(r => !r.special)
+          const last = regular[0] || rows[0]
+          // Frequency from Polygon, else from the gap between the last two.
+          let freq = last.frequency
+          if (!(freq > 0) && regular.length >= 2) {
+            const gapDays = (new Date(regular[0].exDate) - new Date(regular[1].exDate)) / 86400000
+            freq = gapDays < 45 ? 12 : gapDays < 120 ? 4 : gapDays < 240 ? 2 : 1
+          }
+          // A payer only if it has paid within about a year and a half.
+          const lastAge = (Date.now() - new Date(last.exDate)) / 86400000
+          if (lastAge > 550 && last.exDate < today) return
+
+          // Declared, still to come.
+          const declared = rows.filter(r => r.exDate >= today || (r.payDate && r.payDate >= today))
+          for (const r of declared) {
+            events.push({ ticker: t, exDate: r.exDate, payDate: r.payDate, amount: r.amount,
+                          shares, expected: Math.round(r.amount * shares * 100) / 100,
+                          status: r.special ? 'special' : 'declared' })
+          }
+          // Projected from the latest regular payment, out a year.
+          if (freq > 0 && freq <= 12 && regular.length) {
+            const step = Math.round(12 / freq)
+            let ex = regular[0].exDate
+            const payLag = regular[0].payDate
+              ? Math.round((new Date(regular[0].payDate) - new Date(regular[0].exDate)) / 86400000) : null
+            for (let n = 0; n < 24; n++) {
+              ex = addMonths(ex, step)
+              if (ex > yearEnd) break
+              if (ex < today) continue
+              // Skip a projection that lands on top of a declared payment.
+              if (declared.some(d => Math.abs(new Date(d.exDate) - new Date(ex)) < (step * 30 * 86400000) / 2)) continue
+              const pay = payLag != null
+                ? new Date(new Date(ex).getTime() + payLag * 86400000).toISOString().slice(0, 10) : null
+              events.push({ ticker: t, exDate: ex, payDate: pay, amount: regular[0].amount,
+                            shares, expected: Math.round(regular[0].amount * shares * 100) / 100,
+                            status: 'estimated' })
+            }
+          }
+          payers.push({ ticker: t, shares, amount: last.amount, frequency: freq || null,
+                        annualPerShare: freq > 0 ? Math.round(last.amount * freq * 10000) / 10000 : null })
+        }))
+      }
+    }
+    events.sort((a, b) => a.exDate.localeCompare(b.exDate) || a.ticker.localeCompare(b.ticker))
+
+    // What actually arrived this year, from the imported cash activity.
+    const yearStart = `${today.slice(0, 4)}-01-01`
+    const received = {}
+    let receivedTotal = 0
+    for (const d of databaseService.getDividendsAndInterestForUser(userId)) {
+      if (!d.isDividend || !d.date || d.date < yearStart) continue
+      if (brokerFilter && (d.broker || 'robinhood') !== brokerFilter) continue
+      const amt = Number(d.amount) || 0
+      received[d.symbol || '?'] = Math.round(((received[d.symbol || '?'] || 0) + amt) * 100) / 100
+      receivedTotal += amt
+    }
+
+    // Short calls against a name going ex soon are the early-assignment risk.
+    const shortCallTickers = new Set(databaseService.getOpenOptionPositions(userId, brokerFilter)
+      .filter(p => p.net_short > 0)
+      .map(p => parseOptionDescription(p.symbol))
+      .filter(o => o?.type === 'call')
+      .map(o => o.ticker))
+    for (const e of events) e.shortCalls = shortCallTickers.has(e.ticker)
+
+    res.json({
+      success: true, today, events, payers,
+      checked: held.length,
+      receivedYtd: Math.round(receivedTotal * 100) / 100,
+      receivedByTicker: received,
+      ...(unavailable ? { unavailable } : {}),
+    })
+  } catch (e) {
+    console.error('Error in /api/dividend-schedule:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+/**
  * Premium ledger: is this name still net credit, counting every roll?
  *
  * A roll never shows up as one event — it is a close and an open, and after

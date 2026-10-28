@@ -1506,7 +1506,6 @@ button:disabled {
 }
 [data-theme^="prift"] th {
   font-weight: 600;
-  color: var(--textSecondary);
 }
 @media (max-width: 700px) {
   [data-theme^="prift"] .app-container { padding: 12px 4px; }
@@ -1576,7 +1575,6 @@ button:disabled {
   text-transform: uppercase;
   font-size: 11px;
   letter-spacing: 0.06em;
-  color: var(--textSecondary);
 }
 /* The nav band: warm grey, uppercase labels, current page underlined in blue. */
 [data-theme^="rightCapital"] .main-nav {
@@ -1601,3 +1599,71 @@ button:disabled {
   [data-theme^="rightCapital"] .app-container { padding: 12px 4px; }
   [data-theme^="rightCapital"] .main-nav { justify-content: flex-start; }
 }
+
+/* ── Soft controls for Prift and RightCapital ──────────────────────────────
+   The base stylesheet paints every default button, table header and summary
+   card in a purple gradient with a coloured glow -- the "loud" part of the
+   Analytics tab. Under these two themes they become quiet: outlined neutral
+   buttons, accent only as a soft tint, flat headers. Buttons and panels that
+   set their own inline colours are unaffected. */
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 9px 18px;
+}
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) button:hover {
+  transform: none;
+  background: var(--surfaceHover);
+  box-shadow: none;
+}
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.upload-button, .btn-signals, .btn-split) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  box-shadow: none;
+}
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.upload-button, .btn-signals, .btn-split):hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
+/* A flat, muted band in place of the gradient. Kept dark because many panels
+   put white header text on it. */
+[data-theme^="prift"] thead,
+[data-theme^="prift"] thead th:nth-child(3) { background: #2c3b57; }
+[data-theme^="rightCapital"] thead,
+[data-theme^="rightCapital"] thead th:nth-child(3) { background: #4a4560; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) tfoot {
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px var(--shadow), 0 6px 20px var(--shadow);
+}
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card:hover { transform: none; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card h3 { color: var(--textSecondary); letter-spacing: 0.04em; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .summary-card .value { color: var(--text); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .upload-section {
+  border: 2px dashed var(--border);
+  background: var(--panel);
+}
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .upload-section:hover { border-color: var(--accent); background: var(--surfaceHover); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.upload-section h2, .expand-icon, .trades-detail h4, .controls label:hover) { color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .controls input[type="checkbox"] { accent-color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .symbol-search:focus { border-color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .positive { color: var(--positive); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .negative { color: var(--negative); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-edit { color: var(--accent); border: 1px solid var(--border); background: var(--surface); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-edit:hover { background: var(--surfaceHover); color: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-save { background: var(--positive); color: #fff; border: none; }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-cancel { background: var(--surface); color: var(--negative); border: 1px solid var(--border); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .btn-clear { background: var(--cardNeutral); color: var(--text); border: 1px solid var(--border); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) :is(.price-input, .split-input) { border: 1px solid var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .split-indicator { background: var(--accent); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .signals-panel { border: 1px solid var(--border); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .signals-header h3 { color: var(--text); }
+:is([data-theme^="prift"], [data-theme^="rightCapital"]) .signal-card { border-left: 3px solid var(--accent); }

@@ -14,6 +14,7 @@ import ExtendedHoursPanel from './components/ExtendedHoursPanel'
 import BrokerTabs from './components/BrokerTabs'
 import DashboardCharts from './components/DashboardCharts'
 import EarningsPanel from './components/EarningsPanel'
+import DividendSchedulePanel from './components/DividendSchedulePanel'
 import FibRsiScreener from './components/FibRsiScreener'
 import { loadPrefs, getPref, setPref } from './services/prefs'
 import UploadButton from './components/UploadButton'
@@ -2629,6 +2630,7 @@ function AuthenticatedApp({ user }) {
           afterCumulative={<>
             <DashboardCharts broker={brokerFilter} />
             <EarningsPanel broker={brokerFilter} />
+            <DividendSchedulePanel broker={brokerFilter} />
           </>}
           moreDetail={<DCAAlertPanel />}
         />
