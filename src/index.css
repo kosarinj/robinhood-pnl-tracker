@@ -1802,3 +1802,25 @@ button:disabled {
   --softBtnText: var(--accent);
   --softBtnBorder: color-mix(in srgb, var(--accent) 28%, transparent);
 }
+
+/* ── Tab bars on phones ────────────────────────────────────────────────────
+   The touch rule above gives every button min-width: 44px, which replaces the
+   flex default of "never narrower than your text" -- so a tab bar squeezed
+   each tab down to 44px and clipped the labels. Tabs keep their natural width,
+   and on a narrow screen the bar wraps onto a second line instead of hiding
+   tabs off to the side. */
+nav:is(.main-nav, .sub-nav) button { flex-shrink: 0; }
+@media (max-width: 700px) {
+  :root nav:is(.main-nav, .sub-nav) {
+    flex-wrap: wrap;
+    overflow-x: visible !important;
+    width: auto !important;
+    border-radius: 14px;
+    row-gap: 2px;
+  }
+  :root nav:is(.main-nav, .sub-nav) button {
+    padding: 8px 11px !important;
+    font-size: 13px !important;
+    min-height: 36px;
+  }
+}

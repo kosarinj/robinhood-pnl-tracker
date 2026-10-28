@@ -2530,7 +2530,7 @@ function AuthenticatedApp({ user }) {
               book, not a view of it, and it is useless if you have to go looking. */}
           <RollCandidatesAlert broker={brokerFilter} />
 
-          <nav style={{
+          <nav className="sub-nav" style={{
             display: 'flex', gap: 2, overflowX: 'auto', marginBottom: 12,
             borderBottom: '1px solid var(--border)',
           }}>
