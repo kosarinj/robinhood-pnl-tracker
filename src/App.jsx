@@ -1305,7 +1305,7 @@ function AuthenticatedApp({ user }) {
           Colours come from theme tokens. They used to be literal hex, so the
           bar ignored the theme entirely and drew a pale grey rule even in dark
           mode. Emoji are gone — they were decoration, not information.        */}
-      <nav style={{
+      <nav className="main-nav" style={{
         display: 'flex', alignItems: 'center', gap: 0, padding: '0 8px',
         background: 'var(--panel)',
         borderBottom: '1px solid var(--border)',

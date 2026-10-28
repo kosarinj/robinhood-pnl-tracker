@@ -1463,3 +1463,75 @@ button:disabled {
     -webkit-tap-highlight-color: rgba(102, 126, 234, 0.2);
   }
 }
+
+
+/* ── Prift theme ───────────────────────────────────────────────────────────
+   After the Prift wealth dashboard: the page is the grey, the cards are white
+   and lifted by a soft wide shadow rather than outlined, Inter throughout with
+   tabular figures, and generous rounding. Scoped to the theme so every other
+   theme is untouched. */
+[data-theme^="prift"] body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
+  letter-spacing: -0.005em;
+}
+[data-theme^="prift"] table,
+[data-theme^="prift"] input,
+[data-theme^="prift"] select,
+[data-theme^="prift"] button {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+/* The outer white sheet goes away: the page itself is the background and the
+   panels are the cards, as in Prift. */
+[data-theme^="prift"] .app-container {
+  background: transparent;
+  box-shadow: none;
+  padding: 24px 28px;
+}
+[data-theme^="prift"] .floating-panel {
+  border-radius: 14px !important;
+  border-color: transparent !important;
+  box-shadow: 0 1px 2px var(--shadow), 0 8px 28px var(--shadow);
+}
+/* No lift on hover: a calm, still surface reads as more trustworthy. */
+[data-theme^="prift"] .floating-panel:hover {
+  transform: none;
+  box-shadow: 0 1px 2px var(--shadow), 0 10px 32px var(--shadow);
+}
+[data-theme^="prift"] h1,
+[data-theme^="prift"] h2,
+[data-theme^="prift"] h3 {
+  letter-spacing: -0.02em;
+}
+[data-theme^="prift"] th {
+  font-weight: 600;
+  color: var(--textSecondary);
+}
+@media (max-width: 700px) {
+  [data-theme^="prift"] .app-container { padding: 12px 4px; }
+}
+
+/* Prift's top nav: no underline bar, the current page is a soft blue pill. */
+[data-theme^="prift"] .main-nav {
+  background: transparent !important;
+  border-bottom: none !important;
+  gap: 4px !important;
+  padding: 6px 0 !important;
+  overflow-x: auto;
+}
+[data-theme^="prift"] .main-nav button {
+  border-bottom: none !important;
+  border-radius: 10px;
+  padding: 9px 16px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: var(--text) !important;
+  margin-bottom: 0 !important;
+}
+[data-theme^="prift"] .main-nav button:hover { background: var(--surfaceHover) !important; }
+[data-theme^="prift"] .main-nav button[aria-current="page"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+}

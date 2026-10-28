@@ -266,6 +266,90 @@ export const themes = {
     buttonDanger: '#ff6b5e',
     buttonDangerHover: '#e0574b'
   }
+,
+
+  // ── Prift ─────────────────────────────────────────────────────────────────
+  // After the Prift wealth dashboard (Eleken): cool off-white page, white cards
+  // lifted by a soft wide shadow instead of borders, one confident blue, teal
+  // for gains, and big bold figures with a quiet grey delta beside them. The
+  // card, font and tab treatment lives in index.css under [data-theme^="prift"].
+  prift: {
+    name: 'prift', label: 'Prift', dark: false,
+    chartPositive: '#0f8f84', chartNegative: '#e5484d',
+    chartSeriesStock: '#2f6fe4', chartSeriesOptions: '#0f8f84',
+    accent: '#1f6feb', accentHover: '#1a5fd0', accentText: '#ffffff',
+    panel: '#f4f7fb', rule: '#e9eef5', severity: '#d93f44',
+    background: '#f4f7fb',
+    surface: '#ffffff',
+    surfaceHover: '#f7f9fc',
+    text: '#0f1b2d',
+    textSecondary: '#66758a',
+    border: '#e9eef5',
+    shadow: 'rgba(15, 35, 70, 0.07)',
+
+    positive: '#0f8f84',
+    negative: '#e5484d',
+    neutral: '#66758a',
+    warning: '#c27c0e',
+
+    cardPositive: '#e3f5f2',
+    cardNegative: '#fdecec',
+    cardNeutral: '#f4f7fb',
+
+    chartLine: '#2f6fe4',
+    chartGrid: '#edf1f6',
+    chartText: '#66758a',
+
+    tableHeader: '#f7f9fc',
+    tableRowHover: '#f4f8fe',
+    tableRowExpanded: '#eef3fb',
+
+    buttonPrimary: '#1f6feb',
+    buttonPrimaryHover: '#1a5fd0',
+    buttonSecondary: '#66758a',
+    buttonSecondaryHover: '#516073',
+    buttonDanger: '#e5484d',
+    buttonDangerHover: '#cc3a3f'
+  },
+
+  priftDark: {
+    name: 'priftDark', label: 'Prift Dark', dark: true,
+    chartPositive: '#2bb3a3', chartNegative: '#f06a6e',
+    chartSeriesStock: '#5b8ff0', chartSeriesOptions: '#2bb3a3',
+    accent: '#4f8ef7', accentHover: '#6a9ff8', accentText: '#0a1120',
+    panel: '#0f1829', rule: '#1f2b40', severity: '#f06a6e',
+    background: '#0a1120',
+    surface: '#111b2e',
+    surfaceHover: '#16223a',
+    text: '#e8eef7',
+    textSecondary: '#8c9ab0',
+    border: '#1f2b40',
+    shadow: 'rgba(0, 0, 0, 0.35)',
+
+    positive: '#2bb3a3',
+    negative: '#f06a6e',
+    neutral: '#8c9ab0',
+    warning: '#e0a43a',
+
+    cardPositive: '#0f2a2a',
+    cardNegative: '#2c1619',
+    cardNeutral: '#111b2e',
+
+    chartLine: '#5b8ff0',
+    chartGrid: '#1f2b40',
+    chartText: '#8c9ab0',
+
+    tableHeader: '#0f1829',
+    tableRowHover: '#16223a',
+    tableRowExpanded: '#1f2b40',
+
+    buttonPrimary: '#4f8ef7',
+    buttonPrimaryHover: '#6a9ff8',
+    buttonSecondary: '#8c9ab0',
+    buttonSecondaryHover: '#73839b',
+    buttonDanger: '#f06a6e',
+    buttonDangerHover: '#d9575b'
+  }
 }
 
 // Keys that are metadata, not CSS custom properties.
@@ -273,6 +357,9 @@ const META_KEYS = new Set(['name', 'label', 'dark'])
 
 export const applyTheme = (theme) => {
   const root = document.documentElement
+  // Lets a theme carry more than colour: index.css styles cards, type and tabs
+  // per theme through this attribute.
+  root.dataset.theme = theme.name
   Object.entries(theme).forEach(([key, value]) => {
     if (!META_KEYS.has(key)) root.style.setProperty(`--${key}`, value)
   })
