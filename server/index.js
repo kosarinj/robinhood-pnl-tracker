@@ -5478,6 +5478,11 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
       // total: long positions are worth what they'd sell for, short ones cost
       // that much to buy back.
       subtotalExcludingOpenOptions: round2(stockCash + stockMarketValue + optionCash + transferValue),
+      // Net money put in (deposits less withdrawals), for the dashboard's
+      // account-value card: value = deposits + P&L + dividends received.
+      netDeposits: round2(databaseService.getAllDepositsForUser(userId)
+        .filter(d => !brokerFilter || (d.broker || 'robinhood') === brokerFilter)
+        .reduce((a, d) => a + (Number(d.amount) || 0), 0)),
       positionCount: symbols.length,
       unpricedSymbols: unpriced,
     })

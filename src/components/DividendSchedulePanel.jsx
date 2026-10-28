@@ -57,7 +57,7 @@ export default function DividendSchedulePanel({ broker = 'all' }) {
       {sub && <div style={{ fontSize: 11, color: 'var(--textSecondary)' }}>{sub}</div>}
     </div>
   )
-  const th = { padding: '6px 8px', fontSize: 11, fontWeight: 600, color: 'var(--textSecondary)', textAlign: 'right', whiteSpace: 'nowrap' }
+  const th = { padding: '6px 8px', fontSize: 11, fontWeight: 600, color: 'var(--textSecondary)', background: 'var(--surface)', textAlign: 'right', whiteSpace: 'nowrap' }
   const td = { padding: '6px 8px', fontSize: 12.5, textAlign: 'right', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }
 
   return (
@@ -93,7 +93,9 @@ export default function DividendSchedulePanel({ broker = 'all' }) {
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
+            {/* Its own light header: the themes' dark thead band made the grey
+                labels unreadable. */}
+            <thead style={{ background: 'transparent', position: 'static' }}>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 <th style={{ ...th, textAlign: 'left' }}>Ticker</th>
                 <th style={th} title="Own the shares before this date to get the dividend">Ex-date</th>
