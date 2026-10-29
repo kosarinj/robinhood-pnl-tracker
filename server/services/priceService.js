@@ -31,6 +31,7 @@ async function fetchPolygonGrouped(apiKey) {
     if (dow === 0 || dow === 6) continue // skip Sun/Sat
     tryDates.push(dt.toISOString().slice(0, 10))
   }
+  let retries429 = 0
   for (let i = 0; i < tryDates.length; i++) {
     const date = tryDates[i]
     try {
@@ -51,6 +52,9 @@ async function fetchPolygonGrouped(apiKey) {
       if (status === 429) {
         // Rate limited — wait and retry the same date (don't skip a valid trading day)
         console.warn(`Polygon grouped ${date}: rate limited (429), waiting 13s to retry`)
+        // At most twice per call: unbounded, a sustained 429 held every request
+        // waiting on these prices open indefinitely.
+        if (++retries429 > 2) break
         await sleep(13000)
         i--
         continue

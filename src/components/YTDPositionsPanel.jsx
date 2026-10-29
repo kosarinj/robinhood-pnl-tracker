@@ -431,7 +431,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // loaded with the table instead of waiting for a chart click. Reset on a
   // broker switch: the legs are per broker and would otherwise go stale.
   useEffect(() => { setOpenLegs({ loading: false, positions: null, stockPrices: {}, error: null }) }, [broker])
-  useEffect(() => { if (!asOf && !openLegs.positions && !openLegs.loading && !openLegs.error) ensureOpenLegs() }, [asOf, openLegs, broker])
+  // Only once the table itself has loaded: that endpoint walks every contract
+  // through Polygon, and started alongside the table it held the table's own
+  // request up and left the grid on Loading.
+  useEffect(() => { if (!asOf && data && !loading && !openLegs.positions && !openLegs.loading && !openLegs.error) ensureOpenLegs() }, [asOf, openLegs, broker, data, loading])
   const preparedByTicker = React.useMemo(() => {
     const out = {}
     for (const l of openLegs.positions || []) {
