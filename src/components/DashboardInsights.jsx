@@ -331,13 +331,16 @@ function WeekdayOdds({ rows }) {
         : !data.success ? <div style={{ fontSize: 12, color: 'var(--textSecondary)' }}>Unavailable: {data.error}</div>
         : (
           <div style={{ fontSize: 12.5 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr 58px 70px', gap: 8, padding: '0 6px 3px', fontSize: 10, fontWeight: 700, color: 'var(--textSecondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <span /><span>52 weeks</span><span style={{ textAlign: 'right' }}>up / dn</span><span style={{ textAlign: 'right' }}>last 4</span>
+            </div>
             {data.days.map(d => {
               const isNext = d.dow === nextDow
               const total = d.up + d.down + d.flat || 1
               const upPct = Math.round(d.up / total * 100)
               return (
                 <div key={d.dow} title={`${d.day}: ${d.up} up, ${d.down} down${d.flat ? `, ${d.flat} flat` : ''} of ${d.sessions} sessions\nAverage ${d.avgPct}% · avg up day +${d.avgUpPct ?? 0}% · avg down day ${d.avgDownPct ?? 0}%\nLast few: ${d.recent.map(x => `${x.date.slice(5)} ${x.pct > 0 ? '+' : ''}${x.pct}%`).join(', ')}`}
-                  style={{ display: 'grid', gridTemplateColumns: '64px 1fr 74px', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8,
+                  style={{ display: 'grid', gridTemplateColumns: '64px 1fr 58px 70px', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 8,
                     background: isNext ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'transparent',
                     outline: isNext ? '1px solid color-mix(in srgb, var(--accent) 35%, transparent)' : 'none' }}>
                   <span style={{ fontWeight: isNext ? 700 : 600 }}>{d.day}{isNext && <span style={{ fontSize: 10, color: 'var(--accent)', marginLeft: 4 }}>{nextLabel}</span>}</span>
@@ -350,6 +353,16 @@ function WeekdayOdds({ rows }) {
                     <span style={{ color: 'var(--textSecondary)' }}> / </span>
                     <span style={{ color: 'var(--negative)', fontWeight: 700 }}>{d.down}</span>
                   </span>
+                  {/* The last four of this weekday, oldest to newest. */}
+                  <span style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
+                    {d.recent.slice(-4).map(x => (
+                      <span key={x.date} title={`${x.date} ${x.pct > 0 ? '+' : ''}${x.pct}%`}
+                        style={{ width: 14, height: 14, borderRadius: 3, fontSize: 9, lineHeight: '14px', textAlign: 'center', color: '#fff', fontWeight: 800,
+                          background: x.pct > 0 ? 'var(--positive)' : x.pct < 0 ? 'var(--negative)' : 'var(--textSecondary)' }}>
+                        {x.pct > 0 ? '▲' : x.pct < 0 ? '▼' : '–'}
+                      </span>
+                    ))}
+                  </span>
                 </div>
               )
             })}
@@ -359,6 +372,13 @@ function WeekdayOdds({ rows }) {
               const total = d.up + d.down + d.flat || 1
               return <div style={{ marginTop: 8, color: 'var(--textSecondary)', fontSize: 12 }}>
                 {data.symbol} closed up on {d.up} of the last {total} {FULL[d.day]}s ({Math.round(d.up / total * 100)}%), average move {d.avgPct > 0 ? '+' : ''}{d.avgPct}%.
+                {(() => {
+                  const last = d.recent.slice(-4)
+                  if (!last.length) return null
+                  const up = last.filter(x => x.pct > 0).length
+                  const sum = last.reduce((a, x) => a + x.pct, 0)
+                  return <> Last {last.length}: {up} up, {last.length - up} down ({sum > 0 ? '+' : ''}{sum.toFixed(2)}% combined).</>
+                })()}
               </div>
             })()}
           </div>
