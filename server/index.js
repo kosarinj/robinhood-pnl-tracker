@@ -7319,6 +7319,9 @@ app.get('/api/weekday-stats', requireAuth, async (req, res) => {
   try {
     const symbol = String(req.query.symbol || 'SPY').toUpperCase()
     if (!/^[A-Z.]{1,6}$/.test(symbol)) return res.status(400).json({ success: false, error: 'bad symbol' })
+    // Lookback in calendar days: 4 weeks up to 2 years. Two years of bars are
+    // fetched once and every period is cut from them.
+    const lookback = Math.min(731, Math.max(7, parseInt(req.query.days) || 364))
     const polygonKey = process.env.POLYGON_API_KEY || ''
     if (!polygonKey) return res.json({ success: false, error: 'no Polygon key configured' })
 
@@ -7327,9 +7330,9 @@ app.get('/api/weekday-stats', requireAuth, async (req, res) => {
     if (hit && Date.now() - hit.at < 6 * 60 * 60000) bars = hit.bars
     else {
       const to = new Date().toISOString().slice(0, 10)
-      const from = new Date(Date.now() - 372 * 86400000).toISOString().slice(0, 10)
+      const from = new Date(Date.now() - 745 * 86400000).toISOString().slice(0, 10)
       const r = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${symbol}/range/1/day/${from}/${to}`, {
-        params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 500 }, timeout: 10000,
+        params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 1000 }, timeout: 10000,
       })
       bars = (r.data?.results || []).map(b => ({
         date: new Date(b.t).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }), c: b.c,
@@ -7340,7 +7343,7 @@ app.get('/api/weekday-stats', requireAuth, async (req, res) => {
     // Only completed sessions: today's bar is still moving during market hours.
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
     const closed = currentUsSession() === 'regular' || currentUsSession() === 'pre' ? bars.filter(b => b.date < today) : bars
-    const cutoff = new Date(Date.now() - 364 * 86400000).toISOString().slice(0, 10)
+    const cutoff = new Date(Date.now() - lookback * 86400000).toISOString().slice(0, 10)
     const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
     const by = {}
     for (let i = 1; i < closed.length; i++) {
@@ -7363,7 +7366,7 @@ app.get('/api/weekday-stats', requireAuth, async (req, res) => {
         recent: d.last.slice(-8),
       }
     })
-    res.json({ success: true, symbol, today, from: cutoff, days })
+    res.json({ success: true, symbol, today, from: cutoff, lookback, days })
   } catch (e) {
     console.error('Error in /api/weekday-stats:', e.message)
     res.status(500).json({ success: false, error: e.response?.status ? `Polygon HTTP ${e.response.status}` : e.message })

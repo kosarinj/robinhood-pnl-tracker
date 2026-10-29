@@ -297,16 +297,20 @@ function UpcomingTimeline({ insights, rows, earnings, dividends, macro = [] }) {
 // ── Weekday odds ──────────────────────────────────────────────────────────
 // For each weekday over the last 52 weeks: sessions that closed up vs down.
 // The next session to trade is highlighted.
+const WEEKDAY_PERIODS = [['4W', 28, '4 weeks'], ['2M', 61, '2 months'], ['3M', 92, '3 months'], ['6M', 183, '6 months'], ['1Y', 364, '52 weeks'], ['2Y', 728, '2 years']]
+
 function WeekdayOdds({ rows }) {
   const [symbol, setSymbol] = useState(() => getPref('weekdaySymbol', 'SPY'))
+  const [period, setPeriod] = useState(() => getPref('weekdayPeriod', '1Y'))
   const [data, setData] = useState(null)
+  const per = WEEKDAY_PERIODS.find(p => p[0] === period) || WEEKDAY_PERIODS[4]
   useEffect(() => {
     let alive = true
     setData(null)
-    fetchShared(`/api/weekday-stats?symbol=${encodeURIComponent(symbol)}`, 60 * 60000)
+    fetchShared(`/api/weekday-stats?symbol=${encodeURIComponent(symbol)}&days=${per[1]}`, 60 * 60000)
       .then(d => alive && setData(d))
     return () => { alive = false }
-  }, [symbol])
+  }, [symbol, period])
   const choices = [...new Set(['SPY', 'QQQ', 'IWM', ...(rows || []).filter(r => r.stockPosition > 0).map(r => r.ticker).sort()])]
 
   // The next session: today if the market hasn't closed, else the next weekday.
@@ -322,17 +326,26 @@ function WeekdayOdds({ rows }) {
   const FULL = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday' }
 
   return (
-    <Panel title="Up or down by weekday · 52 weeks" right={
+    <Panel title={`Up or down by weekday · ${per[2]}`} right={
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      <span style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
+        {WEEKDAY_PERIODS.map(([k]) => (
+          <button key={k} onClick={() => { setPeriod(k); setPref('weekdayPeriod', k) }}
+            style={{ border: 'none', boxShadow: 'none', minWidth: 0, minHeight: 0, padding: '2px 6px', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              background: period === k ? 'var(--accent)' : 'transparent', color: period === k ? '#fff' : 'var(--textSecondary)' }}>{k}</button>
+        ))}
+      </span>
       <select value={symbol} onChange={e => { setSymbol(e.target.value); setPref('weekdaySymbol', e.target.value) }}
         style={{ fontSize: 12, padding: '2px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontFamily: 'inherit' }}>
         {choices.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>}>
+      </select>
+      </span>}>
       {!data ? <div style={{ fontSize: 12, color: 'var(--textSecondary)' }}>…</div>
         : !data.success ? <div style={{ fontSize: 12, color: 'var(--textSecondary)' }}>Unavailable: {data.error}</div>
         : (
           <div style={{ fontSize: 12.5 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr 58px 70px', gap: 8, padding: '0 6px 3px', fontSize: 10, fontWeight: 700, color: 'var(--textSecondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              <span /><span>52 weeks</span><span style={{ textAlign: 'right' }}>up / dn</span><span style={{ textAlign: 'right' }}>last 4</span>
+              <span /><span>{per[2]}</span><span style={{ textAlign: 'right' }}>up / dn</span><span style={{ textAlign: 'right' }}>last 4</span>
             </div>
             {data.days.map(d => {
               const isNext = d.dow === nextDow
