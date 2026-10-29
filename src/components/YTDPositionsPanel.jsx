@@ -1548,12 +1548,14 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         // shares-only answer here would look like a breakeven and leave the options out.
         if (hasLegs && !legs.length) return <span style={{ fontSize: 10, color: openLegs.error ? '#f59e0b' : textMid }}
           title={openLegs.error ? `Option prices could not be loaded: ${openLegs.error}` : 'Waiting for option prices'}>{openLegs.error ? '!' : '…'}</span>
-        const spot = (legs.length && openLegs.stockPrices?.[r.ticker]) || r.stockCurrentPrice || c.price || 0
+        // Net + Open is at the grid's price; the legs were marked at the leg fetch's.
+        const spot = c.price || r.stockCurrentPrice || 0
+        const legSpot = (legs.length && openLegs.stockPrices?.[r.ticker]) || spot
         if ((!legs.length && !(c.pos > 0)) || !(spot > 0) || !Number.isFinite(c.netPlusOpen)) return <span style={{ color: textMid }}>—</span>
-        const key = `${r.ticker}|${spot}|${c.pos}|${c.netPlusOpen}|${legs.length}`
+        const key = `${r.ticker}|${spot}|${legSpot}|${c.pos}|${c.netPlusOpen}|${legs.length}`
         let be = breakevenCache.current.get(key)
         if (!be) {
-          const args = { preparedLegs: legs, spot, shares: c.pos || 0, netOpenNow: c.netPlusOpen }
+          const args = { preparedLegs: legs, spot, legSpot, shares: c.pos || 0, netOpenNow: c.netPlusOpen }
           be = { now: breakevenPrice(args), exp: legs.length ? breakevenPrice({ ...args, basis: 'expiry' }) : null }
           breakevenCache.current.set(key, be)
         }

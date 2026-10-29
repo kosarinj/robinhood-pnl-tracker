@@ -303,10 +303,15 @@ export function projectedPnl(preparedLegs, spot, years) {
  * today's price is returned, the rest alongside. No crossing at all means the
  * position is on one side of zero at every price, and `allAbove` says which.
  */
-export function breakevenPrice({ preparedLegs, spot, shares = 0, netOpenNow, basis = 'today' }) {
+// `legSpot` is the underlying price the legs' marks were taken at; `spot` is the
+// price `netOpenNow` is measured at. They can differ (the leg fetch is older,
+// or priced off a delayed quote), and anchoring both at one of them shifts the
+// answer by the gap -- so options move from `spot` along a curve anchored at
+// `legSpot`, and shares move from `spot`.
+export function breakevenPrice({ preparedLegs, spot, legSpot = spot, shares = 0, netOpenNow, basis = 'today' }) {
   if (!(spot > 0) || netOpenNow == null || !Number.isFinite(netOpenNow)) return null
-  const base = pnlAtPrice(preparedLegs, spot, spot)[basis]
-  const f = (p) => netOpenAtPrice({ netOpenNow, optionPnlAt: pnlAtPrice(preparedLegs, spot, p)[basis], optionPnlNow: base, shares, spot, price: p })
+  const base = pnlAtPrice(preparedLegs, legSpot, spot)[basis]
+  const f = (p) => netOpenAtPrice({ netOpenNow, optionPnlAt: pnlAtPrice(preparedLegs, legSpot, p)[basis], optionPnlNow: base, shares, spot, price: p })
   const lo = spot * 0.02, hi = spot * 5, steps = 400
   const pts = new Set()
   for (let i = 0; i <= steps; i++) pts.add(lo * Math.pow(hi / lo, i / steps))
