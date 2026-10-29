@@ -3103,9 +3103,15 @@ function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, 
 
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-  const WIDTH = Math.min(520, vw - 24)
-  const left = Math.max(8, Math.min(vw - WIDTH - 8, anchor.left))
+  // Sized to its table rather than a fixed width: a fixed box clipped the
+  // Mark and Open P&L columns off the right whenever a leg's label ran long.
+  // Measured after render and pulled left if it would run off screen.
+  const [left, setLeft] = useState(Math.max(8, anchor.left))
   const top = Math.max(8, Math.min(anchor.top + 6, vh - 320))
+  React.useLayoutEffect(() => {
+    const w = boxRef.current?.offsetWidth || 0
+    setLeft(Math.max(8, Math.min(vw - w - 8, anchor.left)))
+  }, [detail, anchor.left, vw])
 
   const label = {
     quote: ['market', '#22c55e'],
@@ -3138,10 +3144,10 @@ function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, 
       ref={boxRef}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', top, left, width: WIDTH, zIndex: 9999,
+        position: 'fixed', top, left, width: 'max-content', minWidth: 340, maxWidth: vw - 16, zIndex: 9999,
         background: surface, border: `1px solid ${border}`, borderRadius: 8,
         padding: '10px 12px', maxHeight: Math.min(480, vh - top - 16),
-        overflowY: 'auto', overflowX: 'hidden',
+        overflowY: 'auto', overflowX: 'auto',
         boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
       }}
     >
@@ -3228,7 +3234,9 @@ function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, 
       )}
 
       {live.some(r => r.basis === 'staleClose') && (
-        <div style={{ fontSize: 11, color: textMid, marginTop: 8, lineHeight: 1.5 }}>
+        // width 0 / minWidth 100%: wraps to the table's width instead of
+        // widening the box to one long line.
+        <div style={{ fontSize: 11, color: textMid, marginTop: 8, lineHeight: 1.5, width: 0, minWidth: '100%' }}>
           A <strong>stale print</strong> is the last trade in a contract that hasn't traded recently — on a
           thin contract it can sit a long way from where it would trade now, which is the usual reason a
           figure disagrees with your broker.
