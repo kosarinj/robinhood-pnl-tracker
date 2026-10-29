@@ -5812,6 +5812,11 @@ async function fetchEarningsCalendarDay(date) {
   const rows = (resp.data?.data?.rows || []).map(r => ({
     ticker: String(r.symbol || '').toUpperCase(),
     time: r.time === 'time-pre-market' ? 'before open' : r.time === 'time-after-hours' ? 'after close' : null,
+    // Filled in once the company has reported -- the day's own actuals, which
+    // reach the calendar well before the per-company surprise table.
+    eps: r.eps ?? null,
+    epsForecast: r.epsForecast ?? null,
+    surprise: r.surprise ?? null,
   }))
   earningsCalCache.set(date, { at: Date.now(), rows })
   return rows
@@ -5830,7 +5835,7 @@ async function earningsCalendarWindow(days = 21) {
   for (let i = 0; i < dates.length; i += 5) {
     await Promise.all(dates.slice(i, i + 5).map(async date => {
       try {
-        for (const r of await fetchEarningsCalendarDay(date)) if (r.ticker && !map[r.ticker]) map[r.ticker] = { date, time: r.time }
+        for (const r of await fetchEarningsCalendarDay(date)) if (r.ticker && !map[r.ticker]) map[r.ticker] = { date, time: r.time, eps: r.eps, epsForecast: r.epsForecast, surprise: r.surprise }
       } catch { failed++ }
     }))
   }
@@ -5945,6 +5950,188 @@ app.get('/api/earnings', requireAuth, async (req, res) => {
       noDate: out.filter(r => !r.earningsDate).map(r => r.ticker),
       checked: out.length,
     })
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+// ─── Earnings history ────────────────────────────────────────────────────────
+// What past reports looked like and what the stock did on each, so "the report
+// was good and it got hammered" can be checked against how this name usually
+// trades a print. Three Nasdaq feeds (EPS surprises, revenue by quarter, the
+// forward consensus) plus Polygon daily closes for the price reaction.
+//
+// Nasdaq's revenue table labels its quarter groups wrongly (the "December" group
+// holds the 09/30 figures), so revenue is keyed by the period-end date printed
+// next to each EPS figure rather than by the group label.
+const NASDAQ_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+}
+const earningsHistCache = new Map()
+
+const nasdaqNum = (v) => {
+  if (v == null) return null
+  const s = String(v).trim()
+  if (!s || s === 'N/A' || s === '--') return null
+  const neg = /^\(.*\)$/.test(s) || s.startsWith('-')
+  const n = parseFloat(s.replace(/[^0-9.]/g, ''))
+  return Number.isFinite(n) ? (neg ? -n : n) : null
+}
+// "7/30/2026" -> "2026-07-30"
+const mdyToIso = (s) => {
+  const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null
+}
+// "Jun 2026" -> "2026-06"
+const MONTHS = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' }
+const qtrToYm = (s) => {
+  const m = String(s || '').match(/([A-Za-z]{3})\w*[\s/]+(\d{4})/)
+  return m && MONTHS[m[1]] ? `${m[2]}-${MONTHS[m[1]]}` : null
+}
+
+/** quarter-end "YYYY-MM" -> revenue in $ millions */
+function parseNasdaqRevenue(table) {
+  const out = {}
+  const rows = table?.rows || []
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].value1 !== 'Revenue') continue
+    const eps = rows[i + 1]?.value1 === 'EPS' ? rows[i + 1] : null
+    if (!eps) continue
+    for (const k of ['value2', 'value3', 'value4', 'value5']) {
+      const iso = mdyToIso(eps[k])
+      const rev = nasdaqNum(rows[i][k])
+      if (iso && rev != null) out[iso.slice(0, 7)] = rev
+    }
+  }
+  return out
+}
+
+async function nasdaqGet(path) {
+  const r = await axios.get(`https://api.nasdaq.com/api/${path}`, { timeout: 10000, headers: NASDAQ_HEADERS })
+  return r.data?.data || null
+}
+
+app.get('/api/earnings-history', requireAuth, async (req, res) => {
+  try {
+    const ticker = String(req.query.ticker || '').toUpperCase().trim()
+    if (!/^[A-Z.]{1,6}$/.test(ticker)) return res.status(400).json({ success: false, error: 'bad ticker' })
+    const hit = earningsHistCache.get(ticker)
+    if (hit && Date.now() - hit.at < 60 * 60000) return res.json(hit.body)
+
+    const enc = encodeURIComponent(ticker)
+    const [surprise, revenue, forecast, cal] = await Promise.all([
+      nasdaqGet(`company/${enc}/earnings-surprise`).catch(() => null),
+      nasdaqGet(`company/${enc}/revenue?limit=1`).catch(() => null),
+      nasdaqGet(`analyst/${enc}/earnings-forecast`).catch(() => null),
+      earningsCalendarWindow(21).catch(() => null),
+    ])
+
+    const revByQ = parseNasdaqRevenue(revenue?.revenueTable)
+    const quarters = (surprise?.earningsSurpriseTable?.rows || []).map(r => {
+      const ym = qtrToYm(r.fiscalQtrEnd)
+      const prevYm = ym ? `${Number(ym.slice(0, 4)) - 1}${ym.slice(4)}` : null
+      const rev = ym ? revByQ[ym] ?? null : null
+      const revPrev = prevYm ? revByQ[prevYm] ?? null : null
+      return {
+        fiscalQtrEnd: r.fiscalQtrEnd,
+        reported: mdyToIso(r.dateReported),
+        eps: nasdaqNum(r.eps),
+        epsEstimate: nasdaqNum(r.consensusForecast),
+        surprisePct: nasdaqNum(r.percentageSurprise),
+        revenueM: rev,
+        revenueYoYPct: rev != null && revPrev > 0 ? Math.round((rev / revPrev - 1) * 1000) / 10 : null,
+      }
+    }).filter(q => q.reported)
+
+    // Price reaction from daily closes. Whether a report came before the open
+    // or after the close isn't known for past quarters, so the move is taken
+    // from the last close BEFORE the report date to the first close AFTER it —
+    // that window holds the reaction either way.
+    let bars = []
+    const polygonKey = process.env.POLYGON_API_KEY || ''
+    if (polygonKey) {
+      try {
+        const to = new Date().toISOString().slice(0, 10)
+        const from = new Date(Date.now() - 560 * 86400000).toISOString().slice(0, 10)
+        const r = await axios.get(`https://api.polygon.io/v2/aggs/ticker/${enc}/range/1/day/${from}/${to}`, {
+          params: { apiKey: polygonKey, adjusted: true, sort: 'asc', limit: 1000 }, timeout: 10000,
+        })
+        bars = (r.data?.results || []).map(b => ({
+          date: new Date(b.t).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }), c: b.c,
+        }))
+      } catch { /* reaction columns stay empty */ }
+    }
+    const pct = (a, b) => (a > 0 && b > 0 ? Math.round((b / a - 1) * 1000) / 10 : null)
+    for (const q of quarters) {
+      const before = bars.filter(b => b.date < q.reported).pop()
+      const iAfter = bars.findIndex(b => b.date > q.reported)
+      const after = iAfter >= 0 ? bars[iAfter] : null
+      q.closeBefore = before?.c ?? null
+      q.closeAfter = after?.c ?? null
+      q.reactionPct = pct(before?.c, after?.c)
+      // Did the move keep going? Five more sessions after the reaction day.
+      const later = iAfter >= 0 ? bars[iAfter + 5] : null
+      q.followThroughPct = later ? pct(after.c, later.c) : null
+    }
+
+    const fq = forecast?.quarterlyForecast?.rows?.[0] || null
+    const calNext = cal?.map?.[ticker] || null
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    // Reported today: the surprise table lags by a day or more, so take the
+    // actuals from the calendar row and put the report at the top. Its
+    // reaction stays empty until the next session closes.
+    const reportedToday = calNext && calNext.date <= today && nasdaqNum(calNext.eps) != null
+      && !quarters.some(q => q.reported >= calNext.date)
+    if (reportedToday) {
+      const before = bars.filter(b => b.date < calNext.date).pop()
+      const sameDay = bars.find(b => b.date === calNext.date)
+      // After the close the day's own close is still the "before" price.
+      const base = calNext.time === 'after close' ? (sameDay || before) : before
+      quarters.unshift({
+        fiscalQtrEnd: fq?.fiscalEnd || 'Latest', reported: calNext.date, time: calNext.time, fromCalendar: true,
+        eps: nasdaqNum(calNext.eps), epsEstimate: nasdaqNum(calNext.epsForecast), surprisePct: nasdaqNum(calNext.surprise),
+        revenueM: null, revenueYoYPct: null,
+        closeBefore: base?.c ?? null, closeAfter: null, reactionPct: null, followThroughPct: null,
+      })
+    }
+    const last = bars[bars.length - 1] || null
+    const lastReport = quarters.find(q => q.closeAfter) || null
+    const pastDays = (n) => (bars.length > n ? pct(bars[bars.length - 1 - n].c, last.c) : null)
+
+    const reacted = quarters.filter(q => q.reactionPct != null)
+    const beats = quarters.filter(q => q.surprisePct != null && q.surprisePct > 0)
+    const body = {
+      success: true,
+      ticker,
+      price: last ? { close: last.c, date: last.date, chg5d: pastDays(5), chg10d: pastDays(10), chg20d: pastDays(20) } : null,
+      reportedToday: !!reportedToday,
+      next: !reportedToday && (calNext || fq) ? {
+        date: calNext?.date || null,
+        time: calNext?.time || null,
+        daysAway: calNext?.date ? Math.round((new Date(calNext.date) - new Date(today)) / 86400000) : null,
+        fiscalQtrEnd: fq?.fiscalEnd || null,
+        epsEstimate: nasdaqNum(fq?.consensusEPSForecast),
+        epsHigh: nasdaqNum(fq?.highEPSForecast),
+        epsLow: nasdaqNum(fq?.lowEPSForecast),
+        estimates: fq?.noOfEstimates ?? null,
+        revisionsUp: fq?.up ?? null,
+        revisionsDown: fq?.down ?? null,
+      } : null,
+      sinceLastReport: lastReport?.closeAfter && last ? {
+        from: lastReport.closeAfter, pct: pct(lastReport.closeAfter, last.c),
+      } : null,
+      quarters,
+      summary: {
+        reports: quarters.length,
+        beats: beats.length,
+        avgAbsReactionPct: reacted.length
+          ? Math.round(reacted.reduce((s, q) => s + Math.abs(q.reactionPct), 0) / reacted.length * 10) / 10 : null,
+        beatAndFell: quarters.filter(q => q.surprisePct > 0 && q.reactionPct < 0).length,
+      },
+    }
+    earningsHistCache.set(ticker, { at: Date.now(), body })
+    res.json(body)
   } catch (e) {
     res.status(500).json({ success: false, error: e.message })
   }

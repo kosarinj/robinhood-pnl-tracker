@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { LABELS as BROKER_LABELS } from './BrokerTabs'
+import EarningsHistory from './EarningsHistory'
 
 /**
  * Upcoming earnings for what you actually hold.
@@ -26,6 +28,9 @@ const urgency = (days) => {
 export default function EarningsPanel({ broker = 'all' }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  // Past reports for one name: a held name from the list, or any ticker typed in.
+  const [histFor, setHistFor] = useState(null)
+  const [lookup, setLookup] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -51,8 +56,16 @@ export default function EarningsPanel({ broker = 'all' }) {
         <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, letterSpacing: '0.02em' }}>
           Upcoming earnings
         </h3>
-        <span style={{ fontSize: 11, color: 'var(--textSecondary)' }}>
-          {upcoming.length} of {checked} holdings
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--textSecondary)' }}>
+            {upcoming.length} of {checked} holdings
+          </span>
+          <form onSubmit={e => { e.preventDefault(); const t = lookup.trim().toUpperCase(); if (t) setHistFor(t) }}>
+            <input value={lookup} onChange={e => setLookup(e.target.value)} placeholder="Past reports: ticker"
+              title="Show past earnings reports and the stock's reaction for any ticker"
+              style={{ width: 130, fontSize: 11, padding: '3px 6px', borderRadius: 4,
+                border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }} />
+          </form>
         </span>
       </div>
 
@@ -72,7 +85,12 @@ export default function EarningsPanel({ broker = 'all' }) {
                 boxShadow: u.strong ? `inset 2px 0 0 ${u.tone}` : 'none',
                 background: u.strong ? 'var(--surfaceHover)' : 'transparent',
               }}>
-                <span style={{ fontWeight: 700, fontSize: 13, minWidth: 52 }}>{r.ticker}</span>
+                <button onClick={() => setHistFor(r.ticker)}
+                  title={`Past ${r.ticker} reports and how the stock reacted`}
+                  style={{ font: 'inherit', fontWeight: 700, fontSize: 13, minWidth: 52, textAlign: 'left', padding: 0,
+                    background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer' }}>
+                  {r.ticker}
+                </button>
                 <span style={{ fontSize: 12, color: 'var(--textSecondary)', flex: 1, minWidth: 0 }}>
                   {fmtDate(r.earningsDate)}
                   {r.time && <span style={{ marginLeft: 5 }}>· {r.time}</span>}
@@ -124,6 +142,8 @@ export default function EarningsPanel({ broker = 'all' }) {
           reported, not that the lookup failed.
         </div>
       )}
+
+      {histFor && createPortal(<EarningsHistory ticker={histFor} onClose={() => setHistFor(null)} />, document.body)}
     </div>
   )
 }
