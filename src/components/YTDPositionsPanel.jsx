@@ -1570,7 +1570,12 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         const tip = `Net + Open is $0 at $${b.price.toFixed(2)} (${b.pct >= 0 ? '+' : ''}${b.pct.toFixed(1)}% from $${spot.toFixed(2)}); ` +
           `profit ${b.profitAbove ? 'above' : 'below'} it.` +
           (others.length ? ` Also crosses $0 at ${others.join(', ')}.` : '') +
-          (be.exp?.price != null ? ` Held to expiry: $${be.exp.price.toFixed(2)}.` : '')
+          (be.exp?.price != null ? ` Held to expiry: $${be.exp.price.toFixed(2)}.` : '') +
+          `
+
+Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0).toLocaleString()} shares` +
+          (legs.length ? ` · ${legs.length} option leg${legs.length > 1 ? 's' : ''} (marks taken at $${legSpot.toFixed(2)}): ` +
+            legs.map(l => `${l.isLong ? '+' : '−'}${l.openContracts} ${l.strike}${l.optionType === 'call' ? 'C' : 'P'} ${l.expiry.slice(5)} @${(l.markPrice || 0).toFixed(2)}${l.priced ? '' : ' (no vol)'}`).join(', ') : '')
         return (
           <span title={tip} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
             <span style={{ fontWeight: 700 }}>${b.price.toFixed(2)}</span>
@@ -1969,7 +1974,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
           <OptionPayoffChart
             ticker={payoffTicker}
             legs={legs}
-            spot={spot}
+            spot={(ctx?.price > 0 ? ctx.price : null) || spot}
+            legSpot={spot}
             shares={ctx?.pos || row?.stockPosition || 0}
             netOpenNow={Number.isFinite(ctx?.netPlusOpen) ? ctx.netPlusOpen : null}
             isDark={isDark}

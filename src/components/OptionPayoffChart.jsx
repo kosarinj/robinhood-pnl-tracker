@@ -31,7 +31,12 @@ import { prepareLeg, pnlAtPrice, priceGrid, intrinsic, netOpenAtPrice } from '..
  * a forecast — a point the footnote makes on screen rather than leaving to be
  * inferred.
  */
-export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, netOpenNow = null, onClose, isDark }) {
+export default function OptionPayoffChart({ ticker, legs, spot, legSpot: legSpotProp, shares = 0, netOpenNow = null, onClose, isDark }) {
+  // `spot` is the grid's price, the one Net + Open is measured at; `legSpot` is
+  // the price the legs' marks were fetched at, which can lag it. Option P&L runs
+  // along a curve anchored at legSpot, and everything is read relative to spot,
+  // so the two can't put "now" in different places.
+  const legSpot = legSpotProp > 0 ? legSpotProp : spot
   // Change from today rather than the running total, because that is the
   // question being asked — "what would I make or lose if it goes there". It is
   // also the only basis the share line can honestly join: this view knows the
@@ -61,8 +66,8 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, netO
   const pnlColor = (n) => n == null ? textMid : n >= 0 ? GOOD : CRIT
 
   const prepared = useMemo(
-    () => legs.map(l => prepareLeg(l, spot)),
-    [legs, spot])
+    () => legs.map(l => prepareLeg(l, legSpot)),
+    [legs, legSpot])
 
   const { series, lo, hi, base, unpricedLegs } = useMemo(() => {
     const strikes = legs.map(l => l.strike)
@@ -70,9 +75,9 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, netO
     // Everything is measured against this, so it is computed once from the same
     // function that draws the curve. At today's price the change is exactly
     // zero and the total is exactly the panel's unrealized figure.
-    const at0 = pnlAtPrice(prepared, spot, spot)
+    const at0 = pnlAtPrice(prepared, legSpot, spot)
     const rows = gridPrices.map(p => {
-      const r = pnlAtPrice(prepared, spot, p)
+      const r = pnlAtPrice(prepared, legSpot, p)
       const optDelta = r.today - at0.today
       const shareDelta = shares > 0 ? shares * (p - spot) : 0
       return {
@@ -102,10 +107,10 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, netO
       base: at0,
       unpricedLegs: at0.unpriced,
     }
-  }, [prepared, legs, spot, shares, netOpenNow])
+  }, [prepared, legs, spot, legSpot, shares, netOpenNow])
 
   const price = priceInput != null && priceInput > 0 ? priceInput : spot
-  const at = useMemo(() => pnlAtPrice(prepared, spot, price), [prepared, spot, price])
+  const at = useMemo(() => pnlAtPrice(prepared, legSpot, price), [prepared, legSpot, price])
   const sharesMove = shares > 0 ? shares * (price - spot) : 0
   const optionChange = at.today - base.today
   const combinedChange = optionChange + (withShares ? sharesMove : 0)
@@ -330,7 +335,7 @@ export default function OptionPayoffChart({ ticker, legs, spot, shares = 0, netO
             <div style={{ textAlign: 'right' }}>P&L now</div><div style={{ textAlign: 'right' }}>P&L at expiry</div>
           </div>
           {prepared.map((leg, i) => {
-            const one = pnlAtPrice([leg], spot, price)
+            const one = pnlAtPrice([leg], legSpot, price)
             const settleMark = intrinsic(leg.optionType, price, leg.strike)
             // Back the modelled mark out of the P&L rather than recomputing it,
             // so the column can never disagree with the number beside it.
