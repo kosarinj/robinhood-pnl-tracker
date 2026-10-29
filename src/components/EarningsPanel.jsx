@@ -75,6 +75,7 @@ export default function EarningsPanel({ broker = 'all' }) {
                 <span style={{ fontWeight: 700, fontSize: 13, minWidth: 52 }}>{r.ticker}</span>
                 <span style={{ fontSize: 12, color: 'var(--textSecondary)', flex: 1, minWidth: 0 }}>
                   {fmtDate(r.earningsDate)}
+                  {r.time && <span style={{ marginLeft: 5 }}>· {r.time}</span>}
                   {/* Which account(s) hold it -- shares per account when it's
                       split, "opt" where only options are open there. */}
                   {(r.accounts || []).length > 0 && (

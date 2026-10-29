@@ -5790,6 +5790,56 @@ function parseNasdaqEarnings(announcement) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
 }
 
+/**
+ * Nasdaq's earnings calendar, one day at a time: every company reporting that
+ * date, with before-open / after-close. The per-ticker lookup below drops the
+ * date on the day of the report itself ("hasn't provided the upcoming date"),
+ * which is exactly the day it matters most -- the calendar still lists it.
+ * Cached per date: an hour for today, six for later days.
+ */
+const earningsCalCache = new Map()
+async function fetchEarningsCalendarDay(date) {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  const hit = earningsCalCache.get(date)
+  if (hit && Date.now() - hit.at < (date === today ? 60 : 360) * 60000) return hit.rows
+  const resp = await axios.get('https://api.nasdaq.com/api/calendar/earnings', {
+    params: { date }, timeout: 10000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+    },
+  })
+  const rows = (resp.data?.data?.rows || []).map(r => ({
+    ticker: String(r.symbol || '').toUpperCase(),
+    time: r.time === 'time-pre-market' ? 'before open' : r.time === 'time-after-hours' ? 'after close' : null,
+  }))
+  earningsCalCache.set(date, { at: Date.now(), rows })
+  return rows
+}
+
+/** ticker -> { date, time } for the next `days` calendar days (weekdays only). */
+async function earningsCalendarWindow(days = 21) {
+  const dates = []
+  const start = new Date(new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) + 'T12:00:00Z')
+  for (let i = 0; i <= days; i++) {
+    const d = new Date(start.getTime() + i * 86400000)
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) dates.push(d.toISOString().slice(0, 10))
+  }
+  const map = {}
+  let failed = 0
+  for (let i = 0; i < dates.length; i += 5) {
+    await Promise.all(dates.slice(i, i + 5).map(async date => {
+      try {
+        for (const r of await fetchEarningsCalendarDay(date)) if (r.ticker && !map[r.ticker]) map[r.ticker] = { date, time: r.time }
+      } catch { failed++ }
+    }))
+  }
+  return { map, dates, failed }
+}
+
+// Warm it shortly after boot so the first Dashboard load isn't the one waiting.
+setTimeout(() => { earningsCalendarWindow(21).catch(() => {}) }, 20000)
+
 async function fetchEarningsDate(ticker) {
   const url = `https://api.nasdaq.com/api/analyst/${encodeURIComponent(ticker)}/earnings-date`
   const resp = await axios.get(url, {
@@ -5812,9 +5862,10 @@ app.get('/api/earnings', requireAuth, async (req, res) => {
     const optionUnderlyings = databaseService.getOpenOptionPositions(userId, brokerFilter)
       .map(p => parseOptionDescription(p.symbol)?.ticker)
       .filter(Boolean)
-    const tickers = [...new Set([...Object.keys(stock), ...optionUnderlyings])]
+    // Shares actually held -- the stock map also carries names long since sold,
+    // and those used to fill the 40-name cap ahead of real holdings.
+    const tickers = [...new Set([...Object.keys(stock).filter(t => stock[t]?.position > 0), ...optionUnderlyings])]
       .filter(t => /^[A-Z.]{1,6}$/.test(t))
-      .slice(0, 40)   // a hard bound on how many upstream calls one request can make
 
     const now = Date.now()
     const out = []
@@ -5830,15 +5881,34 @@ app.get('/api/earnings', requireAuth, async (req, res) => {
 
     // Nasdaq is not a bulk API, so this is one call per stale ticker, spaced out.
     // Anything that fails keeps whatever was cached rather than blanking the row.
-    for (const t of stale) {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    // The calendar covers the next three weeks for every name at once; the
+    // per-ticker lookup is only needed for what it doesn't list.
+    let cal = { map: {}, failed: 0, dates: [] }
+    try { cal = await earningsCalendarWindow(21) } catch { /* fall back to per-ticker */ }
+
+    // A bound on upstream calls per request; the rest refresh on a later load.
+    for (const t of stale.filter(t => !cal.map[t]).slice(0, 40)) {
+      const prev = databaseService.getEarnings(t)?.earnings_date ?? null
       let date = null
-      try { date = await fetchEarningsDate(t) } catch { date = databaseService.getEarnings(t)?.earnings_date ?? null }
+      try { date = await fetchEarningsDate(t) } catch { date = prev }
+      // Nasdaq blanks the date on report day, so a blank never erases one that
+      // hasn't passed yet.
+      if (!date && prev && prev >= today) date = prev
       databaseService.setEarnings(t, date)
       out.push({ ticker: t, earningsDate: date, cached: false })
       await new Promise(r => setTimeout(r, 350))
     }
+    for (const t of stale.filter(t => cal.map[t])) out.push({ ticker: t, earningsDate: null, cached: false })
+    // Calendar wins inside its window: it is the day-of source of truth.
+    for (const r of out) {
+      const c = cal.map[r.ticker]
+      if (c) {
+        r.earningsDate = c.date; r.time = c.time
+        if (databaseService.getEarnings(r.ticker)?.earnings_date !== c.date) databaseService.setEarnings(r.ticker, c.date)
+      }
+    }
 
-    const today = new Date().toISOString().slice(0, 10)
     const upcoming = out
       .filter(r => r.earningsDate && r.earningsDate >= today)
       .map(r => ({

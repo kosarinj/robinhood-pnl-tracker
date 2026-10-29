@@ -247,7 +247,7 @@ function UpcomingTimeline({ insights, rows, earnings, dividends, macro = [] }) {
     events.push({ date, kind: 'exp', color: '#f59e0b', ticker, text: `expires: ${parts.join(', ')}` })
   }
   for (const e of earnings) if (e.earningsDate && within(e.earningsDate)) {
-    events.push({ date: e.earningsDate, kind: 'earn', color: '#3b82f6', ticker: e.ticker, text: 'earnings' + (e.hasOptions ? ' — options open' : '') })
+    events.push({ date: e.earningsDate, kind: 'earn', color: '#3b82f6', ticker: e.ticker, text: 'earnings' + (e.time ? ` ${e.time}` : '') + (e.hasOptions ? ' — options open' : '') })
   }
   for (const d of dividends) if (within(d.exDate)) {
     events.push({ date: d.exDate, kind: 'ex', color: '#a855f7', ticker: d.ticker,
