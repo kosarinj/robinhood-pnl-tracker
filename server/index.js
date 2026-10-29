@@ -3393,7 +3393,13 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // already aged for the move since; this one went straight through as
         // 'today'. Aged once, at the source, so every leg loop below and the
         // day move all see the same moved price.
-        if (currentUsSession() === 'post') {
+        // Post-market, and the rest of that evening: after 20:00 the session
+        // reads 'closed' but the last after-hours trade is still the price, and
+        // the 4pm prints are still dated today. Stops at midnight, when they aren't.
+        const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
+        const afterClose = currentUsSession() === 'post'
+          || (currentUsSession() === 'closed' && etNow.getHours() >= 20 && etNow.getDay() >= 1 && etNow.getDay() <= 5)
+        if (afterClose) {
           try {
             const ext = await priceService.fetchExtendedHoursCached(openTickers)
             const regClose = {}
