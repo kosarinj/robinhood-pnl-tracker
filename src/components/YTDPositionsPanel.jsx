@@ -6,7 +6,7 @@ import OptionPayoffChart from './OptionPayoffChart'
 import { pairSpreads } from '../utils/pairSpreads'
 import { fetchShared, brokerQuery, withQuery } from '../services/dashData'
 import { tickerStatus, statusTitle } from '../utils/positionStatus'
-import { prepareLeg, projectedPnl } from '../utils/optionMath'
+import { prepareLeg, projectedPnl, breakevenPrice } from '../utils/optionMath'
 
 // Where a mark came from, in words. The market/model verdict beside this says
 // whether to trust the figure; this says why — "a print from four days ago aged
@@ -426,6 +426,21 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       setOpenLegs({ loading: false, positions: null, stockPrices: {}, error: e.message })
     }
   }
+
+  // The Breakeven column needs every ticker's legs, so in a live view they are
+  // loaded with the table instead of waiting for a chart click. Reset on a
+  // broker switch: the legs are per broker and would otherwise go stale.
+  useEffect(() => { setOpenLegs({ loading: false, positions: null, stockPrices: {}, error: null }) }, [broker])
+  useEffect(() => { if (!asOf && !openLegs.positions && !openLegs.loading && !openLegs.error) ensureOpenLegs() }, [asOf, openLegs, broker])
+  const preparedByTicker = React.useMemo(() => {
+    const out = {}
+    for (const l of openLegs.positions || []) {
+      const spot = openLegs.stockPrices?.[l.ticker] || l.stockPrice || 0
+      ;(out[l.ticker] ||= []).push(prepareLeg(l, spot))
+    }
+    return out
+  }, [openLegs])
+  const breakevenCache = useRef(new Map())
 
   const openPayoff = async (ticker) => {
     setPayoffTicker(ticker)
@@ -1516,6 +1531,46 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       cell: (r, c) => <span style={{ fontWeight: 700, fontSize: 14, color: pnlColor(c.net, isDark) }}>{fmt(c.net)}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.net, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net)}</span> },
 
+    // The P&L chart's Net + Open line run backwards: the stock price at which
+    // that line crosses $0. Same legs, same spot and same Net + Open anchor the
+    // chart is opened with, so the two can't disagree.
+    { key: 'breakeven', label: 'Breakeven', borderLeft: '1px',
+      title: 'Stock price at which Net + Open P&L is $0 if the stock got there now -- where the P&L chart\'s "if it gets there now" line crosses zero. Hover a value for the held-to-expiry break-even.',
+      cell: (r, c) => {
+        if (asOf) return <span style={{ color: textMid }}>—</span>
+        const hasLegs = ((r.openLegsPriced || 0) + (r.openLegsUnpriced || 0)) > 0
+        if (hasLegs && openLegs.loading) return <span style={{ fontSize: 10, color: textMid }}>…</span>
+        const legs = preparedByTicker[r.ticker] || []
+        const spot = (legs.length && openLegs.stockPrices?.[r.ticker]) || r.stockCurrentPrice || c.price || 0
+        if ((!legs.length && !(c.pos > 0)) || !(spot > 0) || !Number.isFinite(c.netPlusOpen)) return <span style={{ color: textMid }}>—</span>
+        const key = `${r.ticker}|${spot}|${c.pos}|${c.netPlusOpen}|${legs.length}`
+        let be = breakevenCache.current.get(key)
+        if (!be) {
+          const args = { preparedLegs: legs, spot, shares: c.pos || 0, netOpenNow: c.netPlusOpen }
+          be = { now: breakevenPrice(args), exp: legs.length ? breakevenPrice({ ...args, basis: 'expiry' }) : null }
+          breakevenCache.current.set(key, be)
+        }
+        const b = be.now
+        if (!b) return <span style={{ color: textMid }}>—</span>
+        if (b.price == null) return (
+          <span title={b.allAbove ? 'Net + Open stays above $0 at every price from 2% to 5x today\'s.' : 'Net + Open stays below $0 at every price from 2% to 5x today\'s.'}
+            style={{ fontSize: 12, fontWeight: 700, color: b.allAbove ? pnlColor(1, isDark) : pnlColor(-1, isDark) }}>
+            {b.allAbove ? 'always +' : 'never'}</span>
+        )
+        const others = b.roots.filter(x => x !== b.price).map(x => `$${x.toFixed(2)}`)
+        const tip = `Net + Open is $0 at $${b.price.toFixed(2)} (${b.pct >= 0 ? '+' : ''}${b.pct.toFixed(1)}% from $${spot.toFixed(2)}); ` +
+          `profit ${b.profitAbove ? 'above' : 'below'} it.` +
+          (others.length ? ` Also crosses $0 at ${others.join(', ')}.` : '') +
+          (be.exp?.price != null ? ` Held to expiry: $${be.exp.price.toFixed(2)}.` : '')
+        return (
+          <span title={tip} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
+            <span style={{ fontWeight: 700 }}>${b.price.toFixed(2)}</span>
+            <span style={{ fontSize: 10.5, color: pnlColor(b.profitAbove ? -b.pct : b.pct, isDark) }}>
+              {b.pct >= 0 ? '+' : ''}{b.pct.toFixed(1)}%</span>
+          </span>
+        )
+      } },
+
     { key: 'netPlusOpen', label: 'Net + Open P&L', borderLeft: '1px', title: 'Net + Open P&L — marks open short options to market on top of Net. Click a value to see previous times this stock was at the same price.',
       // The popover is NOT rendered here — it goes through a portal to
       // document.body, below. The sticky ticker column is position:sticky with
@@ -1822,6 +1877,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     }
     const NEIGHBOURS = [
       { keys: ['scenarioNet', 'scenarioDelta'], anchor: 'netPlusOpen' },
+      { keys: ['breakeven'], anchor: 'netPlusOpen' },
       { keys: ['weekStock', 'weekOptions', 'weekOptionsOpen'], anchor: 'dayPnl' },
       { keys: ['weekTotal'], anchor: 'weekOptionsOpen' },
       { keys: ['dayStockPnl', 'dayOptionPnl'], anchor: 'dayPnl' },

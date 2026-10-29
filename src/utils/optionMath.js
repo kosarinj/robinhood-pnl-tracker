@@ -289,3 +289,47 @@ export function projectedPnl(preparedLegs, spot, years) {
   }
   return { pnl, expired, total, unpriced }
 }
+
+/**
+ * Break-even underlying price: where Net + Open on one ticker crosses zero.
+ *
+ * The payoff chart's Net + Open curve run backwards -- same pnlAtPrice, same
+ * netOpenAtPrice anchoring -- so the number in the grid is exactly the price at
+ * which that chart's line meets the zero rule. `basis` picks the curve: 'today'
+ * (the move happens now, time and vol held) or 'expiry' (every leg settled).
+ *
+ * A hedged position can cross zero more than once (shares below, a short call's
+ * cap above), so every crossing is found on a wide log grid and the one nearest
+ * today's price is returned, the rest alongside. No crossing at all means the
+ * position is on one side of zero at every price, and `allAbove` says which.
+ */
+export function breakevenPrice({ preparedLegs, spot, shares = 0, netOpenNow, basis = 'today' }) {
+  if (!(spot > 0) || netOpenNow == null || !Number.isFinite(netOpenNow)) return null
+  const base = pnlAtPrice(preparedLegs, spot, spot)[basis]
+  const f = (p) => netOpenAtPrice({ netOpenNow, optionPnlAt: pnlAtPrice(preparedLegs, spot, p)[basis], optionPnlNow: base, shares, spot, price: p })
+  const lo = spot * 0.02, hi = spot * 5, steps = 400
+  const pts = new Set()
+  for (let i = 0; i <= steps; i++) pts.add(lo * Math.pow(hi / lo, i / steps))
+  preparedLegs.forEach(l => { if (l.strike > lo && l.strike < hi) { pts.add(l.strike - 0.01); pts.add(l.strike + 0.01) } })
+  pts.add(spot)
+  const xs = [...pts].sort((a, b) => a - b)
+  const ys = xs.map(f)
+  const roots = []
+  for (let i = 1; i < xs.length; i++) {
+    const y0 = ys[i - 1], y1 = ys[i]
+    if (y0 == null || y1 == null) continue
+    if (y0 === 0) { roots.push(xs[i - 1]); continue }
+    if ((y0 < 0) === (y1 < 0)) continue
+    let a = xs[i - 1], b = xs[i], fa = y0
+    for (let k = 0; k < 60 && b - a > 1e-4; k++) {
+      const m = (a + b) / 2, fm = f(m)
+      if ((fm < 0) === (fa < 0)) { a = m; fa = fm } else b = m
+    }
+    roots.push((a + b) / 2)
+  }
+  if (!roots.length) return { price: null, roots, allAbove: netOpenNow >= 0 }
+  const price = roots.reduce((best, r) => Math.abs(r - spot) < Math.abs(best - spot) ? r : best, roots[0])
+  // Which way from the break-even is profit: sample just above it.
+  const profitAbove = (f(price * 1.001) ?? 0) > 0
+  return { price, roots, profitAbove, pct: (price - spot) / spot * 100 }
+}
