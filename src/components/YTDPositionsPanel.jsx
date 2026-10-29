@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '../contexts/ThemeContext'
+import EarningsHistory from './EarningsHistory'
 import { getPref, setPref, subscribePrefs } from '../services/prefs'
 import OptionPayoffChart from './OptionPayoffChart'
 import { pairSpreads } from '../utils/pairSpreads'
@@ -20,6 +21,7 @@ const MARK_SOURCE_LABELS = [
   ['ibkrClose', "today's closing IBKR bid/ask"],
   ['agedIbkrClose', "today's closing IBKR book, aged for the stock's move since"],
   ['today', "today's Polygon print"],
+  ['agedToday', "today's 4pm print, aged for the after-hours move"],
   ['agedClose', 'a stale print aged forward for the underlying'],
   ['model', 'a Black-Scholes estimate'],
   ['close', 'a stale Polygon print, not aged'],
@@ -397,6 +399,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // stock figures because it renders outside the row and can't read them.
   const [rowDetailAnchor, setRowDetailAnchor] = useState(null)
   const [rowDetailStock, setRowDetailStock] = useState(null)
+  const [earnFor, setEarnFor] = useState(null)
 
   // ── P&L-vs-price curve ──────────────────────────────────────────────────
   // The rows carry openScenario — the same repricing at twelve fixed
@@ -2687,10 +2690,13 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
           stock={rowDetailStock}
           anchor={rowDetailAnchor}
           onClose={() => { setOpenRow(null); setRowDetailAnchor(null) }}
+          onEarnings={(t) => { setOpenRow(null); setRowDetailAnchor(null); setEarnFor(t) }}
           isDark={isDark} fmt={fmt} pnlColor={pnlColor}
         />,
         document.body
       )}
+
+      {earnFor && createPortal(<EarningsHistory ticker={earnFor} onClose={() => setEarnFor(null)} />, document.body)}
 
       {dayFor && dayAnchor && dayRow && createPortal(
         <DayOptionsPopover
@@ -3076,7 +3082,7 @@ function PriceHistoryPopover({ state, ticker, anchor, nowPrice, nowValue, onClos
  * measured number and an estimated one — and on a thinly traded contract it's
  * the difference between agreeing with the broker and not.
  */
-function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, fmt, pnlColor }) {
+function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, onEarnings, isDark, fmt, pnlColor }) {
   const surface = isDark ? '#1e2130' : '#ffffff'
   const border = isDark ? '#2a3142' : '#e2e8f0'
   const text = isDark ? '#e2e8f0' : '#1e293b'
@@ -3106,12 +3112,16 @@ function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, 
   // Sized to its table rather than a fixed width: a fixed box clipped the
   // Mark and Open P&L columns off the right whenever a leg's label ran long.
   // Measured after render and pulled left if it would run off screen.
+  // On a phone a five-column table can't fit, so it becomes a full-width
+  // sheet of stacked rows instead of a box that scrolls sideways.
+  const narrow = vw < 600
   const [left, setLeft] = useState(Math.max(8, anchor.left))
-  const top = Math.max(8, Math.min(anchor.top + 6, vh - 320))
+  const top = narrow ? Math.max(8, Math.min(anchor.top + 6, vh * 0.35)) : Math.max(8, Math.min(anchor.top + 6, vh - 320))
   React.useLayoutEffect(() => {
+    if (narrow) return
     const w = boxRef.current?.offsetWidth || 0
     setLeft(Math.max(8, Math.min(vw - w - 8, anchor.left)))
-  }, [detail, anchor.left, vw])
+  }, [detail, anchor.left, vw, narrow])
 
   const label = {
     quote: ['market', '#22c55e'],
@@ -3144,9 +3154,10 @@ function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, 
       ref={boxRef}
       onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed', top, left, width: 'max-content', minWidth: 340, maxWidth: vw - 16, zIndex: 9999,
+        position: 'fixed', top, zIndex: 9999,
+        ...(narrow ? { left: 8, right: 8 } : { left, width: 'max-content', minWidth: 340, maxWidth: vw - 16 }),
         background: surface, border: `1px solid ${border}`, borderRadius: 8,
-        padding: '10px 12px', maxHeight: Math.min(480, vh - top - 16),
+        padding: '10px 12px', maxHeight: narrow ? vh - top - 16 : Math.min(480, vh - top - 16),
         overflowY: 'auto', overflowX: 'auto',
         boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
       }}
@@ -3156,6 +3167,12 @@ function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, 
           {ticker}
           {stock?.price > 0 && <span style={{ fontWeight: 400, color: textMid }}> @ {fmt(stock.price)}</span>}
         </strong>
+        <span style={{ flex: 1 }} />
+        {onEarnings && (
+          <button onClick={() => onEarnings(ticker)} title={`Past ${ticker} earnings reports and how the stock reacted`}
+            style={{ background: 'none', border: `1px solid ${border}`, borderRadius: 4, color: '#3b82f6',
+              cursor: 'pointer', fontSize: 11, padding: '1px 7px', marginRight: 10 }}>Earnings</button>
+        )}
         <button onClick={onClose}
           style={{ background: 'none', border: 'none', color: textMid, cursor: 'pointer', fontSize: 14, padding: 0 }}>✕</button>
       </div>
@@ -3163,7 +3180,39 @@ function OpenContractsPopover({ ticker, detail, stock, anchor, onClose, isDark, 
       {detail.loading && <div style={{ fontSize: 12, color: textMid }}>Pricing contracts…</div>}
       {detail.error && <div style={{ fontSize: 12, color: '#ef4444' }}>{detail.error}</div>}
 
-      {d && (
+      {d && narrow && (() => {
+        const item = (key, name, qty, qtyColour, sub, pnl, bold) => (
+          <div key={key} style={{ padding: '7px 0', borderBottom: `1px solid ${border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: text }}>
+              <span style={{ fontWeight: 600 }}>{name}</span>
+              {qty != null && <span style={{ fontWeight: 600, color: qtyColour }}>{qty}</span>}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 12, marginTop: 2 }}>
+              <span style={{ color: textMid }}>{sub}</span>
+              <span style={{ fontWeight: bold ? 800 : 700, color: pnlColor(pnl, isDark) }}>{signed(pnl)}</span>
+            </div>
+          </div>
+        )
+        return (
+          <div>
+            {hasShares && item('sh', 'Shares', stock.pos.toLocaleString(), '#3b82f6',
+              `Avg ${money(stock.avgCost)} · Now ${money(stock.price)}`, stock.stockPnl)}
+            {live.map((r, i) => {
+              const [txt, colour] = label[r.basis] || ['no mark', textMid]
+              const entry = r.side === 'long' ? r.costPerShare : r.premiumPerShare
+              return item(i, legName(r), `${r.side === 'long' ? '+' : '−'}${r.contracts}`,
+                r.side === 'long' ? '#22c55e' : '#f59e0b',
+                <>Entry {money(entry)} · Mark {money(r.mark)} <span style={{ color: colour, fontSize: 10.5 }}>{txt}</span></>,
+                r.openPnl)
+            })}
+            {live.length === 0 && <div style={{ fontSize: 12, color: textMid, padding: '6px 0' }}>No open option contracts.</div>}
+            {item('opt', 'Options open', null, null, '', d.totalOpenPnl)}
+            {Number.isFinite(stock?.netPlusOpen) && item('net', 'Net + Open (row)', null, null, '', stock.netPlusOpen, true)}
+          </div>
+        )
+      })()}
+
+      {d && !narrow && (
         <table style={{ borderCollapse: 'collapse', fontSize: 12.5, width: '100%' }}>
           <thead>
             <tr>

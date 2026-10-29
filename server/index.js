@@ -3197,6 +3197,8 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
       // quote and the model, because it's a measurement rather than an estimate
       // — the model should only win when the market hasn't spoken recently.
       const optFresh = {}, optToday = {}, optClose = {}, optPrevClose = {}, stockByTicker = {}
+      // Today's prints moved for the after-hours stock price (see below).
+      const agedAfterHours = new Set()
       // Yesterday's IBKR mids, so a leg priced from the live book today is
       // differenced against the live book yesterday rather than against a
       // Polygon close. Mixing the two makes the gap between the SOURCES read as
@@ -3382,6 +3384,50 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           const m = overnightMark(req.user.userId, t) || overnightMark(orderFlowOwner(), t)
           if (m) stockByTicker[t] = m.last
         }
+
+        // After the close, today's prints are 4pm prices. Options stop trading
+        // at 16:00 while the stock keeps going, so a contract that traded today
+        // sat at its regular-session price however far the stock fell after —
+        // RDDT dropped $21 after hours on its report and Day Options showed only
+        // the session's +285 on the short calls. Every other mark here was
+        // already aged for the move since; this one went straight through as
+        // 'today'. Aged once, at the source, so every leg loop below and the
+        // day move all see the same moved price.
+        if (currentUsSession() === 'post') {
+          try {
+            const ext = await priceService.fetchExtendedHoursCached(openTickers)
+            const regClose = {}
+            for (const t of openTickers) {
+              const e = ext[t]
+              if (!(e?.regularClose > 0)) continue
+              regClose[t] = e.regularClose
+              // The recorder's overnight mark, when fresh, already won above.
+              const hasOvernight = overnightMark(req.user.userId, t) || overnightMark(orderFlowOwner(), t)
+              if (!hasOvernight && e.price > 0 && !e.stale) stockByTicker[t] = e.price
+            }
+            const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+            const yrs = ms => ms / (365.25 * 24 * 3600 * 1000)
+            for (const leg of priceLegs) {
+              const parsed = parseOptionDescription(leg.symbol || '')
+              const S0 = regClose[leg.ticker], S1 = stockByTicker[leg.ticker]
+              if (!parsed || !(S0 > 0) || !(S1 > 0) || Math.abs(S1 - S0) / S0 <= 0.001) continue
+              const expiry = `${parsed.year}-${parsed.month}-${parsed.day}`
+              const T0 = yrs(new Date(expiry).getTime() - new Date(`${todayEt}T20:00:00Z`).getTime())
+              const T1 = yrs(new Date(expiry).getTime() - Date.now())
+              if (!(T0 > 0) || !(T1 > 0)) continue
+              for (const map of [optToday, optFresh]) {
+                const closeMark = map[leg.symbol]
+                if (!(closeMark > 0)) continue
+                const sigma = impliedVol(closeMark, S0, parsed.strike, T0, RISK_FREE_RATE, parsed.type)
+                if (!(sigma > 0)) continue
+                const aged = repriceFromClose({
+                  type: parsed.type, closeMark, S0, S1, K: parsed.strike, T0, T1, sigma, r: RISK_FREE_RATE,
+                })
+                if (aged > 0) { map[leg.symbol] = aged; agedAfterHours.add(leg.symbol) }
+              }
+            }
+          } catch (e) { /* keep the 4pm prints */ }
+        }
       }
 
       // Yesterday's underlying close for the open names, so the daily option move can be
@@ -3458,7 +3504,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         let markBasis = ibkrMark != null ? 'ibkr' : (usedQuote ? 'quote' : null)
         if (currentOptionPrice == null && optToday[entry.symbol] > 0) {
           currentOptionPrice = optToday[entry.symbol]
-          markBasis = 'today'
+          markBasis = agedAfterHours.has(entry.symbol) ? 'agedToday' : 'today'
         }
         // Today's closing IBKR book, aged. Ahead of the Polygon stale close and
         // the model because it is a real two-sided market in THIS contract from
@@ -3699,7 +3745,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         let nowMark = ibkrLegMark ?? optFresh[leg.symbol] ?? legClose?.mark ?? optClose[leg.symbol] ?? null
         let shortBasis = ibkrLegMark != null ? 'ibkr'
           : optFresh[leg.symbol] != null ? 'quote'
-          : optToday[leg.symbol] > 0 ? 'today'
+          : optToday[leg.symbol] > 0 ? (agedAfterHours.has(leg.symbol) ? 'agedToday' : 'today')
           : legClose ? legClose.basis
           : optClose[leg.symbol] != null ? 'close' : null
         // Floored at exercise value, not merely defaulted to it when missing: a
@@ -3836,7 +3882,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
         // and an estimate on the other.
         let longBasis = ibkrLongMark != null ? 'ibkr'
           : optFresh[leg.symbol] != null ? 'quote'
-          : optToday[leg.symbol] > 0 ? 'today'
+          : optToday[leg.symbol] > 0 ? (agedAfterHours.has(leg.symbol) ? 'agedToday' : 'today')
           : longClose ? longClose.basis
           : optClose[leg.symbol] != null ? 'close' : null
         // Long legs have no model fallback — modelOptionMark is built from
