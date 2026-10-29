@@ -5849,6 +5849,24 @@ app.get('/api/earnings', requireAuth, async (req, res) => {
       }))
       .sort((a, b) => a.earningsDate.localeCompare(b.earningsDate))
 
+    // Which account(s) each upcoming name sits in. Per broker, because the
+    // holdings above are already merged across them.
+    if (upcoming.length) {
+      const want = new Set(upcoming.map(r => r.ticker))
+      const brokers = brokerFilter ? [brokerFilter] : databaseService.getBrokersForUser(userId).map(b => b.broker)
+      const acct = {}
+      for (const b of brokers) {
+        const st = databaseService.getStockPositionsWithCost(userId, null, b)
+        const opts = new Set(databaseService.getOpenOptionPositions(userId, b)
+          .map(p => parseOptionDescription(p.symbol)?.ticker).filter(t => want.has(t)))
+        for (const t of want) {
+          const sh = st[t]?.position > 0 ? st[t].position : 0
+          if (sh > 0 || opts.has(t)) (acct[t] ||= []).push({ broker: b, shares: sh || null, hasOptions: opts.has(t) })
+        }
+      }
+      upcoming.forEach(r => { r.accounts = acct[r.ticker] || [] })
+    }
+
     res.json({
       success: true,
       upcoming,

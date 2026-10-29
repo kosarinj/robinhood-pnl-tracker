@@ -11,11 +11,13 @@ import React, { useState, useEffect } from 'react'
  * Renders nothing when only one broker has data — a lone tab is just noise.
  */
 
-const LABELS = {
+export const LABELS = {
   all: 'All brokers',
   robinhood: 'Robinhood',
   webull: 'Webull',
   schwab: 'Schwab',
+  ibkr: 'IBKR',
+  fidelity: 'Fidelity',
 }
 
 /**

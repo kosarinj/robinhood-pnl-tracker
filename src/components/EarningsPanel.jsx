@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { LABELS as BROKER_LABELS } from './BrokerTabs'
 
 /**
  * Upcoming earnings for what you actually hold.
@@ -72,8 +73,24 @@ export default function EarningsPanel({ broker = 'all' }) {
                 background: u.strong ? 'var(--surfaceHover)' : 'transparent',
               }}>
                 <span style={{ fontWeight: 700, fontSize: 13, minWidth: 52 }}>{r.ticker}</span>
-                <span style={{ fontSize: 12, color: 'var(--textSecondary)', flex: 1 }}>
+                <span style={{ fontSize: 12, color: 'var(--textSecondary)', flex: 1, minWidth: 0 }}>
                   {fmtDate(r.earningsDate)}
+                  {/* Which account(s) hold it -- shares per account when it's
+                      split, "opt" where only options are open there. */}
+                  {(r.accounts || []).length > 0 && (
+                    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4, marginLeft: 8, verticalAlign: 'middle' }}>
+                      {r.accounts.map(a => (
+                        <span key={a.broker}
+                          title={`${BROKER_LABELS[a.broker] || a.broker}: ${a.shares ? `${a.shares.toLocaleString()} shares` : 'no shares'}${a.hasOptions ? ', options open' : ''}`}
+                          style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 8,
+                            background: 'var(--surfaceHover)', border: '1px solid var(--border)', color: 'var(--text)', whiteSpace: 'nowrap' }}>
+                          {BROKER_LABELS[a.broker] || a.broker}
+                          {r.accounts.length > 1 && a.shares ? <span style={{ color: 'var(--textSecondary)', fontWeight: 500 }}> {a.shares.toLocaleString()}</span> : null}
+                          {!a.shares && a.hasOptions ? <span style={{ color: 'var(--textSecondary)', fontWeight: 500 }}> opt</span> : null}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </span>
                 {r.hasOptions && (
                   <span
