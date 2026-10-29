@@ -1204,7 +1204,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
             style={{ background: g ? 'var(--accent-soft, rgba(102,126,234,0.12))' : 'transparent', border: g ? 'none' : `1px dashed ${border}`,
               borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: g ? 700 : 500, cursor: 'pointer',
               color: g ? 'var(--accent, #667eea)' : textMid, whiteSpace: 'nowrap', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {g || '+'}
+            {g || 'add group'}
           </button>
         )
       } },
