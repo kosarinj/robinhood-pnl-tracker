@@ -125,6 +125,30 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // stocks held without options. Remembered between visits.
   const [rowView, setRowView] = useState(() => localStorage.getItem(LS_ROWVIEW_KEY) || 'all')
   const changeRowView = (v) => { setRowView(v); localStorage.setItem(LS_ROWVIEW_KEY, v) }
+
+  // Custom groups -- the user's own names ("Core", "Income", "Spec"), not
+  // sectors. One name per ticker, shared across broker tabs since a ticker is
+  // the same holding wherever it's held. Group view splits the table into a
+  // section per name with its own subtotal row.
+  const [groups, setGroups] = useState(() => getPref('ytdPanel_groups', {}) || {})
+  const [groupView, setGroupView] = useState(() => getPref('ytdPanel_groupView', false) === true)
+  const [collapsedGroups, setCollapsedGroups] = useState(() => getPref('ytdPanel_groupsCollapsed', []) || [])
+  const [editingGroup, setEditingGroup] = useState(null)
+  useEffect(() => subscribePrefs(() => {
+    setGroups(getPref('ytdPanel_groups', {}) || {})
+  }), [])
+  const setTickerGroup = (ticker, name) => {
+    const clean = String(name || '').trim().slice(0, 40)
+    const next = { ...groups }
+    if (clean) next[ticker] = clean; else delete next[ticker]
+    setGroups(next); setPref('ytdPanel_groups', next)
+  }
+  const groupNames = [...new Set(Object.values(groups))].sort((a, b) => a.localeCompare(b))
+  const toggleGroupView = () => { const v = !groupView; setGroupView(v); setPref('ytdPanel_groupView', v) }
+  const toggleCollapsed = (g) => {
+    const next = collapsedGroups.includes(g) ? collapsedGroups.filter(x => x !== g) : [...collapsedGroups, g]
+    setCollapsedGroups(next); setPref('ytdPanel_groupsCollapsed', next)
+  }
   const [symbolDates, setSymbolDates] = useState(() => {
     return getPref(LS_SYMBOL_KEY, {})
   })
@@ -836,7 +860,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     return mul * ((av ?? 0) - (bv ?? 0))
   })
 
-  const totals = rows.reduce((acc, r) => {
+  const totalsFor = (list) => list.reduce((acc, r) => {
     // In as-of mode ignore live holdings/prices so the endpoint's historical values win.
     const sh = asOf ? null : stockHoldings[r.ticker]
     const fb = asOf ? null : pnlLookup[r.ticker]
@@ -911,6 +935,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
   }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, weekStockPnl: 0, optionsThisWeek: 0, optionsOpenWeekChange: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0, shares: 0, sharesValue: 0 })
+  const totals = totalsFor(rows)
 
   /**
    * Record what this panel displayed, so "what did it say this morning" has an
@@ -1158,6 +1183,32 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     // Its own column rather than a third control crammed into the ticker cell,
     // which already carries the expander, the chart link, the STK badge and the
     // hide button. Movable like any other, and it starts beside the ticker.
+    { key: 'group', label: 'Group', align: 'left',
+      title: 'Your own grouping for this ticker. Click to name it; pick an existing name or type a new one. Clear it to ungroup. The Group button above splits the table by these names.',
+      cell: (r) => {
+        const g = groups[r.ticker]
+        if (editingGroup === r.ticker) {
+          const done = (v) => { setTickerGroup(r.ticker, v); setEditingGroup(null) }
+          return (
+            <span onClick={e => e.stopPropagation()}>
+              <input autoFocus defaultValue={g || ''} list="ytd-group-names" placeholder="Group name"
+                onKeyDown={e => { if (e.key === 'Enter') done(e.currentTarget.value); if (e.key === 'Escape') setEditingGroup(null) }}
+                onBlur={e => done(e.currentTarget.value)}
+                style={{ width: 110, fontSize: 12, padding: '2px 5px', borderRadius: 4, border: `1px solid ${border}`, background: surface, color: text }} />
+            </span>
+          )
+        }
+        return (
+          <button onClick={e => { e.stopPropagation(); setEditingGroup(r.ticker) }}
+            title={g ? `Group: ${g} — click to change` : 'Add to a group'}
+            style={{ background: g ? 'var(--accent-soft, rgba(102,126,234,0.12))' : 'transparent', border: g ? 'none' : `1px dashed ${border}`,
+              borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: g ? 700 : 500, cursor: 'pointer',
+              color: g ? 'var(--accent, #667eea)' : textMid, whiteSpace: 'nowrap', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {g || '+'}
+          </button>
+        )
+      } },
+
     { key: 'payoff', label: 'P&L↕', align: 'center',
       title: 'P&L on this ticker\'s open option legs across a range of prices for the stock — "what if it goes to 135", rather than the fixed percentages the What-if control uses',
       cell: (r) => {
@@ -1889,6 +1940,10 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
       out.splice(out.indexOf('payoff'), 1)
       out.unshift('payoff')
     }
+    if (missing.includes('group')) {
+      out.splice(out.indexOf('group'), 1)
+      out.unshift('group')
+    }
     const NEIGHBOURS = [
       { keys: ['scenarioNet', 'scenarioDelta'], anchor: 'netPlusOpen' },
       { keys: ['breakeven'], anchor: 'netPlusOpen' },
@@ -2062,6 +2117,15 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
             </button>
           ))}
         </div>
+
+        <button onClick={toggleGroupView}
+          title={groupView ? 'Back to one list' : (groupNames.length ? 'Split the table by your groups, each with a subtotal' : 'Name groups in the Group column first, then split the table by them')}
+          style={{ padding: '5px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer', borderRadius: 6,
+            border: `1px solid ${groupView ? '#667eea' : border}`, background: groupView ? '#667eea' : 'transparent',
+            color: groupView ? '#fff' : textMid }}>
+          ▤ Group{groupNames.length ? <span style={{ marginLeft: 5, opacity: 0.75, fontWeight: 500, fontSize: 11 }}>{groupNames.length}</span> : null}
+        </button>
+        <datalist id="ytd-group-names">{groupNames.map(g => <option key={g} value={g} />)}</datalist>
 
         {/* Row height. The table is 28 columns and the list is long, so the real
             limit is what fits on screen. Compact trades padding for rows. */}
@@ -2366,7 +2430,8 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
               </tr>
             </thead>
             <tbody>
-              {sorted.map((row, i) => {
+              {(() => {
+                const renderRow = (row, i) => {
                 const c = rowCtx(row, i)
                 return (
                   <React.Fragment key={row.ticker}>
@@ -2441,7 +2506,53 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
                   )}
                   </React.Fragment>
                 )
-              })}
+                }
+                if (!groupView) return sorted.map(renderRow)
+                // One section per name, alphabetical, then the ungrouped. Rows
+                // keep the table's sort inside each section.
+                const UNGROUPED = '\u0000'
+                const by = new Map()
+                for (const r of sorted) {
+                  const g = groups[r.ticker] || UNGROUPED
+                  if (!by.has(g)) by.set(g, [])
+                  by.get(g).push(r)
+                }
+                const names = [...by.keys()].sort((a, b) => a === UNGROUPED ? 1 : b === UNGROUPED ? -1 : a.localeCompare(b))
+                return names.map(g => {
+                  const list = by.get(g)
+                  const label = g === UNGROUPED ? 'Ungrouped' : g
+                  const closed = collapsedGroups.includes(label)
+                  const t = totalsFor(list)
+                  const npo = t.net + t.openUnrealizedPnL
+                  return (
+                    <React.Fragment key={'g:' + label}>
+                      <tr onClick={() => toggleCollapsed(label)} style={{ cursor: 'pointer', background: isDark ? '#1b2238' : '#eef1fb', borderTop: `2px solid ${border}` }}>
+                        <td colSpan={orderedColumns.length} style={{ padding: '7px 10px', fontSize: 12.5, fontWeight: 800, color: text, position: 'sticky', left: 0 }}>
+                          <span style={{ display: 'inline-block', width: 14, color: textMid }}>{closed ? '▸' : '▾'}</span>
+                          {label}
+                          <span style={{ fontWeight: 500, color: textMid, marginLeft: 8 }}>{list.length} ticker{list.length > 1 ? 's' : ''}</span>
+                          <span style={{ marginLeft: 12, color: pnlColor(npo, isDark) }}>Net + Open {fmt(npo)}</span>
+                        </td>
+                      </tr>
+                      {!closed && list.map((r, i) => renderRow(r, i))}
+                      {!closed && (
+                        <tr style={{ background: isDark ? '#171d30' : '#f5f7fd', borderBottom: `1px solid ${border}` }}>
+                          {orderedColumns.map(col => col.pinned ? (
+                            <td key={col.key} style={{ padding: padPin, fontSize: 11, fontWeight: 700, color: textMid, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap',
+                              position: 'sticky', left: 0, zIndex: 1, background: isDark ? '#171d30' : '#f5f7fd' }}>
+                              {label} subtotal
+                            </td>
+                          ) : (
+                            <td key={col.key} style={{ padding: padCell, textAlign: col.align || 'right', fontSize: 12, ...cellBorder(col) }}>
+                              {col.foot && col.key !== 'group' ? col.foot(t) : null}
+                            </td>
+                          ))}
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })
+              })()}
             </tbody>
             <tfoot>
               <tr style={{ borderTop: `2px solid ${border}`, background: headerBg }}>
