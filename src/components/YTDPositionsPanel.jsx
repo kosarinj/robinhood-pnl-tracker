@@ -990,10 +990,32 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         legsPriced: totals.openLegsPriced,
         legsUnpriced: totals.openLegsUnpriced,
         tickers: rows.length,
+        // Per name, so tomorrow's Day P&L check can say which one disagrees.
+        // Price and shares go with it so the check can correct for the stock
+        // having moved between this capture and the close.
+        byTicker: Object.fromEntries(rows.map((r, i) => {
+          const c = rowCtx(r, i)
+          return [r.ticker, { n: r2(c.netPlusOpen), px: c.price || null, sh: c.pos || 0 }]
+        }).filter(([, v]) => Number.isFinite(v.n))),
       }),
     }).catch(() => {})     // recording must never disturb the view
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, broker, globalStart, asOf, scenarioMove])
+
+  // The snapshot the Day P&L check measures from. Fetched per data load, so a
+  // refresh after the close picks up the new day's baseline.
+  const [dayCheckSnap, setDayCheckSnap] = useState(null)
+  useEffect(() => {
+    if (!data || asOf) { setDayCheckSnap(null); return }
+    let alive = true
+    const p = new URLSearchParams({ broker: broker || 'all' })
+    if (globalStart) p.set('periodStart', globalStart)
+    fetch(`/api/net-open-snapshot/prev-close?${p}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { if (alive) setDayCheckSnap(d?.success ? d.snapshot : null) })
+      .catch(() => { if (alive) setDayCheckSnap(null) })
+    return () => { alive = false }
+  }, [data, broker, globalStart, asOf])
 
   const SortIcon = ({ field }) => {
     if (sortField !== field) return <span style={{ opacity: 0.3, fontSize: '10px' }}> ↕</span>
@@ -2382,6 +2404,69 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
                 {worst && worst.v < 0 && <> · worst <b style={{ color: text }}>{worst.t}</b> {fmt(worst.v)}</>}
               </div>
             </div>
+          </div>
+        )
+      })()}
+
+      {/* Day P&L check. Day P&L is built leg by leg from yesterday's closing
+          prices; this measures the same day a second, independent way — how
+          far each name's Net + Open has moved since what the panel showed at
+          yesterday's close. The two share no prior-day option prices, so a bad
+          previous close on a thin contract shows up as a gap on its ticker.
+          Stock timing is corrected (shares x close-vs-capture price); option
+          timing can't be, hence the capture time on show. */}
+      {!loading && rows.length > 0 && !asOf && scenarioMove === 0 && dayCheckSnap && (() => {
+        const snap = dayCheckSnap.byTicker || {}
+        const per = rows.map((r, i) => {
+          const c = rowCtx(r, i)
+          const was = snap[r.ticker]
+          if (!Number.isFinite(c.netPlusOpen)) return null
+          // The stock's prior close, recovered from the row's own day move.
+          const prevClose = (c.pos > 0 && r.dayStockPnl != null && c.price > 0) ? c.price - r.dayStockPnl / c.pos : null
+          const stockGap = (was && was.sh > 0 && was.px > 0 && prevClose > 0) ? was.sh * (prevClose - was.px) : 0
+          const moved = c.netPlusOpen - (was ? was.n : 0) - stockGap
+          return { t: r.ticker, moved, day: r.dayPnl, isNew: !was, gap: r.dayPnl != null ? r.dayPnl - moved : null }
+        }).filter(Boolean)
+        const gone = Object.keys(snap).filter(t => !rows.some(r => r.ticker === t))
+        const movedTotal = per.reduce((a, x) => a + x.moved, 0) - gone.reduce((a, t) => a + (snap[t].n || 0), 0)
+        const dayTotal = totals.dayPnl
+        const gap = dayTotal - movedTotal
+        // A few dollars of rounding and a few % of drift are normal; beyond
+        // that one of the two is wrong and the biggest single gap is the lead.
+        const tolerance = Math.max(150, Math.abs(dayTotal) * 0.1)
+        const ok = Math.abs(gap) <= tolerance
+        const worst = per.filter(x => x.gap != null).sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap)).slice(0, 3)
+          .filter(x => Math.abs(x.gap) >= 50)
+        const when = `${fmtDate(dayCheckSnap.asofDate)} ${dayCheckSnap.capturedEt}`
+        const tone = ok ? '#22c55e' : '#f59e0b'
+        return (
+          <div className="floating-panel" style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 10,
+            border: `1px solid ${border}`, background: surface, fontSize: 12.5, color: text, lineHeight: 1.6,
+            boxShadow: `inset 3px 0 0 ${tone}` }}
+            title={"Day P&L is built leg by leg from yesterday's closing prices. This check measures the day another way: "
+              + "how far each name's Net + Open has moved since the panel's snapshot at yesterday's close. "
+              + "They share no prior-day option prices, so a bad previous close on a thin contract shows up as a gap on its ticker. "
+              + "Trades imported since the snapshot and cost-basis edits also move Net + Open, and show up here too."}>
+            <strong>Day P&amp;L check:</strong>{' '}
+            Day P&amp;L <b style={{ color: pnlColor(dayTotal, isDark) }}>{dayTotal >= 0 ? '+' : ''}{fmt(dayTotal)}</b>
+            {' '}vs Net + Open moved <b style={{ color: pnlColor(movedTotal, isDark) }}>{movedTotal >= 0 ? '+' : ''}{fmt(movedTotal)}</b>
+            {' '}since {when}
+            {' · '}<b style={{ color: tone }}>{ok ? 'agrees' : `off by ${fmt(Math.abs(gap))}`}</b>
+            {!ok && worst.length > 0 && (
+              <span style={{ color: textMid }}>
+                {' · '}biggest gaps:{' '}
+                {worst.map((x, i) => (
+                  <span key={x.t}>{i ? ', ' : ''}<b style={{ color: text }}>{x.t}</b> {x.gap >= 0 ? '+' : ''}{fmt(x.gap)}{x.isNew ? ' (new since snapshot)' : ''}</span>
+                ))}
+                {' '}— open its Day Options to see which leg's prices don't fit
+              </span>
+            )}
+            {dayCheckSnap.afterClose && (
+              <div style={{ fontSize: 11, color: '#f59e0b' }}>
+                No snapshot from before 4pm that day, so this measures from {dayCheckSnap.capturedEt} — after-hours option
+                marks make it rougher than usual.
+              </div>
+            )}
           </div>
         )
       })()}

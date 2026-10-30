@@ -9874,8 +9874,32 @@ app.post('/api/net-open-snapshot', requireAuth, (req, res) => {
       net: b.net, openUnrealized: b.openUnrealized, netPlusOpen: b.netPlusOpen,
       totalRealized: b.totalRealized, stockPnl: b.stockPnl, dayPnl: b.dayPnl,
       legsPriced: b.legsPriced, legsUnpriced: b.legsUnpriced, tickers: b.tickers,
+      byTicker: b.byTicker,
     })
     res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message })
+  }
+})
+
+/**
+ * The snapshot the Day P&L check measures from: the last one taken on the most
+ * recent earlier day, for the same broker and period start.
+ *
+ * Prefers one taken by 16:05 ET. A snapshot from the evening carries
+ * after-hours stock prices, and measuring today from that instead of from the
+ * close would be the same mistake the check exists to catch. Stock timing is
+ * corrected client-side from the stored price; option timing can't be, so the
+ * capture time is returned for the panel to show.
+ */
+app.get('/api/net-open-snapshot/prev-close', requireAuth, (req, res) => {
+  try {
+    const snapshot = databaseService.getPrevCloseSnapshot(req.user.userId, {
+      broker: req.query.broker || 'all',
+      periodStart: req.query.periodStart || null,
+      today: new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }),
+    })
+    res.json({ success: true, snapshot })
   } catch (err) {
     res.status(500).json({ success: false, error: err.message })
   }

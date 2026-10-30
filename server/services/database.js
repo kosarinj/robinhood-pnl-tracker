@@ -482,6 +482,9 @@ try {
 } catch (e) {
   console.error('net_open_snapshots migration error:', e.message)
 }
+// Per-ticker Net + Open, price and shares at the moment of the snapshot, as
+// JSON. What lets the Day P&L check name the ticker behind a gap.
+try { db.exec(`ALTER TABLE net_open_snapshots ADD COLUMN by_ticker TEXT`) } catch (e) { /* column already exists */ }
 
 // Migration: short_call_entries — tracks underlying close price when a short call was sold
 try {
@@ -4090,14 +4093,40 @@ export class DatabaseService {
       INSERT INTO net_open_snapshots
         (user_id, captured_at, asof_date, broker, period_start,
          net, open_unrealized, net_plus_open, total_realized, stock_pnl, day_pnl,
-         legs_priced, legs_unpriced, tickers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         legs_priced, legs_unpriced, tickers, by_ticker)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       userId, Math.floor(Date.now() / 1000), s.asofDate, s.broker || 'all', s.periodStart || null,
       s.net ?? null, s.openUnrealized ?? null, s.netPlusOpen ?? null,
       s.totalRealized ?? null, s.stockPnl ?? null, s.dayPnl ?? null,
       s.legsPriced ?? null, s.legsUnpriced ?? null, s.tickers ?? null,
+      s.byTicker && typeof s.byTicker === 'object' ? JSON.stringify(s.byTicker) : null,
     )
+  }
+
+  /**
+   * The baseline for the Day P&L check: the most recent earlier day's last
+   * snapshot for this broker and period start, preferring one taken by 16:05
+   * ET over an evening one carrying after-hours prices. Only snapshots with
+   * per-ticker figures qualify. `today` is the ET date, passed in for tests.
+   */
+  getPrevCloseSnapshot(userId, { broker = 'all', periodStart = null, today }) {
+    const rows = this.getNetOpenSnapshots(userId, { sinceDays: 10, limit: 2000 })
+      .filter(r => r.asof_date < today && r.by_ticker && (r.broker || 'all') === broker
+        && (r.period_start || null) === (periodStart || null))
+    if (!rows.length) return null
+    const day = rows.reduce((m, r) => (r.asof_date > m ? r.asof_date : m), '')
+    const etHm = (sec) => new Date(sec * 1000).toLocaleTimeString('en-GB',
+      { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })
+    const sameDay = rows.filter(r => r.asof_date === day).sort((a, b) => b.captured_at - a.captured_at)
+    const byClose = sameDay.find(r => etHm(r.captured_at) <= '16:05')
+    const pick = byClose || sameDay[0]
+    let byTicker = null
+    try { byTicker = JSON.parse(pick.by_ticker) } catch { return null }
+    return {
+      asofDate: pick.asof_date, capturedAt: pick.captured_at, capturedEt: etHm(pick.captured_at),
+      afterClose: !byClose, netPlusOpen: pick.net_plus_open, byTicker,
+    }
   }
 
   // Newest first. `sinceDays` bounds the window so the history stays readable.
