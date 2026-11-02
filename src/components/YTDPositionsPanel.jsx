@@ -476,6 +476,23 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   }, [openLegs])
   const breakevenCache = useRef(new Map())
 
+  // Open verticals per ticker, paired by pairSpreads so this column, the
+  // Spreads panel and the roll pill all agree on what a spread is. Value is
+  // what it costs (or pays) to close both legs at their marks right now.
+  const openSpreadsByTicker = React.useMemo(() => {
+    if (!openLegs.positions) return {}
+    const out = {}
+    for (const sp of pairSpreads(openLegs.positions).spreads) {
+      const g = out[sp.ticker] ||= { pnl: 0, nowCost: 0, credit: 0, maxLoss: 0, count: 0, priced: true, breached: false, list: [] }
+      g.pnl += sp.pnl; g.nowCost += sp.nowCost; g.credit += sp.credit; g.maxLoss += sp.maxLoss
+      g.count += 1
+      if (!sp.priced) g.priced = false
+      if (sp.breached) g.breached = true
+      g.list.push(sp)
+    }
+    return out
+  }, [openLegs])
+
   const openPayoff = async (ticker) => {
     setPayoffTicker(ticker)
     await ensureOpenLegs()
@@ -865,7 +882,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   const stockOnlyCount = (data?.byUnderlying || []).filter(r => !r.hasOptions).length
   const sorted = [...rows].sort((a, b) => {
     const mul = sortDir === 'asc' ? 1 : -1
-    const av = a[sortField], bv = b[sortField]
+    const sv = (r) => sortField === 'openSpreadPnl' ? openSpreadsByTicker[r.ticker]?.pnl : r[sortField]
+    const av = sv(a), bv = sv(b)
     if (typeof av === 'string' || typeof bv === 'string') {
       return mul * String(av ?? '').localeCompare(String(bv ?? ''))
     }
@@ -918,6 +936,8 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       taxableRealized: acc.taxableRealized + (r.totalRealized || 0) + (r.stockRealizedPnL || 0),
       openPremium: acc.openPremium + (r.openPremium || 0),
       openUnrealizedPnL: acc.openUnrealizedPnL + (r.openUnrealizedPnL || 0),
+      openSpreadPnl: acc.openSpreadPnl + (openSpreadsByTicker[r.ticker]?.pnl || 0),
+      openSpreadNowCost: acc.openSpreadNowCost + (openSpreadsByTicker[r.ticker]?.nowCost || 0),
       openProjectedPnL: acc.openProjectedPnL + (r.openProjected?.[projectMonths]?.pnl ?? r.openUnrealizedPnL ?? 0),
       // Week to date, summed the same way the rows compute it so the footer
       // agrees with the column above it.
@@ -946,7 +966,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       sharesValue: acc.sharesValue + (pos > 0 && price > 0 ? pos * price : 0),
       costBasis: acc.costBasis + ((pos > 0 && avgCost > 0) ? pos * avgCost : 0)
     }
-  }, { scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, weekStockPnl: 0, optionsThisWeek: 0, optionsOpenWeekChange: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0, shares: 0, sharesValue: 0 })
+  }, { openSpreadPnl: 0, openSpreadNowCost: 0, scenarioStockPnL: 0, scenarioOpen: 0, scenarioNetPlusOpen: 0, openExitPnL: 0, stockRealizedAll: 0, dayStockPnl: 0, dayOptionPnl: 0, realizedShortCalls: 0, realizedLongCalls: 0, realizedShortPuts: 0, realizedLongPuts: 0, totalRealized: 0, realizedExpired: 0, shortCallsThisWeek: 0, shortCallsLastWeek: 0, shortCallsWeekChange: 0, shortCallsLastWeekChange: 0, realizedExpiredCalls: 0, realizedExpiredPuts: 0, realizedSpreads: 0, realizedSpreadCalls: 0, realizedSpreadPuts: 0, taxableRealized: 0, openPremium: 0, openUnrealizedPnL: 0, openProjectedPnL: 0, weekStockPnl: 0, optionsThisWeek: 0, optionsOpenWeekChange: 0, stockUnrealizedPnL: 0, stockUnrealizedOnly: 0, net: 0, dayPnl: 0, costBasis: 0, openLegsPriced: 0, openLegsUnpriced: 0, dividends: 0, shares: 0, sharesValue: 0 })
   const totals = totalsFor(rows)
 
   /**
@@ -1436,6 +1456,47 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         {r.openIncomplete > 0 && <span style={{ fontSize: 10, color: '#f59e0b' }}
           title={`${r.openLegsUnpriced} of ${r.openLegsPriced + r.openLegsUnpriced} option legs could not be priced, so this is part of the position, not all of it.`}> {r.openLegsUnpriced} unpriced</span>}</span>,
       foot: (t) => <span style={{ color: pnlColor(t.openUnrealizedPnL, isDark), fontWeight: 700 }}>{fmt(t.openUnrealizedPnL)}</span> },
+
+    { key: 'openSpreads', label: 'Open Spreads', sort: 'openSpreadPnl', borderLeft: '1px',
+      title: 'Open vertical spreads — a short and a long leg in the same underlying, expiry and type, paired the same way as the Spreads panel. The figure is P&L: credit taken (or debit paid) minus what it costs to close both legs at their current marks. Below it, the spread\'s value now (negative = you pay to close). Already inside Open P&L; not an extra term. Hover for each spread.',
+      cell: (r) => {
+        if (asOf) return <span style={{ color: textMid }}>—</span>
+        const g = openSpreadsByTicker[r.ticker]
+        if (!g) {
+          const hasLegs = ((r.openLegsPriced || 0) + (r.openLegsUnpriced || 0)) > 0
+          if (hasLegs && openLegs.loading) return <span style={{ fontSize: 10, color: textMid }}>…</span>
+          if (hasLegs && openLegs.error) return <span style={{ fontSize: 10, color: '#f59e0b' }} title={openLegs.error}>!</span>
+          return <span style={{ color: textMid }}>—</span>
+        }
+        const d = (iso) => `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}`
+        const tip = g.list.map(sp =>
+          `$${sp.shortStrike}/$${sp.longStrike} ${sp.type === 'put' ? 'P' : 'C'} ${d(sp.expiry)} ×${sp.n}: `
+          + `${sp.isCredit ? 'credit' : 'debit'} ${fmt(Math.abs(sp.credit))}, `
+          + `${sp.nowCost >= 0 ? 'costs' : 'pays'} ${fmt(Math.abs(sp.nowCost))} to close, P&L ${fmt(sp.pnl)}`
+          + ` · max loss ${fmt(sp.maxLoss)}`
+          + (sp.breached ? ' · SHORT STRIKE IN THE MONEY' : '')
+          + (sp.priced ? '' : ' · a leg has no price'))
+          .join('\n')
+          + `\n\nValue now ${fmt(-g.nowCost)} · max loss if all go wrong ${fmt(g.maxLoss)}`
+        const one = g.list.length === 1 ? g.list[0] : null
+        return (
+          <span title={tip} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
+            <span style={{ fontWeight: 700, color: pnlColor(g.pnl, isDark) }}>
+              {fmt(g.pnl)}
+              {!g.priced && <span style={{ fontSize: 10, color: '#f59e0b' }}> ~</span>}
+              {g.breached && <span style={{ fontSize: 10, color: '#ef4444' }} title="A short strike is in the money"> ITM</span>}
+            </span>
+            <span style={{ fontSize: 10.5, color: textMid, whiteSpace: 'nowrap' }}>
+              {one ? `${one.lo}/${one.hi}${one.type === 'put' ? 'P' : 'C'} ${d(one.expiry)} ×${one.n}` : `${g.count} spreads`}
+              {' · '}value {fmt(-g.nowCost)}
+            </span>
+          </span>
+        )
+      },
+      foot: (t) => <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
+          <span style={{ color: pnlColor(t.openSpreadPnl, isDark), fontWeight: 700 }}>{fmt(t.openSpreadPnl)}</span>
+          <span style={{ fontSize: 10.5, color: textMid }}>value {fmt(-t.openSpreadNowCost)}</span>
+        </span> },
 
     { key: 'theta', label: 'Theta',
       title: 'Estimated Open P&L if the stock doesn’t move — decay only. Volatility is held constant and backed out of today’s mark. Contracts expiring before then settle at intrinsic.',
@@ -1985,6 +2046,7 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
       { keys: ['weekTotal'], anchor: 'weekOptionsOpen' },
       { keys: ['dayStockPnl', 'dayOptionPnl'], anchor: 'dayPnl' },
       { keys: ['openExitPnL'], anchor: 'openUnrealizedPnL' },
+      { keys: ['openSpreads'], anchor: 'openUnrealizedPnL' },
       { keys: ['stockRealizedAll'], anchor: 'stockPnL' },
     ]
     let ordered = out
