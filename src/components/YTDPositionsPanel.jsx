@@ -163,6 +163,7 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     try { return JSON.parse(localStorage.getItem(costKey(broker)) || '{}') } catch { return {} }
   })
   const [editingCost, setEditingCost] = useState(null)
+  const [costError, setCostError] = useState(null)
   const [costDraft, setCostDraft] = useState('')
   const [sortField, setSortField] = useState('ticker')
   const [sortDir, setSortDir] = useState('asc')
@@ -770,50 +771,56 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
     fetchData(globalStart, updated)
   }
 
-  // An override belongs to one broker's shares, so it can only be set from a
-  // single-broker tab. From "All brokers" there is no unambiguous target.
+  // An override belongs to one broker's shares. From "All brokers" the server
+  // picks the broker when only one holds the shares, and says so when two do.
+  // The state only changes once the server has accepted it: updating first
+  // showed the new cost and then lost it on the next refresh.
   const saveCostOverride = async (ticker, value) => {
     const num = parseFloat(value)
     if (!num || num <= 0) return
-    if (!broker || broker === 'all') {
-      setError('Pick a broker tab before editing cost. An override applies to a single broker position.')
-      setEditingCost(null)
-      return
-    }
     const rounded = Math.round(num * 100) / 100
-    const updated = { ...costOverrides, [ticker]: rounded }
-    setCostOverrides(updated)
-    localStorage.setItem(costKey(broker), JSON.stringify(updated))
-    setEditingCost(null)
     try {
-      await fetch(`/api/stock-cost-overrides/${ticker}`, {
+      const r = await fetch(`/api/stock-cost-overrides/${ticker}`, {
         method: 'PUT', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ avgCost: rounded, broker })
+        body: JSON.stringify({ avgCost: rounded, broker: broker || 'all' })
       })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.success) { setCostError({ ticker, msg: d.error || `Save failed (${r.status})` }); return }
+      setCostError(null)
+      setEditingCost(null)
+      if (broker && broker !== 'all') {
+        const updated = { ...costOverrides, [ticker]: rounded }
+        setCostOverrides(updated)
+        localStorage.setItem(costKey(broker), JSON.stringify(updated))
+      } else {
+        fetchCostOverrides()
+      }
       fetchData(undefined, undefined, true)
     } catch (e) {
-      console.error('Failed to persist cost override:', e)
+      setCostError({ ticker, msg: `Save failed: ${e.message}` })
     }
   }
 
   const clearCostOverride = async (ticker) => {
-    if (!broker || broker === 'all') {
-      setError('Pick a broker tab before clearing cost. An override applies to a single broker position.')
-      setEditingCost(null)
-      return
-    }
-    const updated = { ...costOverrides }
-    delete updated[ticker]
-    setCostOverrides(updated)
-    localStorage.setItem(costKey(broker), JSON.stringify(updated))
-    setEditingCost(null)
     try {
-      await fetch(`/api/stock-cost-overrides/${ticker}?broker=${encodeURIComponent(broker)}`,
+      const r = await fetch(`/api/stock-cost-overrides/${ticker}?broker=${encodeURIComponent(broker || 'all')}`,
         { method: 'DELETE', credentials: 'include' })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.success) { setCostError({ ticker, msg: d.error || `Reset failed (${r.status})` }); return }
+      setCostError(null)
+      setEditingCost(null)
+      if (broker && broker !== 'all') {
+        const updated = { ...costOverrides }
+        delete updated[ticker]
+        setCostOverrides(updated)
+        localStorage.setItem(costKey(broker), JSON.stringify(updated))
+      } else {
+        fetchCostOverrides()
+      }
       fetchData(undefined, undefined, true)
     } catch (e) {
-      console.error('Failed to delete cost override:', e)
+      setCostError({ ticker, msg: `Reset failed: ${e.message}` })
     }
   }
 
@@ -1616,16 +1623,19 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
 
     { key: 'avgCost', label: 'Avg Cost', title: 'Average cost per share',
       cell: (r, c) => c.isCostEditing ? (
-        <span style={{ display: 'flex', gap: 3, justifyContent: 'flex-end', alignItems: 'center' }}>
+        <span style={{ display: 'flex', flexWrap: 'wrap', gap: 3, justifyContent: 'flex-end', alignItems: 'center' }}>
           <input type="number" step="0.01" value={costDraft} onChange={e => setCostDraft(e.target.value)} autoFocus
             onKeyDown={e => { if (e.key === 'Enter') saveCostOverride(r.ticker, costDraft); if (e.key === 'Escape') setEditingCost(null) }}
             style={{ width: 72, padding: '2px 5px', borderRadius: 4, border: `1px solid ${border}`, background: surface, color: text, fontSize: 12, textAlign: 'right' }} />
           <button onClick={() => saveCostOverride(r.ticker, costDraft)} style={{ padding: '2px 6px', borderRadius: 4, border: 'none', background: '#22c55e', color: '#fff', fontSize: 11, cursor: 'pointer' }}>{'✓'}</button>
           <button onClick={() => setEditingCost(null)} style={{ padding: '2px 6px', borderRadius: 4, border: 'none', background: '#94a3b8', color: '#fff', fontSize: 11, cursor: 'pointer' }}>{'✗'}</button>
           {c.hasManualCost && <button onClick={() => clearCostOverride(r.ticker)} style={{ padding: '2px 6px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', fontSize: 11, cursor: 'pointer' }}>Reset</button>}
+          {costError?.ticker === r.ticker && (
+            <span style={{ flexBasis: '100%', fontSize: 10.5, color: '#ef4444', whiteSpace: 'normal', maxWidth: 220, textAlign: 'right' }}>{costError.msg}</span>
+          )}
         </span>
       ) : (
-        <button onClick={() => { setEditingCost(r.ticker); setCostDraft(c.avgCost?.toFixed(2) || '') }}
+        <button onClick={() => { setCostError(null); setEditingCost(r.ticker); setCostDraft(c.avgCost?.toFixed(2) || '') }}
           title={c.hasManualCost
             ? `Your override: ${fmt(c.avgCost)} (in use)`
               + (c.blendDiffers

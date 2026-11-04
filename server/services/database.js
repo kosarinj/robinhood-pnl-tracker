@@ -3385,6 +3385,20 @@ export class DatabaseService {
     }
   }
 
+  // Brokers where the user currently holds shares of a symbol. Lets an
+  // avg-cost edit made from the All-brokers view land on the one broker that
+  // holds the shares, instead of being refused.
+  brokersHoldingStock(userId = 1, symbol) {
+    return db.prepare(
+      `SELECT COALESCE(broker,'robinhood') AS broker,
+              SUM(CASE WHEN is_buy = 1 THEN COALESCE(quantity,0) ELSE -COALESCE(quantity,0) END) AS position
+       FROM trades
+       WHERE user_id = ? AND symbol = ? AND (is_option = 0 OR is_option IS NULL)
+       GROUP BY COALESCE(broker,'robinhood')
+       HAVING position > 0`
+    ).all(userId, String(symbol).toUpperCase()).map(r => r.broker)
+  }
+
   setCostOverride(userId = 1, symbol, avgCost, broker = 'robinhood') {
     db.prepare(`
       INSERT INTO stock_cost_overrides (user_id, symbol, broker, avg_cost, updated_at)
