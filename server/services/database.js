@@ -4560,6 +4560,124 @@ export class DatabaseService {
    * modelling one would turn a measurement into a guess. The caller says so
    * rather than folding an estimate into the total.
    */
+  /**
+   * One ticker's position, day by day, rebuilt from the trades in one pass:
+   * Options Total (realized option closes inside the period), stock P&L
+   * (unrealized at each close + realized sales inside the period), and the
+   * recorded open option P&L where a daily snapshot exists.
+   *
+   * `closes` is [{date, close}] ascending. Open P&L is only known on days the
+   * snapshot job ran; a day with contracts open but no snapshot gets null for
+   * Open and Net + Open rather than a guess. A day with nothing open has an
+   * Open P&L of exactly 0.
+   *
+   * Basis: average cost, the YTD panel's own. A manual override replaces the
+   * basis at the period start, the way the panel applies it.
+   */
+  getPositionHistorySeries(userId, ticker, { broker = null, fromDate, closes, costOverride = null }) {
+    const T = String(ticker).toUpperCase()
+    const bq = broker ? "AND COALESCE(broker,'robinhood') = ?" : ''
+    const bp = broker ? [broker] : []
+    const stockRows = db.prepare(`
+      SELECT trans_date, is_buy, COALESCE(quantity,0) AS qty, ABS(COALESCE(amount,0)) AS amt
+      FROM trades WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ? AND symbol = ? ${bq}
+      ORDER BY trans_date ASC, id ASC`).all(userId, T, ...bp)
+    const optRows = db.prepare(`
+      SELECT symbol, trans_date, trans_code, COALESCE(contracts,1) AS contracts, ABS(COALESCE(amount,0)) AS amt
+      FROM trades WHERE is_option = 1 AND user_id = ? AND symbol LIKE ? ${bq}
+      ORDER BY trans_date ASC, id ASC`).all(userId, `${T} %`, ...bp)
+    const openHist = Object.fromEntries(db.prepare(`
+      SELECT snap_date, open_pnl FROM option_open_pnl_history
+      WHERE user_id = ? AND ticker = ? AND snap_date >= ?`).all(userId, T, fromDate)
+      .map(r => [r.snap_date, r.open_pnl]))
+
+    const splits = this.getSplits([T])
+    const expiryOf = (sym) => {
+      const m = String(sym).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+      return m ? `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}` : null
+    }
+
+    let si = 0, oi = 0
+    let pos = 0, cost = 0, stockRealized = 0, optRealized = 0, overrideApplied = false
+    const stacks = {}
+    const inWindow = (d) => d >= fromDate
+    const closeLots = (st, closingShort, n, ppc, d) => {
+      const stack = closingShort ? st.short : st.long
+      let remaining = n
+      while (remaining > 0 && stack.length) {
+        const lot = stack[stack.length - 1]
+        const take = Math.min(lot.left, remaining)
+        const pnl = closingShort ? (lot.ppc - ppc) * take : (ppc - lot.ppc) * take
+        if (inWindow(d)) optRealized += pnl
+        lot.left -= take; remaining -= take
+        if (lot.left <= 0) stack.pop()
+      }
+    }
+
+    const out = []
+    for (const { date, close } of closes) {
+      for (; si < stockRows.length && stockRows[si].trans_date <= date; si++) {
+        const r = stockRows[si]
+        // Shares held going into the period are carried at the typed cost.
+        if (!overrideApplied && costOverride > 0 && r.trans_date >= fromDate) {
+          if (pos > 0) cost = costOverride * pos
+          overrideApplied = true
+        }
+        const f = this.splitFactor(splits[T], r.trans_date)
+        const qty = (r.qty || 0) * f
+        if (!(qty > 0)) continue
+        if (r.is_buy === 1) { pos += qty; cost += r.amt || 0 }
+        else {
+          const avg = pos > 0 ? cost / pos : 0
+          const sold = Math.min(qty, pos)
+          if (inWindow(r.trans_date)) stockRealized += (r.amt || 0) - avg * qty
+          cost -= avg * sold; pos -= sold
+          if (pos <= 1e-9) { pos = 0; cost = 0 }
+        }
+      }
+      if (!overrideApplied && costOverride > 0 && date >= fromDate) {
+        if (pos > 0) cost = costOverride * pos
+        overrideApplied = true
+      }
+      for (; oi < optRows.length && optRows[oi].trans_date <= date; oi++) {
+        const r = optRows[oi]
+        const tc = String(r.trans_code || '').toUpperCase()
+        const n = Math.abs(r.contracts || 1)
+        const ppc = n > 0 ? r.amt / n : r.amt
+        const st = stacks[r.symbol] ||= { long: [], short: [], exp: expiryOf(r.symbol) }
+        if (tc === 'BTO') st.long.push({ ppc, left: n })
+        else if (tc === 'STO') st.short.push({ ppc, left: n })
+        else if (tc === 'BTC') closeLots(st, true, n, ppc, r.trans_date)
+        else if (tc === 'STC') closeLots(st, false, n, ppc, r.trans_date)
+        // Expiry and assignment rows don't say which side they close; it is
+        // whichever side is open.
+        else if (['OEXP', 'OASGN', 'OEXC', 'OEXCS'].includes(tc)) closeLots(st, st.short.length > 0, n, 0, r.trans_date)
+      }
+      // A contract past its expiry with no settlement row expired worthless.
+      let openContracts = 0
+      for (const st of Object.values(stacks)) {
+        if (st.exp && st.exp < date) {
+          while (st.short.length) closeLots(st, true, st.short[st.short.length - 1].left, 0, st.exp)
+          while (st.long.length) closeLots(st, false, st.long[st.long.length - 1].left, 0, st.exp)
+        }
+        for (const l of st.short) openContracts += l.left
+        for (const l of st.long) openContracts += l.left
+      }
+      if (date < fromDate) continue
+      const stockUnrealized = pos > 0 ? pos * close - cost : 0
+      const openPnl = openContracts === 0 ? 0 : (openHist[date] ?? null)
+      const net = stockUnrealized + stockRealized + optRealized
+      out.push({
+        date, price: round2(close), shares: Math.round(pos * 1e6) / 1e6, openContracts,
+        optionsTotal: round2(optRealized),
+        stockPnl: round2(stockUnrealized + stockRealized),
+        openPnl: openPnl == null ? null : round2(openPnl),
+        netPlusOpen: openPnl == null ? null : round2(net + openPnl),
+      })
+    }
+    return out
+  }
+
   getOptionRealizedAsOf(userId, ticker, asOfDate, broker = null, fromDate = null) {
     try {
       // Bounded BELOW as well as above. The panel's Options Total only counts

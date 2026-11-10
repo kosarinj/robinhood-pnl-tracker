@@ -1493,6 +1493,7 @@ function AuthenticatedApp({ user }) {
           onClose={() => setDisplayChartSymbol(null)}
           useServer={useServer}
           connected={connected}
+          broker={brokerFilter}
         />
       )}
 

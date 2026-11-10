@@ -15,8 +15,19 @@ import {
 import { fetchHistoricalPrices } from '../utils/yahooFinance'
 import { addIndicators } from '../utils/technicalIndicators'
 import { socketService } from '../services/socketService'
+import { getPref } from '../services/prefs'
 
-function PriceChart({ symbol, trades, onClose, useServer = false, connected = false }) {
+// The P&L overlays: what the position was worth each day, rebuilt on the
+// server from the trades (/api/position-history), on the same period as the
+// Options YTD panel. Drawn on their own axis on the right.
+const PNL_SERIES = [
+  { key: 'optionsTotal', label: 'Options Total', color: '#7c3aed' },
+  { key: 'openPnl', label: 'Open P&L', color: '#f59e0b' },
+  { key: 'netPlusOpen', label: 'Net + Open', color: '#16a34a' },
+]
+const money = (v) => `${v < 0 ? '−' : ''}$${Math.abs(Math.round(v)).toLocaleString('en-US')}`
+
+function PriceChart({ symbol, trades, onClose, useServer = false, connected = false, broker = 'all' }) {
   const [priceData, setPriceData] = useState([])
   const [rawData, setRawData] = useState([]) // Store raw data separately
   const [loading, setLoading] = useState(true)
@@ -35,6 +46,29 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const showStockPnL = false
   const showOptionsPnL = false
   const [dateRange, setDateRange] = useState('3mo') // '1mo', '3mo', '6mo', '1y', 'max'
+  // Always opens with the overlays off.
+  const [pnlOn, setPnlOn] = useState({})
+  const [pnlHist, setPnlHist] = useState({ loading: false, byDate: null, fromDate: null, error: null })
+  const anyPnl = PNL_SERIES.some(p => pnlOn[p.key])
+  const togglePnl = (key) => setPnlOn(prev => ({ ...prev, [key]: !prev[key] }))
+
+  // Fetched only once an overlay is switched on: it walks every trade in the
+  // name and pulls two years of closes.
+  useEffect(() => {
+    if (!anyPnl || pnlHist.byDate || pnlHist.loading) return
+    const symbolDates = getPref('ytdPanel_symbolDates', {}) || {}
+    const start = symbolDates[symbol] || getPref('ytdPanel_globalStart', '2026-03-15')
+    const q = new URLSearchParams({ startDate: start })
+    if (broker && broker !== 'all') q.set('broker', broker)
+    setPnlHist(h => ({ ...h, loading: true, error: null }))
+    fetch(`/api/position-history/${encodeURIComponent(symbol)}?${q}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => {
+        if (!d?.success) { setPnlHist({ loading: false, byDate: null, fromDate: null, error: d?.error || 'Could not load' }); return }
+        setPnlHist({ loading: false, byDate: Object.fromEntries(d.series.map(r => [r.date, r])), fromDate: d.fromDate, error: null })
+      })
+      .catch(e => setPnlHist({ loading: false, byDate: null, fromDate: null, error: e.message }))
+  }, [anyPnl, symbol, broker])
   const [indicators, setIndicators] = useState({
     showEMA9: false,
     showEMA21: false,
@@ -309,6 +343,15 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     setPriceData(enrichedData)
   }, [showStockPnL, showOptionsPnL, indicators, rawData, trades, symbol])
 
+  const chartData = !anyPnl || !pnlHist.byDate ? priceData : priceData.map(c => {
+    const t = c.timestamp ?? c.date
+    const d = t ? new Date(t) : null
+    const row = d && !isNaN(d) ? pnlHist.byDate[d.toISOString().slice(0, 10)] : null
+    return row
+      ? { ...c, optionsTotal: row.optionsTotal, openPnl: row.openPnl, netPlusOpen: row.netPlusOpen }
+      : c
+  })
+
   const toggleIndicator = (indicator) => {
     setIndicators(prev => ({
       ...prev,
@@ -465,6 +508,19 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 Fibonacci
               </label>
 
+              {/* P&L overlays, on the right-hand axis */}
+              {PNL_SERIES.map(p => (
+                <label key={p.key} style={{
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px',
+                  background: pnlOn[p.key] ? `${p.color}1a` : '#f0f0f0', borderRadius: '6px',
+                  fontSize: '14px', color: '#666', cursor: 'pointer',
+                  border: pnlOn[p.key] ? `1px solid ${p.color}` : '1px solid transparent'
+                }}>
+                  <input type="checkbox" checked={!!pnlOn[p.key]} onChange={() => togglePnl(p.key)} />
+                  {p.label}
+                </label>
+              ))}
+
               {/* EMA 9 Toggle */}
               <label style={{
                 display: 'flex',
@@ -551,9 +607,18 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                 RSI (14)
               </label>
             </div>
+            {anyPnl && (
+              <div style={{ fontSize: 12, color: pnlHist.error ? '#dc2626' : '#666', margin: '0 0 6px', lineHeight: 1.5 }}>
+                {pnlHist.loading ? 'Loading P&L history…'
+                  : pnlHist.error ? `P&L history: ${pnlHist.error}`
+                  : <>P&L (right axis) since {pnlHist.fromDate}, the Options YTD period. Rebuilt from your trades at each
+                    day's close. Open P&L exists only on days the nightly snapshot recorded it, so it and Net + Open
+                    have gaps before that; a day with nothing open counts as $0. Today's live figures are in the grid.</>}
+              </div>
+            )}
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
-              <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}-${showStockPnL}-${showOptionsPnL}`}>
-              <ComposedChart data={priceData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <ResponsiveContainer width="100%" height="100%" key={`chart-${priceData.length}-${showStockPnL}-${showOptionsPnL}-${anyPnl}`}>
+              <ComposedChart data={chartData} margin={{ top: 5, right: anyPnl ? 10 : 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
                 <XAxis
                   dataKey="timestamp"
@@ -571,11 +636,39 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   style={{ fontSize: '12px' }}
                   label={{ value: 'Price', angle: -90, position: 'insideLeft' }}
                 />
+                {anyPnl && (
+                  <YAxis
+                    yAxisId="pnl"
+                    orientation="right"
+                    domain={['auto', 'auto']}
+                    tickFormatter={money}
+                    stroke="#666"
+                    width={70}
+                    style={{ fontSize: '12px' }}
+                  />
+                )}
                 <Tooltip
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ccc', borderRadius: '6px' }}
                   labelFormatter={formatDate}
-                  formatter={(value) => value !== null ? formatPrice(value) : 'N/A'}
+                  formatter={(value, name, item) => value == null ? 'N/A'
+                    : PNL_SERIES.some(p => p.key === item?.dataKey) ? money(value) : formatPrice(value)}
                 />
+                {anyPnl && <ReferenceLine yAxisId="pnl" y={0} stroke="#999" strokeDasharray="2 3" />}
+                {PNL_SERIES.filter(p => pnlOn[p.key]).map(p => (
+                  <Line
+                    key={p.key}
+                    yAxisId="pnl"
+                    type="monotone"
+                    dataKey={p.key}
+                    stroke={p.color}
+                    strokeWidth={p.key === 'netPlusOpen' ? 2.2 : 1.6}
+                    strokeDasharray={p.key === 'openPnl' ? '5 3' : undefined}
+                    dot={false}
+                    name={p.label}
+                    connectNulls={false}
+                    isAnimationActive={false}
+                  />
+                ))}
                 <Legend />
 
                 {/* Price Line */}

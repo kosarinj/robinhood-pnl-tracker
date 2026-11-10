@@ -5545,6 +5545,36 @@ app.get('/api/account-pnl', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/position-history/:ticker?startDate=&broker=
+ *
+ * Daily series for the price chart's P&L overlays: Options Total, Open P&L
+ * (where a daily snapshot was recorded) and Net + Open, from the period start
+ * to the last close. Rebuilt from the trades here, not from the chart's old
+ * client-side running P&L, which treated every option buy and sell as cash.
+ */
+app.get('/api/position-history/:ticker', requireAuth, async (req, res) => {
+  try {
+    const ticker = String(req.params.ticker || '').toUpperCase()
+    const fromDate = /^\d{4}-\d{2}-\d{2}$/.test(req.query.startDate || '') ? req.query.startDate : '2026-01-01'
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    let history = []
+    try { history = await priceService.fetchHistoricalPrices(ticker, '2y', '1d') }
+    catch (e) { return res.json({ success: false, error: `No price history: ${e.message}` }) }
+    const closes = history
+      .map(h => ({ date: new Date(h.date).toISOString().slice(0, 10), close: Number(h.close) }))
+      .filter(h => h.close > 0)
+      .sort((a, b) => a.date.localeCompare(b.date))
+    const overrides = databaseService.getCostOverrides(req.user.userId, brokerFilter)
+    const series = databaseService.getPositionHistorySeries(req.user.userId, ticker,
+      { broker: brokerFilter, fromDate, closes, costOverride: overrides[ticker] || null })
+    res.json({ success: true, ticker, fromDate, series })
+  } catch (e) {
+    console.error('Error in /api/position-history:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
+/**
  * GET /api/price-history-pnl/:ticker?price=153.45
  *
  * Previous visits to roughly this price, with the position recomputed from the
