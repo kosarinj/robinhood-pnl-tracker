@@ -428,6 +428,30 @@ db.exec(`
     ON historical_prices(symbol, price_date DESC);
 `)
 
+// Open option P&L per ticker AND broker view, as the live panel showed it.
+//
+// option_open_pnl_history has no broker column, so whichever broker tab loaded
+// last overwrote the day -- an all-brokers figure one day, a single broker's
+// the next. This one keeps them apart ('all' for the merged view), which is
+// what the as-of view and the price chart need to read a past day honestly.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS option_open_pnl_by_broker (
+      user_id    INTEGER NOT NULL,
+      snap_date  TEXT NOT NULL,
+      broker     TEXT NOT NULL,
+      ticker     TEXT NOT NULL,
+      open_pnl   REAL NOT NULL,
+      legs       INTEGER,
+      mark_basis TEXT,
+      updated_at INTEGER DEFAULT (strftime('%s','now')),
+      PRIMARY KEY (user_id, snap_date, broker, ticker)
+    )
+  `)
+} catch (e) {
+  console.error('option_open_pnl_by_broker migration error:', e.message)
+}
+
 // Daily EOD price snapshot table — created via migration so it works on existing DBs
 try {
   db.exec(`
@@ -2826,6 +2850,50 @@ export class DatabaseService {
     }
   }
 
+  /** Same as recordOpenOptionPnl, kept per broker view ('all' = merged). */
+  recordOpenOptionPnlByBroker(userId, snapDate, broker, rows) {
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO option_open_pnl_by_broker (user_id, snap_date, broker, ticker, open_pnl, legs, mark_basis)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, snap_date, broker, ticker) DO UPDATE SET
+          open_pnl = excluded.open_pnl, legs = excluded.legs,
+          mark_basis = excluded.mark_basis, updated_at = strftime('%s','now')
+      `)
+      db.transaction(list => {
+        for (const r of list) stmt.run(userId, snapDate, broker || 'all', r.ticker, r.openPnl, r.legs ?? null, r.markBasis ?? null)
+      })(rows)
+    } catch (e) {
+      console.error('Error recording open option P&L by broker:', e)
+    }
+  }
+
+  /**
+   * Recorded open option P&L for a broker view between two dates, as
+   * { ticker: { date: openPnl } }. Rows from before the per-broker table
+   * existed come from option_open_pnl_history for the merged view only, since
+   * that is the closest it gets to meaning anything; the per-broker row wins
+   * wherever both exist.
+   */
+  getRecordedOpenPnl(userId, broker, fromDate, toDate, ticker = null) {
+    const b = broker || 'all'
+    const out = {}
+    const put = (t, d, v) => { (out[t] ||= {})[d] = v }
+    const tq = ticker ? 'AND ticker = ?' : ''
+    const tp = ticker ? [String(ticker).toUpperCase()] : []
+    if (b === 'all') {
+      for (const r of db.prepare(`SELECT ticker, snap_date, open_pnl FROM option_open_pnl_history
+          WHERE user_id = ? AND snap_date BETWEEN ? AND ? ${tq}`).all(userId, fromDate, toDate, ...tp)) {
+        put(r.ticker, r.snap_date, r.open_pnl)
+      }
+    }
+    for (const r of db.prepare(`SELECT ticker, snap_date, open_pnl FROM option_open_pnl_by_broker
+        WHERE user_id = ? AND broker = ? AND snap_date BETWEEN ? AND ? ${tq}`).all(userId, b, fromDate, toDate, ...tp)) {
+      put(r.ticker, r.snap_date, r.open_pnl)
+    }
+    return out
+  }
+
   /** Record today's open option P&L per ticker, all legs. Re-running replaces the day. */
   recordOpenOptionPnl(userId, snapDate, rows) {
     try {
@@ -4586,10 +4654,7 @@ export class DatabaseService {
       SELECT symbol, trans_date, trans_code, COALESCE(contracts,1) AS contracts, ABS(COALESCE(amount,0)) AS amt
       FROM trades WHERE is_option = 1 AND user_id = ? AND symbol LIKE ? ${bq}
       ORDER BY trans_date ASC, id ASC`).all(userId, `${T} %`, ...bp)
-    const openHist = Object.fromEntries(db.prepare(`
-      SELECT snap_date, open_pnl FROM option_open_pnl_history
-      WHERE user_id = ? AND ticker = ? AND snap_date >= ?`).all(userId, T, fromDate)
-      .map(r => [r.snap_date, r.open_pnl]))
+    const openHist = this.getRecordedOpenPnl(userId, broker, fromDate, '9999-12-31', T)[T] || {}
 
     const splits = this.getSplits([T])
     const expiryOf = (sym) => {

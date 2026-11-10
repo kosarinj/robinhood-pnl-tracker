@@ -4436,6 +4436,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
             markBasis: openBasisByTicker[ticker] || null,
           }))
         if (allRows.length) databaseService.recordOpenOptionPnl(userId, today, allRows)
+        if (allRows.length) databaseService.recordOpenOptionPnlByBroker(userId, today, brokerFilter || 'all', allRows)
 
         const dayBefore = (iso) => {
           const [y, m, d] = iso.split('-').map(Number)

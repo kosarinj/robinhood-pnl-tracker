@@ -348,7 +348,8 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     const d = t ? new Date(t) : null
     const row = d && !isNaN(d) ? pnlHist.byDate[d.toISOString().slice(0, 10)] : null
     return row
-      ? { ...c, optionsTotal: row.optionsTotal, openPnl: row.openPnl, netPlusOpen: row.netPlusOpen }
+      ? { ...c, optionsTotal: row.optionsTotal, openPnl: row.openPnl, netPlusOpen: row.netPlusOpen,
+          stockPnl: row.stockPnl, shares: row.shares, openContracts: row.openContracts, pnlRow: true }
       : c
   })
 
@@ -652,6 +653,29 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                   labelFormatter={formatDate}
                   formatter={(value, name, item) => value == null ? 'N/A'
                     : PNL_SERIES.some(p => p.key === item?.dataKey) ? money(value) : formatPrice(value)}
+                  content={anyPnl ? ({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    const d = payload[0].payload
+                    const line = (name, v, color, bold) => (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, color, fontWeight: bold ? 700 : 400 }}>
+                        <span>{name}</span><span>{v == null ? '—' : money(v)}</span>
+                      </div>
+                    )
+                    return (
+                      <div style={{ background: 'rgba(255,255,255,0.97)', border: '1px solid #ccc', borderRadius: 6, padding: '8px 10px', fontSize: 12, minWidth: 210 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{formatDate(label)} · {formatPrice(d.close)}</div>
+                        {d.pnlRow ? (
+                          <>
+                            {line(`Stock P&L (${(d.shares || 0).toLocaleString()} sh, incl. realized)`, d.stockPnl, '#444')}
+                            {line('Options Total', d.optionsTotal, '#7c3aed')}
+                            {line(`Open P&L (${d.openContracts || 0} contracts)`, d.openPnl, '#b45309')}
+                            <div style={{ borderTop: '1px solid #ddd', margin: '4px 0' }} />
+                            {line('Net + Open', d.netPlusOpen, '#16a34a', true)}
+                          </>
+                        ) : <div style={{ color: '#888' }}>Before the period start</div>}
+                      </div>
+                    )
+                  } : undefined}
                 />
                 {anyPnl && <ReferenceLine yAxisId="pnl" y={0} stroke="#999" strokeDasharray="2 3" />}
                 {PNL_SERIES.filter(p => pnlOn[p.key]).map(p => (
