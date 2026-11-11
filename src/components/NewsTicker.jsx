@@ -41,12 +41,17 @@ export default function NewsTicker({ broker = 'all' }) {
   const [hidden, setHidden] = useState(() => getPref('newsHidden', false) === true)
   const [flashes, setFlashes] = useState([])
   const [paused, setPaused] = useState(false)
+  // One ticker, or '' for everything. A name not held is fetched on demand.
+  const [tickerFilter, setTickerFilter] = useState('')
+  const [otherOpen, setOtherOpen] = useState(false)
+  const [otherDraft, setOtherDraft] = useState('')
   const flashOnRef = useRef(flashOn)
   flashOnRef.current = flashOn
 
   useEffect(() => {
     let alive = true
-    const load = () => fetch(withQuery('/api/news', brokerQuery(broker)), { credentials: 'include' })
+    const q = [brokerQuery(broker), tickerFilter ? `ticker=${encodeURIComponent(tickerFilter)}` : ''].filter(Boolean).join('&')
+    const load = () => fetch(withQuery('/api/news', q), { credentials: 'include' })
       .then(r => r.json())
       .then(d => {
         if (!alive) return
@@ -66,7 +71,7 @@ export default function NewsTicker({ broker = 'all' }) {
     load()
     const iv = setInterval(load, 3 * 60000)
     return () => { alive = false; clearInterval(iv) }
-  }, [broker])
+  }, [broker, tickerFilter])
 
   // Each flash leaves on its own after 15 seconds.
   useEffect(() => {
@@ -75,7 +80,19 @@ export default function NewsTicker({ broker = 'all' }) {
     return () => clearTimeout(t)
   }, [flashes])
 
-  const shown = (items || []).filter(i => filter === 'all' || (filter === 'mine' ? i.tickers.length : i.macro)).slice(0, 40)
+  const shown = (items || []).filter(i => tickerFilter
+    ? i.tickers.includes(tickerFilter)
+    : (filter === 'all' || (filter === 'mine' ? i.tickers.length : i.macro))).slice(0, 40)
+  // Names with stories, most-covered first, for the picker.
+  const tickerCounts = {}
+  for (const i of items || []) for (const t of i.tickers) tickerCounts[t] = (tickerCounts[t] || 0) + 1
+  const tickerOptions = Object.keys(tickerCounts).sort((a, b) => tickerCounts[b] - tickerCounts[a] || a.localeCompare(b))
+  if (tickerFilter && !tickerOptions.includes(tickerFilter)) tickerOptions.unshift(tickerFilter)
+  const applyOther = () => {
+    const t = otherDraft.trim().toUpperCase()
+    if (/^[A-Z.]{1,6}$/.test(t)) setTickerFilter(t)
+    setOtherOpen(false); setOtherDraft('')
+  }
   const setF = (f) => { setFilter(f); setPref('newsFilter', f) }
   const btn = (active) => ({
     background: 'none', border: 'none', boxShadow: 'none', padding: '2px 6px', minHeight: 0, minWidth: 0,
@@ -103,7 +120,7 @@ export default function NewsTicker({ broker = 'all' }) {
         <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onTouchStart={() => setPaused(p => !p)}
           style={{ flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', maskImage: 'linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent)', WebkitMaskImage: 'linear-gradient(90deg, transparent, #000 3%, #000 97%, transparent)' }}>
           {items == null ? <span style={{ color: 'var(--textSecondary)' }}>loading headlines…</span>
-            : !shown.length ? <span style={{ color: 'var(--textSecondary)' }}>{note || 'No recent headlines.'}</span>
+            : !shown.length ? <span style={{ color: 'var(--textSecondary)' }}>{note || (tickerFilter ? `No headlines on ${tickerFilter} in the last 3 days.` : 'No recent headlines.')}</span>
             : (
               <div style={{ display: 'inline-block', animation: `newsScroll ${duration}s linear infinite`, animationPlayState: paused ? 'paused' : 'running' }}>
                 {[0, 1].map(copy => (
@@ -120,10 +137,27 @@ export default function NewsTicker({ broker = 'all' }) {
               </div>
             )}
         </div>
-        <div style={{ display: 'flex', flexShrink: 0 }}>
-          {[['all', 'All'], ['mine', 'Mine'], ['macro', 'Macro']].map(([k, l]) => (
+        <div style={{ display: 'flex', flexShrink: 0, alignItems: 'center' }}>
+          {otherOpen ? (
+            <input autoFocus value={otherDraft} placeholder="Ticker" maxLength={6}
+              onChange={e => setOtherDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applyOther(); if (e.key === 'Escape') { setOtherOpen(false); setOtherDraft('') } }}
+              onBlur={applyOther}
+              style={{ width: 62, fontSize: 11, padding: '2px 5px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', textTransform: 'uppercase' }} />
+          ) : (
+            <select value={tickerFilter} title="Show one ticker's news"
+              onChange={e => { if (e.target.value === '__other') setOtherOpen(true); else setTickerFilter(e.target.value) }}
+              style={{ fontSize: 11, fontWeight: 700, padding: '1px 2px', borderRadius: 6, border: '1px solid var(--border)', maxWidth: 92,
+                background: 'var(--surface)', color: tickerFilter ? 'var(--accent)' : 'var(--textSecondary)', cursor: 'pointer' }}>
+              <option value="">All tickers</option>
+              {tickerOptions.map(t => <option key={t} value={t}>{t}{tickerCounts[t] ? ` (${tickerCounts[t]})` : ''}</option>)}
+              <option value="__other">Other…</option>
+            </select>
+          )}
+          {!tickerFilter && [['all', 'All'], ['mine', 'Mine'], ['macro', 'Macro']].map(([k, l]) => (
             <button key={k} style={btn(filter === k)} onClick={() => setF(k)}>{l}</button>
           ))}
+          {tickerFilter && <button style={btn(false)} title="Back to all tickers" onClick={() => setTickerFilter('')}>clear</button>}
           <button style={btn(flashOn)} title={flashOn ? 'Pop-ups on for new stories — click to mute' : 'Pop-ups muted — click to turn on'}
             onClick={() => { setFlashOn(!flashOn); setPref('newsFlash', !flashOn) }}>{flashOn ? '🔔' : '🔕'}</button>
           <button style={btn(false)} title="Hide the news strip" onClick={() => { setHidden(true); setPref('newsHidden', true) }}>✕</button>

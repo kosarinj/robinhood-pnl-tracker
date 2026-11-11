@@ -7450,7 +7450,12 @@ app.get('/api/news', requireAuth, async (req, res) => {
       const p = parseOptionDescription(pos.symbol)
       if (p) held.add(p.ticker)
     }
-    const tickers = [...held].filter(t => /^[A-Z.]{1,6}$/.test(t)).slice(0, 40)
+    // ?ticker= adds one name you don't hold, so the strip's ticker filter can
+    // show news on anything. Put first so the 40-name cap never drops it.
+    const extra = String(req.query.ticker || '').toUpperCase()
+    if (/^[A-Z.]{1,6}$/.test(extra)) held.add(extra)
+    const tickers = [...new Set([...(/^[A-Z.]{1,6}$/.test(extra) ? [extra] : []), ...held])]
+      .filter(t => /^[A-Z.]{1,6}$/.test(t)).slice(0, 40)
 
     const get = async (key, ttlMs, params) => {
       const hit = newsCache.get(key)
