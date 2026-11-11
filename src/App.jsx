@@ -11,6 +11,7 @@ import ChartSearchButton from './components/ChartSearchButton'
 import OptionsPnLPanel from './components/OptionsPnLPanel'
 import DailyRealizedPnLPanel from './components/DailyRealizedPnLPanel'
 import ExtendedHoursPanel from './components/ExtendedHoursPanel'
+import RecentBuysPanel from './components/RecentBuysPanel'
 import BrokerTabs from './components/BrokerTabs'
 import DashboardCharts from './components/DashboardCharts'
 import EarningsPanel from './components/EarningsPanel'
@@ -1513,6 +1514,19 @@ function AuthenticatedApp({ user }) {
               const symbols = [...new Set(positionRows.map(r => r.symbol).filter(Boolean))]
               let livePrices = {}
               let fetchDebug = ''
+              // Buys matched share for share against later sales on the server.
+              // The old test here -- "any later sale at or above the buy price
+              // means it was sold" -- ignored size, so one assigned call could
+              // hide every cheaper buy before it.
+              let lotsBySym = {}
+              try {
+                const q = new URLSearchParams({ n: '10' })
+                if (brokerFilter && brokerFilter !== 'all') q.set('broker', brokerFilter)
+                const lr = await fetch(`/api/recent-buys?${q}`, { credentials: 'include' }).then(r => r.json())
+                if (lr.success) lr.tickers.forEach(t => { lotsBySym[t.symbol] = t })
+              } catch (e) {
+                console.warn('Recent buys fetch failed', e)
+              }
               try {
                 const resp = await fetch(`/api/current-prices?symbols=${symbols.join(',')}`, { credentials: 'include' })
                 const json = await resp.json()
@@ -1547,14 +1561,41 @@ function AuthenticatedApp({ user }) {
                   const combinedUnrealizedPnL = unrealizedPnL + optionsUnrealizedPnL
 
                   // Get sell opportunities from recent buys
-                  const recentBuys = row.real?.recentLowestBuys || []
+                  let recentBuys = row.real?.recentLowestBuys || []
                   const recentSells = row.real?.recentSells || []
                   const highestBuyEver = row.real?.highestBuyEver || 0
                   const totalTrades = row.real?.totalTrades || 0
                   const eligibleBuys = []
                   const matchedBuys = [] // Track which buys were matched off
 
-                  for (const buy of recentBuys) {
+                  const lotInfo = lotsBySym[sym]
+                  if (lotInfo) {
+                    const today = new Date(); today.setHours(0, 0, 0, 0)
+                    const daysAgo = (d) => Math.max(0, Math.round((today - new Date(`${d}T00:00:00`)) / 86400000))
+                    // Shares from each buy still held, priced against now.
+                    for (const lot of lotInfo.open) {
+                      if (!(currentPrice > lot.price && lot.price > 0)) continue
+                      eligibleBuys.push({
+                        price: lot.price, quantity: lot.left, daysAgo: daysAgo(lot.date), date: lot.date,
+                        profit: currentPrice - lot.price,
+                        profitPercent: (currentPrice - lot.price) / lot.price * 100,
+                      })
+                    }
+                    for (const lot of lotInfo.recent) {
+                      const sold = lot.qty - lot.left
+                      if (sold <= 1e-6) continue
+                      const last = lot.sales[lot.sales.length - 1]
+                      matchedBuys.push({
+                        price: lot.price, quantity: sold, daysAgo: daysAgo(lot.date), date: lot.date,
+                        profit: currentPrice - lot.price,
+                        profitPercent: lot.price > 0 ? (currentPrice - lot.price) / lot.price * 100 : 0,
+                        matchedSell: { price: last.price, date: last.date },
+                      })
+                    }
+                    recentBuys = lotInfo.recent.map(l => ({ price: l.price, quantity: l.qty, date: l.date, daysAgo: daysAgo(l.date) }))
+                  }
+
+                  for (const buy of (lotInfo ? [] : recentBuys)) {
                     const buyPrice = buy?.price || 0
                     const buyDate = buy?.date
 
@@ -2547,6 +2588,7 @@ function AuthenticatedApp({ user }) {
               ['shorts', 'Short Calls'],
               ['expiries', 'Expirations'],
               ['longs', 'Long Options'],
+              ['buys', 'Recent Buys'],
               ['coverage', 'Coverage'],
               ['extended', 'Extended Hours'],
             ].map(([key, label]) => {
@@ -2586,6 +2628,7 @@ function AuthenticatedApp({ user }) {
           {positionsTab === 'shorts'   && <ShortCallTracker broker={brokerFilter} />}
           {positionsTab === 'expiries' && <ExpirationsPanel broker={brokerFilter} />}
           {positionsTab === 'longs'    && <LongOptionsPanel broker={brokerFilter} />}
+          {positionsTab === 'buys'     && <RecentBuysPanel broker={brokerFilter} />}
           {positionsTab === 'coverage' && <CallCoveragePanel broker={brokerFilter} />}
           {positionsTab === 'extended' && <ExtendedHoursPanel broker={brokerFilter} standalone />}
       </div>

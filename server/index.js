@@ -9560,6 +9560,38 @@ app.delete('/api/stock-cost-overrides/:symbol', requireAuth, (req, res) => {
 })
 
 // Get fresh current prices for multiple symbols (bypasses cache)
+// GET /api/recent-buys?broker=&n=3 -- each name's latest stock buys and what
+// became of them (see getStockBuyLots), plus every lot still open, priced now.
+app.get('/api/recent-buys', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId
+    const brokerFilter = req.query.broker && req.query.broker !== 'all' ? req.query.broker : null
+    const n = Math.min(Math.max(parseInt(req.query.n) || 3, 1), 20)
+    const lots = databaseService.getStockBuyLots(userId, { broker: brokerFilter })
+    const symbols = Object.keys(lots).filter(s => /^[A-Z.]{1,6}$/.test(s))
+    let prices = {}
+    try { prices = await priceService.fetchPrices(symbols.filter(s => lots[s].position > 0)) } catch (e) { /* priced below from the cache */ }
+    const cached = priceService.getCurrentPrices()
+    const tickers = symbols.map(sym => {
+      const m = overnightMark(userId, sym) || overnightMark(orderFlowOwner(), sym)
+      const price = m ? m.last : (prices[sym] > 0 ? prices[sym] : (cached[sym] > 0 ? cached[sym] : null))
+      const all = lots[sym].lots
+      return {
+        symbol: sym,
+        position: lots[sym].position,
+        price,
+        lastBuy: all.length ? all[all.length - 1].date : null,
+        recent: all.slice(-n).reverse(),
+        open: all.filter(l => l.left > 0).reverse(),
+      }
+    }).filter(t => t.recent.length)
+    res.json({ success: true, tickers })
+  } catch (e) {
+    console.error('Error in /api/recent-buys:', e.message)
+    res.status(500).json({ success: false, error: e.message })
+  }
+})
+
 app.get('/api/current-prices', requireAuth, async (req, res) => {
   try {
     const symbols = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)

@@ -4642,6 +4642,62 @@ export class DatabaseService {
    * Basis: average cost, the YTD panel's own. A manual override replaces the
    * basis at the period start, the way the panel applies it.
    */
+  /**
+   * Every stock buy as a lot, with how much of it later sales used up.
+   *
+   * Sale Opportunities used to call a buy "already sold" when ANY later sale
+   * was at or above its price -- whatever the size. One assigned call on 100
+   * shares would wipe out every cheaper buy before it, which is how a lot
+   * bought in the 50s could vanish with the stock at 61.
+   *
+   * Here a sale is matched share for share, within its own broker, to the
+   * newest open buy it made money on, then to the newest open buy at all. That
+   * is the reading of a sale the opportunities view was after ("the shares I
+   * bought cheap and sold higher"), only with quantities. Split-adjusted like
+   * every other share count.
+   *
+   * Returns { SYMBOL: { position, lots: [...] } }, lots oldest first.
+   */
+  getStockBuyLots(userId, { broker = null } = {}) {
+    const bq = broker ? "AND COALESCE(broker,'robinhood') = ?" : ''
+    const rows = db.prepare(`
+      SELECT id, UPPER(symbol) AS symbol, trans_date, trans_code, is_buy, COALESCE(broker,'robinhood') AS broker,
+             COALESCE(quantity,0) AS qty, ABS(COALESCE(amount,0)) AS amt, COALESCE(price,0) AS price
+      FROM trades WHERE (is_option = 0 OR is_option IS NULL) AND user_id = ? AND symbol IS NOT NULL AND symbol != '' ${bq}
+      ORDER BY trans_date ASC, id ASC`).all(userId, ...(broker ? [broker] : []))
+    const splits = this.getSplits()
+    const out = {}
+    for (const r of rows) {
+      const f = this.splitFactor(splits[r.symbol], r.trans_date)
+      const qty = (r.qty || 0) * f
+      if (!(qty > 0)) continue
+      const price = r.amt > 0 ? r.amt / qty : (r.price || 0) / f
+      const s = out[r.symbol] ||= { position: 0, lots: [] }
+      if (r.is_buy === 1) {
+        s.lots.push({ id: r.id, date: r.trans_date, broker: r.broker, qty, price, left: qty, sales: [] })
+        continue
+      }
+      const open = s.lots.filter(l => l.broker === r.broker && l.left > 1e-9)
+      const order = [...open.filter(l => l.price <= price).reverse(), ...open.filter(l => l.price > price).reverse()]
+      let remaining = qty
+      for (const lot of order) {
+        if (remaining <= 1e-9) break
+        const take = Math.min(lot.left, remaining)
+        lot.left -= take; remaining -= take
+        lot.sales.push({ date: r.trans_date, qty: take, price, code: r.trans_code || null })
+      }
+    }
+    const r4 = n => Math.round(n * 10000) / 10000
+    for (const s of Object.values(out)) {
+      for (const l of s.lots) {
+        l.left = l.left > 1e-6 ? r4(l.left) : 0
+        l.qty = r4(l.qty); l.price = Math.round(l.price * 100) / 100
+      }
+      s.position = r4(s.lots.reduce((a, l) => a + l.left, 0))
+    }
+    return out
+  }
+
   getPositionHistorySeries(userId, ticker, { broker = null, fromDate, closes, costOverride = null }) {
     const T = String(ticker).toUpperCase()
     const bq = broker ? "AND COALESCE(broker,'robinhood') = ?" : ''
