@@ -8,6 +8,11 @@ const YF_HEADERS = {
 
 const PRICE_CACHE_TTL_MS = 4 * 60 * 1000 // 4 minutes
 
+// Yahoo's spark endpoint answers HTTP 400 to any request naming more than 20
+// symbols. Batches of 50 worked only while fewer than 21 stocks were held; at
+// 21 every live price silently fell back to Polygon's prior-day close.
+const YF_SPARK_MAX_SYMBOLS = 20
+
 // Cached Polygon grouped daily bars (one fetch covers all stocks)
 let polygonGroupedCache = null       // Map: ticker → close price
 let polygonGroupedCacheDate = null   // date string the cache was loaded for
@@ -281,7 +286,7 @@ export class PriceService {
       'Accept': 'application/json',
     }
 
-    const batchSize = 50
+    const batchSize = YF_SPARK_MAX_SYMBOLS
     for (let i = 0; i < symbols.length; i += batchSize) {
       const batch = symbols.slice(i, i + batchSize)
       try {
@@ -430,7 +435,7 @@ export class PriceService {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'application/json',
     }
-    const batchSize = 50
+    const batchSize = YF_SPARK_MAX_SYMBOLS
     for (let i = 0; i < symbols.length; i += batchSize) {
       const batch = symbols.slice(i, i + batchSize)
       try {
@@ -470,7 +475,7 @@ export class PriceService {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'application/json',
     }
-    const batchSize = 50
+    const batchSize = YF_SPARK_MAX_SYMBOLS
     for (let i = 0; i < symbols.length; i += batchSize) {
       const batch = symbols.slice(i, i + batchSize)
       try {
