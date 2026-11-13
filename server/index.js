@@ -9602,6 +9602,25 @@ app.get('/api/recent-buys', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * GET /api/prices-on-date?date=YYYY-MM-DD&symbols=A,B
+ * Close on that date for each symbol (the last session on or before it), for
+ * the Options YTD panel's "Price N ago" column. Older dates come from the DB
+ * cache, so after the first look this is cheap.
+ */
+app.get('/api/prices-on-date', requireAuth, async (req, res) => {
+  try {
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : null
+    if (!date) return res.status(400).json({ success: false, error: 'date=YYYY-MM-DD required' })
+    const symbols = [...new Set((req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(s => /^[A-Z0-9.\-]{1,10}$/.test(s)))].slice(0, 200)
+    const prices = symbols.length ? await priceService.getPricesForDate(symbols, date) : {}
+    res.json({ success: true, date, prices })
+  } catch (error) {
+    console.error('Error in /api/prices-on-date:', error.message)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 app.get('/api/current-prices', requireAuth, async (req, res) => {
   try {
     const symbols = (req.query.symbols || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)

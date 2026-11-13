@@ -129,6 +129,11 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // The mirror of the projection — that moves time and holds price, this moves
   // price and holds time.
   const [scenarioMove, setScenarioMove] = useState(0)
+  // "Price N ago" column: the close that long ago next to today's price, as a
+  // reality check on how far names have come down. '' = column off.
+  const [refPeriod, setRefPeriodState] = useState(() => getPref('ytdPanel_refPeriod', '3M'))
+  const setRefPeriod = (v) => { setRefPeriodState(v); setPref('ytdPanel_refPeriod', v) }
+  const [refPrices, setRefPrices] = useState({ date: null, prices: {}, loading: false })
   const SCENARIO_CHOICES = [-30, -20, -15, -10, -5, -2.5, 2.5, 5, 10, 15, 20, 30]
   // Which rows to show: everything, only names with option activity, or only
   // stocks held without options. Remembered between visits.
@@ -607,6 +612,25 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
       setHist({ loading: false, visits: [], band: null, error: e.message || 'Could not load' })
     }
   }
+
+  const refDate = React.useMemo(() => {
+    const m = { '1W': [0, 7], '1M': [1, 0], '3M': [3, 0], '6M': [6, 0], '1Y': [12, 0] }[refPeriod]
+    if (!m) return null
+    const d = new Date()
+    d.setMonth(d.getMonth() - m[0]); d.setDate(d.getDate() - m[1])
+    return d.toLocaleDateString('en-CA')
+  }, [refPeriod])
+  const refTickers = (data?.byUnderlying || []).map(r => r.ticker).filter(Boolean).sort().join(',')
+  useEffect(() => {
+    if (!refDate || !refTickers) { setRefPrices({ date: null, prices: {}, loading: false }); return }
+    let alive = true
+    setRefPrices(s => ({ ...s, loading: s.date !== refDate }))
+    fetch(`/api/prices-on-date?date=${refDate}&symbols=${encodeURIComponent(refTickers)}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (alive) setRefPrices({ date: refDate, prices: j?.success ? j.prices || {} : {}, loading: false }) })
+      .catch(() => { if (alive) setRefPrices(s => ({ ...s, loading: false })) })
+    return () => { alive = false }
+  }, [refDate, refTickers])
 
   const fetchData = useCallback(async (overrideGlobal, overrideSymbolDates, quiet = false) => {
     if (!quiet) setLoading(true)
@@ -1698,6 +1722,25 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         )
       } },
 
+    ...(!refPeriod ? [] : [
+      { key: 'refPrice', label: `Price ${refPeriod} ago`,
+        title: `Close ${refPeriod} ago${refDate ? ` (${fmtDate(refDate)}, or the last session before it)` : ''}, and how far the stock has moved since. Change the period with the "Price ago" picker above the table.`,
+        cell: (r, c) => {
+          if (refPrices.loading) return <span style={{ fontSize: 10, color: textMid }}>…</span>
+          const then = refPrices.prices?.[r.ticker]
+          if (!(then > 0)) return <span style={{ color: textMid }}>—</span>
+          const chg = c.price > 0 ? c.price - then : null
+          return (
+            <span title={chg != null ? `${fmt(then)} → ${fmt(c.price)}: ${chg >= 0 ? '+' : '−'}$${Math.abs(chg).toFixed(2)} (${chg >= 0 ? '+' : ''}${(chg / then * 100).toFixed(1)}%)` : undefined}
+              style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
+              <span style={{ color: text }}>{fmt(then)}</span>
+              {chg != null && <span style={{ fontSize: 10.5, fontWeight: 600, color: pnlColor(chg, isDark) }}>
+                {chg >= 0 ? '+' : ''}{(chg / then * 100).toFixed(1)}%</span>}
+            </span>
+          )
+        } },
+    ]),
+
     // Unrealized only. Realized has its own column immediately to the right, so
     // the table still sums to Net — just in three visible terms rather than two:
     // Stock P&L + Stock Realized + Options Total. Folding realized in here read
@@ -2122,6 +2165,7 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
       { keys: ['openSpreads'], anchor: 'openUnrealizedPnL' },
       { keys: ['stockRealizedAll'], anchor: 'stockPnL' },
       { keys: ['asOfNetPlusOpen'], anchor: 'netPlusOpen' },
+      { keys: ['refPrice'], anchor: 'stockPrice' },
     ]
     let ordered = out
     for (const { keys, anchor: anchorKey } of NEIGHBOURS) {
@@ -2297,6 +2341,21 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
           ▤ Group{groupNames.length ? <span style={{ marginLeft: 5, opacity: 0.75, fontWeight: 500, fontSize: 11 }}>{groupNames.length}</span> : null}
         </button>
         <datalist id="ytd-group-names">{groupNames.map(g => <option key={g} value={g} />)}</datalist>
+
+        {/* Period for the "Price N ago" column; Off removes it. */}
+        <label style={{ fontSize: 12, color: refPeriod ? '#0ea5e9' : textMid, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          title="Adds a column beside Stock Price with the close this long ago and the % move since">
+          Price ago:
+          <select value={refPeriod} onChange={(e) => setRefPeriod(e.target.value)}
+            style={{ padding: '4px 6px', borderRadius: 6, border: `1px solid ${refPeriod ? '#0ea5e9' : border}`, background: surface, color: text, fontSize: 12 }}>
+            <option value="">Off</option>
+            <option value="1W">1W</option>
+            <option value="1M">1M</option>
+            <option value="3M">3M</option>
+            <option value="6M">6M</option>
+            <option value="1Y">1Y</option>
+          </select>
+        </label>
 
         {/* Row height. The table is 28 columns and the list is long, so the real
             limit is what fits on screen. Compact trades padding for rows. */}
