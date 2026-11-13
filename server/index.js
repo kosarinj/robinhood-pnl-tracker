@@ -2612,6 +2612,12 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     const allTrades0 = databaseService.getRawOptionTrades(userId)
     let allTrades = asOf ? allTrades0.filter(t => t.trans_date <= asOf) : allTrades0
     if (brokerFilter) allTrades = allTrades.filter(t => (t.broker || 'robinhood') === brokerFilter)
+    // One underlying only -- the price chart's P&L lines ask for one name on
+    // every day of the chart, and pricing all forty names for each of them is
+    // what would make that slow. Lots never cross underlyings, so the row that
+    // comes back is the same row the full request would have produced.
+    const onlyTicker = /^[A-Z0-9.\-]{1,10}$/i.test(req.query.onlyTicker || '') ? req.query.onlyTicker.toUpperCase() : null
+    if (onlyTicker) allTrades = allTrades.filter(t => parseOptionDescription(t.symbol || '')?.ticker === onlyTicker)
 
     // LIFO pass over ALL trades
     const lifoStacks = {}
@@ -4270,6 +4276,7 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
     // corrected tally instead — the two legitimately differ.
     const stockPositions = databaseService.getStockPositionsWithCost(
       userId, asOf, brokerFilter, corrected ? 'fifo' : 'average')
+    if (onlyTicker) Object.keys(stockPositions).forEach(t => { if (t !== onlyTicker) delete stockPositions[t] })
     const stockCostOverrides = databaseService.getCostOverrides(userId, brokerFilter)
     // Scoped to the panel's period and broker, like realized OPTION P&L already
     // is. The question this panel answers is "where am I since I started",

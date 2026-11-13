@@ -25,6 +25,9 @@ const PNL_SERIES = [
   { key: 'openPnl', label: 'Open P&L', color: '#f59e0b' },
   { key: 'netPlusOpen', label: 'Net + Open', color: '#16a34a' },
 ]
+// As-of rows for past days don't change; keep them for the session so
+// reopening a chart is instant.
+const asOfCache = new Map()
 const money = (v) => `${v < 0 ? '−' : ''}$${Math.abs(Math.round(v)).toLocaleString('en-US')}`
 
 function PriceChart({ symbol, trades, onClose, useServer = false, connected = false, broker = 'all' }) {
@@ -52,23 +55,67 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
   const anyPnl = PNL_SERIES.some(p => pnlOn[p.key])
   const togglePnl = (key) => setPnlOn(prev => ({ ...prev, [key]: !prev[key] }))
 
-  // Fetched only once an overlay is switched on: it walks every trade in the
-  // name and pulls two years of closes.
+  // Fetched only once an overlay is switched on. Each day is the Options YTD
+  // panel's own as-of figure for this name (/api/options-pnl/ytd?asOf=<day>),
+  // assembled exactly as the panel's columns are, and today is the panel's live
+  // row -- so the last point is the number in the grid. The chart used to
+  // rebuild these from the trades with its own lot matching and share costing,
+  // which drifted from the panel by thousands on some names.
   useEffect(() => {
-    if (!anyPnl || pnlHist.byDate || pnlHist.loading) return
+    if (!anyPnl || rawData.length === 0) return
     const symbolDates = getPref('ytdPanel_symbolDates', {}) || {}
     const start = symbolDates[symbol] || getPref('ytdPanel_globalStart', '2026-03-15')
-    const q = new URLSearchParams({ startDate: start })
-    if (broker && broker !== 'all') q.set('broker', broker)
-    setPnlHist(h => ({ ...h, loading: true, error: null }))
-    fetch(`/api/position-history/${encodeURIComponent(symbol)}?${q}`, { credentials: 'include' })
-      .then(r => r.json())
-      .then(d => {
-        if (!d?.success) { setPnlHist({ loading: false, byDate: null, fromDate: null, error: d?.error || 'Could not load' }); return }
-        setPnlHist({ loading: false, byDate: Object.fromEntries(d.series.map(r => [r.date, r])), fromDate: d.fromDate, error: null })
-      })
-      .catch(e => setPnlHist({ loading: false, byDate: null, fromDate: null, error: e.message }))
-  }, [anyPnl, symbol, broker])
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const days = [...new Set(rawData.map(c => {
+      const d = new Date(c.timestamp ?? c.date)
+      return isNaN(d) ? null : d.toISOString().slice(0, 10)
+    }).filter(d => d && d >= start && d < today))].sort()
+    days.push(today)
+    let cancelled = false
+    setPnlHist({ loading: true, done: 0, total: days.length, byDate: null, fromDate: start, error: null })
+
+    const rowFor = async (day) => {
+      const key = `${symbol}|${broker}|${start}|${day}`
+      if (day !== today && asOfCache.has(key)) return asOfCache.get(key)
+      const p = new URLSearchParams({ startDate: start, onlyTicker: symbol })
+      if (day !== today) p.set('asOf', day)
+      if (broker && broker !== 'all') p.set('broker', broker)
+      const data = await fetch(`/api/options-pnl/ytd?${p}`, { credentials: 'include' }).then(r => r.json())
+      if (!data?.success && !data?.byUnderlying) throw new Error(data?.error || 'Could not load')
+      const row = (data.byUnderlying || []).find(x => x.ticker === symbol)
+      // Same assembly as the panel: Net = Options Total + stock (unrealized +
+      // realized); Net + Open adds the open options.
+      const optionsTotal = row?.totalRealized || 0
+      const stockPnl = (row?.stockUnrealizedPnL || 0) + (row?.stockRealizedPnL || 0)
+      const openPnl = row?.openUnrealizedPnL || 0
+      const r2 = (v) => Math.round(v * 100) / 100
+      const out = {
+        date: day, optionsTotal: r2(optionsTotal), stockPnl: r2(stockPnl), openPnl: r2(openPnl),
+        netPlusOpen: r2(optionsTotal + stockPnl + openPnl), shares: row?.stockPosition || 0,
+        live: day === today,
+      }
+      if (day !== today) asOfCache.set(key, out)
+      return out
+    }
+
+    ;(async () => {
+      const byDate = {}
+      let next = 0, done = 0, failed = 0
+      const worker = async () => {
+        while (!cancelled && next < days.length) {
+          const day = days[next++]
+          try { byDate[day] = await rowFor(day) } catch { failed++ }
+          done++
+          if (!cancelled && done % 10 === 0) setPnlHist(h => ({ ...h, done }))
+        }
+      }
+      await Promise.all(Array.from({ length: 6 }, worker))
+      if (cancelled) return
+      if (Object.keys(byDate).length === 0) setPnlHist({ loading: false, byDate: null, fromDate: start, error: 'Could not load' })
+      else setPnlHist({ loading: false, byDate, fromDate: start, failed, error: null })
+    })()
+    return () => { cancelled = true }
+  }, [anyPnl, symbol, broker, rawData])
   const [indicators, setIndicators] = useState({
     showEMA9: false,
     showEMA21: false,
@@ -349,7 +396,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     const row = d && !isNaN(d) ? pnlHist.byDate[d.toISOString().slice(0, 10)] : null
     return row
       ? { ...c, optionsTotal: row.optionsTotal, openPnl: row.openPnl, netPlusOpen: row.netPlusOpen,
-          stockPnl: row.stockPnl, shares: row.shares, openContracts: row.openContracts, pnlRow: true }
+          stockPnl: row.stockPnl, shares: row.shares, pnlLive: row.live, pnlRow: true }
       : c
   })
 
@@ -610,11 +657,11 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
             </div>
             {anyPnl && (
               <div style={{ fontSize: 12, color: pnlHist.error ? '#dc2626' : '#666', margin: '0 0 6px', lineHeight: 1.5 }}>
-                {pnlHist.loading ? 'Loading P&L history…'
+                {pnlHist.loading ? `Loading P&L history… ${pnlHist.done || 0}/${pnlHist.total || 0} days`
                   : pnlHist.error ? `P&L history: ${pnlHist.error}`
-                  : <>P&L (right axis) since {pnlHist.fromDate}, the Options YTD period. Rebuilt from your trades at each
-                    day's close. Open P&L exists only on days the nightly snapshot recorded it, so it and Net + Open
-                    have gaps before that; a day with nothing open counts as $0. Today's live figures are in the grid.</>}
+                  : <>P&L (right axis) since {pnlHist.fromDate}, the Options YTD period: each day is the panel's as-of
+                    view for that date, and today is the grid's live row. Past Open P&L is the as-of Black–Scholes
+                    estimate, not a recorded quote.{pnlHist.failed ? ` ${pnlHist.failed} day(s) could not be loaded.` : ''}</>}
               </div>
             )}
             <div style={{ width: '100%', height: '400px', background: '#fafafa', border: '1px solid #ddd' }}>
@@ -668,7 +715,7 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
                           <>
                             {line(`Stock P&L (${(d.shares || 0).toLocaleString()} sh, incl. realized)`, d.stockPnl, '#444')}
                             {line('Options Total', d.optionsTotal, '#7c3aed')}
-                            {line(`Open P&L (${d.openContracts || 0} contracts)`, d.openPnl, '#b45309')}
+                            {line(d.pnlLive ? 'Open P&L (live)' : 'Open P&L (~est)', d.openPnl, '#b45309')}
                             <div style={{ borderTop: '1px solid #ddd', margin: '4px 0' }} />
                             {line('Net + Open', d.netPlusOpen, '#16a34a', true)}
                           </>
