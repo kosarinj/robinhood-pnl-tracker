@@ -112,7 +112,14 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // Compact rows. 28 columns and a long list means the limit is how much fits
   // on screen, not how much is rendered — this trades breathing room for rows.
   const [dense, setDense] = useState(() => getPref(LS_DENSE_KEY, true))
-  const [asOf, setAsOf] = useState('')  // point-in-time "as of" date; '' = live
+  // The As-of picker no longer turns the whole grid into a past view: the grid
+  // stays live and the picked date fills its own "Net + Open as of" column next
+  // to today's, like the what-if columns. `asOf` is kept as the grid's own
+  // as-of switch (always live now) so the live/as-of branches below still read
+  // the way they were written.
+  const [asOfDate, setAsOf] = useState('')  // '' = no comparison column
+  const asOf = ''
+  const [asOfRows, setAsOfRows] = useState({ loading: false, byTicker: null, error: null })
   // Horizon for the theta projection column, underlying held flat. Weeks as
   // well as months: on a contract expiring Friday, a 1M projection only says it
   // will have settled, which is not a forecast. Defaults to 1M.
@@ -630,11 +637,30 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
   // identical request alongside the mount fetch — three calls to an endpoint
   // that takes a couple of seconds, every time the panel opened. They are
   // change handlers, and should only run on a change.
-  const firstAsOf = useRef(true)
+  // The comparison column: the same endpoint and period as the grid, as of the
+  // picked date, with Net + Open assembled the way the as-of view built it.
   useEffect(() => {
-    if (firstAsOf.current) { firstAsOf.current = false; return }
-    fetchData(undefined, undefined, true)
-  }, [asOf])
+    if (!asOfDate) { setAsOfRows({ loading: false, byTicker: null, error: null }); return }
+    let alive = true
+    setAsOfRows(s => ({ ...s, loading: true, error: null }))
+    const params = new URLSearchParams({ startDate: globalStart, asOf: asOfDate })
+    if (Object.keys(symbolDates).length > 0) params.set('symbolDates', JSON.stringify(symbolDates))
+    if (broker && broker !== 'all') params.set('broker', broker)
+    fetch(`/api/options-pnl/ytd?${params}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(json => {
+        if (!alive) return
+        if (!json.success) { setAsOfRows({ loading: false, byTicker: null, error: json.error || 'Could not load' }); return }
+        const byTicker = {}
+        for (const row of json.byUnderlying || []) {
+          const v = (row.totalRealized || 0) + (row.stockUnrealizedPnL || 0) + (row.stockRealizedPnL || 0) + (row.openUnrealizedPnL || 0)
+          byTicker[row.ticker] = Math.round(v * 100) / 100
+        }
+        setAsOfRows({ loading: false, byTicker, error: null })
+      })
+      .catch(e => { if (alive) setAsOfRows({ loading: false, byTicker: null, error: e.message }) })
+    return () => { alive = false }
+  }, [asOfDate, globalStart, symbolDates, broker])
   // ...and when the broker tab changes. Stock holdings have to refetch too, or
   // the Shares / Avg Cost / Stock P&L columns would keep showing every broker
   // while the options columns beside them show only the selected one.
@@ -1785,6 +1811,29 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
       ),
       foot: (t) => <span style={{ color: pnlColor(t.net + t.openUnrealizedPnL, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(t.net + t.openUnrealizedPnL)}</span> },
 
+    // As-of comparison. Present only while a date is picked.
+    ...(!asOfDate ? [] : [
+      { key: 'asOfNetPlusOpen', label: `Net+Open ${fmtDate(asOfDate)}`, borderLeft: '2px',
+        title: `Net + Open P&L as of ${fmtDate(asOfDate)}: trades after that date excluded, stock at that day's close, open options a Black–Scholes estimate. The small figure is how far it has moved since.`,
+        cell: (r, c) => {
+          if (asOfRows.loading) return <span style={{ fontSize: 10, color: textMid }}>…</span>
+          const v = asOfRows.byTicker?.[r.ticker]
+          if (v == null) return <span style={{ color: textMid }}>—</span>
+          const d = Number.isFinite(c.netPlusOpen) ? Math.round((c.netPlusOpen - v) * 100) / 100 : null
+          return (
+            <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: pnlColor(v, isDark) }}>{fmt(v)}</span>
+              {d != null && <span title="Change since then" style={{ fontSize: 10.5, color: pnlColor(d, isDark) }}>{d >= 0 ? '+' : ''}{fmt(d)} since</span>}
+            </span>
+          )
+        },
+        foot: () => {
+          if (!asOfRows.byTicker) return null
+          const v = Math.round(sorted.reduce((a, r) => a + (asOfRows.byTicker[r.ticker] || 0), 0) * 100) / 100
+          return <span style={{ color: pnlColor(v, isDark), fontWeight: 700, fontSize: 15 }}>{fmt(v)}</span>
+        } },
+    ]),
+
     // What-if columns. Present only while a move is selected, so the table is
     // unchanged when it's off.
     ...(scenarioMove === 0 ? [] : [
@@ -2072,6 +2121,7 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
       { keys: ['openExitPnL'], anchor: 'openUnrealizedPnL' },
       { keys: ['openSpreads'], anchor: 'openUnrealizedPnL' },
       { keys: ['stockRealizedAll'], anchor: 'stockPnL' },
+      { keys: ['asOfNetPlusOpen'], anchor: 'netPlusOpen' },
     ]
     let ordered = out
     for (const { keys, anchor: anchorKey } of NEIGHBOURS) {
@@ -2177,18 +2227,19 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
               background: surface, color: text, fontSize: '13px', cursor: 'pointer'
             }}
           />
-          <label style={{ fontSize: '13px', color: asOf ? '#8b5cf6' : textMid, fontWeight: asOf ? 700 : 500, marginLeft: '4px' }}>As of:</label>
+          <label style={{ fontSize: '13px', color: asOfDate ? '#8b5cf6' : textMid, fontWeight: asOfDate ? 700 : 500, marginLeft: '4px' }}>As of:</label>
           <input
             type="date"
-            value={asOf}
+            value={asOfDate}
             onChange={(e) => setAsOf(e.target.value)}
-            title="Point-in-time view — shows your book as of this date; trades after it are ignored. Leave blank for live."
+            title="Adds a Net + Open column as of this date, next to today's. Clear it (✕ Live) to remove the column."
             style={{
-              padding: '5px 8px', borderRadius: '6px', border: `1px solid ${asOf ? '#8b5cf6' : border}`,
-              background: asOf ? (isDark ? '#2e1e47' : '#f3e8ff') : surface, color: text, fontSize: '13px', cursor: 'pointer'
+              padding: '5px 8px', borderRadius: '6px', border: `1px solid ${asOfDate ? '#8b5cf6' : border}`,
+              background: asOfDate ? (isDark ? '#2e1e47' : '#f3e8ff') : surface, color: text, fontSize: '13px', cursor: 'pointer'
             }}
           />
-          {asOf && (
+          {asOfRows.error && <span style={{ fontSize: 12, color: '#dc2626' }} title={asOfRows.error}>as-of failed</span>}
+          {asOfDate && (
             <button onClick={() => setAsOf('')} title="Back to live"
               style={{ padding: '5px 10px', borderRadius: '6px', border: `1px solid ${border}`, background: surface, color: textMid, fontSize: '12px', cursor: 'pointer' }}>
               ✕ Live
