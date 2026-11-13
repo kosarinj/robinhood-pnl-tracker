@@ -4606,6 +4606,9 @@ app.get('/api/options-pnl/ytd', requireAuth, async (req, res) => {
           stockPosition: sp?.position ?? null,
           stockAvgCost: sp?.avgCost ?? null,
           stockCurrentPrice: cp,
+          // Yesterday's close, for the Stock Price column's $ change on the day.
+          // Live view only -- dailyChange is never fetched for an as-of date.
+          stockPrevClose: dc && dc.prevClose > 0 ? dc.prevClose : null,
           // Manual avg-cost overrides are honoured here. They were applied only
           // in the Positions panel's own render, so every other consumer — the
           // charts especially — silently used the computed cost instead.

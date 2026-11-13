@@ -1657,8 +1657,20 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
         style={{ fontWeight: 600, color: c.effectiveCost == null ? textMid : c.effectiveCost < c.avgCost ? '#22c55e' : c.effectiveCost > c.avgCost ? '#ef4444' : text }}>
         {c.effectiveCost != null ? fmt(c.effectiveCost) : '—'}</span> },
 
-    { key: 'stockPrice', label: 'Stock Price', title: 'Current stock price',
-      cell: (r, c) => <span style={{ color: text }}>{c.price ? fmt(c.price) : '—'}</span> },
+    { key: 'stockPrice', label: 'Stock Price', title: "Current stock price, and its $ change since yesterday's close",
+      cell: (r, c) => {
+        if (!c.price) return <span style={{ color: textMid }}>—</span>
+        const prev = !asOf && r.stockPrevClose > 0 ? r.stockPrevClose : null
+        const chg = prev ? Math.round((c.price - prev) * 100) / 100 : null
+        return (
+          <span title={prev ? `Yesterday's close ${fmt(prev)} · ${chg >= 0 ? '+' : ''}${((c.price - prev) / prev * 100).toFixed(2)}%` : undefined}
+            style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
+            <span style={{ color: text }}>{fmt(c.price)}</span>
+            {chg != null && <span style={{ fontSize: 10.5, fontWeight: 600, color: pnlColor(chg, isDark) }}>
+              {chg > 0 ? '+' : chg < 0 ? '−' : ''}${Math.abs(chg).toFixed(2)}</span>}
+          </span>
+        )
+      } },
 
     // Unrealized only. Realized has its own column immediately to the right, so
     // the table still sums to Net — just in three visible terms rather than two:
