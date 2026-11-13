@@ -72,7 +72,13 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
     }).filter(d => d && d >= start && d < today))].sort()
     days.push(today)
     let cancelled = false
-    setPnlHist({ loading: true, done: 0, total: days.length, byDate: null, fromDate: start, error: null })
+    // Days already fetched this session draw immediately.
+    const cached = {}
+    for (const day of days) {
+      const hit = day !== today && asOfCache.get(`${symbol}|${broker}|${start}|${day}`)
+      if (hit) cached[day] = hit
+    }
+    setPnlHist({ loading: true, done: 0, total: days.length, byDate: Object.keys(cached).length ? cached : null, fromDate: start, error: null })
 
     const rowFor = async (day) => {
       const key = `${symbol}|${broker}|${start}|${day}`
@@ -80,7 +86,12 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
       const p = new URLSearchParams({ startDate: start, onlyTicker: symbol })
       if (day !== today) p.set('asOf', day)
       if (broker && broker !== 'all') p.set('broker', broker)
-      const data = await fetch(`/api/options-pnl/ytd?${p}`, { credentials: 'include' }).then(r => r.json())
+      // A hung request must not hold the whole series back.
+      const ctl = new AbortController()
+      const timer = setTimeout(() => ctl.abort(), 45000)
+      let data
+      try { data = await fetch(`/api/options-pnl/ytd?${p}`, { credentials: 'include', signal: ctl.signal }).then(r => r.json()) }
+      finally { clearTimeout(timer) }
       if (!data?.success && !data?.byUnderlying) throw new Error(data?.error || 'Could not load')
       const row = (data.byUnderlying || []).find(x => x.ticker === symbol)
       // Same assembly as the panel: Net = Options Total + stock (unrealized +
@@ -106,7 +117,10 @@ function PriceChart({ symbol, trades, onClose, useServer = false, connected = fa
           const day = days[next++]
           try { byDate[day] = await rowFor(day) } catch { failed++ }
           done++
-          if (!cancelled && done % 10 === 0) setPnlHist(h => ({ ...h, done }))
+          // Draw as the days arrive rather than after the last one: with one
+          // request per day the full set takes a while, and a blank chart
+          // under a ticked box reads as the box not working.
+          if (!cancelled) setPnlHist(h => ({ ...h, done, byDate: { ...byDate } }))
         }
       }
       await Promise.all(Array.from({ length: 6 }, worker))
