@@ -1723,8 +1723,10 @@ export default function YTDPositionsPanel({ pnlData = [], broker = 'all', onPick
             {b.allAbove ? 'always +' : 'never'}</span>
         )
         const others = b.roots.filter(x => x !== b.price).map(x => `$${x.toFixed(2)}`)
-        const tip = `Net + Open is $0 at $${b.price.toFixed(2)} (${b.pct >= 0 ? '+' : ''}${b.pct.toFixed(1)}% from $${spot.toFixed(2)}); ` +
-          `profit ${b.profitAbove ? 'above' : 'below'} it.` +
+        const tip = (b.sharesOnly
+          ? `* Shares only: $${spot.toFixed(2)} + ${fmt(-c.netPlusOpen)} loss ÷ ${(c.pos || 0).toLocaleString()} shares = $${b.price.toFixed(2)}. The option curve never gets back to $0 above today's price (the short calls cap the upside), so this leaves the options out. `
+          : `Net + Open is $0 at $${b.price.toFixed(2)} (${b.pct >= 0 ? '+' : ''}${b.pct.toFixed(1)}% from $${spot.toFixed(2)}); ` +
+            `profit ${b.profitAbove ? 'above' : 'below'} it.`) +
           (others.length ? ` Also crosses $0 at ${others.join(', ')}.` : '') +
           (be.exp?.price != null ? ` Held to expiry: $${be.exp.price.toFixed(2)}.` : '') +
           `
@@ -1734,7 +1736,7 @@ Inputs: Net + Open ${fmt(c.netPlusOpen)} at $${spot.toFixed(2)} · ${(c.pos || 0
             legs.map(l => `${l.isLong ? '+' : '−'}${l.openContracts} ${l.strike}${l.optionType === 'call' ? 'C' : 'P'} ${l.expiry.slice(5)} @${(l.markPrice || 0).toFixed(2)}${l.priced ? '' : ' (no vol)'}`).join(', ') : '')
         return (
           <span title={tip} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.15 }}>
-            <span style={{ fontWeight: 700 }}>${b.price.toFixed(2)}</span>
+            <span style={{ fontWeight: 700 }}>${b.price.toFixed(2)}{b.sharesOnly ? '*' : ''}</span>
             <span style={{ fontSize: 10.5, color: pnlColor(b.profitAbove ? -b.pct : b.pct, isDark) }}>
               {b.pct >= 0 ? '+' : ''}{b.pct.toFixed(1)}%</span>
           </span>

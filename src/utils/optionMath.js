@@ -332,6 +332,23 @@ export function breakevenPrice({ preparedLegs, spot, legSpot = spot, shares = 0,
     }
     roots.push((a + b) / 2)
   }
+  // A losing position is asked "how high does it have to go to get back to $0",
+  // so its break-even is the nearest crossing ABOVE today's price. When the
+  // curve offers none (a capped position, or legs that don't match the shares)
+  // the shares alone still answer it: today's price plus the loss per share,
+  // flagged so it isn't mistaken for the full curve's answer.
+  if (netOpenNow < 0) {
+    const above = roots.filter(r => r > spot)
+    if (above.length) {
+      const price = Math.min(...above)
+      return { price, roots, profitAbove: true, pct: (price - spot) / spot * 100 }
+    }
+    if (shares > 0) {
+      const price = spot - netOpenNow / shares
+      return { price, roots, profitAbove: true, sharesOnly: true, pct: (price - spot) / spot * 100 }
+    }
+    return { price: null, roots, allAbove: false }
+  }
   if (!roots.length) return { price: null, roots, allAbove: netOpenNow >= 0 }
   const price = roots.reduce((best, r) => Math.abs(r - spot) < Math.abs(best - spot) ? r : best, roots[0])
   // Which way from the break-even is profit: sample just above it.
